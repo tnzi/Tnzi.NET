@@ -15,6 +15,7 @@
   <TDetailHost :state="worksheetDetail" :title="t('worksheet.title')" :width="720" :footer="false" :translate="t">
     <div class="fin-recon__worksheet">
       <div class="fin-recon__totals">
+        <span v-if="worksheet?.currency" class="fin-recon__currency">{{ worksheet.currency }}</span>
         <span>{{ t('worksheet.statement') }}: <strong>{{ fmtAmount(worksheet?.statementEndingBalance ?? 0) }}</strong></span>
         <span>{{ t('worksheet.cleared') }}: <strong>{{ fmtAmount(liveCleared) }}</strong></span>
         <span :class="liveDifference === 0 ? 'fin-recon__check--ok' : 'fin-recon__check--bad'">
@@ -45,13 +46,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { NButton, type DataTableColumns } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
 import { formatDateOnly } from '@tnzi/core'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -164,16 +165,35 @@ watch(
   },
 )
 
+/** Lines an imported bank transaction is holding — the server refuses to drop them. */
+const statementMatchedIds = computed(
+  () => new Set((worksheet.value?.lines ?? []).filter((l) => l.isStatementMatched).map((l) => l.journalLineId)),
+)
+
 function onChecked(keys: Array<string | number>) {
   if (!isDraftOpen.value) return
-  selectedIds.value = keys.map(String)
+  // Keep statement-matched lines selected whatever the table emits: dropping one
+  // would orphan the bank transaction that points at its clearing row, so the
+  // backend 409s the whole save. Release is unmatch on the bank feed screen.
+  selectedIds.value = [...new Set([...keys.map(String), ...statementMatchedIds.value])]
 }
 
 const lineColumns: DataTableColumns<ReconciliationCandidateLineDto> = [
-  { type: 'selection' },
+  { type: 'selection', disabled: (r) => r.isStatementMatched },
   { key: 'postingDate', title: t('worksheet.date'), width: 110, render: (r) => formatDateOnly(r.postingDate, { utc: true }) },
   { key: 'entryNumber', title: t('worksheet.entry'), width: 120, render: (r) => r.entryNumber ?? '—' },
-  { key: 'memo', title: t('worksheet.memo'), minWidth: 160, render: (r) => r.memo ?? '—' },
+  {
+    key: 'memo',
+    title: t('worksheet.memo'),
+    minWidth: 160,
+    render: (r) =>
+      r.isStatementMatched
+        ? h('div', { class: 'fin-recon__memo' }, [
+            h('span', r.memo ?? '—'),
+            h(TStatusBadge, { value: 'statement', type: 'info', label: t('worksheet.statementMatched') }),
+          ])
+        : (r.memo ?? '—'),
+  },
   { key: 'debit', title: t('worksheet.debit'), width: 110, render: (r) => amountCell(r.debit > 0 ? fmtAmount(r.debit) : '—') },
   { key: 'credit', title: t('worksheet.credit'), width: 110, render: (r) => amountCell(r.credit > 0 ? fmtAmount(r.credit) : '—') },
 ]
@@ -240,11 +260,28 @@ const rowActions: RowAction<ReconciliationRow>[] = [
   gap: 12px;
 }
 
+.fin-recon__memo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .fin-recon__totals {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 16px;
   font-size: 13px;
+}
+
+.fin-recon__currency {
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--tnzi-primary, #2080f0);
+  background: var(--tnzi-primary-suppl, rgba(32, 128, 240, 0.12));
 }
 
 .fin-recon__check--ok strong {

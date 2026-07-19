@@ -198,9 +198,12 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
     })),
   }
 
+  const wasCreate = !editingEntry.value?.id
   const saved = editingEntry.value?.id
     ? await bridge.expenses.updateDraft(editingEntry.value.id, data)
     : await bridge.expenses.createDraft(data)
+  // 幂等：createDraft 成功后 hydrate 编辑器，post 失败重试走 update 而非再建孤儿草稿。
+  if (wasCreate) await entryDetail.open('edit', saved)
 
   if (post) {
     await bridge.expenses.post(saved.id)

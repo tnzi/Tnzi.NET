@@ -5,6 +5,7 @@
     :title="title"
     :row-actions="rowActions"
     :translate="t"
+    :search-fields="searchFields"
     :detail-width="720"
     :detail-title="detailTitle"
   >
@@ -17,7 +18,7 @@
       </NButton>
     </template>
 
-    <!-- Read-only detail — header meta + lines. Same `view` open-state as the
+    <!-- Read-only detail - header meta + lines. Same `view` open-state as the
          form modal (deep-linkable ?detail=view:<id>, Back-closeable); the
          engine renders it as a right drawer because this `#detail` slot
          exists. `onView` lazy-loads the full entry (list rows carry no lines). -->
@@ -30,7 +31,7 @@
             {{ viewed.currency }} <template v-if="viewed.exchangeRate !== 1"> @ {{ viewed.exchangeRate }}</template>
           </NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.sourceType')">
-            {{ viewed.sourceType ?? '—' }}<template v-if="viewed.sourceId"> / {{ viewed.sourceId }}</template>
+            {{ financeSourceTypeLabel(viewed.sourceType) }}<template v-if="viewed.sourceId"> / {{ viewed.sourceId }}</template>
           </NDescriptionsItem>
           <NDescriptionsItem :label="`${t('columns.totalDebit')} ${t('baseCurrency')}`">{{ fmtAmount(viewed.totalDebit) }}</NDescriptionsItem>
           <NDescriptionsItem :label="`${t('columns.totalCredit')} ${t('baseCurrency')}`">{{ fmtAmount(viewed.totalCredit) }}</NDescriptionsItem>
@@ -49,7 +50,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Line editor (create / edit draft) — driven by `useDetail` so it is
+  <!-- Line editor (create / edit draft) - driven by `useDetail` so it is
        deep-linkable (?entry=new / ?entry=edit:<id>) and rendered by the single
        TDetailHost renderer; the editor supplies its own action row, hence
        :footer="false". Keyed by open sequence so each open starts fresh. -->
@@ -80,9 +81,11 @@ import { viewAction, type RowAction } from '../../headless/rowActions'
 import { createFinanceBridge, JournalEntryStatus, type AccountTreeDto, type JournalEntryDto, type JournalLineDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import type { FormSchemaItem } from '../_shared/form-schema'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildJournalEntryColumns, ENTRY_STATUS_META, type JournalRow } from './journal-entry-config'
 import { amountCell, fmtAmount } from './money'
+import { financeSourceTypeLabel } from './source-type'
 import JournalEntryEditor from './components/JournalEntryEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -100,9 +103,23 @@ const crud = useCrudPage<JournalRow>({
   fetchData: (q) => bridge.journals.fetch(q),
   // Deep-link cold restore (?detail=view:<id>) hydrates even off-page rows.
   loadDetailById: (id) => bridge.journals.getById(id),
-  // Read-only list — create/edit go through the dedicated line-editor overlay.
+  // Read-only list - create/edit go through the dedicated line-editor overlay.
   onView: (row) => void loadViewed(row),
 })
+
+// Ledger filters - status is the primary bookkeeper hunt; the bridge maps filters.status → backend query.
+const searchFields: FormSchemaItem[] = [
+  {
+    key: 'status',
+    labelKey: 'columns.status',
+    label: 'Status',
+    type: 'select',
+    options: [JournalEntryStatus.Draft, JournalEntryStatus.Posted, JournalEntryStatus.Reversed].map((s) => ({
+      value: s,
+      label: t(ENTRY_STATUS_META[s]?.label ?? ''),
+    })),
+  },
+]
 
 const title = 'tnzi.admin.modules.finance.journals.title'
 const detailTitle = (d: JournalRow) => d.number ?? t('detail.draftTitle')
@@ -154,7 +171,7 @@ const entryDetail = useDetail<JournalEntryDto>({
   loadData: (id) => bridge.journals.getById(String(id)),
 })
 
-// 'create' opens with an empty object — treat anything without an id as create.
+// 'create' opens with an empty object - treat anything without an id as create.
 const editingEntry = computed(() => {
   const d = entryDetail.data.value
   return d?.id ? d : null

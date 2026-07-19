@@ -198,7 +198,10 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 export { TnziUiAdminResolver } from './resolver'
 export { registerBrandIcon, type BrandIconData } from './brandIcon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
-export { defineAdminApp } from './defineAdminApp'
+export { defineAdminApp, normalizeBasePath } from './defineAdminApp'
+export { createAdminApp } from './createAdminApp'
+export type { CreateAdminAppOptions, AdminAppHandle } from './createAdminApp'
+export { buildDefaultLoginCallbacks, codeChannelFields, type AdminAuthRuntime } from './defaultAuth'
 export { installDirectives, vPermission, vModule } from '../directives'
 export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
 export {

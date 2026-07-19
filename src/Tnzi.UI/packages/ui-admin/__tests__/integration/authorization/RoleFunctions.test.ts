@@ -81,10 +81,16 @@ describe('RoleFunctions page (Tier 3: dual-pane assignment)', () => {
     expect(roles[1]?.text()).toContain('Editor')
   })
 
-  it('shows a select-role prompt before any role is picked', async () => {
+  it('auto-selects the first role so the right pane is never blank on open', async () => {
     const wrapper = mount(RoleFunctions)
     await nextTick()
     await new Promise(r => setTimeout(r, 100))
-    expect(wrapper.find('.t-role-func-page__placeholder').exists()).toBe(true)
+    await nextTick()
+    // No "pick a role" placeholder — the first role is selected automatically.
+    expect(wrapper.find('.t-role-func-page__placeholder').exists()).toBe(false)
+    // First role in the rail is marked active and the matrix is rendered.
+    const roles = wrapper.findAll('.t-role-func-page__role-item')
+    expect(roles[0]?.classes()).toContain('is-active')
+    expect(wrapper.find('.t-perm-matrix').exists()).toBe(true)
   })
 })

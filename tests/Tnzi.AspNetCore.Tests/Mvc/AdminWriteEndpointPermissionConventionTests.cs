@@ -54,6 +54,12 @@ public class AdminWriteEndpointPermissionConventionTests
         //    (system.diagnostics.execute / system.signalr.execute)，本区清空 ──
 
         // ── (2) POST-读：带查询体的读端点，仅类级 .view 把守，无数据变更 ──
+        // 重估 preview:纯计算预览不落库(落库的 run 有 finance.revaluation.execute);
+        // 余额汇总 verify:只读诊断对账(会重建的 rebuild 有 finance.balanceSummary.execute);
+        // 科目余额 balances:科目集经请求体传递(一页科目的 GUID 列表超 URL 长度上限)的纯读聚合。
+        "Tnzi.Finance.Controllers.Admin.DefaultFinanceRevaluationAdminController.Preview:POST",
+        "Tnzi.Finance.Controllers.Admin.DefaultFinanceBalanceSummaryAdminController.Verify:POST",
+        "Tnzi.Finance.Controllers.Admin.DefaultFinanceAccountAdminController.GetBalances:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.GetVersions:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.Validate:POST",
@@ -70,12 +76,12 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.AI.Controllers.Admin.DefaultUsageAnalyticsAdminController.GetSummary:POST",
         "Tnzi.AI.Controllers.Admin.DefaultUsageAnalyticsAdminController.GetLogs:POST",
         "Tnzi.AI.Controllers.Admin.DefaultUsageAnalyticsAdminController.GetTrend:POST",
-        "Tnzi.AI.Controllers.Admin.DefaultWorkflowAdminController.GetList:POST",
-        "Tnzi.AI.Controllers.Admin.DefaultWorkflowAdminController.Validate:POST",
-        "Tnzi.AI.Rag.Controllers.DefaultKnowledgeBaseAdminController.GetList:POST",
-        "Tnzi.AI.Rag.Controllers.DefaultKnowledgeBaseAdminController.GetDocuments:POST",
-        "Tnzi.AI.Rag.Controllers.DefaultKnowledgeBaseAdminController.Search:POST",
-        "Tnzi.AI.Rag.Controllers.DefaultKnowledgeBaseAdminController.SearchAll:POST",
+        "Tnzi.AI.Workflow.Controllers.Admin.DefaultWorkflowAdminController.GetList:POST",
+        "Tnzi.AI.Workflow.Controllers.Admin.DefaultWorkflowAdminController.Validate:POST",
+        "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.GetList:POST",
+        "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.GetDocuments:POST",
+        "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.Search:POST",
+        "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.SearchAll:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.GetList:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportCsv:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportJson:POST",

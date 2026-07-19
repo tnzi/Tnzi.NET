@@ -51,6 +51,7 @@ import { exportRouteMenuSeed } from '../headless/menuSeed'
 import { defaultAdminRoutes } from '../router/routes'
 import { createAuthGuard, createModuleGuard, createPermissionGuard } from '../router/guards'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
+import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminTabStore } from '../stores/useAdminTabStore'
 import {
   createTnziUiAdmin,
@@ -58,8 +59,10 @@ import {
   type TnziUiAdminOptions,
 } from './index'
 import type { AdminLoginConfig } from './loginConfig'
+import { buildDefaultLoginCallbacks, type AdminAuthRuntime } from './defaultAuth'
 import type { AdminDashboardConfig } from './dashboardConfig'
 import type { AdminSettingsConfig } from './settingsConfig'
+import { resolveHubConfigs } from './hubConfig'
 import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deepLinkConfig'
 import type { AdminThemeConfig } from './themeConfig'
 import {
@@ -72,8 +75,40 @@ import { useGlobalTheme } from '../headless/useGlobalTheme'
 import { fetchAdminShellModules } from '../services/admin-shell-modules'
 
 export interface DefineAdminAppOptions {
-  /** Backend HttpClient that admin bridges use to talk to the API. */
-  client: HttpClient
+  /**
+   * Backend HttpClient that admin bridges use to talk to the API. Optional
+   * when `runtime` is supplied (the client is then taken from `runtime.http`);
+   * pass one directly only when you build the HttpClient yourself instead of
+   * via `createTnziClient()`.
+   */
+  client?: HttpClient
+
+  /**
+   * The wired core runtime from `@tnzi/core`'s `createTnziClient()`
+   * (`{ http, auth, authApi }`). When provided, the framework takes over the
+   * ENTIRE standard auth flow so `main.ts` carries no hand-written auth
+   * wiring:
+   *   - `client` defaults to `runtime.http`;
+   *   - `login.callbacks` defaults to the standard pwd / code / send-code /
+   *     reset-pwd / register callbacks (built from `runtime.auth` +
+   *     `runtime.authApi`) — a consumer callback overrides its slot;
+   *   - `login.user.onLogout` defaults to `auth.logout()` + redirect to the
+   *     login route (a consumer `onLogout` overrides it);
+   *   - `auth.enabled` defaults to `true` and `auth.restore` defaults to
+   *     `() => runtime.auth.restoreAuth()`.
+   * Omit it (and pass `client`) to opt out and wire the callbacks by hand.
+   */
+  runtime?: AdminAuthRuntime
+
+  /**
+   * Host-app i18n message overrides, registered into `useAdminAppStore` at the
+   * correct time by `install()` (AFTER the pinia persistedstate plugin is set
+   * up, BEFORE first render). Pass `{ en, 'zh-cn' }` here instead of calling
+   * `useAdminAppStore().extendLocaleMessages(...)` in `main.ts` — that manual
+   * call had a subtle ordering footgun (touching the store before `install()`
+   * silently disabled persistence for the whole admin-app store).
+   */
+  locales?: { en?: Record<string, unknown>; 'zh-cn'?: Record<string, unknown> }
 
   /**
    * LEGACY FALLBACK - normally unnecessary. `loadPermissions` resolves the
@@ -349,6 +384,17 @@ export interface DefineAdminAppOptions {
   settings?: AdminSettingsConfig
 
   /**
+   * Single deployment path prefix shared by the SignalR hubs (e.g. '/api' when
+   * the API is hosted under an IIS sub-app at /api/). When set, the chat and
+   * settings hub URLs default to `${apiBase}/hubs/chat` / `${apiBase}/hubs/settings`
+   * instead of the root-relative '/hubs/*' — one knob instead of overriding each
+   * hub URL individually. An explicit `chat.hubUrl` / `settings.hubUrl` still
+   * wins. Opt-in: omit it to keep the root-relative defaults (e.g. dev setups
+   * that proxy '/hubs' separately). Match it to your HttpClient's REST baseUrl.
+   */
+  apiBase?: string
+
+  /**
    * Configuration for the built-in chat feature (TChatHost shell-level widget).
    * When omitted the chat launcher is enabled by default.
    */
@@ -422,7 +468,27 @@ export interface DefineAdminAppOptions {
    * ```
    */
   auth?: {
+    /**
+     * Install the built-in **authentication** guard: redirects unauthenticated
+     * users to the login route. Left opt-in so an app that wires its own
+     * `router.beforeEach` for auth isn't double-guarded. Pair with `restore`
+     * (below) to let the guard rehydrate a persisted session + load permissions
+     * itself — then the consumer needs no auth `beforeEach` at all.
+     */
     enabled?: boolean
+    /**
+     * Session-restore hook used by the authentication guard (`enabled: true`).
+     * When the guard finds no active admin session it calls this to let the
+     * consumer rehydrate their core session (e.g. restore the persisted token
+     * onto the HttpClient) BEFORE redirecting to login; the guard then
+     * auto-loads permissions to populate the admin store (its `isLogin`). This
+     * lets a consumer DELETE the hand-rolled `router.beforeEach` that used to
+     * `restoreAuth()` + `loadPermissions()` on every navigation. May be sync or
+     * async; a throw is swallowed (treated as "no session"). It runs only while
+     * signed-out (idempotent restore is fine) and is skipped once the store
+     * already shows a session. Omit if there is no persisted session to restore.
+     */
+    restore?: () => Promise<void> | void
     /**
      * The **permission** navigation guard — redirects to the `forbidden` route
      * when a route's `meta.permission` isn't held. Installed by DEFAULT (true),
@@ -580,7 +646,7 @@ function normalizeName(name: string): string {
  *   `'/console/'` / `'console'`     → `'/console'`
  *   `'/'`                            → `'/'`
  */
-function normalizeBasePath(basePath?: string | null): string {
+export function normalizeBasePath(basePath?: string | null): string {
   if (basePath == null) return '/admin'
   let bp = String(basePath).trim()
   if (bp === '') return '/admin'
@@ -637,6 +703,27 @@ function applyBasePath(
       return { ...route, path: basePath + route.path } as RouteRecordRaw
     }
     return route
+  })
+}
+
+/**
+ * Stamp `meta.builtIn: true` on the top-level module groups under `/admin`
+ * — the framework's preset admin pages. Runs against the ORIGINAL preset
+ * before `addModules` appends consumer routes, so consumer menus stay
+ * unstamped and survive the sidebar's built-in-menus toggle. Clones the
+ * touched nodes instead of mutating `defaultAdminRoutes` (a shared module
+ * constant reused across `defineAdminApp` calls).
+ */
+function markBuiltInModules(routes: RouteRecordRaw[]): RouteRecordRaw[] {
+  return routes.map((route) => {
+    if (route.path !== '/admin' || !route.children) return route
+    return {
+      ...route,
+      children: route.children.map((child) => ({
+        ...child,
+        meta: { ...child.meta, builtIn: true },
+      })),
+    } as RouteRecordRaw
   })
 }
 
@@ -826,6 +913,10 @@ function toAdminRouteRecords(
       // the store's `moduleGateKey` sees `undefined` and never gates the node
       // (the sidebar keeps showing menus for modules the backend never loaded).
       moduleGate: rawMeta?.moduleGate as boolean | string | undefined,
+      // Built-in marker (stamped by markBuiltInModules) — same round-trip
+      // rule as `permission`/`moduleGate`: dropped here = the built-in-menus
+      // toggle silently never filters anything.
+      builtIn: rawMeta?.builtIn as boolean | undefined,
     }
     const record: AdminRouteRecord = {
       name: typeof route.name === 'string' ? route.name : route.path,
@@ -851,6 +942,28 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   const hideRoutesSet = new Set(options.hideRoutes ?? [])
   const basePath = normalizeBasePath(options.basePath)
 
+  // Resolve the HttpClient from an explicit `client` or a wired `runtime`
+  // (`createTnziClient().http`). Everything below talks to the backend through
+  // this single resolved client. The explicit `HttpClient` annotation keeps the
+  // narrowed type through the hoisted nested `function` declarations below
+  // (install / loadPermissions / …), which const CFA narrowing doesn't reach.
+  const resolvedClientOrNull = options.client ?? options.runtime?.http
+  if (!resolvedClientOrNull) {
+    throw new Error(
+      'defineAdminApp requires either `client` (an HttpClient) or `runtime` (from createTnziClient()).',
+    )
+  }
+  const resolvedClient: HttpClient = resolvedClientOrNull
+
+  // Auth-guard defaults. When a `runtime` is supplied the framework owns the
+  // whole auth flow, so the authentication guard is ON by default and the
+  // session-restore hook defaults to the runtime's own `restoreAuth()`. An
+  // explicit `auth.enabled` / `auth.restore` always wins.
+  const authEnabled = options.auth?.enabled ?? Boolean(options.runtime)
+  const restoreSession =
+    options.auth?.restore ??
+    (options.runtime ? () => options.runtime!.auth.restoreAuth() : undefined)
+
   // Module-availability gating is ON by default; `false` or `{ enabled: false }`
   // opts out (fall back to permission-only filtering, the historic behaviour).
   const moduleGatingEnabled =
@@ -865,6 +978,10 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   // applyBasePath as the final step — this keeps the helpers single-purpose
   // and lets us avoid threading basePath through every walker.
   let routes = [...defaultAdminRoutes]
+  // Stamp the preset's top-level module groups as framework built-ins BEFORE
+  // consumer routes join (addModules appends later and stays unstamped) —
+  // this is what the sidebar's built-in-menus toggle keys on.
+  routes = markBuiltInModules(routes)
   routes = filterModules(routes, hideSet, showOnlySet)
   if (hideRoutesSet.size > 0) {
     routes = applyHideRoutes(routes, hideRoutesSet)
@@ -890,7 +1007,34 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
    * own `myId` are correct the moment the user lands on the shell. This is what
    * makes the login flow "框架自洽" — see `loadPermissions`.
    */
-  function wrapLoginCallbacks(login?: AdminLoginConfig): AdminLoginConfig | undefined {
+  function wrapLoginCallbacks(
+    login: AdminLoginConfig | undefined,
+    router?: Router,
+    loginPath?: string,
+  ): AdminLoginConfig | undefined {
+    // When a `runtime` is supplied, synthesize the whole standard login config
+    // from it, then overlay the consumer's `login` so any callback / onLogout
+    // the consumer DID supply wins its slot. This is what lets `main.ts` carry
+    // ZERO auth wiring: the framework fills in pwd / code / send-code /
+    // reset-pwd / register callbacks (from `runtime.auth` + `runtime.authApi`)
+    // and a default `onLogout` (auth.logout + redirect to the login route),
+    // and the consumer only overrides when it genuinely diverges.
+    if (options.runtime) {
+      const rt = options.runtime
+      const defaults = buildDefaultLoginCallbacks(rt)
+      const defaultOnLogout = async () => {
+        await rt.auth.logout()
+        // Redirect by NAME (deployment-agnostic); an explicit loginPath wins.
+        if (router) {
+          void router.replace(loginPath !== undefined ? { path: loginPath } : { name: 'login' })
+        }
+      }
+      login = {
+        ...(login ?? {}),
+        callbacks: { ...defaults, ...(login?.callbacks ?? {}) },
+        user: { ...(login?.user ?? {}), onLogout: login?.user?.onLogout ?? defaultOnLogout },
+      }
+    }
     if (!login) return login
 
     // Clear the admin auth store on deliberate sign-out. The consumer's
@@ -934,6 +1078,26 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     const after = async () => {
       await loadPermissions().catch(() => undefined)
       await loadAvailableModules().catch(() => undefined)
+      // Backend menu overrides (no-op unless menu source === 'merge').
+      const uid = useAdminAuthStore().userInfo?.id
+      if (uid) await loadMenus(uid).catch(() => undefined)
+      // Post-login redirect — ONLY when the consumer's callback didn't already
+      // navigate away (we're still on the login route). Honours the `?next`
+      // deep-link (written by the auth guard / session-expired redirect), else
+      // lands on the dashboard. A consumer that redirects inside its own
+      // callback keeps its target: this no-ops because we're no longer on login.
+      if (router) {
+        const cur = router.currentRoute.value
+        const onLogin =
+          cur.name === 'login' ||
+          (loginPath !== undefined &&
+            (cur.path === loginPath || cur.path.startsWith(`${loginPath}/`)))
+        if (onLogin) {
+          const raw = cur.query.next
+          const next = typeof raw === 'string' && raw ? raw : undefined
+          void router.replace(next ?? { name: 'dashboard' })
+        }
+      }
     }
     const pwd = cbs.pwdLogin
     const code = cbs.codeLogin
@@ -956,16 +1120,34 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   }
 
   function install(app: App, pinia?: Pinia, router?: Router): TnziUiAdminInstance {
+    // Derive hub URL defaults from a single `apiBase` (see resolveHubConfigs).
+    // Opt-in: no apiBase → root-relative '/hubs/*' defaults unchanged.
+    const { chat: chatConfig, settings: settingsConfig } = resolveHubConfigs(
+      options.apiBase,
+      options.chat,
+      options.settings,
+    )
+
     const instance = createTnziUiAdmin(app, {
       ...(options.pluginOptions ?? {}),
-      client: options.client,
+      client: resolvedClient,
       pinia,
-      login: wrapLoginCallbacks(options.login),
+      login: wrapLoginCallbacks(options.login, router, options.auth?.loginPath),
       dashboard: options.dashboard,
-      settings: options.settings,
-      chat: options.chat,
+      settings: settingsConfig,
+      chat: chatConfig,
       theme: options.theme,
     })
+
+    // Register host-app i18n overrides at the correct time — AFTER
+    // createTnziUiAdmin set up the pinia persistedstate plugin (so the
+    // admin-app store's own persistence still attaches), BEFORE first render.
+    // This is the framework-owned replacement for the consumer calling
+    // `useAdminAppStore().extendLocaleMessages(...)` by hand with a fragile
+    // "must run after install()" ordering comment.
+    if (options.locales) {
+      useAdminAppStore().extendLocaleMessages(options.locales)
+    }
 
     // Apply the GLOBAL admin theme snapshot app-wide, at bootstrap — BEFORE
     // and independent of login. `GET /appearance/admin-theme` is anonymous
@@ -984,7 +1166,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     )
     if (bootThemeCtx) {
       void useGlobalTheme({
-        client: options.client,
+        client: resolvedClient,
         themeContext: bootThemeCtx,
         enabled: options.theme?.globalSync !== false,
       }).load()
@@ -1026,9 +1208,43 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     //    `userInfo === null` and for super users, so consumers that never wire
     //    permissions keep the historical open behaviour, and the backend
     //    `[ApiAuthorize]` remains the real enforcement.
+    // Session resolver for the auth guard. TOKEN-FIRST, deliberately: the admin
+    // store's `isLogin` is PERSISTED, so after a cold reload it can read `true`
+    // while the core session (the HttpClient's token) hasn't been rehydrated yet
+    // — trusting the store there would wave the user through to a page whose
+    // every request then 401s. So we key off the live client token:
+    //   • no token → run the consumer's `restore` hook (rehydrate the persisted
+    //     core session onto the client). Still no token afterwards → genuinely
+    //     signed out → redirect to login (no backend call, no 401 noise).
+    //   • token present → the core session is live; populate the admin store via
+    //     `loadPermissions` unless a prior in-app navigation already did.
+    const resolveSession = async (): Promise<boolean> => {
+      // Call getAccessToken AS A METHOD on the client (never extract it into a
+      // bare variable — the HttpClient impl reads `this.accessToken`, so an
+      // unbound call throws "Cannot read properties of undefined").
+      const client = resolvedClient as { getAccessToken?: () => string | null }
+      const hasToken = () =>
+        typeof client.getAccessToken === 'function' ? Boolean(client.getAccessToken()) : true
+      if (!hasToken()) {
+        try {
+          await restoreSession?.()
+        } catch {
+          // treated as "no session" — the token check below then redirects
+        }
+        if (!hasToken()) return false
+      }
+      const store = useAdminAuthStore()
+      if (!(store.isLogin && store.userInfo !== null)) {
+        await loadPermissions().catch(() => undefined)
+        const uid = useAdminAuthStore().userInfo?.id
+        if (uid) await loadMenus(uid).catch(() => undefined)
+      }
+      return useAdminAuthStore().isLogin
+    }
+
     if (router) {
-      if (options.auth?.enabled) {
-        router.beforeEach(createAuthGuard({ loginPath: explicitLoginPath }))
+      if (authEnabled) {
+        router.beforeEach(createAuthGuard({ loginPath: explicitLoginPath, resolveSession }))
       }
       // Module-availability guard BEFORE the permission guard: a route into an
       // unloaded framework module should bounce to /403 (graceful) without the
@@ -1056,7 +1272,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // reload) and redirects with a `next` deep-link back to the current page.
     if (router && options.auth?.sessionExpiredRedirect !== false) {
       // Optional call: tolerates HttpClient builds predating addUnauthorizedListener.
-      options.client.addUnauthorizedListener?.(() => {
+      resolvedClient.addUnauthorizedListener?.(() => {
         useAdminAuthStore().logout()
         const current = router.currentRoute.value
         const onLogin =
@@ -1114,7 +1330,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     const authStore = useAdminAuthStore()
     if (authStore.isLogin && authStore.userInfo !== null) {
       const refreshWhenClientReady = async (): Promise<void> => {
-        if (!(await waitForClientToken(options.client))) return
+        if (!(await waitForClientToken(resolvedClient))) return
         await loadPermissions()
       }
       void refreshWhenClientReady().catch(() => undefined)
@@ -1136,7 +1352,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       routeStore.setModuleSignalPending(true)
       const loadModulesWhenReady = async (): Promise<void> => {
         try {
-          if (await waitForClientToken(options.client)) {
+          if (await waitForClientToken(resolvedClient)) {
             await loadAvailableModules()
           }
         } finally {
@@ -1161,7 +1377,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // a failure falls back to whatever the caller supplied.
     let profile: Awaited<ReturnType<ReturnType<typeof createIdentityBridge>['me']['getProfile']>> | null = null
     try {
-      const fetched = await createIdentityBridge({ client: options.client }).me.getProfile()
+      const fetched = await createIdentityBridge({ client: resolvedClient }).me.getProfile()
       // Failure envelopes RESOLVE here instead of throwing, in two shapes:
       // `data: undefined` unwraps to undefined, and an envelope WITHOUT a
       // data field unwraps to the envelope object itself (truthy!). Only a
@@ -1196,7 +1412,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // fetch, which the sidebar's `isLogin`-gated fail-open reads as "logged in,
     // permissions loading" → it flashes EVERY menu. It also matters nothing for
     // request auth: the permission/profile fetches below go through
-    // `options.client` (core HttpClient), which already carries the token from
+    // `resolvedClient` (core HttpClient), which already carries the token from
     // the consumer's login. Deferring keeps the login state atomic: either both
     // token + userInfo land, or (on the failed-resolution guard) neither.
 
@@ -1218,7 +1434,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     let backendIsSuper: boolean | null = null
     if (user.permissions === undefined) {
       try {
-        const api = useAdminFunctionAuthorizationApi(options.client)
+        const api = useAdminFunctionAuthorizationApi(resolvedClient)
         // Preferred: single self-service call, no userId needed, and the
         // super-admin flag comes from the backend instead of a front-end
         // mirror of `Authorization:SuperAdminRoles` (which could drift).
@@ -1252,7 +1468,18 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // Flip the token (→ `isLogin`) and the identity together so the sidebar
     // never sees `isLogin === true` with a still-null / still-previous
     // `userInfo` (see the note above where the early setToken used to live).
-    if (user.token) authStore.setToken(user.token, user.refreshToken)
+    // SELF-FETCH MODE (no `user.token` passed — the auth guard's resolveSession
+    // and the post-login `after()` both call `loadPermissions()` bare): mirror
+    // the LIVE client token so `isLogin` reflects the active core session. The
+    // admin-store token is a UI gate only (requests auth via `resolvedClient`,
+    // which already carries the token), so mirroring the access token alone is
+    // correct — and REQUIRED, else these callers `setUserInfo` but leave
+    // `isLogin` false, bouncing a just-authenticated user back to login. Call
+    // getAccessToken AS A METHOD (it reads `this.accessToken`).
+    const client = resolvedClient as { getAccessToken?: () => string | null }
+    const liveToken = typeof client.getAccessToken === 'function' ? client.getAccessToken() : null
+    const accessToken = user.token ?? liveToken ?? undefined
+    if (accessToken) authStore.setToken(accessToken, user.refreshToken)
 
     authStore.setUserInfo({
       id: userId,
@@ -1296,7 +1523,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
 
   async function loadAvailableModules(): Promise<void> {
     if (!moduleGatingEnabled) return
-    const names = await fetchAdminShellModules(options.client)
+    const names = await fetchAdminShellModules(resolvedClient)
     // null = endpoint unavailable / failed → fail-open: keep the prior signal
     // (null on the first run = gating off = show everything). A real Set (even
     // empty) turns gating on.
@@ -1307,7 +1534,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   async function loadMenus(userId: string): Promise<void> {
     if (options.menu?.source !== 'merge') return
     const routeStore = useAdminRouteStore()
-    const res = await useAdminMenuApi(options.client).getUserTree(userId)
+    const res = await useAdminMenuApi(resolvedClient).getUserTree(userId)
     if (res.success && Array.isArray(res.data)) {
       routeStore.setBackendMenus(res.data)
     }
@@ -1317,7 +1544,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     const routeStore = useAdminRouteStore()
     const seed = exportRouteMenuSeed(routeStore.menus)
     if (seed.length === 0) return null
-    const res = await useAdminMenuApi(options.client).seed(seed)
+    const res = await useAdminMenuApi(resolvedClient).seed(seed)
     return res.success ? (res.data ?? null) : null
   }
 

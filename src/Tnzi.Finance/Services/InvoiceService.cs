@@ -181,7 +181,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         if (invoice.Lines.Count == 0)
             return Fail<InvoiceDto>("The invoice has no lines.", 400);
 
-        var guardResult = await _guards.CheckAsync(nameof(Invoice), invoice.Id.ToString(), FinancePostingOperation.Post, invoice, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Invoice, invoice.Id.ToString(), FinancePostingOperation.Post, invoice, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<InvoiceDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
@@ -228,7 +228,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
             Memo = string.IsNullOrWhiteSpace(invoice.Memo) ? "Invoice" : $"Invoice: {invoice.Memo}",
             Currency = invoice.Currency,
             ExchangeRate = invoice.ExchangeRate,
-            SourceType = nameof(Invoice),
+            SourceType = FinanceSourceTypes.Invoice,
             SourceId = invoice.Id.ToString()
         };
 
@@ -281,7 +281,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
 
                 // 单据号分配在全部可失败校验之后（回滚回收）
                 invoice.Number = await _numberService.NextFormattedAsync(
-                    nameof(Invoice), _options.InvoiceNumberPrefix, _options.JournalNumberPadding, ct);
+                    FinanceSourceTypes.Invoice, _options.InvoiceNumberPrefix, _options.JournalNumberPadding, ct);
                 invoice.Status = FinanceDocumentStatus.Posted;
                 invoice.SubTotal = subTotal;
                 invoice.TaxTotal = tax.TaxTotal;
@@ -306,7 +306,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
 
         await PublishEventAsync(new FinanceDocumentPostedEvent
         {
-            DocType = nameof(Invoice),
+            DocType = FinanceSourceTypes.Invoice,
             DocId = invoice.Id,
             Number = invoice.Number!,
             JournalEntryId = entry.Id,
@@ -330,7 +330,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         if (invoice.AppliedTotal != 0)
             return Fail<InvoiceDto>("The invoice has applied payments. Unapply them before voiding.", 409);
 
-        var guardResult = await _guards.CheckAsync(nameof(Invoice), invoice.Id.ToString(), FinancePostingOperation.Void, invoice, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Invoice, invoice.Id.ToString(), FinancePostingOperation.Void, invoice, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<InvoiceDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
@@ -374,7 +374,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
 
         await PublishEventAsync(new FinanceDocumentVoidedEvent
         {
-            DocType = nameof(Invoice),
+            DocType = FinanceSourceTypes.Invoice,
             DocId = invoice.Id,
             Number = invoice.Number,
             VoidJournalEntryId = reversal!.Id,

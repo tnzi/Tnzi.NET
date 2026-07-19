@@ -1,4 +1,4 @@
-export { default as SourceCitations } from './SourceCitations.vue';
-export { default as KnowledgePanel } from './KnowledgePanel.vue';
-export type { Citation } from './SourceCitations.vue';
-export type { KnowledgeBase } from './KnowledgePanel.vue';
+export { default as TSourceCitations } from './TSourceCitations.vue';
+export { default as TKnowledgePanel } from './TKnowledgePanel.vue';
+export type { Citation } from './TSourceCitations.vue';
+export type { KnowledgeBase } from './TKnowledgePanel.vue';

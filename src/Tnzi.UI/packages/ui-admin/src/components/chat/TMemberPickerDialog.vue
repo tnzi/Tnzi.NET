@@ -13,6 +13,9 @@
         v-model="keyword"
         class="t-member-picker__search-input"
         :placeholder="t('window.search')"
+        enterkeyhint="search"
+        autocapitalize="off"
+        autocorrect="off"
         @input="onSearch"
         @focus="focused = true"
         @blur="focused = false"
@@ -22,9 +25,11 @@
       </button>
     </div>
 
-    <!-- Candidate list — fixed height so the dialog footprint stays constant.
-         Inline height: NScrollbar's root does not inherit the scoped attr. -->
-    <NScrollbar class="t-member-picker__list" style="height: 280px">
+    <!-- Candidate list — fixed height on desktop so the dialog footprint stays
+         constant; on a phone (isSm) it flexes to a dvh-capped height so it
+         never exceeds the viewport with the keyboard up. Inline height:
+         NScrollbar's root does not inherit the scoped attr. -->
+    <NScrollbar class="t-member-picker__list" :style="{ height: isSm ? 'auto' : '280px', maxHeight: isSm ? '50dvh' : undefined }">
       <div
         v-for="c in candidates"
         :key="c.userId"
@@ -63,6 +68,7 @@ import { Icon } from '@iconify/vue'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatDialog from './TChatDialog.vue'
 import TChatAvatar from './TChatAvatar.vue'
 
@@ -85,6 +91,8 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+// Phone (<md) flexes the fixed list height so it never exceeds the viewport.
+const { isSm } = useBreakpoint()
 
 const keyword = ref('')
 const focused = ref(false)

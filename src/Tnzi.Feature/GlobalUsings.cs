@@ -27,7 +27,8 @@ global using Tnzi.Feature.Controllers.Admin;
 global using Tnzi.Feature.Dtos;
 global using Tnzi.Feature.Entities;
 global using Tnzi.Feature.Events;
-global using Tnzi.Feature.Features;
+global using Tnzi.Feature.Attributes;
+global using Tnzi.Feature.Filters;
 // Alias: disambiguate Tnzi.Feature.Metadata.ErrorCodes from Tnzi.Exceptions.ErrorCodes
 global using ErrorCodes = Tnzi.Feature.Metadata.ErrorCodes;
 global using Tnzi.Feature.Options;

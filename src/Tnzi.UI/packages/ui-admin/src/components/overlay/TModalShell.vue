@@ -4,11 +4,18 @@
     preset="card"
     :size="size"
     :mask-closable="maskClosable"
+    :auto-focus="autoFocus"
     :title="title"
     :class="{ 't-modal-shell--fullscreen': isFullscreen }"
     :style="modalStyle"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
+    <!-- Rich header (entity name + status tag / subtitle): a `#header` slot
+         overrides the plain `title` prop for callers that need more than a
+         string. Omit it and the `title` prop drives the header as before. -->
+    <template v-if="$slots.header" #header>
+      <slot name="header" />
+    </template>
     <!-- Body scrolls inside the card so long content never pushes the header /
          footer off the viewport. `max-height` = viewport height minus reserved
          header (~56px) + footer (~64px) + outer modal padding (~80px). Short
@@ -16,8 +23,14 @@
          max-height). Plain `overflow:auto` (not NScrollbar) so the global
          polish.css macOS-style scrollbar applies — NScrollbar renders an
          overlay thumb that floats over (and occludes) the rightmost widgets. -->
-    <div class="t-modal-shell__scroll" :style="{ maxHeight: contentMaxHeight }">
-      <slot />
+    <div
+      class="t-modal-shell__scroll"
+      :class="{ 't-modal-shell__scroll--loading': loading }"
+      :style="{ maxHeight: contentMaxHeight }"
+    >
+      <NSpin :show="loading">
+        <slot />
+      </NSpin>
     </div>
     <template v-if="$slots.footer" #footer>
       <!-- Chrome-level action layout: right-aligned with a uniform gap, so
@@ -31,7 +44,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NModal } from 'naive-ui'
+import { NModal, NSpin } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 
 interface Props {
@@ -56,6 +69,12 @@ interface Props {
   contentMaxHeightVh?: number
   /** Allow closing by clicking the mask. Default false (forms shouldn't lose input on a stray click). */
   maskClosable?: boolean
+  /**
+   * Show a spinner over the body while its data loads. The body keeps a
+   * minimum height during the load so the modal doesn't collapse when the
+   * content renders empty (`v-if` on the record).
+   */
+  loading?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,11 +84,19 @@ const props = withDefaults(defineProps<Props>(), {
   fullscreen: undefined,
   contentMaxHeightVh: 65,
   maskClosable: false,
+  loading: false,
 })
 
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const bp = useBreakpoint()
+
+// Suppress naive's default first-focusable auto-focus on phones: it would grab
+// the first input/search box on open and pop the soft keyboard, covering half
+// the screen before the user has read anything. Desktop keeps auto-focus (users
+// expect to start typing in a create/edit form immediately). `trap-focus` stays
+// on either way (a11y).
+const autoFocus = computed<boolean>(() => !bp.isSm.value)
 
 // Auto-fullscreen when the viewport can't fit the configured width with room:
 //   - width + 32 → never crop at the sides
@@ -90,7 +117,9 @@ const modalStyle = computed(() =>
 
 const contentMaxHeight = computed(() =>
   // Fullscreen leaves room for header (~56) + footer (~64) + safe area (~24).
-  isFullscreen.value ? 'calc(100vh - 144px)' : `${props.contentMaxHeightVh}vh`,
+  // `dvh` so the soft keyboard / mobile address bar shrinks the height instead
+  // of the footer buttons ending up below the fold and unreachable.
+  isFullscreen.value ? 'calc(100dvh - 144px)' : `${props.contentMaxHeightVh}vh`,
 )
 </script>
 
@@ -99,12 +128,31 @@ const contentMaxHeight = computed(() =>
   overflow-y: auto;
   overflow-x: hidden;
 }
+/* While loading, guarantee the spin container a working height: an empty body
+   (content behind `v-if`) would otherwise collapse to ~0 and squash the
+   spinner. :deep because NSpin's wrapper is a child component element. */
+.t-modal-shell__scroll--loading :deep(.n-spin-container) {
+  min-height: 120px;
+}
 .t-modal-shell__footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
+}
+/* Phone: stack the action buttons full-width (thumb-friendly). `column` keeps
+   DOM order (Cancel above, primary below at thumb reach). naive buttons are
+   inline-flex so `align-items: stretch` alone won't widen them — set an explicit
+   full width. `:deep` because the buttons are the consumer's, not this scope. */
+@media (max-width: 767px) {
+  .t-modal-shell__footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .t-modal-shell__footer :deep(.n-button) {
+    width: 100%;
+  }
 }
 </style>
 
@@ -116,14 +164,18 @@ const contentMaxHeight = computed(() =>
   position: fixed !important;
   inset: 0 !important;
   height: 100vh !important;
+  height: 100dvh !important; /* dvh: shrink with the mobile URL bar / keyboard */
   max-height: 100vh !important;
+  max-height: 100dvh !important;
   border-radius: 0 !important;
   margin: 0 !important;
 }
 .t-modal-shell--fullscreen .n-card {
   border-radius: 0;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -131,5 +183,9 @@ const contentMaxHeight = computed(() =>
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+/* Keep the footer action row clear of the iOS home indicator when fullscreen. */
+.t-modal-shell--fullscreen .n-card__footer {
+  padding-bottom: max(var(--n-padding-bottom, 16px), env(safe-area-inset-bottom));
 }
 </style>

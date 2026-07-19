@@ -40,6 +40,7 @@
           <span>{{ t('editor.account') }}</span>
           <span>{{ t('editor.qty') }}</span>
           <span>{{ t('editor.price') }}</span>
+          <span class="fin-doc-editor__line-amount">{{ t('editor.amount') }}</span>
         </template>
         <template v-else>
           <span>{{ t('editor.description') }}</span>
@@ -50,20 +51,41 @@
         <span class="fin-doc-editor__line-remove" />
       </div>
 
+      <!-- 每字段裹在 __cell 里：桌面 display:contents 让输入直接落进原 sales/expense 网格；
+           手机(<768px)__cell 变带 data-label 的堆叠列，一字段一行、无横滚。 -->
       <div v-for="(line, index) in lines" :key="index" class="fin-doc-editor__line" :class="`fin-doc-editor__line--${kind}`">
         <span class="fin-doc-editor__line-no">{{ index + 1 }}</span>
         <template v-if="kind === 'sales'">
-          <NSelect v-model:value="line.itemId" :options="itemOptions" size="small" filterable clearable :placeholder="t('editor.itemPlaceholder')" />
-          <NSelect v-model:value="line.accountId" :options="accountOptions" size="small" filterable clearable :placeholder="t('editor.accountPlaceholder')" />
-          <NInputNumber v-model:value="line.quantity" size="small" :min="0" :show-button="false" />
-          <NInputNumber v-model:value="line.unitPrice" size="small" :min="0" :show-button="false" />
+          <div class="fin-doc-editor__cell" :data-label="t('editor.item')">
+            <NSelect v-model:value="line.itemId" :options="itemOptions" size="small" filterable clearable :placeholder="t('editor.itemPlaceholder')" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.account')">
+            <NSelect v-model:value="line.accountId" :options="accountOptions" size="small" filterable clearable :placeholder="t('editor.accountPlaceholder')" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.qty')">
+            <NInputNumber v-model:value="line.quantity" size="small" :min="0" :show-button="false" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.price')">
+            <NInputNumber v-model:value="line.unitPrice" size="small" :min="0" :show-button="false" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.amount')">
+            <span class="fin-doc-editor__line-amount fin-doc-editor__line-amount--value">{{ fmtAmount(lineAmount(line)) }}</span>
+          </div>
         </template>
         <template v-else>
-          <NInput v-model:value="line.description" size="small" :placeholder="t('editor.descriptionPlaceholder')" />
-          <NSelect v-model:value="line.accountId" :options="accountOptions" size="small" filterable :placeholder="t('editor.accountPlaceholder')" />
-          <NInputNumber v-model:value="line.amount" size="small" :min="0" :show-button="false" />
+          <div class="fin-doc-editor__cell" :data-label="t('editor.description')">
+            <NInput v-model:value="line.description" size="small" :placeholder="t('editor.descriptionPlaceholder')" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.account')">
+            <NSelect v-model:value="line.accountId" :options="accountOptions" size="small" filterable :placeholder="t('editor.accountPlaceholder')" />
+          </div>
+          <div class="fin-doc-editor__cell" :data-label="t('editor.amount')">
+            <NInputNumber v-model:value="line.amount" size="small" :min="0" :show-button="false" />
+          </div>
         </template>
-        <NSelect v-model:value="line.taxCodeId" :options="taxCodeOptions" size="small" filterable clearable :placeholder="t('editor.taxPlaceholder')" />
+        <div class="fin-doc-editor__cell" :data-label="t('editor.taxCode')">
+          <NSelect v-model:value="line.taxCodeId" :options="taxCodeOptions" size="small" filterable clearable :placeholder="t('editor.taxPlaceholder')" />
+        </div>
         <NButton size="tiny" quaternary circle class="fin-doc-editor__line-remove" :disabled="lines.length <= 1" @click="removeLine(index)">
           <template #icon>
             <TSvgIcon icon="mdi:close" :size="14" />
@@ -216,8 +238,13 @@ function resetFrom(entry: EditableDocument | null) {
 
 watch(() => props.entry, (entry) => resetFrom(entry), { immediate: true })
 
+// Extended line amount (qty × price) - shown per sales line so the bookkeeper sees each figure before posting.
+function lineAmount(l: EditableLine): number {
+  return (l.quantity ?? 0) * (l.unitPrice ?? 0)
+}
+
 const subTotal = computed(() => lines.value.reduce((sum, l) => {
-  const amount = props.kind === 'sales' ? (l.quantity ?? 0) * (l.unitPrice ?? 0) : (l.amount ?? 0)
+  const amount = props.kind === 'sales' ? lineAmount(l) : (l.amount ?? 0)
   return sum + amount
 }, 0))
 
@@ -323,7 +350,16 @@ async function save(post: boolean) {
 }
 
 .fin-doc-editor__line--sales {
-  grid-template-columns: 24px minmax(140px, 1fr) minmax(140px, 1fr) 90px 110px minmax(120px, 0.9fr) 28px;
+  grid-template-columns: 24px minmax(140px, 1fr) minmax(140px, 1fr) 90px 110px 100px minmax(120px, 0.9fr) 28px;
+}
+
+.fin-doc-editor__line-amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-doc-editor__line-amount--value {
+  font-size: 13px;
 }
 
 .fin-doc-editor__line--expense {
@@ -333,6 +369,15 @@ async function save(post: boolean) {
 .fin-doc-editor__line--head {
   font-size: 12px;
   color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+/* Desktop: transparent wrapper — the input becomes the grid cell directly, so
+   the sales/expense column templates are untouched and the label stays hidden. */
+.fin-doc-editor__cell {
+  display: contents;
+}
+.fin-doc-editor__cell[data-label]::before {
+  content: none;
 }
 
 .fin-doc-editor__line-no {
@@ -359,14 +404,60 @@ async function save(post: boolean) {
   gap: 8px;
 }
 
+/* Phone (<md): the fixed 8-column (sales) / 6-column (expense) grid overflows a
+   fullscreen modal - stack each line into a single-column labeled card so every
+   field (item/account/qty/price/amount/tax) gets its own row and the panel never
+   scrolls horizontally (content-page iron-law). */
 @media (max-width: 767px) {
   .fin-doc-editor__header {
     grid-template-columns: 1fr;
   }
 
+  .fin-doc-editor__line--head {
+    display: none;
+  }
+
   .fin-doc-editor__line--sales,
   .fin-doc-editor__line--expense {
-    grid-template-columns: 20px minmax(120px, 1fr) minmax(120px, 1fr) 80px 90px minmax(100px, 0.9fr) 24px;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--tnzi-border, rgba(0, 0, 0, 0.09));
+    border-radius: var(--tnzi-admin-radius-md, 8px);
+  }
+
+  .fin-doc-editor__line-no {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+  }
+  .fin-doc-editor__line-no::before {
+    content: '#';
+  }
+
+  .fin-doc-editor__cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .fin-doc-editor__cell[data-label]::before {
+    content: attr(data-label);
+    font-size: 12px;
+    color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+  }
+
+  /* Extended-amount display reads left-aligned under its label in the card. */
+  .fin-doc-editor__line-amount {
+    text-align: left;
+  }
+
+  /* Delete row moves to the card end as a full-width ≥44px touch target. */
+  .fin-doc-editor__line-remove.n-button {
+    width: 100%;
+    height: 44px;
+    border-radius: var(--tnzi-admin-radius-md, 8px);
   }
 }
 </style>

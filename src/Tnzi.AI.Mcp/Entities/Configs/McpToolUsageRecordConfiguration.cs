@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities.Configs;
+namespace Tnzi.AI.Mcp.Entities.Configs;
 
 /// <summary>
 /// McpToolUsageRecord 实体配置类

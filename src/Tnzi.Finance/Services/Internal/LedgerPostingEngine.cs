@@ -19,6 +19,7 @@ public sealed class LedgerPostingEngine
     private readonly IFiscalYearService _fiscalYearService;
     private readonly IExchangeRateService _exchangeRateService;
     private readonly IDocumentNumberService _numberService;
+    private readonly BalanceSummaryMaintainer _summaryMaintainer;
     private readonly TimeProvider _timeProvider;
     private readonly FinanceOptions _options;
     private readonly ICurrentUser? _currentUser;
@@ -28,6 +29,7 @@ public sealed class LedgerPostingEngine
         IFiscalYearService fiscalYearService,
         IExchangeRateService exchangeRateService,
         IDocumentNumberService numberService,
+        BalanceSummaryMaintainer summaryMaintainer,
         TimeProvider timeProvider,
         IOptionsSnapshot<FinanceOptions> options,
         ICurrentUser? currentUser = null)
@@ -36,6 +38,7 @@ public sealed class LedgerPostingEngine
         _fiscalYearService = Check.NotNull(fiscalYearService);
         _exchangeRateService = Check.NotNull(exchangeRateService);
         _numberService = Check.NotNull(numberService);
+        _summaryMaintainer = Check.NotNull(summaryMaintainer);
         _timeProvider = Check.NotNull(timeProvider);
         _options = Check.NotNull(options).Value;
         _currentUser = currentUser;
@@ -120,8 +123,12 @@ public sealed class LedgerPostingEngine
                 return Result.Failure($"Line {i + 1}: cannot post to group account '{account.Code}'.", 400);
             if (!account.IsActive)
                 return Result.Failure($"Line {i + 1}: account '{account.Code}' is inactive.", 400);
-            if (account.Currency != null && account.Currency != currency)
-                return Result.Failure($"Line {i + 1}: account '{account.Code}' only accepts {account.Currency} transactions.", 400);
+            // 币种限定科目接受「其币种 OR 本位币」的行：本位币行是价值调整（期末重估、
+            // realized FX 控制科目残差），语义同 SettlementService.PostRealizedFxAsync 先例。
+            // 口径铁律：限定科目的交易币余额 = Σ(TxnDebit − TxnCredit) WHERE l.Currency == account.Currency；
+            // 本位币行只进本位币余额，不进交易币余额、不进外币对账候选。
+            if (account.Currency != null && currency != account.Currency && currency != baseCurrency)
+                return Result.Failure($"Line {i + 1}: account '{account.Code}' only accepts {account.Currency} or {baseCurrency} transactions.", 400);
         }
 
         // 本位币金额换算（写入本地缓冲）
@@ -180,6 +187,9 @@ public sealed class LedgerPostingEngine
         }
 
         Finalize(entry, lines, rate);
+
+        // 提交点内：把定稿行累加进月粒度余额桶（与凭证同事务，回滚一并撤销）
+        await _summaryMaintainer.ApplyAsync(entry, cancellationToken);
         return Result.Success();
     }
 
@@ -248,6 +258,10 @@ public sealed class LedgerPostingEngine
 
         reversal.Number = await _numberService.NextFormattedAsync(
             JournalEntrySequenceScope, _options.JournalNumberPrefix, _options.JournalNumberPadding, cancellationToken);
+
+        // 冲销行毛额累加进桶（净额天然归零）；调用方 MUST 同 UoW 持久化冲销凭证，
+        // 任一后续失败经 UnitOfWorkAbortException/异常连同桶增量整体回滚
+        await _summaryMaintainer.ApplyAsync(reversal, cancellationToken);
 
         return Result<JournalEntry>.Success(reversal);
     }

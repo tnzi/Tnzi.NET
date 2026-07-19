@@ -21,6 +21,13 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         MapperExtensions.SetMapper(new Mapper(config));
     }
 
+    /// <summary>
+    /// 报表读路径是否消费余额汇总桶。默认 false（历史行为）；余额汇总等价测试逐 scope 翻转此开关。
+    /// <see cref="Microsoft.Extensions.Options.IOptionsSnapshot{T}"/> 每 scope 重算，因此改此字段后
+    /// 新 scope（<c>InScopeAsync</c>）中的服务即读到新值。
+    /// </summary>
+    protected bool UseBalanceSummaryOption { get; set; }
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         services.AddOptions();
@@ -29,7 +36,10 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
             o.BaseCurrency = "USD";
             o.JournalNumberPrefix = "JE-";
             o.JournalNumberPadding = 6;
+            o.UseBalanceSummary = UseBalanceSummaryOption;
         });
+        // 全 0 的 32 字节测试密钥（AES-GCM 对任意 32 字节密钥成立）；确定性便于往返断言。
+        services.Configure<FinanceEncryptionOptions>(o => o.EncryptionKey = Convert.ToBase64String(new byte[32]));
         services.AddSingleton(TimeProvider.System);
 
         // 仓储（IRepository + IReadOnlyRepository）
@@ -59,6 +69,15 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<Transfer>(services);
         AddRepo<Reconciliation>(services);
         AddRepo<ReconciliationLine>(services);
+        AddRepo<BankAccount>(services);
+        AddRepo<PartyBankAccount>(services);
+        AddRepo<BankTransaction>(services);
+        AddRepo<BankImportBatch>(services);
+        AddRepo<BankCheck>(services);
+        AddRepo<EftBatch>(services);
+        AddRepo<EftBatchLine>(services);
+        AddRepo<Receipt>(services);
+        AddRepo<AccountPeriodBalance>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -80,6 +99,10 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         services.AddScoped<IFiscalYearService, FiscalYearService>();
         services.AddScoped<IFinancialReportService, FinancialReportService>();
         services.AddScoped<LedgerPostingEngine>();
+        // 余额汇总（批次 F）
+        services.AddScoped<BalanceSummaryMaintainer>();
+        services.AddScoped<BalanceSummaryReader>();
+        services.AddScoped<IBalanceSummaryService, BalanceSummaryService>();
 
         // 主数据服务（P2a）
         services.AddScoped<ICustomerService, CustomerService>();
@@ -101,6 +124,28 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         // P3a 银行域
         services.AddScoped<ITransferService, TransferService>();
         services.AddScoped<IReconciliationService, ReconciliationService>();
+
+        // 多币种深化：期末重估
+        services.AddScoped<IRevaluationService, RevaluationService>();
+
+        // P3「输出与摄取」— 块 0 基建 + 块 1 银行流水导入
+        services.AddScoped<IFinanceDataProtector, FinanceDataProtector>();
+        services.AddScoped<IBankAccountService, BankAccountService>();
+        services.AddScoped<IPartyBankAccountService, PartyBankAccountService>();
+        services.AddScoped<BankMatchEngine>();
+        services.AddScoped<IBankFeedService, BankFeedService>();
+
+        // P3「输出与摄取」— 块 2 支票打印
+        services.AddScoped<CheckNumberAllocator>();
+        services.AddScoped<ICheckDocumentRenderer, PdfSharpCheckRenderer>();
+        services.AddScoped<ICheckService, CheckService>();
+
+        // P3「输出与摄取」— 块 3 EFT 输出
+        services.AddScoped<IEftFileComposer, DefaultEftFileComposer>();
+        services.AddScoped<IEftService, EftService>();
+
+        // P3「输出与摄取」— 块 4 收据采集（IReceiptExtractor 桩由测试按需注入）
+        services.AddScoped<IReceiptCaptureService, ReceiptCaptureService>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>
@@ -148,6 +193,43 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
     /// </summary>
     protected Task<Result<JournalEntryDto>> PostLedgerAsync(LedgerPostingRequest request)
         => InScopeAsync<ILedgerPostingService, Result<JournalEntryDto>>(s => s.PostAsync(request));
+
+    /// <summary>按编码查询科目 Id</summary>
+    protected async Task<Guid> AccountIdByCodeAsync(string code)
+    {
+        var repo = ServiceProvider.GetRequiredService<IRepository<Account, Guid>>();
+        var account = await repo.FirstOrDefaultAsync(a => a.Code == code);
+        account.ShouldNotBeNull($"account {code}");
+        return account.Id;
+    }
+
+    /// <summary>创建科目并断言成功，返回 Id</summary>
+    protected async Task<Guid> CreateAccountAsync(CreateAccountDto input)
+    {
+        var result = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.CreateAsync(input));
+        result.Succeeded.ShouldBeTrue(result.Message);
+        return result.Data!.Id;
+    }
+
+    /// <summary>录入一条汇率（并断言成功）</summary>
+    protected async Task UpsertRateAsync(string from, string to, decimal rate, DateTime date)
+    {
+        var result = await InScopeAsync<IExchangeRateService, Result<ExchangeRateDto>>(
+            s => s.UpsertAsync(new UpsertExchangeRateDto { FromCurrency = from, ToCurrency = to, Rate = rate, RateDate = date }));
+        result.Succeeded.ShouldBeTrue(result.Message);
+    }
+
+    /// <summary>构造一笔外币过账请求（Debit/Credit 为交易币金额）</summary>
+    protected static LedgerPostingRequest Posting(DateTime date, string currency, decimal? rate, string sourceId, params LedgerPostingLine[] lines)
+        => new()
+        {
+            PostingDate = date,
+            Currency = currency,
+            ExchangeRate = rate,
+            SourceType = "Test.Fx",
+            SourceId = sourceId,
+            Lines = [.. lines]
+        };
 
     /// <summary>
     /// 构造一笔简单销售过账请求：借 应收账款（角色），贷 4100 销售收入（编码）

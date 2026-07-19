@@ -12,6 +12,20 @@ export {
   maybeTranslate,
 } from './_shared/translate'
 
+// Admin form-schema renderer — `TSchemaForm` (from `@tnzi/ui`) wrapped with the
+// admin field renderers (icon/json/password) + the shared `selectRenderer`
+// factory for dynamic / parent-dependent select options. Exported so consumer
+// pages compose the same schema-driven form (with dynamic selects) instead of
+// rebuilding a wrapper over the bare `@tnzi/ui` `TSchemaForm`.
+export { default as TFormSchemaRenderer, selectRenderer } from './_shared/form-schema'
+export type {
+  FormSchemaItem,
+  FormSchemaFieldType,
+  FieldRenderer,
+  FieldRenderContext,
+  SelectRendererOptions,
+} from './_shared/form-schema'
+
 // Phase I.7.1: login page route component + 5 modules + composable.
 // Consumers can import `{ TnziAdminLoginPage }` to register the route
 // themselves, or override individual modules via the `moduleComponents`

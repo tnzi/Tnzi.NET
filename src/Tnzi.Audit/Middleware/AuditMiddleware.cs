@@ -30,24 +30,13 @@ public class AuditMiddleware
         _redactor = Check.NotNull(redactor);
     }
 
-    public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, IUserAgentParserService? userAgentParser = null)
+    // 中间件是 pipeline 单例，per-request 服务（ICurrentUser / IEntityAuditCollector 等）
+    // 经 InvokeAsync 参数由框架从 context.RequestServices 逐请求解析
+    public async Task InvokeAsync(HttpContext context, ICurrentUser currentUser, IEntityAuditCollector entityAuditCollector, IUserAgentParserService? userAgentParser = null)
     {
-        // 检查是否启用操作审计
-        if (!Options.EnableOperationAudit)
-        {
-            await _next(context);
-            return;
-        }
-
-        // 检查排除路径
-        if (IsExcludedPath(context.Request.Path))
-        {
-            await _next(context);
-            return;
-        }
-
-        // Check [AuditDisabled] attribute on controller or action
-        if (IsAuditDisabled(context))
+        // 操作审计请求门（总开关 / 排除路径 / [AuditDisabled]）——
+        // 与 EntityAuditSaveChangesInterceptor 的采集门共用 AuditOperationGate 判定
+        if (!AuditOperationGate.ShouldAudit(context, Options))
         {
             await _next(context);
             return;
@@ -79,38 +68,13 @@ public class AuditMiddleware
 
             try
             {
-                await EnqueueAuditOperationAsync(context, currentUser, userAgentParser, startTime, stopwatch.ElapsedMilliseconds, exception, requestBody);
+                await EnqueueAuditOperationAsync(context, currentUser, entityAuditCollector, userAgentParser, startTime, stopwatch.ElapsedMilliseconds, exception, requestBody);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to enqueue audit operation");
             }
         }
-    }
-
-    /// <summary>
-    /// Check if the current endpoint has [AuditDisabled] attribute
-    /// </summary>
-    private static bool IsAuditDisabled(HttpContext context)
-    {
-        var endpoint = context.GetEndpoint();
-        if (endpoint == null)
-            return false;
-
-        // Check action-level attribute first, then controller-level
-        return endpoint.Metadata.GetMetadata<AuditDisabledAttribute>() != null;
-    }
-
-    private bool IsExcludedPath(PathString path)
-    {
-        foreach (var excluded in Options.ExcludedPaths)
-        {
-            if (path.StartsWithSegments(excluded))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 
     /// <summary>
@@ -170,6 +134,7 @@ public class AuditMiddleware
     private async Task EnqueueAuditOperationAsync(
         HttpContext context,
         ICurrentUser currentUser,
+        IEntityAuditCollector entityAuditCollector,
         IUserAgentParserService? userAgentParser,
         DateTime startTime,
         long duration,
@@ -200,6 +165,11 @@ public class AuditMiddleware
             functionName = $"{controller}.{action}";
         }
 
+        // 采集时定案写/读分类 + 提取端点权限码（[AuditRead] > 方法级操作码 >
+        // 三层门约定 admin 面(类级 .view)无操作码=读 > HTTP 方法+伪读启发式），
+        // 查询端不再对新行做字符串猜测
+        var (isWrite, permissionName) = AuditOperationClassifier.Classify(context, functionName);
+
         // 获取请求参数（受配置控制）
         string? requestParameters = null;
         if (Options.EnableRequestParameters)
@@ -226,6 +196,8 @@ public class AuditMiddleware
         var auditOperation = new AuditOperation
         {
             FunctionName = functionName,
+            PermissionName = permissionName,
+            IsWrite = isWrite,
             UserId = currentUser.Id,
             UserName = currentUser.UserName,
             NickName = null, // ICurrentUser 不包含 NickName，避免错误赋值 UserName
@@ -248,6 +220,13 @@ public class AuditMiddleware
             StartTime = startTime,
             EndTime = startTime.AddMilliseconds(duration)
         };
+
+        // 挂载本请求内经 EF 拦截器采集的实体级变更（EnableEntityAudit 关闭时恒为空），
+        // 随操作审计实体图一起经 channel → 后台批量 InsertMany 级联入库
+        foreach (var entityEntry in entityAuditCollector.Drain())
+        {
+            auditOperation.EntityEntries.Add(entityEntry);
+        }
 
         await _auditSender.SendAsync(auditOperation);
     }

@@ -182,6 +182,14 @@
             </template>
           </Suspense>
         </NCard>
+
+        <!-- Phone: read-only scrim over the drag-based canvas. It captures
+             touch so users can't fight an unusable editor, and points them at
+             the left node list (which stays selectable) + desktop editing. -->
+        <div v-if="isSm" class="t-wf-editor__canvas-guard">
+          <TSvgIcon icon="mdi:gesture-tap" :size="30" class="t-wf-editor__canvas-guard-icon" />
+          <p class="t-wf-editor__canvas-guard-text">{{ t('editor.mobileCanvasUnavailable') }}</p>
+        </div>
       </section>
 
       <!-- Right: node properties OR workflow metadata -->
@@ -465,6 +473,7 @@ import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import { useDetail } from '../../../headless/useDetail'
 import { useTabTitle } from '../../../headless/useTabTitle'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
+import { useBreakpoint } from '../../../headless/useBreakpoint'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useSafeMessage } from '../../_shared/safeMessage'
@@ -545,7 +554,7 @@ const LoadingStub = {
 }
 
 const WorkflowCanvas = defineAsyncComponent({
-  loader: () => import('@tnzi/ui-ai').then((m) => m.WorkflowCanvas),
+  loader: () => import('@tnzi/ui-ai').then((m) => m.TWorkflowCanvas),
   loadingComponent: LoadingStub,
   delay: 200,
   timeout: 30000,
@@ -555,6 +564,10 @@ const route = useRoute()
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
+// Phone (<768px): the DAG canvas is drag-to-move + drag-to-connect, which is
+// unusable on touch; overlay a read-only scrim + guidance while keeping the
+// left node list (view/select) usable. Desktop canvas is untouched.
+const { isSm } = useBreakpoint()
 // Guarded message — ui-admin shells don't always wrap with NMessageProvider
 // (and unit tests mount bare), so `useSafeMessage` no-ops without a provider.
 const message = useSafeMessage()
@@ -1144,6 +1157,36 @@ void loadAgents()
 }
 .t-wf-editor__canvas {
   min-width: 0;
+  /* Positioning context for the phone read-only scrim below. */
+  position: relative;
+}
+/* Phone-only scrim over the drag canvas. Covers the whole canvas cell,
+   captures pointer events (blocks the unusable drag interactions) and
+   centers the guidance. Only rendered under `isSm`, so desktop is untouched. */
+.t-wf-editor__canvas-guard {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  border-radius: var(--tnzi-admin-radius, 6px);
+  background: color-mix(in srgb, var(--tnzi-container-bg) 82%, transparent);
+  backdrop-filter: blur(1px);
+}
+.t-wf-editor__canvas-guard-icon {
+  color: var(--tnzi-base-text-muted);
+}
+.t-wf-editor__canvas-guard-text {
+  margin: 0;
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--tnzi-base-text-muted);
 }
 .t-wf-editor__inspector {
   min-width: 0;

@@ -68,7 +68,9 @@ interface Props {
   activeSection?: string | null
   title?: string
   icon?: string
-  back?: boolean | string
+  /** Back affordance forwarded to the in-layout `TPageHeader` — `true` (history),
+   *  a string (static push), or `{ fallback }` (smart back). See {@link BackTarget}. */
+  back?: boolean | string | { fallback?: string }
   translate?: (key: string) => string
   /** Render the in-layout TPageHeader. Set false when an overlay (modal/drawer) already provides the title chrome. */
   showHeader?: boolean
@@ -150,16 +152,37 @@ async function scrollToSection(key: string): Promise<void> {
 // exposed for unit testing the section handler without simulating naive events
 defineExpose({ onSection, scrollToSection })
 
+/**
+ * Badge text for a section that has no `icon`. Used only on the collapsed
+ * phone rail (60px) where NMenu shows the icon slot alone — without a fallback
+ * an icon-less section would render as an indistinguishable blank dot. Prefer
+ * the first character of the (translated) label; fall back to the 1-based
+ * ordinal when the label is empty so every section stays tellable apart.
+ */
+function sectionBadge(s: DetailSection, index: number): string {
+  const text = label(s).trim()
+  if (text) return text.slice(0, 1).toUpperCase()
+  return String(index + 1)
+}
+
 /** Group sections into NMenu option groups when any section declares a `group`. */
 const menuOptions = computed(() => {
   const hasGroups = props.sections.some((s) => s.group)
-  const toItem = (s: DetailSection) => ({
+  // On the collapsed phone rail, icon-less sections fall back to a letter /
+  // ordinal badge instead of an empty icon slot. Desktop (expanded, with text
+  // labels) keeps the original behaviour: no badge when there's no icon.
+  const phone = isSm.value
+  const toItem = (s: DetailSection, index: number) => ({
     key: s.key,
     label: label(s),
     disabled: s.disabled,
-    icon: s.icon ? () => h(TSvgIcon, { icon: s.icon as string, size: 14 }) : undefined,
+    icon: s.icon
+      ? () => h(TSvgIcon, { icon: s.icon as string, size: 14 })
+      : phone
+        ? () => h('span', { class: 't-detail-layout__nav-badge' }, sectionBadge(s, index))
+        : undefined,
   })
-  if (!hasGroups) return props.sections.map(toItem)
+  if (!hasGroups) return props.sections.map((s, i) => toItem(s, i))
   const order: string[] = []
   const byGroup = new Map<string, DetailSection[]>()
   for (const s of props.sections) {
@@ -174,7 +197,9 @@ const menuOptions = computed(() => {
     type: 'group' as const,
     key: `group:${g || 'default'}`,
     label: g ? maybeTranslateKey(props.translate, g, g) : '',
-    children: (byGroup.get(g) ?? []).map(toItem),
+    // Badge ordinal tracks the section's position in the flat list so numbers
+    // stay stable and unique across groups.
+    children: (byGroup.get(g) ?? []).map((s) => toItem(s, props.sections.indexOf(s))),
   }))
 })
 </script>
@@ -208,6 +233,17 @@ const menuOptions = computed(() => {
 .t-detail-layout__footer {
   flex-shrink: 0; display: flex; justify-content: flex-end; gap: 8px;
   padding-top: 12px; border-top: 1px solid var(--tnzi-border);
+}
+/* Fallback badge for icon-less sections on the collapsed phone rail — a small
+   letter/ordinal chip that reads like an icon so each section stays distinct.
+   Only produced when `isSm` is true (see `menuOptions`), so desktop is unaffected. */
+.t-detail-layout__nav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--tnzi-admin-radius-sm, 3px);
+  background: var(--tnzi-layout-bg);
+  color: var(--tnzi-base-text);
+  font-size: 12px; font-weight: 600; line-height: 1;
 }
 @media (max-width: 767px) {
   /* Phone: keep the LEFT/RIGHT split (do NOT stack) and collapse the menu to

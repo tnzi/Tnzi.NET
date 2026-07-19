@@ -116,7 +116,7 @@ public class DatabaseAuditStoreIntegrationTests : IntegrationTestBase
                 EntityTypeName = "User",
                 EntityTypeFullName = "Tnzi.Domain.User",
                 EntityId = "123",
-                OperationType = Tnzi.Audit.Entities.EntityState.Modified,
+                OperationType = Tnzi.Audit.Metadata.EntityState.Modified,
                 CreationTime = DateTime.UtcNow
             },
             new AuditEntityEntry
@@ -126,7 +126,7 @@ public class DatabaseAuditStoreIntegrationTests : IntegrationTestBase
                 EntityTypeName = "Product",
                 EntityTypeFullName = "Tnzi.Domain.Product",
                 EntityId = "456",
-                OperationType = Tnzi.Audit.Entities.EntityState.Added,
+                OperationType = Tnzi.Audit.Metadata.EntityState.Added,
                 CreationTime = DateTime.UtcNow
             }
         };

@@ -118,6 +118,48 @@ public class SettlementWorkflowTests : FinanceIntegrationTestBase
         open.Data!.Single(d => d.DocId == invoice.Id).Outstanding.ShouldBe(80m);
     }
 
+    /// <summary>
+    /// 回归（子账↔GL tie-out）：未核销的超收现金必须作为负行进 AR 账龄，
+    /// 使账龄合计 = GL AR 控制科目余额。旧实现只查发票→超收后账龄错报 0（应为 −50）。
+    /// </summary>
+    [Fact]
+    public async Task ArAging_TiesToControl_WithUnappliedOverpayment()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("TieOut Co");
+        var invoice = await PostInvoiceAsync(customer.Data!.Id, 100m, docDate: new DateTime(2026, 3, 1));
+        var payment = await PostInboundPaymentAsync(customer.Data.Id, 150m);
+        (await ApplyAsync(SettlementDocType.PaymentEntry, payment.Id, SettlementDocType.Invoice, invoice.Id, 100m))
+            .Succeeded.ShouldBeTrue();
+
+        // GL AR = Dr 100 (发票) − Cr 150 (收款) = −50；发票已付清出账龄，未核销 50 现金入负行
+        var aging = await InScopeAsync<IFinancialReportService, Result<AgingReportDto>>(
+            s => s.GetArAgingAsync(new DateTime(2026, 12, 31)));
+        aging.Succeeded.ShouldBeTrue(aging.Message);
+        aging.Data!.Totals.Total.ShouldBe(-50m);
+    }
+
+    /// <summary>
+    /// 回归（时点口径）：账龄以 asOf 之前发生的核销为准；asOf 之后才付清的发票在该日仍显示全额未清。
+    /// 旧实现读当前 AppliedTotal/Status → 把后付清的单追溯抹掉（错报 0，应为 100）。
+    /// </summary>
+    [Fact]
+    public async Task ArAging_PointInTime_IgnoresLaterSettlement()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("PIT Co");
+        var invoice = await PostInvoiceAsync(customer.Data!.Id, 100m, docDate: new DateTime(2026, 3, 1));
+        var payment = await PostInboundPaymentAsync(customer.Data.Id, 100m); // DocDate 2026-03-20
+        (await ApplyAsync(SettlementDocType.PaymentEntry, payment.Id, SettlementDocType.Invoice, invoice.Id, 100m))
+            .Succeeded.ShouldBeTrue();
+
+        // 发票现为 Paid，但 2026-03-10 时收款(DocDate 03-20)与核销(记账于运行时刻)都尚未发生 → 账龄仍 100
+        var aging = await InScopeAsync<IFinancialReportService, Result<AgingReportDto>>(
+            s => s.GetArAgingAsync(new DateTime(2026, 3, 10)));
+        aging.Succeeded.ShouldBeTrue(aging.Message);
+        aging.Data!.Totals.Total.ShouldBe(100m);
+    }
+
     [Fact]
     public async Task Apply_CreditMemo_OffsetsInvoice()
     {

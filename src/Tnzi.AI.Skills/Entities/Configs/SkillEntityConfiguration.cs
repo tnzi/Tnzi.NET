@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities.Configs;
+namespace Tnzi.AI.Skills.Entities.Configs;
 
 /// <summary>
 /// SkillEntity EF Core 配置

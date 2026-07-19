@@ -12,6 +12,8 @@ public class FiscalYearDto
     public bool IsClosed { get; set; }
     public DateTime? ClosedTime { get; set; }
     public Guid? ClosedById { get; set; }
+    public DateTime? ReopenedTime { get; set; }
+    public Guid? ReopenedById { get; set; }
 }
 
 /// <summary>

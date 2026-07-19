@@ -1,3 +1,25 @@
 #nullable enable
+override Tnzi.EFCore.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentSequence!>! builder) -> void
+override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
+Tnzi.EFCore.DocumentNumberService
+Tnzi.EFCore.DocumentNumberService.DocumentNumberService(System.IServiceProvider! serviceProvider, Tnzi.Domain.Repositories.IRepository<Tnzi.EFCore.DocumentSequence!, System.Guid>! repository) -> void
+Tnzi.EFCore.DocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Tnzi.EFCore.DocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+Tnzi.EFCore.DocumentSequence
+Tnzi.EFCore.DocumentSequence.DocumentSequence() -> void
+Tnzi.EFCore.DocumentSequence.NextValue.get -> long
+Tnzi.EFCore.DocumentSequence.NextValue.set -> void
+Tnzi.EFCore.DocumentSequence.Scope.get -> string!
+Tnzi.EFCore.DocumentSequence.Scope.set -> void
+Tnzi.EFCore.DocumentSequence.TenantId.get -> System.Guid?
+Tnzi.EFCore.DocumentSequence.TenantId.set -> void
+Tnzi.EFCore.DocumentSequenceConfiguration
+Tnzi.EFCore.DocumentSequenceConfiguration.DocumentSequenceConfiguration() -> void
+Tnzi.EFCore.IDocumentNumberService
+Tnzi.EFCore.IDocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Tnzi.EFCore.IDocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!

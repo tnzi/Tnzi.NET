@@ -20,8 +20,8 @@ function mockAuditApi() {
     getTrend: vi.fn(async () => []),
     getTopFunctions: vi.fn(async () => []),
     getTopUsers: vi.fn(async () => []),
-    getExportCsvUrl: vi.fn(() => '/admin/audit-operations/export/csv'),
-    getExportJsonUrl: vi.fn(() => '/admin/audit-operations/export/json'),
+    exportCsv: vi.fn(async () => new Blob(['Id,Url\n1,/x'], { type: 'text/csv' })),
+    exportJson: vi.fn(async () => new Blob(['[]'], { type: 'application/json' })),
   }
 }
 
@@ -30,6 +30,43 @@ describe('audit-bridge', () => {
     const bridge = createAuditBridge({ auditApi: mockAuditApi() as never })
     expect(typeof bridge.logs.fetch).toBe('function')
     expect(typeof bridge.operations.fetch).toBe('function')
+  })
+
+  it('logs.exportCsv/exportJson return Blobs from the api', async () => {
+    const auditApi = mockAuditApi()
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    const csv = await bridge.logs.exportCsv({ httpMethod: 'POST' })
+    const json = await bridge.logs.exportJson()
+    expect(csv).toBeInstanceOf(Blob)
+    expect(json).toBeInstanceOf(Blob)
+    expect(auditApi.exportCsv).toHaveBeenCalledWith({ httpMethod: 'POST' })
+    expect(auditApi.exportJson).toHaveBeenCalledWith({})
+  })
+
+  it('logs.detail / operations.detail unwrap getById (entity-level change tree)', async () => {
+    const auditApi = mockAuditApi()
+    const full = {
+      id: 'op1',
+      functionName: 'UpdateUser',
+      entityEntries: [
+        {
+          id: 'ee1',
+          entityTypeName: 'User',
+          operationType: 'Modified',
+          propertyEntries: [{ id: 'pe1', propertyName: 'Email', originalValue: 'a@x', newValue: 'b@x' }],
+        },
+      ],
+    }
+    auditApi.getById = vi.fn(async () => ({ success: true, data: full })) as never
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+
+    const logsDetail = await bridge.logs.detail('op1')
+    const opsDetail = await bridge.operations.detail('op1')
+
+    expect(auditApi.getById).toHaveBeenCalledWith('op1')
+    expect(logsDetail.entityEntries).toHaveLength(1)
+    expect(logsDetail.entityEntries[0].propertyEntries[0].newValue).toBe('b@x')
+    expect(opsDetail).toEqual(full)
   })
 
   it('logs.fetch calls auditApi.getList and returns paged items', async () => {

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, h, ref, watch, getCurrentInstance } from 'vue'
 import { useRoute, type RouteLocationNormalizedLoaded, type Router } from 'vue-router'
-import { NMenu } from 'naive-ui'
+import { NMenu, NSwitch } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import {
   useAdminRouteStore,
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
+import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
@@ -97,6 +98,15 @@ const emit = defineEmits<{
 
 const routeStore = useAdminRouteStore()
 const appStore = useAdminAppStore()
+const authStore = useAdminAuthStore()
+
+// Built-in-menus toggle (footer, super admin only): show or hide the
+// framework's preset admin menus (`meta.builtIn` groups), leaving the
+// consumer app's own menus untouched. Display-only: flipping it re-filters
+// the menu tree, never reachability.
+const showBuiltInToggle = computed(() => authStore.isSuperUser)
+const builtInLabel = computed(() => resolveLabel('admin.common.builtInMenus'))
+const builtInTip = computed(() => resolveLabel('admin.common.builtInMenusTip'))
 
 // Phase I.7.6: drive NMenu's active state from the *current vue-router route
 // name* — previously this was wired to `tabStore.activeTabId`, which only
@@ -332,10 +342,30 @@ function onSelect(key: string): void {
       <slot name="footer" />
     </div>
     <div
-      v-else-if="showSettingsEntry && hasSettingsRoute"
+      v-else-if="showBuiltInToggle || (showSettingsEntry && hasSettingsRoute)"
       class="t-admin-sidebar__footer t-admin-sidebar__footer--default"
     >
       <button
+        v-if="showBuiltInToggle"
+        type="button"
+        class="t-admin-sidebar__settings t-admin-sidebar__ops"
+        :class="{ 'is-active': isHeaderCompact && appStore.showBuiltInMenus, 't-admin-sidebar__settings--collapsed': isHeaderCompact }"
+        :title="builtInTip"
+        @click="appStore.toggleBuiltInMenus()"
+      >
+        <TSvgIcon icon="mdi:cube-outline" :size="18" />
+        <span v-if="!isHeaderCompact" class="t-admin-sidebar__settings-label">{{ builtInLabel }}</span>
+        <!-- 纯指示器：整行点击是唯一切换入口，避免行/开关双触发 -->
+        <NSwitch
+          v-if="!isHeaderCompact"
+          :value="appStore.showBuiltInMenus"
+          size="small"
+          class="t-admin-sidebar__ops-switch"
+          style="pointer-events: none"
+        />
+      </button>
+      <button
+        v-if="showSettingsEntry && hasSettingsRoute"
         type="button"
         class="t-admin-sidebar__settings"
         :class="{ 'is-active': isSettingsActive, 't-admin-sidebar__settings--collapsed': isHeaderCompact }"
@@ -526,5 +556,13 @@ function onSelect(key: string): void {
 .t-admin-sidebar__settings--collapsed {
   justify-content: center;
   padding: 8px 0;
+}
+/* Ops-view row: label takes the flexible width, switch hugs the right edge. */
+.t-admin-sidebar__ops .t-admin-sidebar__settings-label {
+  flex: 1 1 auto;
+  text-align: left;
+}
+.t-admin-sidebar__ops-switch {
+  flex-shrink: 0;
 }
 </style>

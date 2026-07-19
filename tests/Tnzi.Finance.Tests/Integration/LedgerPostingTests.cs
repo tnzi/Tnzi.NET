@@ -315,4 +315,62 @@ public class LedgerPostingTests : FinanceIntegrationTestBase
         var allowed = await PostLedgerAsync(SimpleSale(100m, new DateTime(2020, 6, 15)));
         allowed.Succeeded.ShouldBeTrue(allowed.Message);
     }
+
+    /// <summary>回归：重开已关闭年度（敏感控制动作）必须留下归属+时间戳，而非静默清空。</summary>
+    [Fact]
+    public async Task Reopen_RecordsAttributionAndTimestamp()
+    {
+        await SeedCoaAsync();
+        var created = await InScopeAsync<IFiscalYearService, Result<FiscalYearDto>>(s => s.CreateAsync(new CreateFiscalYearDto
+        {
+            Name = "FY2021", StartDate = new DateTime(2021, 1, 1), EndDate = new DateTime(2021, 12, 31)
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        (await InScopeAsync<IFiscalYearService, Result>(s => s.CloseAsync(created.Data!.Id))).Succeeded.ShouldBeTrue();
+        (await InScopeAsync<IFiscalYearService, Result>(s => s.ReopenAsync(created.Data!.Id))).Succeeded.ShouldBeTrue();
+
+        var list = await InScopeAsync<IFiscalYearService, Result<List<FiscalYearDto>>>(s => s.GetListAsync());
+        list.Succeeded.ShouldBeTrue(list.Message);
+        var after = list.Data!.Single(f => f.Id == created.Data!.Id);
+        after.IsClosed.ShouldBeFalse();
+        after.ReopenedTime.ShouldNotBeNull();      // 重开留痕
+        after.ClosedTime.ShouldNotBeNull();        // 关闭痕迹保留（不被清空）
+    }
+
+    [Fact]
+    public async Task Delete_ClosedFiscalYear_IsRefused_SoTheLockCannotBeDroppedInsteadOfReopened()
+    {
+        await SeedCoaAsync();
+
+        var created = await InScopeAsync<IFiscalYearService, Result<FiscalYearDto>>(s => s.CreateAsync(new CreateFiscalYearDto
+        {
+            Name = "FY2021",
+            StartDate = new DateTime(2021, 1, 1),
+            EndDate = new DateTime(2021, 12, 31)
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var closed = await InScopeAsync<IFiscalYearService, Result>(s => s.CloseAsync(created.Data!.Id));
+        closed.Succeeded.ShouldBeTrue(closed.Message);
+
+        // 删除曾是绕开期间锁的捷径：ValidatePostingDateAsync 判定倒填的唯一依据就是
+        // "有没有已关闭年度覆盖该日期"，年度一删、锁即消失。若放行，.delete 权限就凭空
+        // 等同于撤销 .close —— 而 .close 本该是一道需要显式重开才能解除的关账动作。
+        var deleted = await InScopeAsync<IFiscalYearService, Result>(s => s.DeleteAsync(created.Data!.Id));
+        deleted.Succeeded.ShouldBeFalse();
+        deleted.Code.ShouldBe(409);
+
+        // 锁必须仍然生效 —— 这才是拒绝删除的意义所在，而不只是返回一个错误码
+        var stillBlocked = await PostLedgerAsync(SimpleSale(100m, new DateTime(2021, 6, 15)));
+        stillBlocked.Succeeded.ShouldBeFalse();
+        stillBlocked.Code.ShouldBe(409);
+
+        // 重开之后可以删：未关闭的年度只是一个期间定义，删掉不解开任何锁
+        var reopened = await InScopeAsync<IFiscalYearService, Result>(s => s.ReopenAsync(created.Data!.Id));
+        reopened.Succeeded.ShouldBeTrue(reopened.Message);
+
+        var deletedAfterReopen = await InScopeAsync<IFiscalYearService, Result>(s => s.DeleteAsync(created.Data!.Id));
+        deletedAfterReopen.Succeeded.ShouldBeTrue(deletedAfterReopen.Message);
+    }
 }

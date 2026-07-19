@@ -25,6 +25,7 @@ export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
 
 // Layout primitives
 export { default as TPageHeader } from './layout/TPageHeader.vue'
+export type { BackTarget } from './layout/backTarget'
 export { default as TContentPage } from './layout/TContentPage.vue'
 // Batteries-included container for tabbed content pages — declare `:sections`,
 // drop each tab's content in a same-named slot; NTabs chrome, `t-table-tabs`
@@ -38,13 +39,19 @@ export type { TabSection } from './layout/TTabsPage.vue'
 // Organizations / Permissions / RoleFunctions pages.
 export { default as TMasterDetailLayout } from './layout/TMasterDetailLayout.vue'
 export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
+// Header notification bell — unread badge + popover list + load-more + empty.
+// Mount via `defineAdminApp({ login: { headerNotification } })`.
+export { default as THeaderBell } from './layout/THeaderBell.vue'
 
 // Data primitives — responsive table (auto card-stacking on phones) and the
 // card-list primitive underneath it. Public per the content-page standard
 // (docs/coding-standards/ui-content-page.md §5.5): consumers replacing a raw
 // NDataTable are told to import TResponsiveTable from the package root.
 export { default as TResponsiveTable } from './data/TResponsiveTable.vue'
-export type { TResponsiveTableProps, TResponsivePagination } from './data/TResponsiveTable.vue'
+export type { TResponsiveTableProps, TResponsivePagination, TResponsiveSummaryRow } from './data/TResponsiveTable.vue'
+// Financial-report table — money/total columns + auto totals row + drill-down.
+export { default as TReportTable } from './data/TReportTable.vue'
+export type { ReportColumn } from './data/TReportTable.vue'
 export { default as TDataCardList } from './data/TDataCardList.vue'
 export type { CardColumn } from './data/TDataCardList.vue'
 // KPI primitives — unified KPI card + responsive KPI strip (one per page,
@@ -64,10 +71,15 @@ export { default as TKpiRow } from './data/TKpiRow.vue'
 export { default as TEmpty } from './data/TEmpty.vue'
 export type { TEmptyProps, TEmptySize } from './data/TEmpty.vue'
 
-// Detail primitives — 3-mode (modal/drawer/page) detail host + skeleton.
+// Detail primitives — 3-mode (modal/drawer/page) detail host + skeleton +
+// per-section container. TDetailSection is the standard chrome for ONE section
+// inside a TDetailLayout side/tabs panel (fixed header bar + scrolling body +
+// optional savebar); exported so consumer detail pages compose it instead of
+// copying it (the built-in module detail pages use it internally).
 export { default as TDetailLayout } from './detail/TDetailLayout.vue'
 export { default as TDetailHost } from './detail/TDetailHost.vue'
 export type { TDetailHostProps } from './detail/TDetailHost.vue'
+export { default as TDetailSection } from './detail/TDetailSection.vue'
 
 // Settings center — schema-driven module settings page (side-nav shell) +
 // the per-group auto-rendered form panel it composes.
@@ -114,3 +126,9 @@ export { default as TWorkbenchLayout } from './pages/TWorkbenchLayout.vue'
 export { default as THeaderBanner } from './dashboard/THeaderBanner.vue'
 export { default as TProjectTimeline } from './dashboard/TProjectTimeline.vue'
 export type { TimelineItem, TimelineTone } from './dashboard/TProjectTimeline.vue'
+
+// Chat display atom — presence status dot (color-coded by UserPresenceStatus).
+// Exported so consumer apps that surface presence (e.g. on TAvatar's `#badge`
+// slot) reuse it instead of copying it. The richer chat widgets stay internal
+// to the shell (mounted by `defineAdminApp({ chat })`).
+export { default as TPresenceDot } from './chat/TPresenceDot.vue'

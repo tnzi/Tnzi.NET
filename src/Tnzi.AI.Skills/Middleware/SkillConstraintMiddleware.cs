@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Middleware;
+namespace Tnzi.AI.Skills.Middleware;
 
 /// <summary>
 /// 技能约束中间件 — 在上下文注入后、用量日志前执行约束过滤

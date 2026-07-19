@@ -30,6 +30,11 @@ public class UsageLogConfiguration : EntityTypeConfigurationBase<UsageLog, Guid>
         builder.Property(e => e.UserAgent)
             .HasMaxLength(500);
 
+        // LLM 单请求成本常见 1e-6 ~ 1e-4 量级（CostCalculator 按 6 位小数计算），
+        // 显式高精度避免退回全局 (19, 4) 约定时被截断为 0。
+        builder.Property(e => e.EstimatedCostUsd)
+            .HasPrecision(19, 8);
+
         if (multiTenancyEnabled)
         {
             builder.HasIndex(e => e.TenantId);

@@ -103,6 +103,15 @@ export interface AdminRouteMeta {
    * permissions, so the gate holds for super-admins too. Absent = never gated.
    */
   moduleGate?: boolean | string
+  /**
+   * Stamped by `defineAdminApp` on the top-level module groups that ship
+   * with `defaultAdminRoutes` (framework built-in admin pages). Drives the
+   * sidebar's built-in-menus toggle: hiding built-ins leaves only the
+   * consumer app's own menus (routes added via `addModules` stay
+   * unstamped) plus neutral built-ins like the landing dashboard.
+   * Display-only — never consulted by guards.
+   */
+  builtIn?: boolean
 }
 
 export interface AdminRouteRecord {
@@ -232,6 +241,13 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const grantedPermissions = new Set(
       authStore.userPermissions.map((p) => p.toLowerCase()),
     )
+    // Role gate source — consumer routes only (no framework route sets
+    // `meta.roles`), so this is zero-impact for existing apps. Same OR /
+    // super-user-bypass / fail-open semantics as the permission gate: it lets a
+    // role-driven app (e.g. Contoso's Owner/Management-only Staff pages) declare
+    // `meta.roles` on a route instead of hand-mutating `hideInMenu` after every
+    // navigation.
+    const grantedRoles = new Set(authStore.userRoles.map((r) => r.toLowerCase()))
     const permissionsLoaded = authStore.userInfo !== null
     // Fail-open ONLY while a SESSION IS ACTIVE (token present) but its permission
     // list hasn't arrived yet — the async gap between setToken and setUserInfo on
@@ -249,11 +265,42 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
       authStore.isSuperUser || (!permissionsLoaded && authStore.isLogin)
     function isVisible(route: AdminRouteRecord): boolean {
       if (bypassPermissionFilter) return true
+      // Permission gate (unchanged): singular wins; else plural ANY-of.
       const single = route.meta?.permission
-      if (single) return grantedPermissions.has(single.toLowerCase())
-      const multi = route.meta?.permissions
-      if (multi && multi.length > 0) return multi.some((p) => grantedPermissions.has(p.toLowerCase()))
+      if (single) {
+        if (!grantedPermissions.has(single.toLowerCase())) return false
+      } else {
+        const multi = route.meta?.permissions
+        if (multi && multi.length > 0 && !multi.some((p) => grantedPermissions.has(p.toLowerCase()))) return false
+      }
+      // Role gate (consumer routes only): a route declaring `meta.roles` is
+      // visible only to those roles (ANY-of). Absent → no role restriction.
+      const roles = route.meta?.roles
+      if (roles && roles.length > 0 && !roles.some((r) => grantedRoles.has(r.toLowerCase()))) return false
       return true
+    }
+    // Built-in-menus toggle (sidebar footer, super admin) — DISPLAY-ONLY,
+    // orthogonal to both the permission filter and module gating. When OFF,
+    // top-level groups stamped `meta.builtIn` (the framework's preset admin
+    // pages) hide, leaving only the consumer app's own menus plus neutral
+    // built-ins (the landing dashboard, which carries no permission anywhere
+    // in its subtree). Guards and tabs are deliberately untouched: this
+    // never creates a lockout, hidden pages stay reachable by URL. Gated on
+    // isSuperUser so a persisted OFF from a super-admin session never hides
+    // menus for the next (non-super) sign-in on the same browser.
+    const hideBuiltIn = !appStore.showBuiltInMenus && authStore.isSuperUser
+    function subtreeHasAnyPermission(route: AdminRouteRecord): boolean {
+      const single = route.meta?.permission
+      const multi = route.meta?.permissions
+      if (single || (multi && multi.length > 0)) return true
+      return (route.children ?? []).some(subtreeHasAnyPermission)
+    }
+    function passesBuiltInFilter(route: AdminRouteRecord): boolean {
+      if (!hideBuiltIn) return true
+      if (route.meta?.builtIn !== true) return true
+      // Neutral built-in subtree (no permission anywhere — the landing
+      // dashboard) → always visible.
+      return !subtreeHasAnyPermission(route)
     }
     // Host-app messages registered via `extendLocaleMessages`. Passed
     // through to `resolveI18nKey` so consumer-owned route titles
@@ -314,7 +361,10 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
       }
       return item
     }
+    // Built-in filter runs at the TOP LEVEL only — a kept group renders all
+    // its leaves; consumer routes (unstamped) are never filtered here.
     let items = allRoutes.value
+      .filter((r) => passesBuiltInFilter(r))
       .map((r) => toMenuItem(r, ''))
       .filter(Boolean) as AdminMenuItem[]
     // 'merge' menu source: overlay backend Sys_Menu overrides (retitle / re-icon
@@ -348,11 +398,20 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const permissionsLoaded = authStore.userInfo !== null
     if (authStore.isSuperUser || !permissionsLoaded) return denied
     const granted = new Set(authStore.userPermissions.map((p) => p.toLowerCase()))
+    const grantedRoles = new Set(authStore.userRoles.map((r) => r.toLowerCase()))
     function isAllowed(route: AdminRouteRecord): boolean {
       const single = route.meta?.permission
-      if (single) return granted.has(single.toLowerCase())
-      const multi = route.meta?.permissions
-      if (multi && multi.length > 0) return multi.some((p) => granted.has(p.toLowerCase()))
+      if (single) {
+        if (!granted.has(single.toLowerCase())) return false
+      } else {
+        const multi = route.meta?.permissions
+        if (multi && multi.length > 0 && !multi.some((p) => granted.has(p.toLowerCase()))) return false
+      }
+      // Role gate mirrors the menu filter, so a persisted tab pointing at a
+      // role-restricted page the current user can't hold is pruned + the guard
+      // bounces its deep link to `forbidden`.
+      const roles = route.meta?.roles
+      if (roles && roles.length > 0 && !roles.some((r) => grantedRoles.has(r.toLowerCase()))) return false
       return true
     }
     function walk(route: AdminRouteRecord): void {

@@ -314,9 +314,7 @@
             <NDescriptionsItem :label="t('detail.createdAt')">
               {{ viewedFile.creationTime ? new Date(viewedFile.creationTime).toLocaleString() : '—' }}
             </NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.hash')">
-              <span class="break-all text-12px">{{ viewedFile.md5Hash || '—' }}</span>
-            </NDescriptionsItem>
+            <!-- MD5 已从对外 FileRecordDto 收窄剔除(内部字段);按需完整性校验走 More → Verify(bridge.integrity.verifyOne)。 -->
           </NDescriptions>
 
           <div v-if="detailFileTags.length" class="mt-14px">

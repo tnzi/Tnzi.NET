@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities;
+namespace Tnzi.AI.Skills.Entities;
 
 /// <summary>
 /// 技能分类实体 — 支持层级目录结构组织技能。

@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 工作流节点服务上下文默认实现 — 通过 IServiceProvider 解析依赖并提供作用域创建能力。

@@ -92,7 +92,20 @@ public class CustomerService : ApplicationService, ICustomerService
         if (customer == null)
             return Fail("Customer not found.", 404);
 
-        // P2b：被未清单据引用时拒绝删除
+        // 被单据引用时拒绝删除：Customer 软删后会被全局过滤器隐藏，而其已过账发票/贷项/收款仍留在子账，
+        // 导致往来方名字丢失、账龄回退显示原始 GUID。引导用 IsActive=false 停用而非删除（对齐 Tax/BankAccount 守卫）。
+        // 引用仓储在删除冷路径按需解析（避免把 Invoice/CreditMemo/Payment 依赖强加到共享 VendorService 图上的
+        // Payroll 最小测试基类；那里从不调用本删除路径）。
+        var invoiceRepository = GetRequiredService<IRepository<Invoice, Guid>>();
+        var creditMemoRepository = GetRequiredService<IRepository<CreditMemo, Guid>>();
+        var paymentRepository = GetRequiredService<IRepository<PaymentEntry, Guid>>();
+        var referenced =
+            await invoiceRepository.AnyAsync(i => i.CustomerId == id, cancellationToken) ||
+            await creditMemoRepository.AnyAsync(c => c.CustomerId == id, cancellationToken) ||
+            await paymentRepository.AnyAsync(p => p.PartyType == FinancePartyType.Customer && p.PartyId == id, cancellationToken);
+        if (referenced)
+            return Fail("Cannot delete a customer referenced by invoices, credit memos, or payments. Deactivate it instead.", 409);
+
         await _customerRepository.DeleteAsync(customer, cancellationToken);
         return Ok();
     }

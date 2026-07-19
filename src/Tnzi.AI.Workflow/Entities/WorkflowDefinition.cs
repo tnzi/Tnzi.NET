@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities;
+namespace Tnzi.AI.Workflow.Entities;
 
 /// <summary>
 /// 工作流定义实体

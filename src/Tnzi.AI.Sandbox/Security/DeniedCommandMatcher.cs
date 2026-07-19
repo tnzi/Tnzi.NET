@@ -46,7 +46,7 @@ public static class DeniedCommandMatcher
 
         // Token-level prefix check — only available when the AI module registered
         // the analyzer. Sandbox can be used in isolation (tests, scripts) where
-        // the DI graph stops at SandboxModule; fall back to substring-only.
+        // the DI graph stops at AISandboxModule; fall back to substring-only.
         if (analyzer != null && deniedPrefixes.Count > 0)
         {
             // Pre-canonicalize the blacklist once instead of once per segment.

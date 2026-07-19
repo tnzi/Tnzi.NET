@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流服务 - 版本历史和执行统计

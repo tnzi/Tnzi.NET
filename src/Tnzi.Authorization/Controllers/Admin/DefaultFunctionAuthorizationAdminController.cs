@@ -61,8 +61,8 @@ public class DefaultFunctionAuthorizationAdminController : ApiAdminControllerBas
             && !(currentUserId is Guid readerId
                  && await FunctionAuthorizationService.CheckPermissionAsync(readerId, "authorization.permission.view")))
         {
-            return Result.Failure<IEnumerable<string>>(
-                "You may only read your own permissions.", 403, ErrorCodes.FORBIDDEN).ToApiResult();
+            return Forbidden<IEnumerable<string>>(
+                "You may only read your own permissions.", ErrorCodes.FORBIDDEN);
         }
 
         var result = await FunctionAuthorizationService.GetUserPermissionNamesWithResultAsync(userId);
@@ -80,7 +80,7 @@ public class DefaultFunctionAuthorizationAdminController : ApiAdminControllerBas
         var userId = CurrentUser?.Id;
         if (userId == null || userId == Guid.Empty)
         {
-            return Result.Failure<AccessProfileDto>("User is not authenticated", 401, ErrorCodes.UNAUTHORIZED).ToApiResult();
+            return Unauthorized<AccessProfileDto>("User is not authenticated", ErrorCodes.UNAUTHORIZED);
         }
 
         var result = await FunctionAuthorizationService.GetAccessProfileAsync(userId.Value);

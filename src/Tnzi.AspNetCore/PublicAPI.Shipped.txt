@@ -319,8 +319,8 @@ Tnzi.AspNetCore.Mvc.ApiControllerBase.BadRequest<T>(string! message = "Bad Reque
 Tnzi.AspNetCore.Mvc.ApiControllerBase.CurrentUser.get -> Tnzi.Security.Claims.ICurrentUser?
 Tnzi.AspNetCore.Mvc.ApiControllerBase.Error(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.Error<T>(string! message, int code = 500, string? errorCode = null, object? errors = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
-Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult!
-Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden<T>(string! message = "Forbidden") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden(string! message = "Forbidden", string? errorCode = null) -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Forbidden<T>(string! message = "Forbidden", string? errorCode = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.GetRequiredCurrentUser() -> Tnzi.Security.Claims.ICurrentUser!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.GetRequiredService<T>() -> T
 Tnzi.AspNetCore.Mvc.ApiControllerBase.IsServiceAvailable<T>() -> bool
@@ -330,8 +330,8 @@ Tnzi.AspNetCore.Mvc.ApiControllerBase.NotFound<T>(string! message = "Resource no
 Tnzi.AspNetCore.Mvc.ApiControllerBase.Ok(string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.Ok<T>(T data, string! message = "Success") -> Tnzi.AspNetCore.Models.ApiResult<T>!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.Services.get -> System.IServiceProvider!
-Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult!
-Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized<T>(string! message = "Unauthorized") -> Tnzi.AspNetCore.Models.ApiResult<T>!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized(string! message = "Unauthorized", string? errorCode = null) -> Tnzi.AspNetCore.Models.ApiResult!
+Tnzi.AspNetCore.Mvc.ApiControllerBase.Unauthorized<T>(string! message = "Unauthorized", string? errorCode = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.ValidationError(string? message = null) -> Tnzi.AspNetCore.Models.ApiResult!
 Tnzi.AspNetCore.Mvc.ApiControllerBase.ValidationError<T>(string? message = null) -> Tnzi.AspNetCore.Models.ApiResult<T>!
 Tnzi.AspNetCore.Mvc.Conventions.ApiControllerRouteProvider

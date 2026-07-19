@@ -19,7 +19,7 @@ public class DocumentWorkflowTests : FinanceIntegrationTestBase
     private Task<Result<VendorDto>> CreateVendorAsync(string name = "Doc Vendor")
         => InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = name }));
 
-    private async Task<Guid> CreateTaxCodeAsync(decimal rate = 5m)
+    private async Task<Guid> CreateTaxCodeAsync(decimal rate = 5m, bool isRecoverable = true)
     {
         var agency = await InScopeAsync<ITaxService, Result<TaxAgencyDto>>(s => s.CreateAgencyAsync(new UpsertTaxAgencyDto { Name = $"Agency {Guid.NewGuid():N}" }));
         var taxRate = await InScopeAsync<ITaxService, Result<TaxRateDto>>(s => s.CreateRateAsync(new UpsertTaxRateDto
@@ -31,10 +31,44 @@ public class DocumentWorkflowTests : FinanceIntegrationTestBase
         var code = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.CreateCodeAsync(new UpsertTaxCodeDto
         {
             Name = $"Code {Guid.NewGuid():N}",
+            IsRecoverable = isRecoverable,
             Components = [new UpsertTaxCodeComponentDto { TaxRateId = taxRate.Data!.Id, Order = 1 }]
         }));
         code.Succeeded.ShouldBeTrue(code.Message);
         return code.Data!.Id;
+    }
+
+    /// <summary>B7：不可抵扣税码的采购税作为成本进 NonRecoverableTaxExpense（5950），不进 TaxReceivable。</summary>
+    [Fact]
+    public async Task Bill_NonRecoverableTax_PostsToExpense_NotTaxReceivable()
+    {
+        await SeedCoaAsync();
+        var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "NR Vendor" }));
+        var taxCodeId = await CreateTaxCodeAsync(10m, isRecoverable: false);
+        var expenseAccount = await AccountIdAsync("5200");
+
+        var draft = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 3, 10),
+            Lines = [new CreateBillLineDto { Description = "Widget", AccountId = expenseAccount, Quantity = 1, UnitPrice = 100m, TaxCodeId = taxCodeId }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        var posted = await InScopeAsync<IBillService, Result<BillDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        posted.Data!.Total.ShouldBe(110m); // 100 + 10 tax（不可抵扣仍是向供应商付的成本）
+
+        var entry = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(posted.Data.JournalEntryId!.Value));
+        entry.Succeeded.ShouldBeTrue(entry.Message);
+        entry.Data!.TotalDebit.ShouldBe(110m);
+        entry.Data.TotalCredit.ShouldBe(110m);
+
+        // 税额进 5950 NonRecoverableTaxExpense（借 10），不进 TaxReceivable
+        var nrAccount = await AccountIdAsync("5950");
+        var taxReceivable = await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("1300"));
+        entry.Data.Lines.ShouldContain(l => l.AccountId == nrAccount && l.Debit == 10m);
+        if (taxReceivable != null)
+            entry.Data.Lines.ShouldNotContain(l => l.AccountId == taxReceivable.Id);
     }
 
     [Fact]
@@ -137,6 +171,67 @@ public class DocumentWorkflowTests : FinanceIntegrationTestBase
     }
 
     [Fact]
+    public async Task Bill_ManualTaxOverride_DraftAndPostUseOverriddenTax()
+    {
+        await SeedCoaAsync();
+        var vendor = await CreateVendorAsync("Override Vendor");
+        var taxCodeId = await CreateTaxCodeAsync(5m);
+        var expenseAccount = await AccountIdAsync("5200");
+
+        // 按率计算是 50.00，小票实际 49.97 → 草稿总额与过账 GL 都用覆盖额
+        var draft = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 4, 10),
+            Lines = [new CreateBillLineDto { Description = "Supplies", AccountId = expenseAccount, Quantity = 1, UnitPrice = 1000m, TaxCodeId = taxCodeId, TaxAmount = 49.97m }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        draft.Data!.TaxTotal.ShouldBe(49.97m);
+        draft.Data.Total.ShouldBe(1049.97m);
+        draft.Data.Lines.Single().TaxAmount.ShouldBe(49.97m);
+
+        var posted = await InScopeAsync<IBillService, Result<BillDto>>(s => s.PostAsync(draft.Data.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        posted.Data!.TaxTotal.ShouldBe(49.97m);
+        posted.Data.Total.ShouldBe(1049.97m);
+
+        var entry = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(posted.Data.JournalEntryId!.Value));
+        var apId = await AccountIdAsync("2100");
+        var taxRecvId = await AccountIdAsync("1300");
+        entry.Data!.Lines.Single(l => l.AccountId == apId).Credit.ShouldBe(1049.97m);
+        entry.Data.Lines.Single(l => l.AccountId == taxRecvId).Debit.ShouldBe(49.97m);
+    }
+
+    [Fact]
+    public async Task Bill_ManualTaxOverride_Invalid_Rejected()
+    {
+        await SeedCoaAsync();
+        var vendor = await CreateVendorAsync("Override Reject Vendor");
+        var taxCodeId = await CreateTaxCodeAsync(5m);
+        var expenseAccount = await AccountIdAsync("5200");
+
+        // 有覆盖额无税码 → 400
+        var noCode = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 4, 11),
+            Lines = [new CreateBillLineDto { AccountId = expenseAccount, Quantity = 1, UnitPrice = 100m, TaxAmount = 5m }]
+        }));
+        noCode.Succeeded.ShouldBeFalse();
+        noCode.Code.ShouldBe(400);
+
+        // 负覆盖额 → 400
+        var negative = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 4, 11),
+            Lines = [new CreateBillLineDto { AccountId = expenseAccount, Quantity = 1, UnitPrice = 100m, TaxCodeId = taxCodeId, TaxAmount = -1m }]
+        }));
+        negative.Succeeded.ShouldBeFalse();
+        negative.Code.ShouldBe(400);
+    }
+
+    [Fact]
     public async Task Expense_Post_CreditsPaidFromAccount()
     {
         await SeedCoaAsync();
@@ -167,6 +262,56 @@ public class DocumentWorkflowTests : FinanceIntegrationTestBase
         // 作废
         var voided = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.VoidAsync(draft.Data!.Id));
         voided.Succeeded.ShouldBeTrue(voided.Message);
+    }
+
+    [Fact]
+    public async Task Expense_ManualTaxOverride_DraftAndPostUseOverriddenTax()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdAsync("1120");
+        var opex = await AccountIdAsync("5200");
+        var taxCodeId = await CreateTaxCodeAsync(5m);
+
+        // 按率计算是 2.50，小票实际 2.49
+        var draft = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.CreateDraftAsync(new CreateExpenseDto
+        {
+            PaidFromAccountId = bank,
+            DocDate = new DateTime(2026, 4, 12),
+            Lines = [new CreateExpenseLineDto { Description = "Parking", AccountId = opex, Amount = 50m, TaxCodeId = taxCodeId, TaxAmount = 2.49m }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        draft.Data!.TaxTotal.ShouldBe(2.49m);
+        draft.Data.Total.ShouldBe(52.49m);
+        draft.Data.Lines.Single().TaxAmount.ShouldBe(2.49m);
+
+        var posted = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.PostAsync(draft.Data.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        posted.Data!.TaxTotal.ShouldBe(2.49m);
+
+        var entry = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(posted.Data.JournalEntryId!.Value));
+        var taxRecvId = await AccountIdAsync("1300");
+        entry.Data!.Lines.Single(l => l.AccountId == bank).Credit.ShouldBe(52.49m);
+        entry.Data.Lines.Single(l => l.AccountId == taxRecvId).Debit.ShouldBe(2.49m);
+
+        // 有覆盖额无税码 → 400
+        var noCode = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.CreateDraftAsync(new CreateExpenseDto
+        {
+            PaidFromAccountId = bank,
+            DocDate = new DateTime(2026, 4, 12),
+            Lines = [new CreateExpenseLineDto { AccountId = opex, Amount = 50m, TaxAmount = 2.49m }]
+        }));
+        noCode.Succeeded.ShouldBeFalse();
+        noCode.Code.ShouldBe(400);
+
+        // 负覆盖额 → 400
+        var negative = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.CreateDraftAsync(new CreateExpenseDto
+        {
+            PaidFromAccountId = bank,
+            DocDate = new DateTime(2026, 4, 12),
+            Lines = [new CreateExpenseLineDto { AccountId = opex, Amount = 50m, TaxCodeId = taxCodeId, TaxAmount = -0.01m }]
+        }));
+        negative.Succeeded.ShouldBeFalse();
+        negative.Code.ShouldBe(400);
     }
 
     [Fact]

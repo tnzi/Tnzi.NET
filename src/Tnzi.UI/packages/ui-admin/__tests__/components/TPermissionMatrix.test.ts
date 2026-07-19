@@ -216,4 +216,34 @@ describe('TPermissionMatrix', () => {
       .find((r) => r.text().includes('用户'))!
     expect(userRow.exists()).toBe(true)
   })
+
+  it('renders the special column as a labelled checkbox (not a colour-only pill)', () => {
+    const wrapper = mountMatrix()
+    const sqlRow = wrapper
+      .findAll('.t-perm-matrix__surface-row')
+      .find((r) => r.text().includes('ai.sql'))!
+    // Special actions (execute/assign/use) render as a checkbox with a visible
+    // label so granted vs not is obvious at a glance — the old bare pill is gone.
+    const special = sqlRow.find('.t-perm-matrix__special-check')
+    expect(special.exists()).toBe(true)
+    expect(special.classes()).toContain('is-execute')
+    expect(sqlRow.find('.t-perm-matrix__special-pill').exists()).toBe(false)
+  })
+
+  it('readonly locks the whole matrix and renders everything granted', async () => {
+    const wrapper = mountMatrix({ readonly: true, checkedIds: [] })
+    const userRow = wrapper
+      .findAll('.t-perm-matrix__surface-row')
+      .find((r) => r.text().includes('Users'))!
+    // Every checkbox reads as granted even with an empty checkedIds …
+    const boxes = userRow.findAll('.n-checkbox')
+    expect(boxes.length).toBe(5)
+    expect(boxes.every((b) => b.classes().includes('n-checkbox--disabled'))).toBe(true)
+    expect(userRow.findAll('.n-checkbox--checked').length).toBe(5)
+
+    // … and clicks never mutate the selection.
+    await userRow.find('.t-perm-matrix__surface-cell .n-checkbox').trigger('click')
+    await userRow.find('.t-perm-matrix__cell').trigger('click')
+    expect(wrapper.emitted('update:checkedIds')).toBeUndefined()
+  })
 })

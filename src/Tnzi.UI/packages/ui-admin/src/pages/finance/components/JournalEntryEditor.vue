@@ -28,19 +28,29 @@
         <span>{{ t('form.lineMemo') }}</span>
         <span class="je-editor__line-remove" />
       </div>
+      <!-- 每个字段裹在 __cell 里：桌面 display:contents 让包裹层透明、输入直接落进原网格；
+           手机(<768px)__cell 变成带 data-label 的堆叠列，一字段一行、无横滚。 -->
       <div v-for="(line, index) in lines" :key="index" class="je-editor__line">
         <span class="je-editor__line-no">{{ index + 1 }}</span>
-        <NSelect
-          v-model:value="line.accountId"
-          :options="accountOptions"
-          size="small"
-          filterable
-          :placeholder="t('form.accountPlaceholder')"
-        />
+        <div class="je-editor__cell" :data-label="t('form.account')">
+          <NSelect
+            v-model:value="line.accountId"
+            :options="accountOptions"
+            size="small"
+            filterable
+            :placeholder="t('form.accountPlaceholder')"
+          />
+        </div>
         <!-- 一行只能填借或贷一侧：填一侧即清空另一侧 -->
-        <NInputNumber v-model:value="line.debit" size="small" :min="0" :show-button="false" :placeholder="'0.00'" @update:value="(v) => { if ((v ?? 0) > 0) line.credit = null }" />
-        <NInputNumber v-model:value="line.credit" size="small" :min="0" :show-button="false" :placeholder="'0.00'" @update:value="(v) => { if ((v ?? 0) > 0) line.debit = null }" />
-        <NInput v-model:value="line.memo" size="small" :placeholder="t('form.lineMemoPlaceholder')" />
+        <div class="je-editor__cell" :data-label="t('form.debit')">
+          <NInputNumber v-model:value="line.debit" size="small" :min="0" :show-button="false" :placeholder="'0.00'" @update:value="(v) => { if ((v ?? 0) > 0) line.credit = null }" />
+        </div>
+        <div class="je-editor__cell" :data-label="t('form.credit')">
+          <NInputNumber v-model:value="line.credit" size="small" :min="0" :show-button="false" :placeholder="'0.00'" @update:value="(v) => { if ((v ?? 0) > 0) line.debit = null }" />
+        </div>
+        <div class="je-editor__cell" :data-label="t('form.lineMemo')">
+          <NInput v-model:value="line.memo" size="small" :placeholder="t('form.lineMemoPlaceholder')" />
+        </div>
         <NButton size="tiny" quaternary circle class="je-editor__line-remove" :disabled="lines.length <= 1" @click="removeLine(index)">
           <template #icon>
             <TSvgIcon icon="mdi:close" :size="14" />
@@ -258,6 +268,15 @@ async function save(post: boolean) {
   color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
 }
 
+/* Desktop: transparent wrapper — the input becomes the grid cell directly, so
+   the original column sizing is untouched and the label stays hidden. */
+.je-editor__cell {
+  display: contents;
+}
+.je-editor__cell[data-label]::before {
+  content: none;
+}
+
 .je-editor__line-no {
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -292,6 +311,9 @@ async function save(post: boolean) {
   gap: 8px;
 }
 
+/* Phone (<md): the 6-column grid overflows a fullscreen modal - stack each line
+   into a single-column labeled card so debit/credit/account/memo each get their
+   own row and the panel never scrolls horizontally (content-page iron-law). */
 @media (max-width: 767px) {
   .je-editor__header {
     grid-template-columns: 1fr 1fr;
@@ -301,8 +323,45 @@ async function save(post: boolean) {
     grid-column: 1 / -1;
   }
 
+  .je-editor__line--head {
+    display: none;
+  }
+
   .je-editor__line {
-    grid-template-columns: 20px minmax(140px, 1.4fr) 90px 90px 1fr 24px;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--tnzi-border, rgba(0, 0, 0, 0.09));
+    border-radius: var(--tnzi-admin-radius-md, 8px);
+  }
+
+  .je-editor__line-no {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+  }
+  .je-editor__line-no::before {
+    content: '#';
+  }
+
+  .je-editor__cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .je-editor__cell[data-label]::before {
+    content: attr(data-label);
+    font-size: 12px;
+    color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+  }
+
+  /* Delete row moves to the card end as a full-width ≥44px touch target. */
+  .je-editor__line-remove.n-button {
+    width: 100%;
+    height: 44px;
+    border-radius: var(--tnzi-admin-radius-md, 8px);
   }
 }
 </style>

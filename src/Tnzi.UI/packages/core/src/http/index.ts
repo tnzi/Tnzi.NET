@@ -32,6 +32,8 @@ export {
   getErrorMessage,
   getErrorCode,
   unwrapData,
+  ensureOk,
+  unwrapResult,
   extractData,
   extractDataOrThrow,
   emptyPaged,

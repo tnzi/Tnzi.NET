@@ -87,7 +87,9 @@ const visibleGroups = computed(() => {
 })
 
 const customSections = computed<AdminSettingsSection[]>(() =>
-  [...(config?.sections ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+  [...(config?.sections ?? [])]
+    .filter((s) => !s.permission || can(s.permission))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
 )
 
 const sections = computed<DetailSection[]>(() => [
@@ -203,8 +205,17 @@ async function load(silent = false): Promise<void> {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
     if (!silent) loading.value = false
-    // No manual seed needed: `useSectionRoute` re-resolves the default the moment
-    // the (async) `sections` list changes, picking the first schema group.
+    // For the common case `useSectionRoute` re-resolves the default the moment the
+    // (async) `sections` list changes, picking the first SCHEMA group; the post-load
+    // seed below only kicks in when that resolves to nothing (no viewable groups).
+  }
+
+  // After definitions load: if the async default deferred because the caller can
+  // view NO schema groups (e.g. a role granted only a consumer custom section),
+  // land on the first available nav section so the right panel is never blank.
+  if (!detail.activeSection.value) {
+    const first = sections.value[0]?.key
+    if (first) detail.setSection(first)
   }
 }
 

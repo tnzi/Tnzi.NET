@@ -2,6 +2,7 @@ using Tnzi.AI.Sandbox.Events;
 using Tnzi.AI.Sandbox.Events.Handlers;
 using Tnzi.AI.Sandbox.Tools;
 using Tnzi.Audit.Entities;
+using Tnzi.Audit.Metadata;
 using Tnzi.Audit.Services;
 using Tnzi.EventBus;
 
@@ -111,9 +112,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task AuditHandler_NoSender_IsNoOp()
     {
         // Audit module not loaded → IAuditSender = null → handler short-circuits.
-        var handler = new SandboxCommandAuditHandler(
-            NullLogger<SandboxCommandAuditHandler>.Instance,
-            auditSender: null);
+        var handler = new SandboxCommandAuditHandler(auditSender: null);
 
         await handler.HandleAsync(NewEvent(exitCode: 0));
         // No assertion needed — passing means no exception raised.
@@ -123,9 +122,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task AuditHandler_Success_RecordsSuccessAuditOperation()
     {
         var sender = new CapturingAuditSender();
-        var handler = new SandboxCommandAuditHandler(
-            NullLogger<SandboxCommandAuditHandler>.Instance,
-            auditSender: sender);
+        var handler = new SandboxCommandAuditHandler(auditSender: sender);
 
         await handler.HandleAsync(NewEvent(exitCode: 0));
 
@@ -142,9 +139,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task AuditHandler_NonZeroExit_RecordsFailure()
     {
         var sender = new CapturingAuditSender();
-        var handler = new SandboxCommandAuditHandler(
-            NullLogger<SandboxCommandAuditHandler>.Instance,
-            auditSender: sender);
+        var handler = new SandboxCommandAuditHandler(auditSender: sender);
 
         await handler.HandleAsync(NewEvent(exitCode: 5));
 
@@ -156,9 +151,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     public async Task AuditHandler_Denial_RecordsWarning()
     {
         var sender = new CapturingAuditSender();
-        var handler = new SandboxCommandAuditHandler(
-            NullLogger<SandboxCommandAuditHandler>.Instance,
-            auditSender: sender);
+        var handler = new SandboxCommandAuditHandler(auditSender: sender);
 
         await handler.HandleAsync(NewEvent(
             exitCode: -1, denied: true, denialReason: "Command denied: contains blocked pattern 'rm -rf /'"));
@@ -169,15 +162,13 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AuditHandler_SenderThrows_HandlerSwallows()
+    public async Task AuditHandler_SenderThrows_Propagates()
     {
         var sender = new ThrowingAuditSender();
-        var handler = new SandboxCommandAuditHandler(
-            NullLogger<SandboxCommandAuditHandler>.Instance,
-            auditSender: sender);
+        var handler = new SandboxCommandAuditHandler(auditSender: sender);
 
-        // Must not throw — handler silent-catch protects main flow.
-        await handler.HandleAsync(NewEvent(exitCode: 0));
+        // 审计落库是持久化副作用：sender 抛异常必须冒泡给事件总线（隔离/重试/DLQ），不再吞。
+        await Should.ThrowAsync<InvalidOperationException>(() => handler.HandleAsync(NewEvent(exitCode: 0)));
     }
 
     // ------------------------------------------------------------------ //

@@ -56,6 +56,8 @@ withDefaults(defineProps<Props>(), { fixed: false })
 .t-admin-footer--fixed {
   position: sticky;
   bottom: 0;
+  /* Clear the iOS home indicator when pinned to the viewport bottom. */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .t-admin-footer__links {
   display: flex;

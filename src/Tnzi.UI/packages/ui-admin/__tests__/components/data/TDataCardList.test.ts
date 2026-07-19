@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 import TDataCardList, {
@@ -98,5 +98,42 @@ describe('TDataCardList', () => {
     const w = mountList({ items: [], loading: true })
     expect(w.findAll('.t-data-cards__skeleton').length).toBeGreaterThan(0)
     expect(w.find('.t-data-cards__empty').exists()).toBe(false)
+  })
+
+  it('applies cardProps to each card and flags clickable when it carries onClick', async () => {
+    const onRowClick = vi.fn()
+    const w = mountList({
+      cardProps: (row: Record<string, unknown>) => ({ onClick: () => onRowClick(row.id) }),
+    })
+    const cards = w.findAll('.t-data-cards__card')
+    expect(cards[0].classes()).toContain('t-data-cards__card--clickable')
+    await cards[1].trigger('click')
+    expect(onRowClick).toHaveBeenCalledWith(2)
+  })
+
+  it('keeps footer actions and the selection toggle from firing the card click', async () => {
+    const onRowClick = vi.fn()
+    const w = mountList(
+      { showSelection: true, selectedKeys: [], cardProps: () => ({ onClick: onRowClick }) },
+      { actions: '<button class="act">Edit</button>' },
+    )
+    await w.findAll('.t-data-cards__actions .act')[0].trigger('click')
+    await w.findAll('.t-data-cards__check')[0].trigger('click')
+    expect(onRowClick).not.toHaveBeenCalled()
+    expect(w.emitted('toggle')?.[0]).toEqual([1])
+  })
+
+  it('renders summary rows as a totals card at the bottom of the list', () => {
+    const w = mountList({
+      summaryRows: [{ email: '2 users', status: h('strong', { class: 'sum' }, '1 active') }],
+    })
+    const summary = w.find('.t-data-cards__card--summary')
+    expect(summary.exists()).toBe(true)
+    // Column order and label rendering mirror the data cards.
+    const labels = summary.findAll('.t-data-cards__label').map((n) => n.text())
+    expect(labels).toEqual(['Email', 'Status'])
+    expect(summary.find('.sum').text()).toBe('1 active')
+    // 2 data cards + 1 totals card.
+    expect(w.findAll('.t-data-cards__card')).toHaveLength(3)
   })
 })

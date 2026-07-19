@@ -28,34 +28,29 @@ public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
 
     public async Task HandleAsync(UserLoggedInEvent @event, CancellationToken cancellationToken = default)
     {
-        try
+        // 不吞异常：登录日志/会话创建是持久化副作用，失败必须冒泡给总线做隔离/重试/DLQ
+        // （后台处理器分发在 LocalEventBus 已统一 LogError 观测）。此前的空 catch 会连日志都吞掉。
+
+        // 处理登录日志记录
+        if (_loginLogInternalService != null)
         {
-            // 处理登录日志记录
-            if (_loginLogInternalService != null)
-            {
-                await _loginLogInternalService.LogAsync(
-                    @event.UserId,
-                    @event.UserName,
-                    @event.IpAddress,
-                    @event.UserAgent,
-                    LoginStatus.Success,
-                    null);
-            }
-
-            // 处理会话创建 — deviceInfo 从 UserAgent 解析（供会话统计 Top device 聚合）
-            if (_sessionService != null)
-            {
-                await _sessionService.CreateSessionAsync(
-                    @event.UserId,
-                    BuildDeviceInfo(@event.UserAgent),
-                    @event.IpAddress,
-                    @event.UserAgent);
-            }
-
+            await _loginLogInternalService.LogAsync(
+                @event.UserId,
+                @event.UserName,
+                @event.IpAddress,
+                @event.UserAgent,
+                LoginStatus.Success,
+                null);
         }
-        catch (Exception)
+
+        // 处理会话创建：deviceInfo 从 UserAgent 解析（供会话统计 Top device 聚合）
+        if (_sessionService != null)
         {
-            // 事件处理器错误不影响主业务流程，静默忽略（框架已有错误隔离，此处为双重保险）
+            await _sessionService.CreateSessionAsync(
+                @event.UserId,
+                BuildDeviceInfo(@event.UserAgent),
+                @event.IpAddress,
+                @event.UserAgent);
         }
     }
 
@@ -89,16 +84,9 @@ public class UserLoggedOutEventHandler : IEventHandler<UserLoggedOutEvent>
 {
     public async Task HandleAsync(UserLoggedOutEvent @event, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            // 可以用于日志记录、统计等辅助操作
-            // 会话撤销和 Token 清理已在服务层完成（核心业务逻辑）
-            await Task.CompletedTask;
-        }
-        catch (Exception)
-        {
-            // 事件处理器错误不影响主业务流程，静默忽略
-        }
+        // 占位：会话撤销和 Token 清理已在服务层完成（核心业务逻辑）
+        // 未来若加日志/统计等副作用，不要用 log-only try/catch 吞异常，让其冒泡给总线。
+        await Task.CompletedTask;
     }
 }
 
@@ -120,23 +108,16 @@ public class UserLoginFailedEventHandler : IEventHandler<UserLoginFailedEvent>
 
     public async Task HandleAsync(UserLoginFailedEvent @event, CancellationToken cancellationToken = default)
     {
-        try
+        // 不吞异常：失败登录日志是持久化副作用，写入失败必须冒泡给总线（后台分发已 LogError）。
+        if (_loginLogInternalService != null)
         {
-            // 处理失败登录日志记录
-            if (_loginLogInternalService != null)
-            {
-                await _loginLogInternalService.LogAsync(
-                    @event.UserId,
-                    @event.UserName,
-                    @event.IpAddress,
-                    @event.UserAgent,
-                    LoginStatus.Failed,
-                    @event.FailureReason);
-            }
-        }
-        catch (Exception)
-        {
-            // 事件处理器错误不影响主业务流程，静默忽略
+            await _loginLogInternalService.LogAsync(
+                @event.UserId,
+                @event.UserName,
+                @event.IpAddress,
+                @event.UserAgent,
+                LoginStatus.Failed,
+                @event.FailureReason);
         }
     }
 }

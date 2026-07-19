@@ -19,6 +19,12 @@ public class ChatPermissions : IPermissionDefinitionProvider
     {
         context.AddGroup("chat", "Chat");
         context.AddPermission("chat.view", "View Chat", parentName: "chat");
+        // Grant-to-use (white-list, deny-by-default): a user/role must hold chat.use
+        // to use chat at all. Without it the chat launcher is hidden, every user-facing
+        // endpoint 403s, and messages sent to the holder-less user are intercepted /
+        // isolated. Super admins bypass (they hold every code). Not an admin surface —
+        // it is granted in the role matrix / direct grants like any other permission.
+        context.AddPermission("chat.use", "Use Chat", parentName: "chat");
         // create = broadcast (delivers system messages); delete = remove
         // conversations / recall messages. No admin-side update surface.
         context.AddCrudPermissions("chat.session", "Chat Sessions", parentName: "chat", actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);

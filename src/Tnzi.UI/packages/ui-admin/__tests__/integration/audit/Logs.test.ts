@@ -23,18 +23,27 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
         pageIndex: 1,
         pageSize: 20,
       })),
+      detail: vi.fn(async (id: string) => ({ id, functionName: 'GetUser', resultType: 'Success', entityEntries: [], creationTime: '2026-01-01T00:00:00Z', startTime: '2026-01-01T00:00:00Z', elapsed: 42 })),
     },
     operations: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
+      detail: vi.fn(async (id: string) => ({ id, entityEntries: [] })),
     },
   }),
-  // The bridge re-exports `AuditResultType` so pages read the enum value
-  // without reaching into `@tnzi/core/services/audit`. It is a PascalCase
-  // string enum (global JsonStringEnumConverter) — mirror that here.
+  // The bridge re-exports `AuditResultType` / `EntityChangeType` so pages read
+  // the enum values without reaching into `@tnzi/core/services/audit`. Both are
+  // PascalCase string enums (global JsonStringEnumConverter) — mirror that here.
   AuditResultType: {
     Success: 'Success',
     Failed: 'Failed',
     Warning: 'Warning',
+  },
+  EntityChangeType: {
+    Unchanged: 'Unchanged',
+    Added: 'Added',
+    Modified: 'Modified',
+    Deleted: 'Deleted',
+    Detached: 'Detached',
   },
 }))
 

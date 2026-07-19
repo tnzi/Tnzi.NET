@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- 强命名以匹配 Tnzi.Finance 的 InternalsVisibleTo 公钥声明（friend 程序集必须同钥） -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +28,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <!-- 可选渲染子模块：支票打印测试注册并断言真实 PdfSharpCheckRenderer 的 PDF 输出 -->
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Documents\Tnzi.Finance.Documents.csproj" />
   </ItemGroup>
 
   <ItemGroup>

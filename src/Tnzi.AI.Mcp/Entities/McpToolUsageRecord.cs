@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities;
+namespace Tnzi.AI.Mcp.Entities;
 
 /// <summary>
 /// MCP 工具使用记录 — 记录每次工具调用的耗时、成功/失败、错误信息等

@@ -6,7 +6,7 @@
  * `@tnzi/ui-ai` here, and individual tests can still vi.mock('@tnzi/ui-ai')
  * to override these exports with bespoke stubs.
  */
-export const WorkflowCanvas = {
+export const TWorkflowCanvas = {
   name: 'WorkflowCanvasStub',
   props: ['workflowId'],
   template: '<div data-test="canvas-stub-default" :data-workflow-id="workflowId" />',

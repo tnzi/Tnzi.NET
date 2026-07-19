@@ -21,7 +21,7 @@ import {
   type CreatePromotionDto as CoreCreatePromotionDto,
   type UpdatePromotionDto as CoreUpdatePromotionDto,
 } from '@tnzi/core/services/payment'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 // Re-export under the original bridge names consumed by pages.
 export type PromotionDto = CorePromotionDto
@@ -128,11 +128,11 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
         priority: data.priority ?? undefined,
         isActive: data.isActive ?? undefined,
       }
-      await api.update(id, body)
+      ensureOk(await api.update(id, body))
       return { ...(data as PromotionDto), id }
     },
     deactivate: async (id: string) => {
-      await api.deactivate(id)
+      ensureOk(await api.deactivate(id))
     },
   }
 }

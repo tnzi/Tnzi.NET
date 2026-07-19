@@ -19,6 +19,17 @@ public class SystemModule : TnziApplicationModule
     {
         var configuration = context.Configuration;
 
+        // 自动接线设置热链: TnziApp 流程传入的 context.Configuration 是 ConfigurationManager
+        // (同时实现 IConfigurationBuilder 与 IConfigurationRoot), 模块在 host build 前自行注册
+        // SettingConfigurationSource, 宿主无需在 Program.cs 手调 builder.Configuration.AddTnziSettings()。
+        // 手动调用仍受支持且先于此处执行 (AddTnziSettings 幂等, ExcludedKeys 以手动传入为准);
+        // 配置 System:Settings:EnableConfigurationSource=false 可显式关闭自动接线。
+        if (configuration is IConfigurationBuilder configurationBuilder
+            && configuration.GetValue("System:Settings:EnableConfigurationSource", true))
+        {
+            configurationBuilder.AddTnziSettings();
+        }
+
         // 注册应用程序配置选项并启用启动时验证（section 路径由 [ConfigSection] 派生）
         context.Services.AddTnziOptions<ApplicationOptions, ApplicationOptionsValidator>(configuration);
 
@@ -78,7 +89,8 @@ public class SystemModule : TnziApplicationModule
 
         // SettingConfigurationSource: 把 host builder 阶段注册的 source 暴露成 DI singleton，
         // 让 OnApplicationInitializationAsync 拿同一实例 attach IServiceProvider + 触发首次 reload。
-        // 应用未调 builder.Configuration.AddTnziSettings() 时, source 为 null, IOptionsMonitor 自动 no-op。
+        // source 通常由 PreConfigureServicesAsync 自动注册 (或宿主手动 AddTnziSettings);
+        // 两者都缺席时 (非 builder 型 IConfiguration 且未手调) source 为 null, 热链自动 no-op。
         var settingSource = context.Configuration.GetTnziSettingsSource();
         if (settingSource != null)
         {
@@ -123,8 +135,10 @@ public class SystemModule : TnziApplicationModule
         }
         else
         {
-            // 沉默失败护栏：存在热设置定义却没接 AddTnziSettings 时，配置中心 UI 照常可编辑、
+            // 沉默失败护栏：存在热设置定义却没有 source 时，配置中心 UI 照常可编辑、
             // 保存也"成功"，但值永远流不进 IOptionsMonitor — 必须在启动期把话说明白。
+            // 自动接线覆盖 TnziApp 流程 (ConfigurationManager); 走到这里意味着宿主传入了
+            // 非 builder 型 IConfiguration 且未手调, 或显式关闭了自动接线。
             var hasRuntimeSettings = context.ServiceProvider
                 .GetServices<ISettingDefinitionProvider>()
                 .SelectMany(p => p.GetGroups())
@@ -132,9 +146,11 @@ public class SystemModule : TnziApplicationModule
             if (hasRuntimeSettings)
             {
                 context.ServiceProvider.GetService<ILogger<SystemModule>>()?.LogWarning(
-                    "Runtime setting groups are defined but the host did not call builder.Configuration.AddTnziSettings(). " +
-                    "Settings-center writes will persist but will NOT flow into IConfiguration/IOptionsMonitor " +
-                    "(admin changes take no effect until AddTnziSettings is wired before Build()).");
+                    "Runtime setting groups are defined but no SettingConfigurationSource is registered. " +
+                    "Settings-center writes will persist but will NOT flow into IConfiguration/IOptionsMonitor. " +
+                    "Auto-wiring requires the host configuration to be a ConfigurationManager (TnziApp does this automatically); " +
+                    "otherwise call builder.Configuration.AddTnziSettings() before Build(), " +
+                    "or remove System:Settings:EnableConfigurationSource=false if it was set.");
             }
         }
 

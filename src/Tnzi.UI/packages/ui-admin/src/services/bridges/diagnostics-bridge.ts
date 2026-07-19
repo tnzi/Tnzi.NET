@@ -24,7 +24,7 @@ import {
   type ControllerInfoDto,
   type ModuleDiagnosticsDto,
 } from '@tnzi/core/services/diagnostics'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminDiagnosticsApi>[0]
 
@@ -79,7 +79,7 @@ export function createDiagnosticsBridge(deps: DiagnosticsBridgeDeps = {}): Diagn
       getRecent: async (count = 50) =>
         unwrap<ExceptionEntryDto[]>(await api.getRecentExceptions(count)) ?? [],
       clear: async () => {
-        await api.clearExceptions()
+        ensureOk(await api.clearExceptions())
       },
     },
     controllers: {

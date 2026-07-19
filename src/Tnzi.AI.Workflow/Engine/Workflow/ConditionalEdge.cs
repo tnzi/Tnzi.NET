@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 条件边 — 根据节点输出动态路由到不同的下游节点

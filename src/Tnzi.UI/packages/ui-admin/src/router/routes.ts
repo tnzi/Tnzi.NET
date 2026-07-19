@@ -637,161 +637,269 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       },
 
       // ── Finance ───────────────────────────────────────────────
+      // Grouped into accounting sub-menus (Sales / Purchases / Banking /
+      // General Ledger / Setup / Reports) so the ~21 pages are scannable
+      // instead of one flat wall. The group nodes are component-less menu
+      // containers (mirroring the top-level module pattern): clicking one
+      // expands it, never navigates. Leaf route NAMES are unchanged so every
+      // `router.push({ name })`, `meta.activeMenu` back-reference, tab key and
+      // deep-link keeps working; only the URL gains a group segment.
       {
         path: 'finance',
         name: 'finance',
         meta: { title: 'tnzi.admin.modules.finance.label', permission: 'finance.view', order: 185, moduleGate: true },
         children: [
+          // ── Sales (AR) ──
           {
-            path: 'accounts',
-            name: 'finance.accounts',
-            component: () => import('../pages/finance/Accounts.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.accounts.title',
-              permission: 'finance.account.view',
-              keepAlive: true,
-            },
+            path: 'sales',
+            name: 'finance.group.sales',
+            meta: { title: 'tnzi.admin.modules.finance.groups.sales' },
+            children: [
+              {
+                path: 'customers',
+                name: 'finance.customers',
+                component: () => import('../pages/finance/Customers.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.customers.title',
+                  permission: 'finance.customer.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'invoices',
+                name: 'finance.invoices',
+                component: () => import('../pages/finance/Invoices.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.invoices.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'credit-memos',
+                name: 'finance.creditMemos',
+                component: () => import('../pages/finance/CreditMemos.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.creditMemos.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+            ],
           },
+          // ── Purchases (AP) ──
           {
-            path: 'journal-entries',
-            name: 'finance.journals',
-            component: () => import('../pages/finance/JournalEntries.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.journals.title',
-              permission: 'finance.journal.view',
-              keepAlive: true,
-            },
+            path: 'purchases',
+            name: 'finance.group.purchases',
+            meta: { title: 'tnzi.admin.modules.finance.groups.purchases' },
+            children: [
+              {
+                path: 'vendors',
+                name: 'finance.vendors',
+                component: () => import('../pages/finance/Vendors.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.vendors.title',
+                  permission: 'finance.vendor.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'bills',
+                name: 'finance.bills',
+                component: () => import('../pages/finance/Bills.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.bills.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'expenses',
+                name: 'finance.expenses',
+                component: () => import('../pages/finance/Expenses.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.expenses.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'receipts',
+                name: 'finance.receipts',
+                component: () => import('../pages/finance/Receipts.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.receipts.title',
+                  permission: 'finance.receipt.view',
+                  keepAlive: true,
+                },
+              },
+            ],
           },
+          // ── Banking ──
           {
-            path: 'exchange-rates',
-            name: 'finance.rates',
-            component: () => import('../pages/finance/ExchangeRates.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.rates.title',
-              permission: 'finance.rate.view',
-              keepAlive: true,
-            },
+            path: 'banking',
+            name: 'finance.group.banking',
+            meta: { title: 'tnzi.admin.modules.finance.groups.banking' },
+            children: [
+              {
+                path: 'bank-accounts',
+                name: 'finance.bankAccounts',
+                component: () => import('../pages/finance/BankAccounts.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.bankAccounts.title',
+                  permission: 'finance.bankAccount.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'payments',
+                name: 'finance.payments',
+                component: () => import('../pages/finance/Payments.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.payments.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'transfers',
+                name: 'finance.transfers',
+                component: () => import('../pages/finance/Transfers.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.transfers.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'reconciliations',
+                name: 'finance.reconciliations',
+                component: () => import('../pages/finance/Reconciliations.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.reconciliations.title',
+                  permission: 'finance.reconciliation.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'bank-feed',
+                name: 'finance.bankFeed',
+                component: () => import('../pages/finance/BankFeed.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.bankFeed.title',
+                  permission: 'finance.bankFeed.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'checks',
+                name: 'finance.checks',
+                component: () => import('../pages/finance/Checks.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.checks.title',
+                  permission: 'finance.check.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'eft-batches',
+                name: 'finance.eftBatches',
+                component: () => import('../pages/finance/EftBatches.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.eftBatches.title',
+                  permission: 'finance.eft.view',
+                  keepAlive: true,
+                },
+              },
+            ],
           },
+          // ── General Ledger (Accountant) ──
           {
-            path: 'fiscal-years',
-            name: 'finance.fiscalYears',
-            component: () => import('../pages/finance/FiscalYears.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.fiscalYears.title',
-              permission: 'finance.fiscalYear.view',
-              keepAlive: true,
-            },
+            path: 'ledger',
+            name: 'finance.group.ledger',
+            meta: { title: 'tnzi.admin.modules.finance.groups.ledger' },
+            children: [
+              {
+                path: 'accounts',
+                name: 'finance.accounts',
+                component: () => import('../pages/finance/Accounts.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.accounts.title',
+                  permission: 'finance.account.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'journal-entries',
+                name: 'finance.journals',
+                component: () => import('../pages/finance/JournalEntries.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.journals.title',
+                  permission: 'finance.journal.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'fiscal-years',
+                name: 'finance.fiscalYears',
+                component: () => import('../pages/finance/FiscalYears.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.fiscalYears.title',
+                  permission: 'finance.fiscalYear.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'revaluations',
+                name: 'finance.revaluations',
+                component: () => import('../pages/finance/Revaluations.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.revaluations.title',
+                  permission: 'finance.revaluation.view',
+                  keepAlive: true,
+                },
+              },
+            ],
           },
+          // ── Setup (master data) ──
           {
-            path: 'customers',
-            name: 'finance.customers',
-            component: () => import('../pages/finance/Customers.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.customers.title',
-              permission: 'finance.customer.view',
-              keepAlive: true,
-            },
+            path: 'setup',
+            name: 'finance.group.setup',
+            meta: { title: 'tnzi.admin.modules.finance.groups.setup' },
+            children: [
+              {
+                path: 'items',
+                name: 'finance.items',
+                component: () => import('../pages/finance/Items.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.items.title',
+                  permission: 'finance.item.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'taxes',
+                name: 'finance.taxes',
+                component: () => import('../pages/finance/Taxes.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.taxes.title',
+                  permission: 'finance.tax.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'exchange-rates',
+                name: 'finance.rates',
+                component: () => import('../pages/finance/ExchangeRates.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.rates.title',
+                  permission: 'finance.rate.view',
+                  keepAlive: true,
+                },
+              },
+            ],
           },
-          {
-            path: 'vendors',
-            name: 'finance.vendors',
-            component: () => import('../pages/finance/Vendors.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.vendors.title',
-              permission: 'finance.vendor.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'items',
-            name: 'finance.items',
-            component: () => import('../pages/finance/Items.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.items.title',
-              permission: 'finance.item.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'taxes',
-            name: 'finance.taxes',
-            component: () => import('../pages/finance/Taxes.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.taxes.title',
-              permission: 'finance.tax.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'invoices',
-            name: 'finance.invoices',
-            component: () => import('../pages/finance/Invoices.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.invoices.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'bills',
-            name: 'finance.bills',
-            component: () => import('../pages/finance/Bills.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.bills.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'expenses',
-            name: 'finance.expenses',
-            component: () => import('../pages/finance/Expenses.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.expenses.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'credit-memos',
-            name: 'finance.creditMemos',
-            component: () => import('../pages/finance/CreditMemos.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.creditMemos.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'payments',
-            name: 'finance.payments',
-            component: () => import('../pages/finance/Payments.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.payments.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'transfers',
-            name: 'finance.transfers',
-            component: () => import('../pages/finance/Transfers.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.transfers.title',
-              permission: 'finance.document.view',
-              keepAlive: true,
-            },
-          },
-          {
-            path: 'reconciliations',
-            name: 'finance.reconciliations',
-            component: () => import('../pages/finance/Reconciliations.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.finance.reconciliations.title',
-              permission: 'finance.reconciliation.view',
-              keepAlive: true,
-            },
-          },
+          // ── Reports (direct leaf, single page) ──
           {
             path: 'reports',
             name: 'finance.reports',
@@ -799,6 +907,48 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             meta: {
               title: 'tnzi.admin.modules.finance.reports.title',
               permission: 'finance.report.view',
+              keepAlive: true,
+            },
+          },
+        ],
+      },
+
+      // ── Payroll (Tnzi.Finance.Payroll sub-module) ─────────────
+      // moduleGate is the explicit backend short name `Finance.Payroll`
+      // (normalized → `finance-payroll`), NOT the route name `payroll`, so the
+      // menu gates off the actual loaded-module signal from /admin/shell/modules.
+      {
+        path: 'payroll',
+        name: 'payroll',
+        meta: { title: 'tnzi.admin.modules.payroll.label', permission: 'payroll.view', order: 186, moduleGate: 'Finance.Payroll' },
+        children: [
+          {
+            path: 'employees',
+            name: 'payroll.employees',
+            component: () => import('../pages/payroll/Employees.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payroll.employees.title',
+              permission: 'payroll.employee.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'setup',
+            name: 'payroll.setup',
+            component: () => import('../pages/payroll/Setup.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payroll.setup.title',
+              permission: 'payroll.config.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'pay-runs',
+            name: 'payroll.payRuns',
+            component: () => import('../pages/payroll/PayRuns.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.payroll.payRuns.title',
+              permission: 'payroll.run.view',
               keepAlive: true,
             },
           },

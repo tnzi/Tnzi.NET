@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Skills.Services.Interfaces;
 
 /// <summary>
 /// 技能分类管理服务接口

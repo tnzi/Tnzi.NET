@@ -21,6 +21,9 @@ const mockPlayMessage = vi.fn()
 
 // ── Fake bridge (two conversations: one muted, one not) ─────────────────────
 const fakeBridge = {
+  // enabled:true = this user holds chat.use, so TChatHost proceeds past the
+  // deny-by-default gate and fetches conversations.
+  getConfig: vi.fn().mockResolvedValue({ enabled: true, enablePresence: false }),
   listConversations: vi.fn().mockResolvedValue([
     { id: 'c-muted',   type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: true,  memberCount: 2, lastMessageAt: '' },
     { id: 'c-unmuted', type: 'Direct', title: 'Bob',   unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },

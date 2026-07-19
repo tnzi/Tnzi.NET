@@ -7,7 +7,7 @@ namespace Tnzi.AI.Services.Interfaces;
 /// <remarks>
 /// <para>
 /// AIModule 使用 TryAdd 注册回退实现（如 NoOpWorkflowService、NoOpTextSearchService），
-/// 子模块（如 AIWorkflowModule、RagModule）加载后会替换为真实实现。
+/// 子模块（如 AIWorkflowModule、AIRagModule）加载后会替换为真实实现。
 /// </para>
 /// <para>
 /// 启动校验通过此接口检查某个服务是否仍为回退实现，

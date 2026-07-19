@@ -24,7 +24,7 @@ public class AISkillsModule : TnziApplicationModule
         services.AddScoped<ISkillLoadTracker, SkillLoadTracker>();
         services.AddSingleton<FileSystemSkillStore>();
         // Expose FileSystemSkillStore as the default ISkillStore so that
-        // singleton consumers (SandboxModule startup, ThreadDataMiddleware
+        // singleton consumers (AISandboxModule startup, ThreadDataMiddleware
         // optional injection) can resolve it. DatabaseSkillStore is scoped
         // and not suitable as a singleton default.
         services.AddSingleton<ISkillStore>(sp => sp.GetRequiredService<FileSystemSkillStore>());

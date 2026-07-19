@@ -258,10 +258,10 @@ interface SurfaceGroup {
   rows: SurfaceRowEntry[]
 }
 
-const ACTION_SUFFIXES = ['view', 'create', 'update', 'delete', 'execute', 'assign'] as const
-const ACTION_ORDER: Record<string, number> = { view: 0, create: 1, update: 2, delete: 3, execute: 4, assign: 5 }
+const ACTION_SUFFIXES = ['view', 'create', 'update', 'delete', 'execute', 'assign', 'use'] as const
+const ACTION_ORDER: Record<string, number> = { view: 0, create: 1, update: 2, delete: 3, execute: 4, assign: 5, use: 6 }
 const ACTION_TAG_TYPE: Record<string, 'default' | 'success' | 'info' | 'error' | 'warning'> = {
-  view: 'default', create: 'success', update: 'info', delete: 'error', execute: 'warning', assign: 'warning',
+  view: 'default', create: 'success', update: 'info', delete: 'error', execute: 'warning', assign: 'warning', use: 'info',
 }
 
 const bridge = createAuthorizationBridge({ client: useAdminClient() })

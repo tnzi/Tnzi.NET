@@ -1019,4 +1019,32 @@ public class StatisticsServiceTests
     }
 
     #endregion
+
+    #region CSV Formula Injection Protection
+
+    [Fact]
+    public async Task ExportReconciliationAsync_FormulaLikeBusinessOrderNo_IsEscapedInCsv()
+    {
+        // Arrange: 用户可控字段以公式起始字符开头(经核心 CsvBuilder 必须前置单引号防注入)
+        var now = DateTime.UtcNow;
+        var payments = new List<PaymentEntity>
+        {
+            new() { Id = Guid.NewGuid(), TradeNo = "TRD100", BusinessOrderNo = "=2+5", BusinessType = BusinessType.Order, ChannelCode = "Stripe", PaymentMethod = PaymentMethod.CreditCard, OriginalAmount = 10m, DiscountAmount = 0m, PaidAmount = 10m, Currency = "USD", Status = PaymentStatus.Succeeded, CreationTime = now.AddDays(-1), PaidTime = now.AddDays(-1) }
+        };
+
+        SetupPaymentQueryable(payments);
+        SetupRefundQueryable(new List<Refund>());
+
+        var query = new ReconciliationQueryDto { StartTime = now.AddDays(-30), EndTime = now };
+
+        // Act
+        var result = await _service.ExportReconciliationAsync(query);
+
+        // Assert
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.CsvContent.ShouldContain("'=2+5");
+        result.Data.CsvContent.ShouldNotContain(",=2+5");
+    }
+
+    #endregion
 }

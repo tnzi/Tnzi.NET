@@ -1,5 +1,3 @@
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Dtos;
 
 /// <summary>
@@ -14,9 +12,9 @@ public class CreateNotificationRequest
 
     [Required]
     [MinLength(1, ErrorMessage = "At least one recipient is required.")]
-    public List<RecipientInput> Recipients { get; set; } = new();
+    public List<RecipientInput> Recipients { get; set; } = null!;
 
-    public List<FileInfoDto> Attachments { get; set; } = new();
+    public List<FileInfoDto> Attachments { get; set; } = null!;
     public bool SendImmediately { get; set; } = false;
     public int MaxRetryCount { get; set; } = 3;
     public string? TemplateName { get; set; }

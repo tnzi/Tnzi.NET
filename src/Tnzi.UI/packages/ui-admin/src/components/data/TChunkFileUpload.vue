@@ -15,9 +15,17 @@ const props = withDefaults(defineProps<{
   uploader: ChunkUploader
   chunkSize?: number
   translate?: (key: string) => string
+  /** Native `<input accept>` filter (e.g. `"image/*"`, `".pdf,.docx"`).
+      Omitted by default → the generic file picker (current behaviour). */
+  accept?: string
+  /** Native `<input capture>` hint (`"user"` / `"environment"`) so phones can
+      invoke the camera directly. Omitted by default. */
+  capture?: boolean | 'user' | 'environment'
 }>(), {
   chunkSize: 1024 * 1024,
   translate: (key: string) => key,
+  accept: undefined,
+  capture: undefined,
 })
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
@@ -83,6 +91,8 @@ async function onFileChange(event: Event) {
       type="file"
       class="t-chunk-file-upload__native"
       :disabled="uploading"
+      :accept="props.accept"
+      :capture="props.capture"
       @change="onFileChange"
     />
     <NButton

@@ -12,7 +12,7 @@ import { createPinia, setActivePinia } from 'pinia'
  */
 
 vi.mock('@tnzi/ui-ai', () => ({
-  WorkflowCanvas: {
+  TWorkflowCanvas: {
     name: 'WorkflowCanvas',
     props: ['nodes', 'edges'],
     template: '<div data-test="canvas-stub" :data-node-count="nodes?.length ?? 0">canvas</div>',

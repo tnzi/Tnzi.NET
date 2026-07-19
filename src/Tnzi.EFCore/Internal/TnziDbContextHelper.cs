@@ -21,6 +21,20 @@ public static class TnziDbContextHelper
     }
 
     /// <summary>
+    /// 统一配置模型约定（供 TnziDbContext 与 IdentityDbContext 的 ConfigureConventions 共用）。
+    /// </summary>
+    /// <remarks>
+    /// 全局 decimal 默认精度：未显式配置精度的 decimal 列统一为 (19, 4)，取代各数据库
+    /// 提供者不一致的默认（可能静默截断）。属性级精度配置（HasMoneyPrecision /
+    /// HasExchangeRatePrecision / HasQuantityPrecision / HasRatePrecision / HasPrecision）
+    /// 优先级高于约定，不受此默认影响。
+    /// </remarks>
+    public static void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        configurationBuilder.Properties<decimal>().HavePrecision(19, 4);
+    }
+
+    /// <summary>
     /// 统一异步保存逻辑
     /// </summary>
     public static async Task<int> SaveChangesAsync(

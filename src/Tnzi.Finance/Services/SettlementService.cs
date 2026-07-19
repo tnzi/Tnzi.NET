@@ -593,7 +593,7 @@ public class SettlementService : ApplicationService, ISettlementService
             Memo = $"Realized FX on settlement of {target.Number}",
             Currency = _helper.NormalizeCurrency(null),
             ExchangeRate = 1m,
-            SourceType = nameof(PaymentApplication),
+            SourceType = FinanceSourceTypes.PaymentApplication,
             SourceId = $"{source.Number}->{target.Number}"
         };
 

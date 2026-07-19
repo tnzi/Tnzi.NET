@@ -182,7 +182,7 @@ public class JournalEntryWorkflowTests : FinanceIntegrationTestBase
     {
         var (ar, revenue) = await SeedAndResolveAsync();
 
-        // 提供汇率，但停用舍入差额科目：失败点位于本位币换算之后
+        // 提供汇率，但摘掉舍入差额科目的系统角色：失败点位于本位币换算之后
         // → 回归校验"失败过账"不得把半转换金额残留到被跟踪的草稿上
         var rateResult = await InScopeAsync<IExchangeRateService, Result<ExchangeRateDto>>(s => s.UpsertAsync(new UpsertExchangeRateDto
         {
@@ -193,17 +193,20 @@ public class JournalEntryWorkflowTests : FinanceIntegrationTestBase
         }));
         rateResult.Succeeded.ShouldBeTrue(rateResult.Message);
 
+        // 引擎按 (SystemRole == RoundingDifference && IsActive && !IsGroup) 解析舍入科目。
+        // 停用角色科目本身已被拒绝（过账靠角色解析且要求启用，见 ChartOfAccountsService），
+        // 故这里用"清角色"——被允许的角色迁移动作——命中同一个解析失败点
         var rounding = await InScopeAsync<IChartOfAccountsService, Account?>(
             s => s.FindByRoleAsync(AccountSystemRole.RoundingDifference));
-        var deactivate = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.UpdateAsync(rounding!.Id, new UpdateAccountDto
+        var clearRole = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.UpdateAsync(rounding!.Id, new UpdateAccountDto
         {
             Code = rounding.Code,
             Name = rounding.Name,
             ParentId = rounding.ParentId,
-            SystemRole = rounding.SystemRole,
-            IsActive = false
+            SystemRole = null,
+            IsActive = true
         }));
-        deactivate.Succeeded.ShouldBeTrue(deactivate.Message);
+        clearRole.Succeeded.ShouldBeTrue(clearRole.Message);
 
         // 33.33/33.34 借 + 66.67 贷 @1.115 → 尾差 -0.01，需要舍入差额科目 → 失败
         var input = new CreateJournalEntryDto

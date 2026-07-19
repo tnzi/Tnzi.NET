@@ -62,6 +62,14 @@ public abstract class TnziDbContext<TDbContext> : DbContext
         ConfigureQueryFilters(modelBuilder);
     }
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        // 全局模型约定（含未显式配置精度的 decimal 列的默认精度）
+        TnziDbContextHelper.ConfigureConventions(configurationBuilder);
+    }
+
     protected virtual void ConfigureQueryFilters(ModelBuilder modelBuilder)
     {
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())

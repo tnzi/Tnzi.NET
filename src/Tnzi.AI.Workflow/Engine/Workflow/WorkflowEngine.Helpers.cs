@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// WorkflowEngine — 条件边路由、循环处理、检查点、Run 节点管理等辅助方法

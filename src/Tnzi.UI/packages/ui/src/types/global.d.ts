@@ -2,10 +2,12 @@
  * Global type declarations for Naive UI provider APIs.
  *
  * Naive UI's useMessage() and useDialog() must be called inside setup().
- * To use them globally, the application exposes them on the window object
- * from a setup component wrapped by NMessageProvider / NDialogProvider.
+ * To use them globally, the APIs are exposed on the window object from a
+ * setup component wrapped by NMessageProvider / NDialogProvider.
  *
- * Example:
+ * `@tnzi/ui-admin`'s `TAdminAppRoot` does this registration automatically
+ * (internal `TAdminWindowHandles` component inside its provider stack).
+ * Applications NOT using `TAdminAppRoot` register the handles themselves:
  * ```ts
  * // In a component under NMessageProvider + NDialogProvider
  * import { useMessage, useDialog } from 'naive-ui';

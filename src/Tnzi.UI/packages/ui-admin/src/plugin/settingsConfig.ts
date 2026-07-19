@@ -31,6 +31,8 @@ export interface AdminSettingsSection {
   group?: string
   /** Sort order inside the nav (schema groups use backend Order). */
   order?: number
+  /** Optional permission code required to SEE this section. Checked via usePermissionGuard().can(); omit to always show (super-admin / not-yet-loaded fail-open as everywhere). */
+  permission?: string
   /** Panel component — rendered in the right panel, owns its own data + save bar. */
   component: Component | (() => Promise<unknown>)
 }
@@ -56,6 +58,12 @@ export interface AdminSettingsConfig {
    * re-fetch/apply live when a super admin changes them (no page reload).
    */
   realtime?: AdminSettingsRealtimeRoute[]
+  /**
+   * Override the SignalR settings hub URL. Default '/hubs/settings' (root-relative,
+   * resolved against the page origin). Set e.g. '/api/hubs/settings' when the API
+   * is hosted under a sub-path.
+   */
+  hubUrl?: string
 }
 
 export const ADMIN_SETTINGS_CONFIG_KEY: InjectionKey<AdminSettingsConfig> = Symbol(

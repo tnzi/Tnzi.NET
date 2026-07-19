@@ -13,6 +13,11 @@
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NButton } from 'naive-ui'
+import { useBreakpoint } from '../../headless/useBreakpoint'
+
+// Touch: bump the toolbar buttons from tiny → small (paired with the
+// pointer:coarse ≥40px hit-area rule below).
+const { isTouch } = useBreakpoint()
 
 interface Props {
   value: string
@@ -108,13 +113,23 @@ defineExpose({ format, minify, isValid, errorMessage })
 <template>
   <div class="t-json-editor" :class="{ 't-json-editor--invalid': !isValid }">
     <div class="t-json-editor__toolbar">
-      <NButton size="tiny" :disabled="readonly" @click="format">
+      <NButton
+        class="t-json-editor__btn"
+        :size="isTouch ? 'small' : 'tiny'"
+        :disabled="readonly"
+        @click="format"
+      >
         <template #icon>
           <Icon icon="mdi:code-braces" width="14" height="14" />
         </template>
         Format
       </NButton>
-      <NButton size="tiny" :disabled="readonly" @click="minify">
+      <NButton
+        class="t-json-editor__btn"
+        :size="isTouch ? 'small' : 'tiny'"
+        :disabled="readonly"
+        @click="minify"
+      >
         <template #icon>
           <Icon icon="mdi:arrow-collapse-horizontal" width="14" height="14" />
         </template>
@@ -190,5 +205,25 @@ defineExpose({ format, minify, isValid, errorMessage })
   background: var(--tnzi-container-bg, #ffffff);
   color: var(--tnzi-base-text);
   resize: vertical;
+}
+
+/* Touch: enlarge the Format/Minify hit area to ≥40px and let the status text
+   wrap onto its own line instead of truncating (little horizontal room on
+   phones). Desktop keeps the compact tiny toolbar untouched. */
+@media (pointer: coarse) {
+  .t-json-editor__toolbar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .t-json-editor__btn {
+    min-height: 40px;
+  }
+  .t-json-editor__status,
+  .t-json-editor__status--error {
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
 }
 </style>

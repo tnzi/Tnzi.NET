@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流服务 - 管理操作 (Clone/BatchDelete/BatchEnable/BatchDisable/GetStats/Validate)

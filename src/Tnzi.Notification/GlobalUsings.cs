@@ -29,6 +29,7 @@ global using System.Threading.Channels;
 global using System.Threading.Tasks;
 global using Tnzi;
 global using Tnzi.Application;
+global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;

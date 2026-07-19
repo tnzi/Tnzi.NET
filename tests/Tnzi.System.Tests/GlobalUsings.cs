@@ -18,6 +18,7 @@ global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.System.Dtos;
 global using Tnzi.System.Entities;
+global using Tnzi.System.Metadata;
 global using Tnzi.System.Options;
 global using Tnzi.System.Services;
 global using Tnzi.System.Settings;

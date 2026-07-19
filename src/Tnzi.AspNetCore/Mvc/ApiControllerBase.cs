@@ -193,20 +193,22 @@ public abstract class ApiControllerBase : ControllerBase
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="message">错误消息</param>
+    /// <param name="errorCode">业务错误码（如 ErrorCodes.UNAUTHORIZED），供前端按码分支</param>
     /// <returns>API结果</returns>
-    protected ApiResult<T> Unauthorized<T>(string message = "Unauthorized")
+    protected ApiResult<T> Unauthorized<T>(string message = "Unauthorized", string? errorCode = null)
     {
-        return ApiResult<T>.Error(message, 401);
+        return ApiResult<T>.Error(message, 401, errorCode);
     }
 
     /// <summary>
     /// 401 Unauthorized 响应（无数据）
     /// </summary>
     /// <param name="message">错误消息</param>
+    /// <param name="errorCode">业务错误码，供前端按码分支</param>
     /// <returns>API结果</returns>
-    protected ApiResult Unauthorized(string message = "Unauthorized")
+    protected ApiResult Unauthorized(string message = "Unauthorized", string? errorCode = null)
     {
-        return ApiResult.Error(message, 401);
+        return ApiResult.Error(message, 401, errorCode);
     }
 
     /// <summary>
@@ -214,20 +216,22 @@ public abstract class ApiControllerBase : ControllerBase
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="message">错误消息</param>
+    /// <param name="errorCode">业务错误码（如 ErrorCodes.FORBIDDEN），供前端按码分支</param>
     /// <returns>API结果</returns>
-    protected ApiResult<T> Forbidden<T>(string message = "Forbidden")
+    protected ApiResult<T> Forbidden<T>(string message = "Forbidden", string? errorCode = null)
     {
-        return ApiResult<T>.Error(message, 403);
+        return ApiResult<T>.Error(message, 403, errorCode);
     }
 
     /// <summary>
     /// 403 Forbidden 响应（无数据）
     /// </summary>
     /// <param name="message">错误消息</param>
+    /// <param name="errorCode">业务错误码，供前端按码分支</param>
     /// <returns>API结果</returns>
-    protected ApiResult Forbidden(string message = "Forbidden")
+    protected ApiResult Forbidden(string message = "Forbidden", string? errorCode = null)
     {
-        return ApiResult.Error(message, 403);
+        return ApiResult.Error(message, 403, errorCode);
     }
 
     /// <summary>

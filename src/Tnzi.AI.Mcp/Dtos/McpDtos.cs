@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Dtos;
+namespace Tnzi.AI.Mcp.Dtos;
 
 /// <summary>
 /// MCP Server 状态 DTO

@@ -7,17 +7,23 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
 {
     private const int MaxTreeDepth = 64;
 
+    /// <summary>单次余额查询的科目上限（参数化 IN 列表有数据库上限，SQL Server 为 2100）</summary>
+    private const int MaxBalanceAccounts = 500;
+
     private readonly IRepository<Account, Guid> _accountRepository;
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
+    private readonly BalanceSummaryReader _balanceReader;
 
     public ChartOfAccountsService(
         IServiceProvider serviceProvider,
         IRepository<Account, Guid> accountRepository,
-        IReadOnlyRepository<JournalLine, Guid> lineRepository)
+        IReadOnlyRepository<JournalLine, Guid> lineRepository,
+        BalanceSummaryReader balanceReader)
         : base(serviceProvider)
     {
         _accountRepository = Check.NotNull(accountRepository);
         _lineRepository = Check.NotNull(lineRepository);
+        _balanceReader = Check.NotNull(balanceReader);
     }
 
     public async Task<Result<AccountDto>> GetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -134,6 +140,17 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
             return Fail<AccountDto>("Cannot change the currency of an account that has journal lines.", 409);
         }
 
+        // 过账管线按角色解析科目且要求启用（FinanceDocumentHelper.ResolveSystemAccountAsync /
+        // LedgerPostingEngine 的 RoundingDifference 解析），停用 = 对应过账永久 400，
+        // 且尚未过账的种子科目（如 1130 Undeposited Funds）第一天就能被停掉。
+        // 判据是更新后的结果状态：同一次更新里清掉角色再停用是允许的，故不挡角色迁移
+        if (input.SystemRole.HasValue && !input.IsActive)
+        {
+            return Fail<AccountDto>(
+                $"Cannot deactivate the account holding the {input.SystemRole.Value} system role: postings resolve it by role and require it to be active. " +
+                "Clear the system role first, or move it to another account.", 409);
+        }
+
         account.Code = code!;
         account.Name = input.Name.Trim();
         account.Description = input.Description;
@@ -163,6 +180,15 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
         if (account == null)
             return Fail("Account not found.", 404);
 
+        // 角色科目即使一条分录都没有也不可删：过账按角色解析（而非按 Id 引用），
+        // 删掉 = 对应过账永久 400。先清角色（或迁到别的科目）再删
+        if (account.SystemRole.HasValue)
+        {
+            return Fail(
+                $"Cannot delete the account holding the {account.SystemRole.Value} system role: postings resolve it by role. " +
+                "Clear the system role first, or move it to another account.", 409);
+        }
+
         if (await _accountRepository.AnyAsync(a => a.ParentId == id, cancellationToken))
             return Fail("Cannot delete an account that has child accounts.", 409);
 
@@ -171,6 +197,38 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
 
         await _accountRepository.DeleteAsync(account, cancellationToken);
         return Ok();
+    }
+
+    public async Task<Result<List<AccountBalanceDto>>> GetBalancesAsync(
+        IEnumerable<Guid> accountIds, DateTime asOf, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(accountIds);
+
+        var ids = accountIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return Ok(new List<AccountBalanceDto>());
+        if (ids.Count > MaxBalanceAccounts)
+            return Fail<List<AccountBalanceDto>>($"Cannot read more than {MaxBalanceAccounts} account balances in one request. Split the request into batches.", 400);
+
+        // as-of 边界与报表一致（PostingDate < 次日）——未来日期的过账不进当日余额，
+        // 科目表现金余额与同日资产负债表现金恒等
+        var asOfDate = asOf.ToUtcDate();
+        var sums = await _balanceReader.SumCumulativeByAccountsAsync(ids, asOfDate.AddDays(1), cancellationToken);
+
+        var balances = ids.Select(accountId =>
+        {
+            sums.TryGetValue(accountId, out var sum);
+            return new AccountBalanceDto
+            {
+                AccountId = accountId,
+                AsOf = asOfDate,
+                Debit = sum.Debit,
+                Credit = sum.Credit,
+                Balance = sum.Debit - sum.Credit
+            };
+        }).ToList();
+
+        return Ok(balances);
     }
 
     public async Task<Result<int>> SeedDefaultAsync(CancellationToken cancellationToken = default)

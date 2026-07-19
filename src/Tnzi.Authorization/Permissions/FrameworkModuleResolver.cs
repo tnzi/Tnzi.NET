@@ -12,9 +12,11 @@ namespace Tnzi.Authorization.Permissions;
 /// <remarks>
 /// Two callers must agree on this set:
 /// <list type="bullet">
-///   <item><see cref="FrameworkPermissions"/> declares a group only when its
-///     module is loaded, so an app that never <c>[DependsOn]</c>s Finance/AI/Chat
-///     does not seed those permissions at all.</item>
+///   <item>each module's own <c>{Module}Permissions</c> provider (e.g.
+///     <c>IdentityPermissions</c>, <c>AuthorizationPermissions</c>) declares a
+///     group only when its module is loaded, so an app that never
+///     <c>[DependsOn]</c>s Finance/AI/Chat does not seed those permissions at
+///     all.</item>
 ///   <item>the module admin read path flags each module row <c>IsBuiltIn</c> so
 ///     the role-permission matrix can list a consumer application's own
 ///     permissions first and separate the built-in framework catalogue.</item>

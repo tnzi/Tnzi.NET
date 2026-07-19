@@ -6,19 +6,29 @@ public class ChatContactService : ApplicationService, IChatContactService
     private readonly IRepository<UserDetail, Guid> _userDetailRepository;
     private readonly IPresenceService _presence;
     private readonly IOptionsSnapshot<ChatOptions> _options;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
+    private readonly IChatAccessService? _chatAccess;
 
     public ChatContactService(
         IServiceProvider serviceProvider,
         IRepository<User, Guid> userRepository,
         IRepository<UserDetail, Guid> userDetailRepository,
         IPresenceService presence,
-        IOptionsSnapshot<ChatOptions> options)
+        IOptionsSnapshot<ChatOptions> options,
+        IFunctionAuthorizationService? functionAuthorization = null,
+        IChatAccessService? chatAccess = null)
         : base(serviceProvider)
     {
         _userRepository = Check.NotNull(userRepository);
         _userDetailRepository = Check.NotNull(userDetailRepository);
         _presence = Check.NotNull(presence);
         _options = Check.NotNull(options);
+        // Optional: only present when Authorization is loaded. Null → no super-admin
+        // concept → the directory hides no one (see GetSuperAdminUserIdsAsync).
+        _functionAuthorization = functionAuthorization;
+        // Optional: gate contact results by `chat.use`. Null / no-gate → fail-open
+        // (nobody hidden), so standalone Chat keeps working without Authorization.
+        _chatAccess = chatAccess;
     }
 
     public async Task<Result<IReadOnlyList<ChatContactDto>>> SearchUsersAsync(string? keyword)
@@ -26,11 +36,31 @@ public class ChatContactService : ApplicationService, IChatContactService
         var me = GetRequiredCurrentUser().Id!.Value;
         var kw = keyword?.Trim().ToLower();
 
+        // Super admins are system-maintenance/operations accounts that don't take part in
+        // business activity — they must never surface in the business-facing contact
+        // directory. Strip them from the candidate set (empty when Authorization isn't
+        // loaded, i.e. no super-admin concept → nothing hidden).
+        var hiddenIds = _functionAuthorization == null
+            ? new List<Guid>()
+            : (await _functionAuthorization.GetSuperAdminUserIdsAsync()).ToList();
+
         // Blank keyword → first page of the directory (excluding self) so the picker can
         // show a starting contact list. A keyword narrows by username (case-insensitive).
         var users = string.IsNullOrEmpty(kw)
-            ? await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null)
-            : await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && u.UserName.ToLower().Contains(kw));
+            ? await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && !hiddenIds.Contains(u.Id))
+            : await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && !hiddenIds.Contains(u.Id) && u.UserName.ToLower().Contains(kw));
+
+        // Users without `chat.use` can't take part in chat (their inbound is blocked /
+        // isolated), so they must not appear in the new-chat / add-member picker.
+        // FilterDisabledAsync returns the subset lacking the grant (empty when the
+        // gate is inactive → nothing hidden). Applied BEFORE Take so the page still
+        // fills up to the limit with usable contacts.
+        if (_chatAccess != null && users.Count > 0)
+        {
+            var disabled = await _chatAccess.FilterDisabledAsync(users.Select(u => u.Id));
+            if (disabled.Count > 0)
+                users = users.Where(u => !disabled.Contains(u.Id)).ToList();
+        }
 
         var taken = users.Take(Math.Max(1, _options.Value.ContactSearchLimit)).ToList();
         var detailByUserId = await LoadDetailsAsync(taken.Select(u => u.Id).ToList());

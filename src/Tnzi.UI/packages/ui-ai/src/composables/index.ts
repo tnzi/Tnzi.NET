@@ -1,6 +1,6 @@
 export { useChat } from './useChat';
 // NOTE: ChatMessage type is aliased to ChatMessageData here to avoid collision with the
-// ChatMessage Vue component re-exported from ./components/chat/index.ts at the top-level barrel.
+// TChatMessage Vue component re-exported from ./components/chat/index.ts at the top-level barrel.
 // Consumers importing from '@tnzi/ui-ai/composables' can still access the raw type via useChat's return.
 export type { ChatMessage as ChatMessageData, UseChatReturn, UseChatOptions } from './useChat';
 export { useStreamMarkdown } from './useStreamMarkdown';

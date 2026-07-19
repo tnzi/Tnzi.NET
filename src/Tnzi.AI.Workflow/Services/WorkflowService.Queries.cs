@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流服务 - 执行查询投影：执行状态 / 详情 / 历史分页 + 状态映射、终态更新、

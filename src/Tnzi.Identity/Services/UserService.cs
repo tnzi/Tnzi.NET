@@ -1169,27 +1169,20 @@ public class UserService : ApplicationService, IUserService
             .Take(50000) // Export safety limit
             .ToListAsync(cancellationToken);
 
-        var sb = new StringBuilder();
-        sb.AppendLine("Id,UserName,Email,PhoneNumber,IsActive,EmailConfirmed,PhoneNumberConfirmed,CreationTime,LastModificationTime");
+        // 单元格转义统一走核心 CsvBuilder(含公式注入防护),日期保持 ISO 8601 往返格式
+        var csv = new CsvBuilder();
+        csv.AppendRow("Id", "UserName", "Email", "PhoneNumber", "IsActive", "EmailConfirmed", "PhoneNumberConfirmed", "CreationTime", "LastModificationTime");
 
         foreach (var user in users)
         {
             var isActive = user.LockoutEnd == null || user.LockoutEnd <= DateTimeOffset.UtcNow;
-            sb.AppendLine(string.Join(",",
-                EscapeCsv(user.Id.ToString()),
-                EscapeCsv(user.UserName),
-                EscapeCsv(user.Email),
-                EscapeCsv(user.PhoneNumber),
-                isActive.ToString(),
-                user.EmailConfirmed.ToString(),
-                user.PhoneNumberConfirmed.ToString(),
-                user.CreationTime.ToString("o"),
-                user.LastModificationTime?.ToString("o") ?? ""
-            ));
+            csv.AppendRow(user.Id, user.UserName, user.Email, user.PhoneNumber,
+                isActive, user.EmailConfirmed, user.PhoneNumberConfirmed,
+                user.CreationTime, user.LastModificationTime);
         }
 
         LogInformation("Exported {Count} users to CSV", users.Count);
-        return Ok<string>(sb.ToString());
+        return Ok<string>(csv.ToString());
     }
 
     /// <summary>
@@ -1284,22 +1277,6 @@ public class UserService : ApplicationService, IUserService
         LogInformation("User import completed: {Success} success, {Failed} failed, {Skipped} skipped out of {Total} rows",
             result.SuccessCount, result.FailedCount, result.SkippedCount, result.TotalRows);
         return Ok(result);
-    }
-
-    /// <summary>
-    /// Escape a value for CSV output
-    /// </summary>
-    private static string EscapeCsv(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return "";
-
-        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
-        {
-            return $"\"{value.Replace("\"", "\"\"")}\"";
-        }
-
-        return value;
     }
 
     /// <summary>

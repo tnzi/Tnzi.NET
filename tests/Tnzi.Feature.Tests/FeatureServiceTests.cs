@@ -9,7 +9,6 @@ using Tnzi.EventBus;
 using Tnzi.Feature.Dtos;
 using Tnzi.Feature.Entities;
 using Tnzi.Feature.Events;
-using Tnzi.Feature.Features;
 using Tnzi.Feature.Services;
 using Tnzi.Mapster;
 

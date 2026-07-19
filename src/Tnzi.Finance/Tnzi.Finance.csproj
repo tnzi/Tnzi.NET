@@ -12,4 +12,16 @@
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Services/Internal 边界：纯工具/解析类为 internal，仅对本模块测试开放。
+         经 DI 注入 public 服务构造函数的协作类（LedgerPostingEngine 等）受 CS0051
+         与容器仅解析 public 构造函数的限制必须保持 public，其跨模块边界由
+         Payroll.Tests 的 InternalBoundaryTests 约定测试强制。
+         Tnzi.Finance.Documents（可选渲染子模块）的 PdfSharpCheckRenderer 复用 internal
+         的 MicrLineComposer（不依赖 PdfSharp，故留核心），经此 friend 声明可见——
+         同 Tnzi.Finance.Ai 复用核心公共契约的思路，只是 MICR 拼装是 internal 原语。 -->
+    <InternalsVisibleTo Include="Tnzi.Finance.Tests, PublicKey=$(TnziPublicKey)" />
+    <InternalsVisibleTo Include="Tnzi.Finance.Documents, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

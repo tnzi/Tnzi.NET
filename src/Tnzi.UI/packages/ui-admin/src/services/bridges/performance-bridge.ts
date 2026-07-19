@@ -17,7 +17,7 @@ import {
   type EndpointStatsDto,
   type SlowRequestRecordDto,
 } from '@tnzi/core/services/performance'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPerformanceApi>[0]
 
@@ -61,7 +61,7 @@ export function createPerformanceBridge(deps: PerformanceBridgeDeps = {}): Perfo
     getSlowRequests: async (count = 20, thresholdMs?: number) =>
       unwrap<SlowRequestRecordDto[]>(await api.getSlowRequests(count, thresholdMs)) ?? [],
     clear: async () => {
-      await api.clear()
+      ensureOk(await api.clear())
     },
   }
 }

@@ -1,0 +1,56 @@
+import { h } from 'vue'
+import type { ColumnDef } from '../../headless/useColumnSettings'
+import type { DataTableColumns } from 'naive-ui'
+import { CheckStatus, type BankCheckDto, type CheckQueueItemDto } from '../../services/bridges/finance-bridge'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { amountCell, fmtMoney } from './money'
+import { formatDateOnly } from '@tnzi/core'
+
+/** All-optional row shape (house pattern) so ColumnDef stays assignable. */
+export type BankCheckRow = Partial<BankCheckDto>
+
+/** CheckStatus → badge meta (key = backend PascalCase member). */
+export const CHECK_STATUS_META: Record<string, { type: 'success' | 'warning' | 'default'; label: string }> = {
+  [CheckStatus.Issued]: { type: 'success', label: 'status.issued' },
+  [CheckStatus.Void]: { type: 'warning', label: 'status.void' },
+  [CheckStatus.Spoiled]: { type: 'default', label: 'status.spoiled' },
+}
+
+/** Register book columns (posted / voided / spoiled checks). */
+export function buildCheckColumns(t: (key: string) => string): ColumnDef<BankCheckRow>[] {
+  return [
+    { key: 'checkNumber', title: t('columns.number'), width: 110, primary: true, render: (r) => String(r.checkNumber ?? '—') },
+    { key: 'bankAccountName', title: t('columns.account'), minWidth: 150, mobileHidden: true, render: (r) => r.bankAccountName ?? '—' },
+    { key: 'payeeName', title: t('columns.payee'), minWidth: 150, render: (r) => r.payeeName ?? '—' },
+    { key: 'amount', title: t('columns.amount'), width: 130, render: (r) => amountCell(fmtMoney(r.amount, r.currency)) },
+    { key: 'issueDate', title: t('columns.issueDate'), width: 110, render: (r) => formatDateOnly(r.issueDate, { utc: true }) },
+    {
+      key: 'status',
+      title: t('columns.status'),
+      width: 110,
+      render: (r) => {
+        const meta = CHECK_STATUS_META[String(r.status ?? '')]
+        return meta ? h(TStatusBadge, { value: String(r.status ?? ''), type: meta.type, label: t(meta.label) }) : String(r.status ?? '')
+      },
+    },
+    {
+      key: 'isManual',
+      title: t('columns.source'),
+      width: 100,
+      mobileHidden: true,
+      render: (r) => (r.isManual ? t('source.manual') : t('source.printed')),
+    },
+  ]
+}
+
+/** Print-queue columns (posted outbound check payments awaiting print). */
+export function buildCheckQueueColumns(t: (key: string) => string): DataTableColumns<CheckQueueItemDto> {
+  return [
+    { type: 'selection' },
+    { key: 'paymentNumber', title: t('queue.columns.payment'), width: 130, render: (r) => r.paymentNumber ?? '—' },
+    { key: 'payeeName', title: t('queue.columns.payee'), minWidth: 160, render: (r) => r.payeeName ?? '—' },
+    { key: 'bankAccountName', title: t('queue.columns.account'), minWidth: 150, render: (r) => r.bankAccountName ?? '—' },
+    { key: 'docDate', title: t('queue.columns.date'), width: 110, render: (r) => formatDateOnly(r.docDate, { utc: true }) },
+    { key: 'amount', title: t('queue.columns.amount'), width: 130, render: (r) => amountCell(fmtMoney(r.amount, r.currency)) },
+  ]
+}

@@ -56,7 +56,6 @@ public static class TnziApp
     /// var app = await TnziApp.CreateAsync&lt;StartupModule&gt;(
     ///     args,
     ///     options => {
-    ///         options.AutoInitializeDatabase = true;
     ///         options.EnableDiagnostics = true;
     ///     },
     ///     builder => {
@@ -67,6 +66,8 @@ public static class TnziApp
     ///     }
     /// );
     /// </code>
+    /// TnziOptions 也可经 "Tnzi" 配置节设置（代码回调优先），如 appsettings.json:
+    /// { "Tnzi": { "AutoInitializeDatabase": false } }
     /// </example>
     public static async Task<WebApplication> CreateAsync<TStartupModule>(
         string[] args,
@@ -77,11 +78,8 @@ public static class TnziApp
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // 配置 Tnzi 选项
-        if (configureOptions != null)
-        {
-            builder.Services.Configure(configureOptions);
-        }
+        // 配置 Tnzi 选项（"Tnzi" 配置节 + 代码回调）
+        ConfigureTnziOptions(builder, configureOptions);
 
         // 允许用户自定义 builder 配置
         configureBuilder?.Invoke(builder);
@@ -112,13 +110,24 @@ public static class TnziApp
     {
         Check.NotNull(builder);
 
-        // 配置 Tnzi 选项
+        // 配置 Tnzi 选项（"Tnzi" 配置节 + 代码回调）
+        ConfigureTnziOptions(builder, configureOptions);
+
+        return await BuildAndInitializeAsync<TStartupModule>(builder, configureApp);
+    }
+
+    /// <summary>
+    /// 注册 TnziOptions：先绑定 "Tnzi" 配置节（appsettings 可按环境覆盖，如
+    /// "Tnzi": { "AutoInitializeDatabase": false }），再应用代码回调（代码优先于配置）。
+    /// </summary>
+    private static void ConfigureTnziOptions(WebApplicationBuilder builder, Action<TnziOptions>? configureOptions)
+    {
+        builder.Services.Configure<TnziOptions>(builder.Configuration.GetSection("Tnzi"));
+
         if (configureOptions != null)
         {
             builder.Services.Configure(configureOptions);
         }
-
-        return await BuildAndInitializeAsync<TStartupModule>(builder, configureApp);
     }
 
     /// <summary>
@@ -152,6 +161,14 @@ public static class TnziApp
         {
             await app.UseTnziAsync();
         }
+
+        // Post-migration startup tasks — run on EVERY boot, AFTER module init +
+        // (optional) migration, regardless of the AutoInitializeDatabase / prod-skip
+        // gates. Framework infrastructure that needs the migrated schema (e.g. the
+        // permission-catalogue sync) registers an IPostMigrationStartupTask instead of
+        // doing DB work in module init, which runs before migrations and fails on an
+        // empty database (the old "boot twice" bug). No-op when none are registered.
+        await app.RunPostMigrationStartupTasksAsync();
 
         // 允许用户自定义 app 配置
         if (configureApp != null)
@@ -204,9 +221,10 @@ public static class TnziApp
     /// <code>
     /// await TnziApp.RunAsync&lt;StartupModule&gt;(
     ///     args,
-    ///     options => options.AutoInitializeDatabase = true
+    ///     options => options.EnableDiagnostics = true
     /// );
     /// </code>
+    /// TnziOptions 也可经 "Tnzi" 配置节设置（代码回调优先）。
     /// </example>
     public static async Task RunAsync<TStartupModule>(
         string[] args,

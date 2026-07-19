@@ -439,9 +439,9 @@ export function useAdminUserApi(client: HttpClient) {
     getStatistics: (params?: { organizationId?: string; roleId?: string }) =>
       client.get<UserStatisticsDto>(`${ADMIN_USER_BASE}/statistics`, { params }),
 
-    /** Export users as CSV (returns file download) */
+    /** Export users as CSV (Blob download; backend emits UTF-8 BOM) */
     exportCsv: (data?: UserListQueryDto) =>
-      client.post<string>(`${ADMIN_USER_BASE}/export/csv`, data ?? {}),
+      client.download(`${ADMIN_USER_BASE}/export/csv`, { method: 'POST', body: data ?? {} }),
 
     /** Import users from CSV file */
     importCsv: (file: File) =>

@@ -6,7 +6,7 @@ namespace Tnzi.Notification;
 /// 模板管理由 Template 模块提供，Notification 仅作为消费者
 /// 配置路径：Notification
 /// </summary>
-[DependsOn(typeof(EFCoreModule))]
+[DependsOn(typeof(EFCoreModule), typeof(AspNetCoreModule))]
 [OptionalDependsOn(typeof(TemplateModule))]
 public class NotificationModule : TnziApplicationModule
 {

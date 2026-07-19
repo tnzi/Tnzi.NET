@@ -6,7 +6,7 @@ using MockQueryable.Moq;
 using Moq;
 using Tnzi.Domain.Repositories;
 using Tnzi.Feature.Entities;
-using Tnzi.Feature.Features;
+using Tnzi.Feature.Services;
 using Tnzi.Feature.Options;
 
 namespace Tnzi.Feature.Tests;

@@ -180,7 +180,7 @@ public class BillService : ApplicationService, IBillService
         if (bill.Lines.Count == 0)
             return Fail<BillDto>("The bill has no lines.", 400);
 
-        var guardResult = await _guards.CheckAsync(nameof(Bill), bill.Id.ToString(), FinancePostingOperation.Post, bill, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Bill, bill.Id.ToString(), FinancePostingOperation.Post, bill, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<BillDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
@@ -194,10 +194,10 @@ public class BillService : ApplicationService, IBillService
             return Fail<BillDto>(accountResult.Message ?? "Unable to resolve expense accounts.", accountResult.Code ?? 400);
         var lineAccounts = accountResult.Data!;
 
-        // 税额（过账时权威重算）
+        // 税额（过账时权威重算；行手动覆盖额透传）
         var taxResult = await _helper.CalculateTaxAsync(
-            bill.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId }).ToList(),
-            cancellationToken);
+            bill.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId, TaxAmount = l.TaxAmount }).ToList(),
+            cancellationToken, isPurchase: true);
         if (!taxResult.Succeeded)
             return Fail<BillDto>(taxResult.Message ?? "Tax calculation failed.", taxResult.Code ?? 400);
         var tax = taxResult.Data!;
@@ -211,13 +211,23 @@ public class BillService : ApplicationService, IBillService
         if (!apResult.Succeeded)
             return Fail<BillDto>(apResult.Message!, apResult.Code ?? 400);
 
+        // 可抵扣税进 TaxReceivable（进项抵扣 + 申报口径）；不可抵扣税作为成本进 NonRecoverableTaxExpense。
         Account? taxAccount = null;
-        if (tax.TaxTotal != 0)
+        if (tax.Components.Any(c => c.TaxAmount != 0))
         {
             var taxAccountResult = await _helper.ResolveSystemAccountAsync(AccountSystemRole.TaxReceivable, cancellationToken);
             if (!taxAccountResult.Succeeded)
                 return Fail<BillDto>(taxAccountResult.Message!, taxAccountResult.Code ?? 400);
             taxAccount = taxAccountResult.Data;
+        }
+
+        Account? nonRecoverableAccount = null;
+        if (tax.NonRecoverableTotal != 0)
+        {
+            var nrResult = await _helper.ResolveSystemAccountAsync(AccountSystemRole.NonRecoverableTaxExpense, cancellationToken);
+            if (!nrResult.Succeeded)
+                return Fail<BillDto>(nrResult.Message!, nrResult.Code ?? 400);
+            nonRecoverableAccount = nrResult.Data;
         }
 
         var entry = new JournalEntry
@@ -227,7 +237,7 @@ public class BillService : ApplicationService, IBillService
             Memo = string.IsNullOrWhiteSpace(bill.Memo) ? "Bill" : $"Bill: {bill.Memo}",
             Currency = bill.Currency,
             ExchangeRate = bill.ExchangeRate,
-            SourceType = nameof(Bill),
+            SourceType = FinanceSourceTypes.Bill,
             SourceId = bill.Id.ToString()
         };
 
@@ -267,6 +277,18 @@ public class BillService : ApplicationService, IBillService
             });
         }
 
+        if (nonRecoverableAccount != null)
+        {
+            entry.Lines.Add(new JournalLine
+            {
+                LineNumber = lineNo++,
+                AccountId = nonRecoverableAccount.Id,
+                TxnDebit = tax.NonRecoverableTotal,
+                Currency = bill.Currency,
+                Memo = "Non-recoverable tax"
+            });
+        }
+
         Result postResult;
         try
         {
@@ -280,7 +302,7 @@ public class BillService : ApplicationService, IBillService
 
                 // 单据号分配在全部可失败校验之后（回滚回收）
                 bill.Number = await _numberService.NextFormattedAsync(
-                    nameof(Bill), _options.BillNumberPrefix, _options.JournalNumberPadding, ct);
+                    FinanceSourceTypes.Bill, _options.BillNumberPrefix, _options.JournalNumberPadding, ct);
                 bill.Status = FinanceDocumentStatus.Posted;
                 bill.SubTotal = subTotal;
                 bill.TaxTotal = tax.TaxTotal;
@@ -305,7 +327,7 @@ public class BillService : ApplicationService, IBillService
 
         await PublishEventAsync(new FinanceDocumentPostedEvent
         {
-            DocType = nameof(Bill),
+            DocType = FinanceSourceTypes.Bill,
             DocId = bill.Id,
             Number = bill.Number!,
             JournalEntryId = entry.Id,
@@ -329,7 +351,7 @@ public class BillService : ApplicationService, IBillService
         if (bill.AppliedTotal != 0)
             return Fail<BillDto>("The bill has applied payments. Unapply them before voiding.", 409);
 
-        var guardResult = await _guards.CheckAsync(nameof(Bill), bill.Id.ToString(), FinancePostingOperation.Void, bill, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Bill, bill.Id.ToString(), FinancePostingOperation.Void, bill, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<BillDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
@@ -373,7 +395,7 @@ public class BillService : ApplicationService, IBillService
 
         await PublishEventAsync(new FinanceDocumentVoidedEvent
         {
-            DocType = nameof(Bill),
+            DocType = FinanceSourceTypes.Bill,
             DocId = bill.Id,
             Number = bill.Number,
             VoidJournalEntryId = reversal!.Id,
@@ -416,6 +438,10 @@ public class BillService : ApplicationService, IBillService
                 return Fail($"Line {lineNo}: quantity must be greater than zero.");
             if (line.UnitPrice < 0)
                 return Fail($"Line {lineNo}: unit price must not be negative.");
+            if (line.TaxAmount < 0)
+                return Fail($"Line {lineNo}: the manual tax amount must not be negative.");
+            if (line.TaxAmount.HasValue && !line.TaxCodeId.HasValue)
+                return Fail($"Line {lineNo}: a manual tax amount requires a tax code.");
 
             var item = line.ItemId.HasValue ? itemsResult.Data![line.ItemId.Value] : null;
             bill.Lines.Add(new BillLine
@@ -428,15 +454,16 @@ public class BillService : ApplicationService, IBillService
                 Quantity = line.Quantity,
                 UnitPrice = line.UnitPrice,
                 Amount = _helper.Round(line.Quantity * line.UnitPrice),
-                TaxCodeId = line.TaxCodeId
+                TaxCodeId = line.TaxCodeId,
+                TaxAmount = line.TaxAmount.HasValue ? _helper.Round(line.TaxAmount.Value) : null
             });
         }
 
         // 草稿预估总额（过账时权威重算并覆盖）
         bill.SubTotal = _helper.Round(bill.Lines.Sum(l => l.Amount));
         var draftTax = await _helper.CalculateTaxAsync(
-            bill.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId }).ToList(),
-            cancellationToken);
+            bill.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId, TaxAmount = l.TaxAmount }).ToList(),
+            cancellationToken, isPurchase: true);
         if (!draftTax.Succeeded)
             return Fail(draftTax.Message ?? "Tax calculation failed.", draftTax.Code ?? 400);
 

@@ -10,9 +10,9 @@
  */
 declare module '@tnzi/ui-ai' {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  export const WorkflowCanvas: any
+  export const TWorkflowCanvas: any
   // VueFlow primitives re-exported by @tnzi/ui-ai for consumers writing
-  // custom node templates (`#node-<type>` slot) against `WorkflowCanvas`.
+  // custom node templates (`#node-<type>` slot) against `TWorkflowCanvas`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export const Handle: any
   export const Position: {

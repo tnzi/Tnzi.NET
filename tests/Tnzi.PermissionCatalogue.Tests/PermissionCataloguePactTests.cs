@@ -1,6 +1,10 @@
+using System.Reflection;
+using Microsoft.AspNetCore.Mvc;
 using Tnzi.AI.Channels.Permissions;
+using Tnzi.AspNetCore.Mvc;
 using Tnzi.Authorization.Permissions;
 using Tnzi.Security.Authorization;
+using Tnzi.TestBase;
 using Tnzi.AI.Permissions;
 using Tnzi.AI.Rag.Permissions;
 using Tnzi.AI.Sandbox.Permissions;
@@ -11,6 +15,7 @@ using Tnzi.Audit.Permissions;
 using Tnzi.Chat.Permissions;
 using Tnzi.Feature.Permissions;
 using Tnzi.Finance.Permissions;
+using Tnzi.Finance.Payroll.Permissions;
 using Tnzi.Hangfire.Permissions;
 using Tnzi.HealthChecks.Permissions;
 using Tnzi.Identity.Permissions;
@@ -63,6 +68,7 @@ public class PermissionCataloguePactTests
             ["Chat"] = new ChatPermissions(),
             ["Payment"] = new PaymentPermissions(),
             ["Finance"] = new FinancePermissions(),
+            ["Finance.Payroll"] = new PayrollPermissions(),
             ["Template"] = new TemplatePermissions(),
             ["AI"] = new AIPermissions(),
             ["AI.Skills"] = new AISkillsPermissions(),
@@ -93,13 +99,21 @@ public class PermissionCataloguePactTests
 
         // Locked counts — bump these deliberately when adding/removing codes so
         // an accidental drift (front-end route added without a backend code, or
-        // vice versa) shows up as a failing test. 217 = the operation-level
+        // vice versa) shows up as a failing test. 259 = the operation-level
         // catalogue: every managed surface declares .view plus the write
         // actions its admin endpoints actually expose (incl. the userFunction
-        // direct-grant surface added 2026-07-10 and the finance.reconciliation
-        // bank-reconciliation surface added 2026-07-11).
-        codes.Count.ShouldBe(217);
-        context.Groups.Count.ShouldBe(11);
+        // direct-grant surface added 2026-07-10, the finance.reconciliation
+        // bank-reconciliation surface added 2026-07-11, the
+        // finance.revaluation view/execute pair added 2026-07-13, the
+        // payroll group's 14 codes added with the Payroll sub-module 2026-07-13,
+        // the 23 finance P3 output/ingestion codes added 2026-07-13:
+        // bankAccount/bankFeed/receipt/partyBank crud (4 each), check
+        // view/create/update (3), and eft view/create/update + download (4),
+        // the finance.balanceSummary view/execute pair added 2026-07-13
+        // with the account-period-balance summary surface, and chat.use
+        // added 2026-07-14 as the chat group's deny-by-default use gate).
+        codes.Count.ShouldBe(259);
+        context.Groups.Count.ShouldBe(12);
     }
 
     [Fact]
@@ -257,6 +271,7 @@ public class PermissionCataloguePactTests
     [InlineData("template.template.view", PermissionCategory.Business)]
     [InlineData("chat.session.view", PermissionCategory.Business)]
     [InlineData("finance.account.view", PermissionCategory.Business)]
+    [InlineData("payroll.employee.view", PermissionCategory.Business)]
     [InlineData("payment.order.view", PermissionCategory.Business)]
     [InlineData("ai.agent.view", PermissionCategory.Business)]
     [InlineData("ai.thread.view", PermissionCategory.Business)]
@@ -305,6 +320,9 @@ public class PermissionCataloguePactTests
     [InlineData("finance.account.view")]
     [InlineData("finance.journal.view")]
     [InlineData("finance.report.view")]
+    [InlineData("payroll.employee.view")]
+    [InlineData("payroll.config.view")]
+    [InlineData("payroll.run.view")]
     [InlineData("template.layout.view")]
     [InlineData("ai.agent.view")]
     [InlineData("ai.thread.view")]
@@ -332,6 +350,10 @@ public class PermissionCataloguePactTests
     [InlineData("ai.agentRun.execute")]
     [InlineData("system.scheduledJob.execute")]
     [InlineData("ai.evaluation.execute")]
+    // ...payroll's run lifecycle rides .update; country-pack seeding is a
+    // trigger with its own .execute (the only pack write surface).
+    [InlineData("payroll.run.update")]
+    [InlineData("payroll.pack.execute")]
     // ...and permission granting (role-scoped and user-direct) is the
     // dedicated assign action.
     [InlineData("authorization.roleFunction.assign")]
@@ -351,6 +373,9 @@ public class PermissionCataloguePactTests
     [InlineData("system.performance.delete")]
     [InlineData("payment.statistics.create")]
     [InlineData("finance.report.update")]
+    // Country packs are seed-only (.execute); crud codes would be dead rows.
+    [InlineData("payroll.pack.create")]
+    [InlineData("payroll.pack.delete")]
     [InlineData("ai.usage.delete")]
     [InlineData("dashboard.update")]
     // Sessions cannot be created by admins; roleFunction/userFunction use
@@ -365,6 +390,48 @@ public class PermissionCataloguePactTests
         var context = BuildContext();
         context.Permissions.ContainsKey(code).ShouldBeFalse(
             $"'{code}' must not exist - the surface exposes no such admin operation.");
+    }
+
+    [Fact]
+    public void Every_admin_controller_referenced_code_is_declared_by_some_provider()
+    {
+        // 全框架不变量：admin 控制器 [ApiAuthorize] 引用的每个权限码都必须由某个
+        // provider 声明，否则该门永远无人可被授予（端点恒 403）——三层 AND 门里
+        // 编译器与写端点约定测试都不校验的一环。扫描集 = 全部 provider 所在程序集
+        // （控制器与其权限声明同程序集）；对聚合目录校验，兼容合法的跨模块复用码
+        // （如 receipts convert 复用 finance.document.create）。基类 Admin.Manage
+        // 经 inherit:false 排除；运行时派生的动态码（{group}.settings.* 等）不经
+        // 控制器 attribute 引用，不在扫描面。
+        var declared = BuildContext().Permissions.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assemblies = AllProviders.Values.Select(p => p.GetType().Assembly).Distinct().ToList();
+
+        var controllers = assemblies
+            .SelectMany(a => a.SafeGetTypes())
+            .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(ApiAdminControllerBase).IsAssignableFrom(t))
+            .OrderBy(t => t.FullName)
+            .ToList();
+
+        // 哨兵：扫描失效（基类搬家/程序集缺失）时显式失败而非空转全绿。
+        controllers.Count.ShouldBeGreaterThanOrEqualTo(80);
+
+        var violations = new List<string>();
+        foreach (var controller in controllers)
+        {
+            var referenced = controller.GetCustomAttributes<ApiAuthorizeAttribute>(inherit: false)
+                .Concat(controller.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+                    .SelectMany(m => m.GetCustomAttributes<ApiAuthorizeAttribute>(inherit: false)))
+                .Select(a => a.PermissionName)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var code in referenced)
+            {
+                if (!declared.Contains(code!))
+                    violations.Add($"{controller.Name} references '{code}' which no provider declares - the gate could never be granted (endpoint is permanently 403).");
+            }
+        }
+
+        violations.ShouldBeEmpty(string.Join("\n", violations));
     }
 
     [Fact]

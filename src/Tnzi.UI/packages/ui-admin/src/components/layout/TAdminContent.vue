@@ -65,13 +65,9 @@ defineExpose({ currentTransition })
 .t-admin-content[data-full-content='true'] {
   padding: 0;
 }
-/* Phone: trim the content gutter so list cards / tables reclaim the scarce
-   horizontal space (16px → 10px each side = +12px usable on a 375px screen). */
-@media (max-width: 767px) {
-  .t-admin-content {
-    padding: 10px;
-  }
-}
+/* Phone gutter is driven entirely by the `--tnzi-admin-content-padding` token
+   (variables.css steps it 12 → 10 <768px → 8 <480px). No hardcoded phone media
+   query here — that used to pin 10px and defeat the 8px step on small phones. */
 .t-admin-content__page {
   height: 100%;
   min-height: 0;

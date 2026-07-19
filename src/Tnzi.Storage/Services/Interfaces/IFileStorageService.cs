@@ -106,9 +106,10 @@ public interface IFileStorageService
 
     // File tags
     /// <summary>
-    /// Set tags for a file (replaces existing tags).
+    /// Set tags for a file (replaces existing tags). Returns the updated
+    /// FileRecord entity; controllers project it to the safe FileRecordDto.
     /// </summary>
-    Task<Result<FileInfoDto>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
+    Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get files by tag (supports paging).
@@ -117,9 +118,10 @@ public interface IFileStorageService
 
     // File metadata
     /// <summary>
-    /// Set metadata for a file (replaces existing metadata).
+    /// Set metadata for a file (replaces existing metadata). Returns the updated
+    /// FileRecord entity; controllers project it to the safe FileRecordDto.
     /// </summary>
-    Task<Result<FileInfoDto>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default);
+    Task<Result<FileRecord>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get metadata for a file.

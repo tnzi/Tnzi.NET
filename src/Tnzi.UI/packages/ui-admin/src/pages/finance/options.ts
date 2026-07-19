@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
 import type { SelectOption as NaiveSelectOption } from 'naive-ui'
-import type { AccountTreeDto, FinanceBridge, TaxRateDto } from '../../services/bridges/finance-bridge'
+import { CashFlowActivity, type AccountTreeDto, type FinanceBridge, type TaxRateDto } from '../../services/bridges/finance-bridge'
 
 /** naive-ui 的 SelectOption 别名（保证 NSelect :options 直接可绑）。 */
 export type SelectOption = NaiveSelectOption
@@ -44,6 +44,24 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     return options
   })
 
+  function flattenFundsLeaves(nodes: AccountTreeDto[], into: SelectOption[]) {
+    for (const node of nodes) {
+      if (!node.isGroup && node.isActive && node.cashFlowActivity === CashFlowActivity.CashEquivalent) {
+        into.push({ label: `${node.code} ${node.name}`, value: node.id })
+      }
+      flattenFundsLeaves(node.children ?? [], into)
+    }
+  }
+
+  // Cash / bank funds accounts only (CashEquivalent) — bank account profiles
+  // and bank-feed selection require a funds account, not any leaf.
+  const fundsAccounts = lazy<SelectOption>(async () => {
+    const tree = await bridge.accounts.tree(false)
+    const options: SelectOption[] = []
+    flattenFundsLeaves(tree, options)
+    return options
+  })
+
   const customers = lazy<SelectOption>(async () => {
     const page = await bridge.customers.fetch({ pageIndex: 1, pageSize: 200, filters: { isActive: true } })
     return page.items.map((c) => ({ label: c.name, value: c.id }))
@@ -74,6 +92,8 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
   return {
     leafAccountOptions: leafAccounts.options,
     ensureLeafAccounts: leafAccounts.ensure,
+    fundsAccountOptions: fundsAccounts.options,
+    ensureFundsAccounts: fundsAccounts.ensure,
     customerOptions: customers.options,
     ensureCustomers: customers.ensure,
     vendorOptions: vendors.options,

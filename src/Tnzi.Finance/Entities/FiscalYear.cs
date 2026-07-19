@@ -38,4 +38,14 @@ public class FiscalYear : MultiTenantAuditedEntity<Guid>
     /// 关闭人ID
     /// </summary>
     public Guid? ClosedById { get; set; }
+
+    /// <summary>
+    /// 最近一次重开时间（重开=解除区间锁定，敏感控制动作，须留痕）
+    /// </summary>
+    public DateTime? ReopenedTime { get; set; }
+
+    /// <summary>
+    /// 最近一次重开人ID
+    /// </summary>
+    public Guid? ReopenedById { get; set; }
 }

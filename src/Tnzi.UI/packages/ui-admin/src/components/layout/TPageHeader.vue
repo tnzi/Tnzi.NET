@@ -51,14 +51,22 @@ import { NPopover } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { DEFAULT_ROUTE_ICONS } from '../../router/routeIcons'
 import { maybeTranslateKey } from '../../pages/_shared/translate'
+import { runBack } from './backTarget'
 
 interface Props {
   title?: string
   icon?: string
   help?: string
   helpTitle?: string
-  /** Show a back affordance. `true` → router.back(); a string → router.push(path). */
-  back?: boolean | string
+  /**
+   * Show a back affordance.
+   *  - `true`   → `router.back()` (browser history).
+   *  - `string` → `router.push(path)` (a static parent).
+   *  - `{ fallback }` → SMART back: in-app history when present (restores the
+   *    origin WITH its `?section=…` deep-link), else push `fallback`. Preferred
+   *    for a drilled-into detail page. See {@link BackTarget}.
+   */
+  back?: boolean | string | { fallback?: string }
   bordered?: boolean
   /** Render the header as a white surface card (bg + radius + soft shadow). */
   surface?: boolean
@@ -121,11 +129,7 @@ const resolvedHelpTitle = computed(() =>
 
 const showBack = computed(() => props.back !== undefined && props.back !== false)
 function onBack(): void {
-  if (typeof props.back === 'string') {
-    router?.push(props.back)
-    return
-  }
-  router?.back()
+  runBack(props.back, router)
 }
 </script>
 

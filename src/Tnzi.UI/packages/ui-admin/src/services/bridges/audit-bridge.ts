@@ -16,10 +16,10 @@
  *   Both sub-contracts delegate to the same API; the split reflects different
  *   page views (log-centric vs operation-centric column sets) not different endpoints.
  *
- *   logs.export: backend provides /export/csv and /export/json URL resolvers but
- *   no direct Blob-returning client method. export() returns the CSV URL as a Blob
- *   containing the URL string — callers should use window.open(url) instead.
- *   This is documented as a BACKEND GAP: no direct POST-to-blob admin client method.
+ *   logs.exportCsv/exportJson: direct Blob downloads via client.download
+ *   (POST with AuditOperationQueryDto body; backend returns UTF-8 BOM CSV /
+ *   JSON file with ApiResult envelope on failure). Trigger the browser save
+ *   with downloadBlob from @tnzi/core/utils.
  */
 import {
   useAdminAuditApi,
@@ -40,10 +40,17 @@ export interface AuditBridgeDeps {
 
 export interface AuditBridge {
   logs: BridgeCrudContract<AuditOperationDto> & {
-    /** Returns export CSV URL as string (no direct blob endpoint in backend). */
-    exportCsvUrl(): string
+    /** Full detail by id — includes entityEntries/propertyEntries (list rows do not). */
+    detail(id: string): Promise<AuditOperationDto>
+    /** Export filtered audit operations as a CSV Blob (UTF-8 BOM). */
+    exportCsv(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
+    /** Export filtered audit operations as a JSON Blob. */
+    exportJson(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
   }
-  operations: BridgeCrudContract<AuditOperationDto>
+  operations: BridgeCrudContract<AuditOperationDto> & {
+    /** Full detail by id — includes entityEntries/propertyEntries (list rows do not). */
+    detail(id: string): Promise<AuditOperationDto>
+  }
 }
 
 const readOnlyReject = (): Promise<never> =>
@@ -55,8 +62,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   if (!auditApi) {
     const noFetch = () => Promise.reject(new Error('createAuditBridge: no deps provided'))
     return {
-      logs: { fetch: noFetch as never, create: readOnlyReject, update: readOnlyReject, delete: readOnlyReject, exportCsvUrl: () => '' },
-      operations: { fetch: noFetch as never, create: readOnlyReject, update: readOnlyReject, delete: readOnlyReject },
+      logs: { fetch: noFetch as never, detail: noFetch as never, create: readOnlyReject, update: readOnlyReject, delete: readOnlyReject, exportCsv: noFetch as never, exportJson: noFetch as never },
+      operations: { fetch: noFetch as never, detail: noFetch as never, create: readOnlyReject, update: readOnlyReject, delete: readOnlyReject },
     }
   }
 
@@ -84,18 +91,26 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
     })
   }
 
+  // Detail by id — the list endpoint returns rows WITHOUT entityEntries; the
+  // GET-by-id endpoint Includes the full entity/property change tree.
+  const detail = async (id: string): Promise<AuditOperationDto> =>
+    unwrap<AuditOperationDto>(await api.getById(id))
+
   const logs: AuditBridge['logs'] = {
     // Request-level full view — no implicit filter.
     fetch: (query) => fetchAudit(query),
+    detail,
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,
-    exportCsvUrl: () => api.getExportCsvUrl(),
+    exportCsv: async (query) => unwrap<Blob>(await api.exportCsv((query ?? {}) as AuditOperationQueryDto)),
+    exportJson: async (query) => unwrap<Blob>(await api.exportJson((query ?? {}) as AuditOperationQueryDto)),
   }
 
   const operations: AuditBridge['operations'] = {
     // Change-type operations view — write methods only.
     fetch: (query) => fetchAudit(query, { isWriteOperation: true }),
+    detail,
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,
@@ -104,8 +119,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   return { logs, operations }
 }
 
-// 0.2.72+ (B4): re-export the enum so pages can consume the runtime value
+// 0.2.72+ (B4): re-export the enums so pages can consume the runtime values
 // via the bridge surface and stay clean under the `no-restricted-imports`
 // guard against `@tnzi/core/services/*` value imports from `pages/**`.
-export { AuditResultType } from '@tnzi/core/services/audit'
-export type { AuditOperationDto } from '@tnzi/core/services/audit'
+export { AuditResultType, EntityChangeType } from '@tnzi/core/services/audit'
+export type { AuditOperationDto, AuditEntityEntryDto, AuditPropertyEntryDto } from '@tnzi/core/services/audit'

@@ -76,7 +76,8 @@ public class DefaultPaymentStatisticsAdminController : ApiAdminControllerBase
         var result = await _statisticsService.ExportReconciliationAsync(query);
         if (!result.Succeeded)
         {
-            return BadRequest(result.ToApiResult());
+            // 按 Result 状态码透传标准信封,前端 download 客户端解析错误 body 提取 message
+            return StatusCode(result.Code ?? 400, result.ToApiResult());
         }
 
         var data = result.Data!;

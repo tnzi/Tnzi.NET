@@ -3,7 +3,7 @@ namespace Tnzi.Audit;
 /// <summary>
 /// 审计模块
 /// </summary>
-[DependsOn(typeof(AspNetCoreModule))]
+[DependsOn(typeof(EFCoreModule), typeof(AspNetCoreModule))]
 public class AuditModule : TnziApplicationModule
 {
     /// <summary>
@@ -35,6 +35,15 @@ public class AuditModule : TnziApplicationModule
 
         // 注册审计存储
         context.Services.AddScoped<IAuditStore, DatabaseAuditStore>();
+
+        // 实体级审计采集管道：EF SaveChanges 拦截器 + per-request collector。
+        // 拦截器注册为 IInterceptor 服务，经 Tnzi.EFCore 的 AddTnziDbContext seam
+        // 自动挂进所有 Tnzi DbContext——仅 Audit 模块加载时生效（未加载则 seam
+        // 解析不到任何 IInterceptor，零开销）。两者均 Scoped：DbContext options
+        // 按 scope 构建，拦截器与 AuditMiddleware（从 RequestServices 解析）
+        // 拿到的是同一个请求级 collector 实例。
+        context.Services.AddScoped<IEntityAuditCollector, EntityAuditCollector>();
+        context.Services.AddScoped<IInterceptor, EntityAuditSaveChangesInterceptor>();
 
         // 注册操作审计服务
         context.Services.AddScoped<IAuditOperationService, AuditOperationService>();

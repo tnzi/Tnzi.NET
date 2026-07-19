@@ -134,6 +134,57 @@ public class FinanceOptions
         Type = SettingFieldType.String, Subsection = "Numbering",
         Description = "Prefix for fund transfer numbers. Change at period boundaries to avoid numbering continuity gaps.")]
     public string TransferNumberPrefix { get; set; } = "TRF-";
+
+    /// <summary>EFT 批次编号前缀（P3 EFT 输出）</summary>
+    [RuntimeSetting(Label = "EFT Batch Number Prefix", I18n = "admin.modules.system.settings.fields.eftNumberPrefix",
+        Type = SettingFieldType.String, Subsection = "Numbering",
+        Description = "Prefix for EFT batch numbers. Change at period boundaries to avoid numbering continuity gaps.")]
+    public string EftNumberPrefix { get; set; } = "EFT-";
+
+    /// <summary>
+    /// 银行流水匹配的日期窗口（天）。规则 2（金额相等 + 候选唯一）在此窗口内匹配。
+    /// </summary>
+    [RuntimeSetting(Label = "Bank Match Date Window (days)", I18n = "admin.modules.system.settings.fields.bankMatchDateWindowDays",
+        Type = SettingFieldType.Int, Min = 0, Max = 90, Subsection = "Banking",
+        Description = "Day window used when matching an imported bank transaction to a ledger line by amount. 0 requires the same day.")]
+    public int BankMatchDateWindowDays { get; set; } = 7;
+
+    /// <summary>
+    /// 是否在存在 Draft 对账时对精确匹配（规则 1）自动确认生成勾选行。
+    /// </summary>
+    [RuntimeSetting(Label = "Auto-confirm Exact Bank Matches", I18n = "admin.modules.system.settings.fields.bankFeedAutoConfirmExactMatches",
+        Type = SettingFieldType.Boolean, Subsection = "Banking",
+        Description = "When enabled, an exact reference match auto-generates the reconciliation line if a draft reconciliation exists.")]
+    public bool BankFeedAutoConfirmExactMatches { get; set; }
+
+    /// <summary>
+    /// 单次银行流水导入的最大行数（防御性上限，超限整批拒绝）。
+    /// </summary>
+    [RuntimeSetting(Label = "Bank Import Max Rows", I18n = "admin.modules.system.settings.fields.bankImportMaxRows",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Banking",
+        Description = "Maximum number of transactions accepted in a single statement import; a larger file is rejected.")]
+    public int BankImportMaxRows { get; set; } = 10000;
+
+    /// <summary>
+    /// E-13B MICR 字体文件路径（仅白纸全打印支票需要；预印票纸不打 MICR 行时留空）。
+    /// </summary>
+    [RuntimeSetting(Label = "Check MICR Font Path", I18n = "admin.modules.system.settings.fields.checkMicrFontPath",
+        Type = SettingFieldType.String, Required = false, Subsection = "Checks",
+        Description = "Filesystem path to an E-13B MICR TrueType font, required only when printing checks on blank stock.")]
+    public string? CheckMicrFontPath { get; set; }
+
+    /// <summary>
+    /// 报表是否从 AccountPeriodBalance 月粒度汇总桶读取聚合（默认 false）。
+    /// 汇总维护无条件启用（每凭证过账/冲销同事务累加）；此开关仅门控读路径。
+    /// </summary>
+    /// <remarks>
+    /// **存量账本启用前 MUST 先 POST admin/finance/balance-summary/rebuild** 重建历史桶，
+    /// 否则报表会漏读汇总覆盖的历史月（新部署从空账本开始，开箱即真）。切换后经 verify 端点核实一致。
+    /// </remarks>
+    [RuntimeSetting(Label = "Use Balance Summary", I18n = "admin.modules.system.settings.fields.useBalanceSummary",
+        Type = SettingFieldType.Boolean, Subsection = "Reports",
+        Description = "Serve report aggregates from the account period-balance summary. On an existing ledger, rebuild the summary first before enabling.")]
+    public bool UseBalanceSummary { get; set; }
 }
 
 /// <summary>

@@ -108,10 +108,11 @@ export interface TDetailHostProps<T> {
   icon?: string
   /**
    * Page-mode back affordance: `true` → `router.back()`, a string → push that
-   * path, `false` → no back button (a top-level page reached from the menu, not
-   * drilled into by id). Default `true`. Ignored in modal/drawer mode.
+   * path, `{ fallback }` → smart back (in-app history, else push `fallback` —
+   * preferred for a drilled-into detail), `false` → no back button (a top-level
+   * page reached from the menu). Default `true`. Ignored in modal/drawer mode.
    */
-  back?: boolean | string
+  back?: boolean | string | { fallback?: string }
   /** Page-mode content max-width (forwarded to `TDetailLayout`). */
   contentMaxWidth?: number | string
 }

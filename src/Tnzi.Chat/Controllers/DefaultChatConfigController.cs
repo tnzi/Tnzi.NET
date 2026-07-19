@@ -13,8 +13,8 @@ public class DefaultChatConfigController : ApiControllerBase
         Config = Check.NotNull(config);
     }
 
-    /// <summary>客户端功能配置（前端聊天窗按此显隐群聊/附件/在线状态等入口）。</summary>
+    /// <summary>客户端功能配置（前端聊天窗按此显隐聊天入口/群聊/附件/在线状态等）。</summary>
     [HttpGet("config")]
-    public virtual ApiResult<ChatClientConfigDto> GetConfig()
-        => Config.GetClientConfig().ToApiResult();
+    public virtual async Task<ApiResult<ChatClientConfigDto>> GetConfig()
+        => (await Config.GetClientConfigAsync()).ToApiResult();
 }

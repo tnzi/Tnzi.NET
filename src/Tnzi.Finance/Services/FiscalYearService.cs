@@ -92,8 +92,11 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
             return Fail("Fiscal year is not closed.", 409);
 
         fiscalYear.IsClosed = false;
-        fiscalYear.ClosedTime = null;
-        fiscalYear.ClosedById = null;
+        // Keep ClosedTime/ClosedById as the last-close trace and record who reopened
+        // and when: reopening a locked period is a sensitive control action that
+        // auditors expect to be attributable, so it must not erase all history.
+        fiscalYear.ReopenedTime = TimeProvider.GetUtcNow().UtcDateTime;
+        fiscalYear.ReopenedById = CurrentUser?.Id;
 
         await _fiscalYearRepository.UpdateAsync(fiscalYear, cancellationToken);
         return Ok();
@@ -104,6 +107,12 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
         var fiscalYear = await _fiscalYearRepository.GetAsync(id, cancellationToken);
         if (fiscalYear == null)
             return Fail("Fiscal year not found.", 404);
+
+        // 已关闭的年度本身就是那把期间锁：ValidatePostingDateAsync 判定能否入账的唯一依据，
+        // 就是"有没有一个已关闭年度覆盖该日期"。若允许删除，锁就被静默拆掉、倒填立刻放行，
+        // 于是 .delete 权限凭空隐含了撤销 .close 的能力。Reopen 是唯一留痕的解锁路径。
+        if (fiscalYear.IsClosed)
+            return Fail($"Fiscal year '{fiscalYear.Name}' is closed and cannot be deleted. Reopen it first.", 409);
 
         await _fiscalYearRepository.DeleteAsync(fiscalYear, cancellationToken);
         return Ok();

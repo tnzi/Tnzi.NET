@@ -1,3 +1,4 @@
+using Tnzi.AI.Tools.Sql;
 using McpClientFactory = Tnzi.AI.Infrastructure.Mcp.McpClientFactory;
 
 namespace Tnzi.AI;
@@ -455,14 +456,14 @@ public partial class AIModule
         // implementation by replacing this registration with FrameworkPermissionSqlCheck or
         // their own IReadOnlySqlPermissionCheck. The DbConnection factory MUST be registered
         // by the application — without it, IReadOnlySqlExecutor cannot be resolved.
-        services.AddSingleton<Tools.Sql.ISqlValidator, Tools.Sql.RestrictiveSqlValidator>();
-        services.AddSingleton<Tools.Sql.ISqlColumnInferrer, Tools.Sql.HeuristicSqlColumnInferrer>();
-        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.TSqlSchemaProvider>();
-        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.PostgreSqlSchemaProvider>();
-        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.MySqlSchemaProvider>();
-        services.AddSingleton<Tools.Sql.ISqlSchemaProvider, Tools.Sql.SqliteSchemaProvider>();
-        services.AddScoped<Tools.Sql.IReadOnlySqlExecutor, Tools.Sql.ReadOnlySqlExecutor>();
-        services.AddScoped<Tools.Sql.ISchemaInspector, Tools.Sql.SchemaInspector>();
-        services.TryAddScoped<Tools.Sql.IReadOnlySqlPermissionCheck, Tools.Sql.DenyAllSqlPermissionCheck>();
+        services.AddSingleton<ISqlValidator, RestrictiveSqlValidator>();
+        services.AddSingleton<ISqlColumnInferrer, HeuristicSqlColumnInferrer>();
+        services.AddSingleton<ISqlSchemaProvider, TSqlSchemaProvider>();
+        services.AddSingleton<ISqlSchemaProvider, PostgreSqlSchemaProvider>();
+        services.AddSingleton<ISqlSchemaProvider, MySqlSchemaProvider>();
+        services.AddSingleton<ISqlSchemaProvider, SqliteSchemaProvider>();
+        services.AddScoped<IReadOnlySqlExecutor, ReadOnlySqlExecutor>();
+        services.AddScoped<ISchemaInspector, SchemaInspector>();
+        services.TryAddScoped<IReadOnlySqlPermissionCheck, DenyAllSqlPermissionCheck>();
     }
 }

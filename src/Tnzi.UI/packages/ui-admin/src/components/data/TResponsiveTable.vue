@@ -1,7 +1,9 @@
 <template>
   <!-- Mobile (<768px) card mode: derive a stacked card list from the naive
        column defs. The detected action column(s) render into each card's
-       footer; everything else becomes a label/value row. -->
+       footer; everything else becomes a label/value row. `row-props` makes
+       the cards clickable and `summary` renders as a totals card, so both
+       survive the table→card switch instead of silently dropping. -->
   <div v-if="useCards" class="t-responsive-table t-responsive-table--cards">
     <TDataCardList
       :items="rows"
@@ -9,6 +11,8 @@
       :row-key="cardRowKey"
       :loading="loading"
       :empty-text="emptyText"
+      :card-props="cardProps"
+      :summary-rows="cardSummaryRows"
     >
       <template v-if="actionColumns.length" #actions="{ row, index }">
         <ActionCell :row="row" :index="index" />
@@ -30,8 +34,10 @@
 
   <!-- Desktop / tablet (or mobile="scroll"): pass straight through to
        NDataTable. All extra attrs (size, bordered, flex-height, remote,
-       checked-row-keys, …) flow via $attrs untouched. `scroll-x` is added
-       so wide tables scroll horizontally instead of crushing columns. -->
+       checked-row-keys, …) flow via $attrs untouched; `row-props`/`summary`
+       are declared props (the cards branch consumes them too) and forwarded
+       explicitly. `scroll-x` is added so wide tables scroll horizontally
+       instead of crushing columns. -->
   <NDataTable
     v-else
     class="t-responsive-table"
@@ -41,6 +47,8 @@
     :row-key="ndtRowKey"
     :pagination="pagination"
     :scroll-x="scrollX"
+    :row-props="ndtRowProps"
+    :summary="ndtSummary"
     v-bind="$attrs"
   >
     <!-- Forward consumer slots (#empty, #loading, …) to the underlying
@@ -54,7 +62,13 @@
 
 <script setup lang="ts" generic="T = any">
 import { computed, defineComponent, h, useSlots, type Component, type PropType, type VNodeChild } from 'vue'
-import { NDataTable, NPagination, type DataTableColumns } from 'naive-ui'
+import {
+  NDataTable,
+  NPagination,
+  type DataTableColumns,
+  type DataTableCreateRowProps,
+  type DataTableCreateSummary,
+} from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import { estimateRowActionsWidth, type RowAction } from '../../headless/rowActions'
 import TRowActions from '../crud/TRowActions.vue'
@@ -70,6 +84,12 @@ export interface TResponsivePagination {
   // accept and ignore the extras.
   [key: string]: unknown
 }
+
+/** One naive-compatible summary row: column key → summary cell. */
+export type TResponsiveSummaryRow = Record<
+  string,
+  { value?: VNodeChild; colSpan?: number; rowSpan?: number }
+>
 
 export interface TResponsiveTableProps<T = unknown> {
   /** Naive `DataTableColumns` (forwarded verbatim on desktop). */
@@ -99,6 +119,20 @@ export interface TResponsiveTableProps<T = unknown> {
   rowActionsTitle?: string
   /** Translator forwarded to {@link TRowActions} for its built-in labels. */
   translate?: (key: string) => string
+  /**
+   * naive `row-props` equivalent. Desktop: forwarded to `NDataTable` verbatim.
+   * Mobile cards: the returned attrs/handlers are applied to each card so row
+   * click-through (drill-in) keeps working — a result carrying `onClick` also
+   * gives the card pointer/hover affordance.
+   */
+  rowProps?: (row: T, index: number) => Record<string, unknown>
+  /**
+   * naive `summary` equivalent (same column-keyed cell contract). Desktop:
+   * forwarded to `NDataTable` verbatim. Mobile cards: the summary row(s)
+   * render as a totals card at the bottom of the list (`colSpan`/`rowSpan`
+   * have no card equivalent and are ignored).
+   */
+  summary?: (pageData: T[]) => TResponsiveSummaryRow | TResponsiveSummaryRow[]
 }
 
 // $slots 的 Readonly 推断类型在声明产物（vite-plugin-dts）下无法用动态键
@@ -128,6 +162,8 @@ const props = withDefaults(defineProps<TResponsiveTableProps<T>>(), {
   rowActions: undefined,
   rowActionsTitle: undefined,
   translate: undefined,
+  rowProps: undefined,
+  summary: undefined,
 })
 
 // Pass-through extra attrs to NDataTable (size, bordered, flex-height, etc.).
@@ -144,6 +180,8 @@ const ndtData = computed(() => props.data as unknown as Row[])
 const ndtRowKey = computed(
   () => props.rowKey as unknown as ((row: Row) => string | number) | undefined,
 )
+const ndtRowProps = computed(() => props.rowProps as unknown as DataTableCreateRowProps | undefined)
+const ndtSummary = computed(() => props.summary as unknown as DataTableCreateSummary | undefined)
 
 // Column list, plus a synthesised right-fixed operation column when
 // `rowActions` is supplied. Everything downstream (desktop table, mobile card
@@ -226,6 +264,31 @@ const ActionCell = defineComponent({
   setup(p) {
     return () => actionColumns.value.map((c) => (c.render ? c.render(p.row, p.index) : null))
   },
+})
+
+/** Mobile card counterpart of `rowProps` — same function, Row-typed. */
+const cardProps = computed(
+  () => props.rowProps as unknown as ((row: Row, index: number) => Record<string, unknown>) | undefined,
+)
+
+/** Resolve the naive summary contract into per-column value maps for the
+ *  totals card (colSpan/rowSpan have no card equivalent — dropped). */
+const cardSummaryRows = computed<Record<string, VNodeChild>[]>(() => {
+  const create = props.summary as unknown as
+    | ((pageData: Row[]) => TResponsiveSummaryRow | TResponsiveSummaryRow[])
+    | undefined
+  if (!create || rows.value.length === 0) return []
+  const produced = create(rows.value)
+  const list = Array.isArray(produced) ? produced : [produced]
+  return list
+    .map((srow) => {
+      const resolved: Record<string, VNodeChild> = {}
+      for (const [key, cell] of Object.entries(srow)) {
+        if (cell?.value !== undefined) resolved[key] = cell.value
+      }
+      return resolved
+    })
+    .filter((srow) => Object.keys(srow).length > 0)
 })
 
 // Only surface a mobile pager for *controlled remote* pagination (has an

@@ -12,9 +12,11 @@ public class SettingConfiguration : EntityTypeConfigurationBase<Setting, Guid>
             .IsRequired()
             .HasMaxLength(100);
 
+        // Value 不设长度上限：除普通短设置外，还复用于存储 Appearance 主题快照等大 JSON
+        // 文档（64KB 契约）。设 HasMaxLength(2000) 会在 SQL Server/PostgreSQL 上截断，
+        // 故省略长度映射为 nvarchar(max)/text（不用库特定 HasColumnType）。
         builder.Property(s => s.Value)
-            .IsRequired()
-            .HasMaxLength(2000);
+            .IsRequired();
 
         builder.Property(s => s.Description)
             .HasMaxLength(500);

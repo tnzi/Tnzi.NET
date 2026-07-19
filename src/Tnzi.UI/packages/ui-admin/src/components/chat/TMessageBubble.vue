@@ -35,36 +35,57 @@
       <!-- Sender name above bubble in group chats -->
       <span v-if="showSender && !mine" class="t-bubble-sender">{{ message.senderName }}</span>
 
-      <!-- Image: NImage gives a click-to-zoom lightbox (with prev/next across the
-           whole thread via the NImageGroup wrapper in TMessageList) instead of
-           opening a raw link in a new tab. -->
-      <NImage
-        v-if="message.contentType === MessageContentType.Image"
-        class="t-bubble-image"
-        :src="fileUrl ?? ''"
-        :img-props="{ alt: message.fileName ?? 'image', class: 't-bubble-image__img' }"
-        object-fit="cover"
-      />
+      <!-- The bubble line carries the WeChat-style failed marker: a red circle-!
+           to the LEFT of my own failed bubble; tapping it resends the message. -->
+      <div class="t-bubble-line">
+        <button
+          v-if="mine && message.failed"
+          type="button"
+          class="t-bubble-retry"
+          :title="message.failReason || retryLabel"
+          @click="emit('retry', message)"
+        >
+          <Icon icon="mdi:alert-circle" :width="18" />
+        </button>
 
-      <!-- File: download chip inside a bubble -->
-      <div
-        v-else-if="message.contentType === MessageContentType.File"
-        class="t-bubble"
-        :class="mine ? 't-bubble--mine' : 't-bubble--other'"
-      >
-        <a class="t-bubble-file" :href="fileUrl ?? '#'" target="_blank" rel="noopener noreferrer" download>
-          <span class="t-bubble-file__icon"><Icon :icon="fileIcon" :width="28" :style="{ color: fileIconColor }" /></span>
-          <span class="t-bubble-file__meta">
-            <span class="t-bubble-file__name">{{ message.fileName ?? 'File' }}</span>
-            <span v-if="fileSizeLabel" class="t-bubble-file__size">{{ fileSizeLabel }}</span>
-          </span>
-        </a>
+        <!-- Image: NImage gives a click-to-zoom lightbox (with prev/next across the
+             whole thread via the NImageGroup wrapper in TMessageList) instead of
+             opening a raw link in a new tab. -->
+        <NImage
+          v-if="message.contentType === MessageContentType.Image"
+          class="t-bubble-image"
+          :src="fileUrl ?? ''"
+          :img-props="{ alt: message.fileName ?? 'image', class: 't-bubble-image__img' }"
+          object-fit="cover"
+        />
+
+        <!-- File: download chip inside a bubble -->
+        <div
+          v-else-if="message.contentType === MessageContentType.File"
+          class="t-bubble"
+          :class="mine ? 't-bubble--mine' : 't-bubble--other'"
+        >
+          <a class="t-bubble-file" :href="fileUrl ?? '#'" target="_blank" rel="noopener noreferrer" download>
+            <span class="t-bubble-file__icon"><Icon :icon="fileIcon" :width="28" :style="{ color: fileIconColor }" /></span>
+            <span class="t-bubble-file__meta">
+              <span class="t-bubble-file__name">{{ message.fileName ?? 'File' }}</span>
+              <span v-if="fileSizeLabel" class="t-bubble-file__size">{{ fileSizeLabel }}</span>
+            </span>
+          </a>
+        </div>
+
+        <!-- Text -->
+        <div v-else class="t-bubble" :class="mine ? 't-bubble--mine' : 't-bubble--other'">
+          {{ message.content }}
+        </div>
       </div>
 
-      <!-- Text -->
-      <div v-else class="t-bubble" :class="mine ? 't-bubble--mine' : 't-bubble--other'">
-        {{ message.content }}
-      </div>
+      <!-- Inline failure reason (like WeChat's "sent but rejected by receiver"):
+           states WHY the send failed so the user reads it as a permission wall,
+           not a transient glitch. -->
+      <span v-if="mine && message.failed && message.failReason" class="t-bubble-fail-reason">
+        {{ message.failReason }}
+      </span>
     </div>
   </div>
 </template>
@@ -74,13 +95,13 @@ import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NImage } from 'naive-ui'
 import { MessageContentType } from '@tnzi/core/services/chat'
-import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import { resolveChatAvatarUrl } from './avatar'
 import { translatePageKey } from '../../pages/_shared/translate'
+import type { ChatMessageView } from '../../stores/useChatStore'
 import TChatAvatar from './TChatAvatar.vue'
 
 const props = defineProps<{
-  message: ChatMessageDto
+  message: ChatMessageView
   mine: boolean
   showSender: boolean
   /** True when rendered inside a System (notifications) conversation — system
@@ -95,11 +116,19 @@ const props = defineProps<{
   myAvatarFileId?: string | null
 }>()
 
+const emit = defineEmits<{
+  /** Resend a failed message (the red retry marker was clicked). */
+  retry: [message: ChatMessageView]
+}>()
+
 // On my own messages prefer the known current-user name; fall back to senderName.
 const avatarName = computed(() => (props.mine ? props.myName || props.message.senderName : props.message.senderName))
 
 // Call-to-action label for a rich notification's link.
 const linkLabel = computed(() => translatePageKey('chat', 'window.viewDetails'))
+
+// Tooltip fallback on the retry marker when the backend gave no reason.
+const retryLabel = computed(() => translatePageKey('chat', 'window.resend'))
 
 // File/image URL — reuse the file preview helper (/api/files/{id}/preview).
 const fileUrl = computed(() => resolveChatAvatarUrl(props.message.fileId))
@@ -283,6 +312,56 @@ const fileSizeLabel = computed(() => {
   font-size: 11.5px;
   color: var(--chat-text-3, #9b9b9b);
   padding: 0 2px;
+}
+
+/* ── Bubble line (bubble + WeChat-style failed retry marker) ─────────────── */
+.t-bubble-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Red circle-! to the left of my own failed bubble (col is right-aligned for
+   mine, so the marker naturally lands on the bubble's inner side). Tap = resend. */
+.t-bubble-retry {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--chat-danger, #e64340);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.t-bubble-retry:hover {
+  opacity: 0.82;
+}
+
+/* Touch: the 18px retry glyph is too small to tap reliably, so give it a ≥40px
+   hit area (the icon stays centered and its size unchanged). Coarse-pointer
+   only — desktop keeps the tight inline marker. */
+@media (pointer: coarse) {
+  .t-bubble-retry {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+/* Inline failure reason, right-aligned under my failed bubble. */
+.t-bubble-fail-reason {
+  max-width: 100%;
+  padding: 0 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--chat-danger, #e64340);
+  text-align: right;
+  word-break: break-word;
 }
 
 /* ── Bubble ─────────────────────────────────────────────────────────────── */

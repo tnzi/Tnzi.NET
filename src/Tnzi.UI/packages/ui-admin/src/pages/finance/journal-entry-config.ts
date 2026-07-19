@@ -5,6 +5,7 @@ import { TRelativeTime } from '@tnzi/ui'
 import { formatDateOnly } from '@tnzi/core'
 import { JournalEntryStatus } from '../../services/bridges/finance-bridge'
 import { amountCell, fmtMoney } from './money'
+import { financeSourceTypeLabel } from './source-type'
 
 /** All-optional row shape (house pattern). */
 export interface JournalRow {
@@ -19,7 +20,23 @@ export interface JournalRow {
   sourceId?: string | null
   totalDebit?: number
   totalCredit?: number
+  txnTotalDebit?: number
+  txnTotalCredit?: number
   creationTime?: string
+}
+
+/**
+ * 合计取值：草稿读交易币,其余读本位币。
+ *
+ * 草稿的本位币合计按设计为 0（尚无汇率,本位币金额还不存在）,直接渲染 totalDebit 会让列表上
+ * 每张草稿都显示 $0.00 —— 偏偏"平不平"正是看草稿时唯一要问的事。两者币种口径不同,所以按状态
+ * 取,不做 `||` 回退:已过账凭证若合计真为 0,回退会把它替换成交易币数字,反而说了谎。
+ * 币种列就在旁边,外币草稿的读数因此仍然自洽。
+ */
+export function entryTotal(row: JournalRow, side: 'debit' | 'credit'): number | undefined {
+  const draft = row.status === JournalEntryStatus.Draft
+  if (side === 'debit') return draft ? row.txnTotalDebit : row.totalDebit
+  return draft ? row.txnTotalCredit : row.totalCredit
 }
 
 /** JournalEntryStatus → badge meta（键为后端 PascalCase 成员名；labels 为页面作用域 i18n 键）。 */
@@ -58,20 +75,20 @@ export function buildJournalEntryColumns(t: (key: string) => string): ColumnDef<
       key: 'totalDebit',
       title: 'columns.totalDebit',
       width: 130,
-      render: (row) => amountCell(fmtMoney(row.totalDebit, undefined), true),
+      render: (row) => amountCell(fmtMoney(entryTotal(row, 'debit'), undefined), true),
     },
     {
       key: 'totalCredit',
       title: 'columns.totalCredit',
       width: 130,
-      render: (row) => amountCell(fmtMoney(row.totalCredit, undefined), true),
+      render: (row) => amountCell(fmtMoney(entryTotal(row, 'credit'), undefined), true),
     },
     {
       key: 'sourceType',
       title: 'columns.sourceType',
       width: 130,
       mobileHidden: true,
-      render: (row) => row.sourceType ?? '—',
+      render: (row) => financeSourceTypeLabel(row.sourceType),
     },
     {
       key: 'creationTime',

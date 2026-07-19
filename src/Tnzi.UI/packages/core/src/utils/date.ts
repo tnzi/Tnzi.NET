@@ -71,6 +71,33 @@ export function formatDateOnly(
 }
 
 /**
+ * Picker timestamp (local midnight) → `yyyy-MM-dd` the backend DateTime binder
+ * accepts.
+ *
+ * Companion to {@link formatDateOnly} (display) for editing date-only /
+ * UTC-midnight fields: a date picker must NOT round-trip through
+ * `new Date(iso)` or a viewer west of UTC lands on the previous calendar day.
+ * Prefill the picker with {@link dateOnlyToPickerTs} and save with this.
+ */
+export function pickerTsToDateOnly(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Backend date-only value (`yyyy-MM-dd` or UTC-midnight ISO) → local-midnight
+ * timestamp to prefill a date picker on the SAME calendar day. Reads the date
+ * parts from the string directly (not `new Date`) to avoid the UTC→local shift.
+ */
+export function dateOnlyToPickerTs(dateOnly: string): number {
+  const y = Number(dateOnly.slice(0, 4));
+  const m = Number(dateOnly.slice(5, 7));
+  const d = Number(dateOnly.slice(8, 10));
+  return new Date(y, m - 1, d).getTime();
+}
+
+/**
  * Format relative time
  */
 export function formatRelativeTime(date: Date | string): string {

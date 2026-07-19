@@ -35,10 +35,13 @@ public class AuditSettingDefinitionProviderTests
     [Fact]
     public void Group_HasExpectedFields()
     {
-        // 记录粒度组：RetentionDays + 4 个 Capture 小节字段（EnableEntityAudit / EnableResponseResult
-        // 已作为"假热配"移除——EF 拦截器 / AuditMiddleware 均未消费）。
-        Assert.Equal(5, _group.Fields.Count);
+        // 记录粒度组：RetentionDays + 5 个 Capture 小节字段。
+        // EnableEntityAudit 自实体级审计采集管道落地后成为真热配
+        // （EntityAuditSaveChangesInterceptor 经 IOptionsMonitor 热读）；
+        // EnableResponseResult 仍为"假热配"不暴露（AuditMiddleware 未消费）。
+        Assert.Equal(6, _group.Fields.Count);
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableOperationAudit");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableEntityAudit");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:RetentionDays");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestParameters");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestBodyCapture");

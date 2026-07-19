@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Dtos;
+namespace Tnzi.AI.Skills.Dtos;
 
 /// <summary>
 /// 技能分类 DTO（支持树形结构展示）

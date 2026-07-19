@@ -45,58 +45,21 @@
     </template>
   </TCrudPage>
 
-  <!-- Apply panel — allocate a posted payment across open documents. -->
+  <!-- Apply panel - allocate a posted payment across open documents (shared with Credit Memos). -->
   <TDetailHost :state="applyDetail" :title="t('apply.title')" :width="680" :footer="false" :translate="t">
-    <div class="fin-apply">
-      <div v-if="openDocs.length === 0" class="fin-apply__empty">{{ t('apply.noOpenDocs') }}</div>
-      <template v-else>
-        <div class="fin-apply__row fin-apply__row--head">
-          <span>{{ t('apply.document') }}</span>
-          <span>{{ t('apply.dueDate') }}</span>
-          <span>{{ t('apply.currency') }}</span>
-          <span>{{ t('apply.outstanding') }}</span>
-          <span>{{ t('apply.amount') }}</span>
-        </div>
-        <div v-for="doc in openDocs" :key="doc.docId" class="fin-apply__row">
-          <span>{{ doc.number ?? doc.docId }}</span>
-          <span>{{ formatDateOnly(doc.dueDate, { utc: true, fallback: '—' }) }}</span>
-          <span :class="{ 'fin-apply__mismatch': !sameCurrency(doc) }">{{ doc.currency }}</span>
-          <span class="fin-apply__num">{{ fmtAmount(doc.outstanding) }}</span>
-          <!-- Different-currency documents can't be settled against this payment. -->
-          <NInputNumber
-            v-model:value="allocations[doc.docId]"
-            size="small"
-            :min="0"
-            :max="doc.outstanding"
-            :disabled="!sameCurrency(doc)"
-            :show-button="false"
-            :placeholder="sameCurrency(doc) ? '0.00' : t('apply.currencyMismatch')"
-          />
-        </div>
-        <div class="fin-apply__footer">
-          <span class="fin-apply__num">
-            {{ t('apply.remaining') }}: <strong>{{ fmtAmount(applyRemaining) }}</strong>
-          </span>
-          <div class="fin-apply__actions">
-            <NButton size="small" @click="applyDetail.close()">{{ t('editor.cancel') }}</NButton>
-            <NButton size="small" type="primary" :loading="applying" :disabled="allocatedTotal <= 0 || allocatedTotal > applySource!.remaining" @click="submitApply">
-              {{ t('apply.submit') }}
-            </NButton>
-          </div>
-        </div>
-      </template>
-    </div>
+    <SettlementApplyPanel :bridge="bridge" :source="applySource" @applied="onApplied" @cancel="applyDetail.close()" />
   </TDetailHost>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import { NButton, NDescriptions, NDescriptionsItem, NInputNumber, type DataTableColumns } from 'naive-ui'
+import { computed, ref, watch } from 'vue'
+import { NButton, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateOnly } from '@tnzi/core'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import SettlementApplyPanel, { type SettlementApplySource } from './components/SettlementApplyPanel.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -108,7 +71,6 @@ import {
   PAYMENT_METHODS,
   PaymentDirection,
   SettlementDocType,
-  type OpenDocumentDto,
   type PaymentApplicationDto,
   type PaymentEntryDto,
 } from '../../services/bridges/finance-bridge'
@@ -228,6 +190,17 @@ watch(
   { immediate: true },
 )
 
+// Party options swap between customers/vendors by direction; clear a now-wrong-type selection
+// so toPayload never derives partyType=Vendor while partyId still points at a customer.
+watch(
+  () => (crud.formModal.formData.value as Record<string, unknown> | null)?.direction,
+  (dir, prev) => {
+    if (prev === undefined || dir === prev) return
+    const model = crud.formModal.formData.value as Record<string, unknown> | null
+    if (model) model.partyId = null
+  },
+)
+
 // ── Read-only detail + applications ─────────────────────────────
 const viewed = ref<PaymentEntryDto | null>(null)
 const applications = ref<PaymentApplicationDto[]>([])
@@ -259,83 +232,35 @@ const applicationColumns: DataTableColumns<PaymentApplicationDto> = [
   { key: 'appliedAmount', title: t('applications.amount'), width: 120, render: (r) => amountCell(fmtAmount(r.appliedAmount)) },
 ]
 
-// Declarative unapply (confirm) — TResponsiveTable synthesises the action
+// Declarative unapply (confirm) - TResponsiveTable synthesises the action
 // column (TRowActions) instead of a hand-written NPopconfirm cell.
 const applicationActions: RowAction<PaymentApplicationDto>[] = [
   { key: 'unapply', label: 'applications.unapply', type: 'warning', show: () => can('finance.document.update'), confirm: 'applications.confirmUnapply', onClick: (r) => void unapply(r.id) },
 ]
 
-// ── Apply panel ─────────────────────────────────────────────────
-interface ApplySource {
-  id: string
-  partyType: FinancePartyType
-  partyId: string
-  currency: string
-  remaining: number
-}
-
+// ── Apply panel (shared SettlementApplyPanel) ───────────────────
 const applyDetail = useDetail<PaymentEntryDto>({
   mode: 'drawer',
   url: 'apply',
   loadData: (id) => bridge.payments.getById(String(id)),
 })
 
-const applySource = computed<ApplySource | null>(() => {
+const applySource = computed<SettlementApplySource | null>(() => {
   const d = applyDetail.data.value
   if (!d?.id) return null
-  return { id: d.id, partyType: d.partyType, partyId: d.partyId, currency: d.currency, remaining: d.amount - d.appliedTotal }
+  return {
+    id: d.id,
+    sourceType: SettlementDocType.PaymentEntry,
+    partyType: d.partyType,
+    partyId: d.partyId,
+    currency: d.currency,
+    remaining: d.amount - d.appliedTotal,
+  }
 })
 
-// The backend only settles same-currency documents against the payment.
-function sameCurrency(doc: OpenDocumentDto): boolean {
-  return doc.currency === applySource.value?.currency
-}
-
-const openDocs = ref<OpenDocumentDto[]>([])
-const allocations = reactive<Record<string, number | null>>({})
-const applying = ref(false)
-
-watch(
-  () => applySource.value?.id,
-  async (id) => {
-    openDocs.value = []
-    Object.keys(allocations).forEach((k) => delete allocations[k])
-    if (!id || !applySource.value) return
-    try {
-      openDocs.value = await bridge.settlements.openDocuments(applySource.value.partyType, applySource.value.partyId)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error))
-    }
-  },
-  { immediate: true },
-)
-
-const allocatedTotal = computed(() =>
-  Object.values(allocations).reduce<number>((sum, v) => sum + (v ?? 0), 0))
-const applyRemaining = computed(() => (applySource.value?.remaining ?? 0) - allocatedTotal.value)
-
-async function submitApply() {
-  if (!applySource.value) return
-  const targets = openDocs.value
-    .filter((d) => (allocations[d.docId] ?? 0) > 0 && sameCurrency(d))
-    .map((d) => ({ targetType: d.docType, targetId: d.docId, amount: allocations[d.docId]! }))
-  if (targets.length === 0) return
-
-  applying.value = true
-  try {
-    await bridge.settlements.apply({
-      sourceType: SettlementDocType.PaymentEntry,
-      sourceId: applySource.value.id,
-      targets,
-    })
-    message.success(t('apply.success'))
-    applyDetail.close()
-    await crud.refresh()
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  } finally {
-    applying.value = false
-  }
+async function onApplied() {
+  applyDetail.close()
+  await crud.refresh()
 }
 
 // ── Row actions ─────────────────────────────────────────────────
@@ -373,52 +298,5 @@ const rowActions: RowAction<FinanceDocRow>[] = [
   margin: 0 0 8px;
   font-size: 13px;
   font-weight: 600;
-}
-
-.fin-apply {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.fin-apply__empty {
-  color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
-  font-size: 13px;
-  padding: 24px 0;
-  text-align: center;
-}
-
-.fin-apply__row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) 100px 72px 110px 130px;
-  gap: 8px;
-  align-items: center;
-}
-
-.fin-apply__row--head {
-  font-size: 12px;
-  color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
-}
-
-.fin-apply__num {
-  font-variant-numeric: tabular-nums;
-}
-
-.fin-apply__mismatch {
-  color: var(--tnzi-error, #d03050);
-}
-
-.fin-apply__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-.fin-apply__actions {
-  display: flex;
-  gap: 8px;
 }
 </style>

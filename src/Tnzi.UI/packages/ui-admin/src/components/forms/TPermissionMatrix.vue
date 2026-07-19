@@ -23,7 +23,10 @@
         <div class="t-perm-matrix__mcard-body">
         <div class="t-perm-matrix__mcard-title">
           <span class="t-perm-matrix__module-name">{{ moduleLabel(group.module) }}</span>
-          <code class="t-perm-matrix__code">{{ group.module.code }}</code>
+          <code
+            v-if="!isCodeRedundant(moduleLabel(group.module), group.module.code)"
+            class="t-perm-matrix__code"
+          >{{ group.module.code }}</code>
           <NTag
             v-if="group.technical"
             size="tiny"
@@ -38,7 +41,7 @@
               size="tiny"
               secondary
               type="primary"
-              :disabled="group.toggleable.length === 0"
+              :disabled="readonly || group.toggleable.length === 0"
               @click="toggleFunctions(group.toggleable, true)"
             >
               {{ translate('matrix.moduleAll') }}
@@ -46,7 +49,7 @@
             <NButton
               size="tiny"
               secondary
-              :disabled="group.toggleable.length === 0"
+              :disabled="readonly || group.toggleable.length === 0"
               @click="toggleFunctions(group.toggleable, false)"
             >
               {{ translate('matrix.moduleClear') }}
@@ -75,7 +78,7 @@
             <NCheckbox
               :checked="surface.state === 'all'"
               :indeterminate="surface.state === 'some'"
-              :disabled="surface.toggleable.length === 0"
+              :disabled="readonly || surface.toggleable.length === 0"
               @update:checked="(v: boolean) => toggleFunctions(surface.toggleable, v)"
             />
             <span class="t-perm-matrix__surface-name">{{ surfaceLabel(surface) }}</span>
@@ -98,11 +101,14 @@
               {{ translate('technicalBadge') }}
             </NTag>
           </div>
-          <code class="t-perm-matrix__surface-code t-perm-matrix__mpanel-code">{{ surface.prefix }}</code>
+          <code
+            v-if="!isCodeRedundant(surfaceLabel(surface), surface.prefix)"
+            class="t-perm-matrix__surface-code t-perm-matrix__mpanel-code"
+          >{{ surface.prefix }}</code>
           <div class="t-perm-matrix__chips">
             <template v-for="col in ACTION_COLUMNS" :key="col">
               <span
-                v-if="surface.actions[col] && isCellDisabled(surface.actions[col]!)"
+                v-if="surface.actions[col] && !readonly && isCellDisabled(surface.actions[col]!)"
                 class="t-perm-matrix__chip-blocked"
                 :title="cellTitle(surface.actions[col]!)"
               >
@@ -112,6 +118,7 @@
                 v-else-if="surface.actions[col]"
                 size="small"
                 :type="checkedSet.has(surface.actions[col]!.id) ? 'primary' : 'default'"
+                :disabled="readonly"
                 :title="cellTitle(surface.actions[col]!)"
                 @click="onCellClick(surface.actions[col])"
               >
@@ -123,7 +130,7 @@
             </template>
             <template v-for="item in surface.special" :key="item.fn.id">
               <span
-                v-if="isCellDisabled(item.fn)"
+                v-if="!readonly && isCellDisabled(item.fn)"
                 class="t-perm-matrix__chip-blocked"
                 :title="cellTitle(item.fn)"
               >
@@ -133,6 +140,7 @@
                 v-else
                 size="small"
                 :type="checkedSet.has(item.fn.id) ? 'warning' : 'default'"
+                :disabled="readonly"
                 :title="cellTitle(item.fn)"
                 @click="toggleFunctions([item.fn], !checkedSet.has(item.fn.id))"
               >
@@ -207,7 +215,10 @@
             <div class="t-perm-matrix__module-body">
             <div class="t-perm-matrix__module-title">
               <span class="t-perm-matrix__module-name">{{ moduleLabel(group.module) }}</span>
-              <code class="t-perm-matrix__code">{{ group.module.code }}</code>
+              <code
+                v-if="!isCodeRedundant(moduleLabel(group.module), group.module.code)"
+                class="t-perm-matrix__code"
+              >{{ group.module.code }}</code>
               <NTag
                 v-if="group.technical"
                 size="tiny"
@@ -243,7 +254,7 @@
               size="tiny"
               secondary
               type="primary"
-              :disabled="group.toggleable.length === 0"
+              :disabled="readonly || group.toggleable.length === 0"
               @click="toggleFunctions(group.toggleable, true)"
             >
               {{ translate('matrix.moduleAll') }}
@@ -251,7 +262,7 @@
             <NButton
               size="tiny"
               secondary
-              :disabled="group.toggleable.length === 0"
+              :disabled="readonly || group.toggleable.length === 0"
               @click="toggleFunctions(group.toggleable, false)"
             >
               {{ translate('matrix.moduleClear') }}
@@ -270,7 +281,7 @@
               <NCheckbox
                 :checked="surface.state === 'all'"
                 :indeterminate="surface.state === 'some'"
-                :disabled="surface.toggleable.length === 0"
+                :disabled="readonly || surface.toggleable.length === 0"
                 @update:checked="(v: boolean) => toggleFunctions(surface.toggleable, v)"
               />
               <span class="t-perm-matrix__surface-text">
@@ -297,7 +308,10 @@
                     {{ translate('technicalBadge') }}
                   </NTag>
                 </span>
-                <code class="t-perm-matrix__surface-code">{{ surface.prefix }}</code>
+                <code
+                  v-if="!isCodeRedundant(surfaceLabel(surface), surface.prefix)"
+                  class="t-perm-matrix__surface-code"
+                >{{ surface.prefix }}</code>
               </span>
               </div>
             </td>
@@ -306,20 +320,20 @@
               :key="col"
               class="t-perm-matrix__cell"
               :class="{
-                'is-on': surface.actions[col] && checkedSet.has(surface.actions[col]!.id),
-                'is-clickable': surface.actions[col] && !isCellDisabled(surface.actions[col]!),
+                'is-clickable': surface.actions[col] && !readonly && !isCellDisabled(surface.actions[col]!),
               }"
               :title="surface.actions[col] ? cellTitle(surface.actions[col]!) : undefined"
               @click="onCellClick(surface.actions[col])"
             >
               <span
-                v-if="surface.actions[col] && isCellDisabled(surface.actions[col]!)"
+                v-if="surface.actions[col] && !readonly && isCellDisabled(surface.actions[col]!)"
                 class="t-perm-matrix__hatch-box"
               />
               <NCheckbox
                 v-else-if="surface.actions[col]"
                 size="large"
                 :checked="checkedSet.has(surface.actions[col]!.id)"
+                :disabled="readonly"
                 @click.stop
                 @update:checked="(v: boolean) => toggleFunctions([surface.actions[col]!], v)"
               />
@@ -329,24 +343,26 @@
               <template v-if="surface.special.length > 0">
                 <template v-for="item in surface.special" :key="item.fn.id">
                   <span
-                    v-if="isCellDisabled(item.fn)"
+                    v-if="!readonly && isCellDisabled(item.fn)"
                     class="t-perm-matrix__chip-blocked t-perm-matrix__special-pill"
                     :title="cellTitle(item.fn)"
                   >
                     {{ translate(`matrix.${item.kind}`) }}
                   </span>
-                  <NTag
+                  <!-- A checkbox (not a bare colour-only pill) so granted vs not is
+                       obvious at a glance; the label keeps the danger tint for the
+                       powerful execute/assign grants. -->
+                  <NCheckbox
                     v-else
-                    checkable
-                    round
-                    size="small"
-                    class="t-perm-matrix__special-pill"
                     :checked="checkedSet.has(item.fn.id)"
+                    :disabled="readonly"
+                    class="t-perm-matrix__special-check"
+                    :class="`is-${item.kind}`"
                     :title="cellTitle(item.fn)"
                     @update:checked="(v: boolean) => toggleFunctions([item.fn], v)"
                   >
                     {{ translate(`matrix.${item.kind}`) }}
-                  </NTag>
+                  </NCheckbox>
                 </template>
               </template>
               <span v-else class="t-perm-matrix__na">·</span>
@@ -404,12 +420,16 @@ import { computed, ref, watch } from 'vue'
 import { NCheckbox, NTag, NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { isCodeRedundant } from '../../headless/codeLabel'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 import { PermissionCategory } from '@tnzi/core/services/authorization'
 
 const ACTION_COLUMNS = ['view', 'create', 'update', 'delete'] as const
 type ActionColumn = (typeof ACTION_COLUMNS)[number]
-const SPECIAL_ACTIONS = ['execute', 'assign'] as const
+// Non-CRUD trailing segments that render as pills in the trailing "special"
+// column rather than as their own surface row: `.execute` (trigger actions),
+// `.assign` (role-grant), and `.use` (grant-to-use white-list, e.g. chat.use).
+const SPECIAL_ACTIONS = ['execute', 'assign', 'use'] as const
 
 interface SpecialItem {
   /** i18n suffix: 'execute' | 'assign' | 'access' (unrecognized trailing segment). */
@@ -475,6 +495,13 @@ const props = withDefaults(
     defaultExpanded?: boolean
     /** Auto-expand the FIRST module once data arrives (one-shot). */
     expandFirst?: boolean
+    /**
+     * Read-only display: every permission renders as granted (checked) and
+     * locked (no toggle). Used for a super-admin role, which bypasses every
+     * check and effectively holds the whole catalogue — so an explicit,
+     * editable row set is meaningless. Browsing (expand/collapse, search) stays.
+     */
+    readonly?: boolean
     translate: (key: string, params?: Record<string, unknown>) => string
   }>(),
   {
@@ -483,6 +510,7 @@ const props = withDefaults(
     labelOverrides: null,
     defaultExpanded: false,
     expandFirst: false,
+    readonly: false,
   },
 )
 
@@ -492,7 +520,19 @@ const emit = defineEmits<{
 
 const { isSm } = useBreakpoint()
 
-const checkedSet = computed(() => new Set(props.checkedIds))
+const checkedSet = computed(() => {
+  // Read-only (super-admin): treat the entire catalogue as granted so every
+  // count, progress bar, and cell renders fully-checked. Interactions are
+  // separately locked in the toggle/click handlers and cell `:disabled`.
+  if (props.readonly) {
+    const all = new Set<string>()
+    for (const fns of props.functionsByModule.values()) {
+      for (const fn of fns) all.add(fn.id)
+    }
+    return all
+  }
+  return new Set(props.checkedIds)
+})
 
 const grantableSet = computed<Set<string> | null>(() => {
   if (props.grantableCodes == null) return null
@@ -777,12 +817,12 @@ function moduleColumnChecked(group: ModuleGroup, col: ActionColumn): number {
 }
 
 function onCellClick(fn: ModuleFunctionDto | undefined): void {
-  if (!fn || isCellDisabled(fn)) return
+  if (props.readonly || !fn || isCellDisabled(fn)) return
   toggleFunctions([fn], !checkedSet.value.has(fn.id))
 }
 
 function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
-  if (fns.length === 0) return
+  if (props.readonly || fns.length === 0) return
   const next = new Set(checkedSet.value)
   for (const fn of fns) {
     if (isCellDisabled(fn)) continue
@@ -900,8 +940,15 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   align-items: center;
   gap: 4px;
 }
+/* Desktop module row: the name/code/badge and the progress bar + count share
+   ONE row — the bar is shoved to the right with margin-left:auto. (Mobile cards
+   use `mcard-body` instead and keep the stacked layout.) */
 .t-perm-matrix__module-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
+  flex: 1;
 }
 .t-perm-matrix__module-title {
   display: flex;
@@ -909,6 +956,17 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   gap: 6px;
   font-weight: 600;
   white-space: nowrap;
+}
+.t-perm-matrix__module-body .t-perm-matrix__module-title {
+  min-width: 0;
+}
+.t-perm-matrix__module-body .t-perm-matrix__module-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.t-perm-matrix__module-body .t-perm-matrix__module-meta {
+  margin-top: 0;
+  margin-left: auto;
 }
 .t-perm-matrix__chevron {
   transition: transform 0.15s ease;
@@ -1023,9 +1081,6 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
 .t-perm-matrix__cell.is-clickable {
   cursor: pointer;
 }
-.t-perm-matrix__cell.is-on {
-  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.1);
-}
 /* Delegation-blocked / disabled: a hatched cell-sized box, visually distinct
    from an unchecked (grantable) checkbox. */
 .t-perm-matrix__hatch-box {
@@ -1044,21 +1099,27 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   vertical-align: middle;
 }
 .t-perm-matrix__special-cell {
-  white-space: nowrap;
-  text-align: center;
+  text-align: left;
 }
+/* Blocked (not-grantable) special still shows as an outlined chip. */
 .t-perm-matrix__special-pill + .t-perm-matrix__special-pill {
   margin-left: 6px;
 }
-/* Unchecked checkable tags render borderless text - give the pill a visible
-   outline so it reads as a toggle, not a label. Checked pills use the
-   warning tone: execute/assign are the dangerous grants. */
-.t-perm-matrix__special-pill:not(.n-tag--checked) {
+.t-perm-matrix__special-pill {
   border: 1px solid var(--tnzi-border);
 }
-.t-perm-matrix__special-pill.n-tag--checked {
-  background-color: var(--tnzi-warning) !important;
-  color: #fff !important;
+/* Grantable special (execute / assign / use) renders as a LABELLED checkbox so
+   granted vs not is obvious from the checkmark, not colour alone. execute and
+   assign keep a warning-toned label — they are the powerful grants. */
+.t-perm-matrix__special-check {
+  font-size: 12.5px;
+}
+.t-perm-matrix__special-check + .t-perm-matrix__special-check {
+  margin-left: 14px;
+}
+.t-perm-matrix__special-check.is-execute :deep(.n-checkbox__label),
+.t-perm-matrix__special-check.is-assign :deep(.n-checkbox__label) {
+  color: var(--tnzi-warning);
 }
 .t-perm-matrix__code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

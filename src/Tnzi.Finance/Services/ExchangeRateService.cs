@@ -140,25 +140,95 @@ public class ExchangeRateService : ApplicationService, IExchangeRateService
         }
 
         var quotes = await _provider.GetLatestRatesAsync(_options.BaseCurrency, cancellationToken);
-        var count = 0;
+        var source = _provider.GetType().Name;
 
+        // 本地先校验/归一化(与 UpsertAsync 同规则),无效报价记警告跳过
+        var validQuotes = new List<(string From, string To, decimal Rate, DateTime RateDate)>();
         foreach (var quote in quotes)
         {
-            var result = await UpsertAsync(new UpsertExchangeRateDto
-            {
-                FromCurrency = quote.FromCurrency,
-                ToCurrency = quote.ToCurrency,
-                Rate = quote.Rate,
-                RateDate = quote.RateDate,
-                Source = _provider.GetType().Name
-            }, cancellationToken);
-
-            if (result.Succeeded)
-                count++;
+            var error = ValidateQuote(quote, out var normalized);
+            if (error == null)
+                validQuotes.Add(normalized);
             else
-                LogWarning("Skipped invalid exchange rate quote {From}->{To}: {Message}", quote.FromCurrency, quote.ToCurrency, result.Message ?? "unknown error");
+                LogWarning("Skipped invalid exchange rate quote {From}->{To}: {Message}", quote.FromCurrency, quote.ToCurrency, error);
         }
 
-        return Ok(count);
+        if (validQuotes.Count == 0)
+            return Ok(0);
+
+        // 同 (from, to, date) 元组重复报价去重,后者胜(对齐逐条 upsert 的覆盖语义)
+        validQuotes = validQuotes
+            .GroupBy(q => (q.From, q.To, q.RateDate))
+            .Select(g => g.Last())
+            .ToList();
+
+        // 单查预加载全部命中的既有汇率(替代逐报价 FindAsync 的 2N 往返);
+        // 按三列 IN 过滤是超集,精确 (from, to, date) 元组在内存收敛
+        var froms = validQuotes.Select(q => q.From).Distinct().ToList();
+        var tos = validQuotes.Select(q => q.To).Distinct().ToList();
+        var dates = validQuotes.Select(q => q.RateDate).Distinct().ToList();
+        var existing = await _rateRepository
+            .Where(r => froms.Contains(r.FromCurrency) && tos.Contains(r.ToCurrency) && dates.Contains(r.RateDate))
+            .ToListAsync(cancellationToken);
+        var existingLookup = existing.ToDictionary(r => (r.FromCurrency, r.ToCurrency, r.RateDate));
+
+        var inserts = new List<ExchangeRate>();
+        foreach (var (from, to, rate, rateDate) in validQuotes)
+        {
+            if (existingLookup.TryGetValue((from, to, rateDate), out var entity))
+            {
+                entity.Rate = rate;
+                entity.Source = source;
+                await _rateRepository.UpdateAsync(entity, cancellationToken);
+            }
+            else
+            {
+                inserts.Add(new ExchangeRate
+                {
+                    FromCurrency = from,
+                    ToCurrency = to,
+                    Rate = rate,
+                    RateDate = rateDate,
+                    Source = source
+                });
+            }
+        }
+
+        try
+        {
+            if (inserts.Count > 0)
+                await _rateRepository.InsertManyAsync(inserts, cancellationToken);
+            await _rateRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            // 并发刷新同一 (币种对, 日期)：由唯一索引兜底，提示重试
+            return Fail<int>("Exchange rates were refreshed concurrently. Retry the operation.", 409);
+        }
+
+        return Ok(validQuotes.Count);
+    }
+
+    /// <summary>
+    /// 报价校验与归一化(与 UpsertAsync 同规则);返回 null 表示有效
+    /// </summary>
+    private static string? ValidateQuote(ExchangeRateQuote quote, out (string From, string To, decimal Rate, DateTime RateDate) normalized)
+    {
+        normalized = default;
+
+        if (string.IsNullOrWhiteSpace(quote.FromCurrency) || string.IsNullOrWhiteSpace(quote.ToCurrency))
+            return "FromCurrency and ToCurrency are required.";
+        if (quote.Rate <= 0)
+            return "Rate must be greater than 0.";
+
+        var from = quote.FromCurrency.Trim().ToUpperInvariant();
+        var to = quote.ToCurrency.Trim().ToUpperInvariant();
+        if (from == to)
+            return "FromCurrency and ToCurrency must be different.";
+        if (from.Length > 8 || to.Length > 8)
+            return "Currency codes must not exceed 8 characters.";
+
+        normalized = (from, to, quote.Rate, quote.RateDate.ToUtcDate());
+        return null;
     }
 }

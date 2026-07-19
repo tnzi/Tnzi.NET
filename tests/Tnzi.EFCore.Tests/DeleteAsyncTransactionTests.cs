@@ -105,6 +105,36 @@ public class DeleteAsyncTransactionTests : IDisposable
         Assert.False(reloaded!.IsDeleted);
     }
 
+    [Fact]
+    public async Task ManagerSaveChanges_AsFirstWriteInTransaction_StartsPhysicalTx_GeneratesId_AndRollbackUndoes()
+    {
+        // Backs ApplicationService.FlushAsync (write → flush → read within a UoW) and
+        // the CrudAppService.CreateAsync flush-before-map. The fix routes the manager
+        // flush through the UoW so the deferred physical transaction is started (rather
+        // than autocommitting the first save) and the generated Id is populated.
+        var repository = CreateRepository<TestProduct>();
+
+        _manager.EnableTransaction();
+        var product = new TestProduct { Name = "flush-me", Price = 1m, Stock = 1 };
+        await repository.InsertAsync(product); // only TRACKS under an enabled transaction (no save yet)
+
+        await _manager.SaveChangesAsync(); // the path behind FlushAsync
+
+        // Transaction-safety: the flush started the physical transaction (not autocommit).
+        Assert.NotNull(_dbContext.Database.CurrentTransaction);
+        // The flush ran SaveChanges → the sequential-GUID Id is now generated (the
+        // mechanism CrudAppService relies on to return a non-empty DTO).
+        Assert.NotEqual(Guid.Empty, product.Id);
+        var id = product.Id;
+
+        await _manager.RollbackTransactionAsync();
+
+        // Rollback undoes the flushed insert → it was inside the transaction, not autocommitted.
+        _dbContext.ChangeTracker.Clear();
+        var reloaded = await _dbContext.Products.FindAsync(id);
+        Assert.Null(reloaded);
+    }
+
     public void Dispose()
     {
         _dbContext?.Dispose();

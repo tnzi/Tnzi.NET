@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 工作流节点服务上下文 — 封装节点运行时的依赖解析，避免直接使用 IServiceProvider。

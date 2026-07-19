@@ -67,6 +67,16 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         }
     }
 
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        base.ConfigureConventions(configurationBuilder);
+
+        // 全局模型约定（含未显式配置精度的 decimal 列的默认精度）
+        // 与 TnziDbContext 共用同一实现——两个基类平行（本类继承 ASP.NET Core IdentityDbContext），
+        // 应用侧的主 DbContext 多继承本类，故此处同样需要落约定。
+        TnziDbContextHelper.ConfigureConventions(configurationBuilder);
+    }
+
     /// <summary>
     /// 配置 Identity 相关实体的表名，移除默认的 "AspNet" 前缀
     /// 表名会在后续的 TableNamePrefixConfiguration 中自动添加 "Identity_" 前缀

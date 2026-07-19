@@ -52,8 +52,8 @@ const columns = [
 const stubs = {
   DataTable: {
     name: 'DataTable',
-    props: ['data', 'columns', 'loading', 'scrollX'],
-    template: '<div class="n-data-table-stub" :data-cols="columns.length" :data-scrollx="String(scrollX)" />',
+    props: ['data', 'columns', 'loading', 'scrollX', 'rowProps', 'summary'],
+    template: '<div class="n-data-table-stub" :data-cols="columns.length" :data-scrollx="String(scrollX)" :data-has-row-props="String(!!rowProps)" :data-has-summary="String(!!summary)" />',
   },
 }
 
@@ -104,6 +104,77 @@ describe('TResponsiveTable', () => {
     await nextTick()
     expect(w.find('.n-data-table-stub').exists()).toBe(true)
     expect(w.find('.t-data-cards').exists()).toBe(false)
+  })
+
+  it('forwards row-props and summary to NDataTable on desktop', () => {
+    setViewport(1280)
+    const w = mount(TResponsiveTable, {
+      props: {
+        columns, data,
+        rowKey: (r: Record<string, unknown>) => r.id as number,
+        rowProps: () => ({ onClick: () => undefined }),
+        summary: () => ({ role: { value: 'total' } }),
+      },
+      global: { stubs },
+    })
+    const table = w.find('.n-data-table-stub')
+    expect(table.attributes('data-has-row-props')).toBe('true')
+    expect(table.attributes('data-has-summary')).toBe('true')
+  })
+
+  it('applies row-props to mobile cards (clickable affordance + handler fires)', async () => {
+    setViewport(375)
+    const onRowClick = vi.fn()
+    const w = mount(TResponsiveTable, {
+      props: {
+        columns, data,
+        rowKey: (r: Record<string, unknown>) => r.id as number,
+        rowProps: (row: Record<string, unknown>) => ({ onClick: () => onRowClick(row.id) }),
+      },
+      global: { stubs },
+    })
+    await nextTick()
+    const cards = w.findAll('.t-data-cards__card')
+    expect(cards[0].classes()).toContain('t-data-cards__card--clickable')
+    await cards[1].trigger('click')
+    expect(onRowClick).toHaveBeenCalledWith(2)
+  })
+
+  it('keeps footer actions from also firing the row click on mobile', async () => {
+    setViewport(375)
+    const onRowClick = vi.fn()
+    const w = mount(TResponsiveTable, {
+      props: {
+        columns, data,
+        rowKey: (r: Record<string, unknown>) => r.id as number,
+        rowProps: () => ({ onClick: onRowClick }),
+      },
+      global: { stubs },
+    })
+    await nextTick()
+    await w.findAll('.t-data-cards__actions .revoke')[0].trigger('click')
+    expect(onRevoke).toHaveBeenCalledWith(1)
+    expect(onRowClick).not.toHaveBeenCalled()
+  })
+
+  it('renders the summary as a totals card at the bottom on mobile', async () => {
+    setViewport(375)
+    const w = mount(TResponsiveTable, {
+      props: {
+        columns, data,
+        rowKey: (r: Record<string, unknown>) => r.id as number,
+        summary: (pageData: Record<string, unknown>[]) => ({
+          name: { value: `${pageData.length} rows` },
+          role: { value: h('strong', { class: 'sum-role' }, '1 admin') },
+        }),
+      },
+      global: { stubs },
+    })
+    await nextTick()
+    const summary = w.find('.t-data-cards__card--summary')
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toContain('2 rows')
+    expect(summary.find('.sum-role').text()).toBe('1 admin')
   })
 
   it('renders a simple pager on mobile when pagination is an object', async () => {

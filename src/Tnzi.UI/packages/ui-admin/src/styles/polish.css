@@ -410,7 +410,14 @@ body *::-webkit-scrollbar-thumb:active {
  */
 @media (pointer: coarse) {
   .t-admin-header__icon-btn,
-  .t-admin-user-avatar {
+  .t-admin-user-avatar,
+  /* Header notification bell + chat launcher were custom-sized (34px) and never
+     opted into the shared icon-btn class → below the 44px minimum. */
+  .t-header-bell__trigger,
+  .t-chat-launcher,
+  /* Modal / drawer close (X) — the primary (often only) dismiss affordance on a
+     phone once maskClosable is off. naive renders it ~20-28px. */
+  .n-base-close {
     min-width: 44px;
     min-height: 44px;
   }
@@ -418,6 +425,14 @@ body *::-webkit-scrollbar-thumb:active {
   .t-admin-tabs__action {
     min-width: 36px;
     min-height: 36px;
+  }
+  /* Row-action buttons (Edit / View / Delete / More) inside mobile data cards,
+     and permission-matrix module All/Clear + action chips: bump the compact
+     `small`/`tiny` chrome to a comfortable thumb height without changing the
+     desktop density (glyph/label unchanged). */
+  .t-data-cards__card .t-row-actions .n-button,
+  .t-perm-matrix__mcard .n-button {
+    min-height: 40px;
   }
 }
 

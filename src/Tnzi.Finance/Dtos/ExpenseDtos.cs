@@ -40,6 +40,9 @@ public class ExpenseLineDto
     public Guid AccountId { get; set; }
     public decimal Amount { get; set; }
     public Guid? TaxCodeId { get; set; }
+
+    /// <summary>手动税额覆盖（null = 按税率计算）</summary>
+    public decimal? TaxAmount { get; set; }
 }
 
 /// <summary>
@@ -77,6 +80,9 @@ public class CreateExpenseLineDto
 
     public decimal Amount { get; set; }
     public Guid? TaxCodeId { get; set; }
+
+    /// <summary>手动税额覆盖（null = 按税率计算；仅在行有税码时合法，>= 0，0 表示该行确实无税）</summary>
+    public decimal? TaxAmount { get; set; }
 }
 
 /// <summary>

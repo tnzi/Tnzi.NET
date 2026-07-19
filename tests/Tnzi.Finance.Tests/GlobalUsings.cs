@@ -10,5 +10,6 @@ global using Tnzi.Finance.Metadata;
 global using Tnzi.Finance.Options;
 global using Tnzi.Finance.Services;
 global using Tnzi.Finance.Services.Interfaces;
+global using Tnzi.Finance.Documents.Services;
 global using Tnzi.Results;
 global using Tnzi.Exceptions;

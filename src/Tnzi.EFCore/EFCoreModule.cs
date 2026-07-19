@@ -77,6 +77,10 @@ public class EFCoreModule : TnziInfrastructureModule
         // 注册数据库迁移器（TryAdd 确保不覆盖用户自定义实现）
         services.TryAddScoped<IDbMigrator, Services.EfCoreDbMigrator>();
 
+        // 单据连续编号服务(IDocumentNumberService)在 AddTnziDbContext 漏斗内注册:
+        // 它依赖 IRepository<DocumentSequence>,无 DbContext 的轻宿主下在此无条件注册
+        // 会让 DI ValidateOnBuild 失败(见 TnziEFCoreExtensions)。
+
         // 注册慢查询日志拦截器（Scoped 以支持 Logger 注入）
         services.AddScoped<Interceptors.SlowQueryLoggingInterceptor>();
 

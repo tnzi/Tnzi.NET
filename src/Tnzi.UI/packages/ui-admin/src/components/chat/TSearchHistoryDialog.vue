@@ -12,6 +12,9 @@
         v-model="keyword"
         class="t-search-history__search-input"
         :placeholder="t('window.search')"
+        enterkeyhint="search"
+        autocapitalize="off"
+        autocorrect="off"
         @input="onSearch"
         @focus="focused = true"
         @blur="focused = false"
@@ -21,8 +24,10 @@
       </button>
     </div>
 
-    <!-- Inline height: NScrollbar's root does not inherit the scoped attr. -->
-    <NScrollbar class="t-search-history__list" style="height: 320px">
+    <!-- Fixed height on desktop; on a phone (isSm) it flexes to a dvh-capped
+         height so the keyboard doesn't push the results off-screen. Inline
+         height: NScrollbar's root does not inherit the scoped attr. -->
+    <NScrollbar class="t-search-history__list" :style="{ height: isSm ? 'auto' : '320px', maxHeight: isSm ? '55dvh' : undefined }">
       <div
         v-for="m in results"
         :key="m.id"
@@ -50,6 +55,7 @@ import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import { formatDateTime } from '@tnzi/core'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatDialog from './TChatDialog.vue'
 
 const props = defineProps<{
@@ -64,6 +70,8 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+// Phone (<md) flexes the fixed list height so it never exceeds the viewport.
+const { isSm } = useBreakpoint()
 
 const keyword = ref('')
 const focused = ref(false)

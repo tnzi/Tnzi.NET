@@ -260,7 +260,11 @@ export function useAdminShellLayout(
   )
 
   const tabsVisible = computed<boolean>(
-    () => tabs.value.visible !== false && themeStore.tabVisible,
+    // Multi-tab is a desktop affordance; on phones it's an anti-pattern that
+    // eats ~14% of the scarce vertical space (a 40px bar under a 52px header).
+    // Hide it below md so the content area gets that height back — the tab
+    // state itself is untouched, it's just not rendered on phones.
+    () => tabs.value.visible !== false && themeStore.tabVisible && !appStore.isMobile,
   )
 
   const footerVisible = computed<boolean>(

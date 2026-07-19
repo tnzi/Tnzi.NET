@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 路由节点 — 输入 + 候选路由列表 → LLM 分类 → 返回 RouteTo

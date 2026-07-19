@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Payroll sub-module for the Tnzi.NET finance module: employee master data, salary components with a safe formula engine, tax bracket tables, salary structures and assignments</Description>
+    <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NCalc" Version="6.4.0" />
+  </ItemGroup>
+
+</Project>

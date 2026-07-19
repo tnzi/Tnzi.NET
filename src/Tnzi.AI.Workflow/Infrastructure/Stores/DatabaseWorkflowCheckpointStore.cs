@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Infrastructure.Stores;
+namespace Tnzi.AI.Workflow.Infrastructure.Stores;
 
 /// <summary>
 /// 数据库工作流检查点存储 — 基于 IRepository 持久化工作流执行状态

@@ -33,6 +33,7 @@ global using System.Text.RegularExpressions;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi;
+global using Tnzi.Application;
 global using Tnzi.Caching;
 global using Tnzi.Data;
 global using Tnzi.Data.Filtering;

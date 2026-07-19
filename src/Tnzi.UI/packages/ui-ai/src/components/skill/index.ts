@@ -1,5 +1,5 @@
-export { default as SkillGallery } from './SkillGallery.vue';
-export { default as SkillCard } from './SkillCard.vue';
-export { default as SkillActivator } from './SkillActivator.vue';
-export type { SkillInfo } from './SkillCard.vue';
-export type { SkillParam } from './SkillActivator.vue';
+export { default as TSkillGallery } from './TSkillGallery.vue';
+export { default as TSkillCard } from './TSkillCard.vue';
+export { default as TSkillActivator } from './TSkillActivator.vue';
+export type { SkillInfo } from './TSkillCard.vue';
+export type { SkillParam } from './TSkillActivator.vue';

@@ -10,6 +10,7 @@ import {
   type GlobalThemeOverrides,
 } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
+import TAdminWindowHandles from './TAdminWindowHandles'
 
 interface Props {
   /**
@@ -83,6 +84,10 @@ const Inner = defineComponent({
       <NMessageProvider>
         <NNotificationProvider>
           <NDialogProvider>
+            <!-- Registers window.$message / $dialog / $notification /
+                 $loadingBar so useCrudPage error toasts and the @tnzi/ui
+                 window-handle adapters work without app-side wiring. -->
+            <TAdminWindowHandles />
             <Inner />
           </NDialogProvider>
         </NNotificationProvider>

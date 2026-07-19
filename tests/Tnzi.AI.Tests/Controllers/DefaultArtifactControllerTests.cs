@@ -69,7 +69,7 @@ public class DefaultArtifactControllerTests
             () => _controller.GetByThread(threadId));
 
         ex.HttpStatusCode.ShouldBe(404);
-        ex.Code.ShouldBe(Tnzi.AI.ErrorCodes.ThreadNotFound);
+        ex.Code.ShouldBe(Tnzi.AI.Metadata.ErrorCodes.ThreadNotFound);
         // Artifact service must NOT be called — ownership check short-circuits
         _artifactService.Verify(s => s.GetByThreadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -122,7 +122,7 @@ public class DefaultArtifactControllerTests
             () => _controller.GetById(artifactId));
 
         ex.HttpStatusCode.ShouldBe(404);
-        ex.Code.ShouldBe(Tnzi.AI.ErrorCodes.ThreadNotFound);
+        ex.Code.ShouldBe(Tnzi.AI.Metadata.ErrorCodes.ThreadNotFound);
     }
 
     [Fact]

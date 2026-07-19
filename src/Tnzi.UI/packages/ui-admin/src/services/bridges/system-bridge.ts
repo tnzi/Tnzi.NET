@@ -38,7 +38,7 @@ import {
   type SettingsCenterGroupDto,
 } from '@tnzi/core/services/system'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminMenuApi>[0]
 
@@ -220,10 +220,10 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     create: async (data) => unwrap(await menuApi.create(data)) as MenuInfoDto,
     update: async (id, data) => unwrap(await menuApi.update(String(id), data)) as MenuInfoDto,
     delete: async (ids) => {
-      await menuApi.batchDelete(ids.map(String))
+      ensureOk(await menuApi.batchDelete(ids.map(String)))
     },
     reorder: async (orders) => {
-      await menuApi.batchUpdateOrders(orders)
+      ensureOk(await menuApi.batchUpdateOrders(orders))
     },
   }
 
@@ -244,7 +244,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     create: async (data) => unwrap(await settingApi.create(data)) as SettingDto,
     update: async (id, data) => unwrap(await settingApi.update(String(id), data)) as SettingDto,
     delete: async (ids) => {
-      await settingApi.batchDelete(ids.map(String))
+      ensureOk(await settingApi.batchDelete(ids.map(String)))
     },
   }
 
@@ -279,13 +279,13 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       if (!deps.client) {
         throw new Error('scheduledJobs.trigger: HttpClient (deps.client) is required')
       }
-      await deps.client.post(`/admin/scheduled-jobs/${encodeURIComponent(id)}/trigger`)
+      ensureOk(await deps.client.post(`/admin/scheduled-jobs/${encodeURIComponent(id)}/trigger`))
     },
     delete: async (id: string): Promise<void> => {
       if (!deps.client) {
         throw new Error('scheduledJobs.delete: HttpClient (deps.client) is required')
       }
-      await deps.client.delete(`/admin/scheduled-jobs/${encodeURIComponent(id)}`)
+      ensureOk(await deps.client.delete(`/admin/scheduled-jobs/${encodeURIComponent(id)}`))
     },
   }
 
@@ -331,7 +331,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       if (!deps.client) throw new Error('features.delete: HttpClient required')
       // Backend has no batch endpoint — loop sequentially.
       for (const id of ids) {
-        await deps.client.delete(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`)
+        ensureOk(await deps.client.delete(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`))
       }
     },
   }
@@ -349,15 +349,11 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
    * Unwrap an ApiResult but THROW on a failure envelope. `unwrapResult`
    * resolves failures to `undefined` (or the envelope itself), which is
    * fine for reads but would let a 403 masquerade as a successful write.
+   * Failure detection is delegated to the shared `ensureOk` helper.
    */
   function unwrapOrThrow<T>(res: unknown, fallbackMessage: string): T {
-    if (res && typeof res === 'object' && ('succeeded' in res || 'success' in res)) {
-      const envelope = res as { succeeded?: boolean; success?: boolean; data?: T; message?: string }
-      const ok = envelope.succeeded ?? envelope.success
-      if (!ok) throw new Error(envelope.message || fallbackMessage)
-      return envelope.data as T
-    }
-    return res as T
+    ensureOk(res, fallbackMessage)
+    return unwrap(res as T)
   }
 
   const appearance: SystemBridge['appearance'] = {

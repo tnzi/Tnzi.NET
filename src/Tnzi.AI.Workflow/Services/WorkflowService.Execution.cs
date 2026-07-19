@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流服务 - 执行驱动 (RunAsync / RunStreamingAsync) + 执行驱动相关私有助手。

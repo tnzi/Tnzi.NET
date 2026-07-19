@@ -192,7 +192,7 @@ public class ExpenseService : ApplicationService, IExpenseService
         if (expense.Lines.Count == 0)
             return Fail<ExpenseDto>("The expense has no lines.", 400);
 
-        var guardResult = await _guards.CheckAsync(nameof(Expense), expense.Id.ToString(), FinancePostingOperation.Post, expense, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Expense, expense.Id.ToString(), FinancePostingOperation.Post, expense, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<ExpenseDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
@@ -208,8 +208,8 @@ public class ExpenseService : ApplicationService, IExpenseService
         }
 
         var taxResult = await _helper.CalculateTaxAsync(
-            expense.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId }).ToList(),
-            cancellationToken);
+            expense.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId, TaxAmount = l.TaxAmount }).ToList(),
+            cancellationToken, isPurchase: true);
         if (!taxResult.Succeeded)
             return Fail<ExpenseDto>(taxResult.Message ?? "Tax calculation failed.", taxResult.Code ?? 400);
         var tax = taxResult.Data!;
@@ -219,13 +219,23 @@ public class ExpenseService : ApplicationService, IExpenseService
         if (total <= 0)
             return Fail<ExpenseDto>("Expense total must be greater than zero.", 400);
 
+        // 可抵扣税进 TaxReceivable（进项抵扣 + 申报口径）；不可抵扣税作为成本进 NonRecoverableTaxExpense。
         Account? taxAccount = null;
-        if (tax.TaxTotal != 0)
+        if (tax.Components.Any(c => c.TaxAmount != 0))
         {
             var taxAccountResult = await _helper.ResolveSystemAccountAsync(AccountSystemRole.TaxReceivable, cancellationToken);
             if (!taxAccountResult.Succeeded)
                 return Fail<ExpenseDto>(taxAccountResult.Message!, taxAccountResult.Code ?? 400);
             taxAccount = taxAccountResult.Data;
+        }
+
+        Account? nonRecoverableAccount = null;
+        if (tax.NonRecoverableTotal != 0)
+        {
+            var nrResult = await _helper.ResolveSystemAccountAsync(AccountSystemRole.NonRecoverableTaxExpense, cancellationToken);
+            if (!nrResult.Succeeded)
+                return Fail<ExpenseDto>(nrResult.Message!, nrResult.Code ?? 400);
+            nonRecoverableAccount = nrResult.Data;
         }
 
         var entry = new JournalEntry
@@ -235,7 +245,7 @@ public class ExpenseService : ApplicationService, IExpenseService
             Memo = string.IsNullOrWhiteSpace(expense.Memo) ? "Expense" : $"Expense: {expense.Memo}",
             Currency = expense.Currency,
             ExchangeRate = expense.ExchangeRate,
-            SourceType = nameof(Expense),
+            SourceType = FinanceSourceTypes.Expense,
             SourceId = expense.Id.ToString()
         };
 
@@ -265,6 +275,18 @@ public class ExpenseService : ApplicationService, IExpenseService
             });
         }
 
+        if (nonRecoverableAccount != null)
+        {
+            entry.Lines.Add(new JournalLine
+            {
+                LineNumber = lineNo++,
+                AccountId = nonRecoverableAccount.Id,
+                TxnDebit = tax.NonRecoverableTotal,
+                Currency = expense.Currency,
+                Memo = "Non-recoverable tax"
+            });
+        }
+
         entry.Lines.Add(new JournalLine
         {
             LineNumber = lineNo,
@@ -285,7 +307,7 @@ public class ExpenseService : ApplicationService, IExpenseService
                 await _entryRepository.InsertAsync(entry, ct);
 
                 expense.Number = await _numberService.NextFormattedAsync(
-                    nameof(Expense), _options.ExpenseNumberPrefix, _options.JournalNumberPadding, ct);
+                    FinanceSourceTypes.Expense, _options.ExpenseNumberPrefix, _options.JournalNumberPadding, ct);
                 expense.Status = FinanceDocumentStatus.Posted;
                 expense.SubTotal = subTotal;
                 expense.TaxTotal = tax.TaxTotal;
@@ -308,7 +330,7 @@ public class ExpenseService : ApplicationService, IExpenseService
 
         await PublishEventAsync(new FinanceDocumentPostedEvent
         {
-            DocType = nameof(Expense),
+            DocType = FinanceSourceTypes.Expense,
             DocId = expense.Id,
             Number = expense.Number!,
             JournalEntryId = entry.Id,
@@ -330,7 +352,7 @@ public class ExpenseService : ApplicationService, IExpenseService
         if (expense.Status != FinanceDocumentStatus.Posted)
             return Fail<ExpenseDto>("Only posted expenses can be voided.", 409);
 
-        var guardResult = await _guards.CheckAsync(nameof(Expense), expense.Id.ToString(), FinancePostingOperation.Void, expense, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.Expense, expense.Id.ToString(), FinancePostingOperation.Void, expense, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<ExpenseDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
@@ -374,7 +396,7 @@ public class ExpenseService : ApplicationService, IExpenseService
 
         await PublishEventAsync(new FinanceDocumentVoidedEvent
         {
-            DocType = nameof(Expense),
+            DocType = FinanceSourceTypes.Expense,
             DocId = expense.Id,
             Number = expense.Number,
             VoidJournalEntryId = reversal!.Id,
@@ -415,6 +437,10 @@ public class ExpenseService : ApplicationService, IExpenseService
         {
             if (line.Amount <= 0)
                 return Fail($"Line {lineNo}: amount must be greater than zero.");
+            if (line.TaxAmount < 0)
+                return Fail($"Line {lineNo}: the manual tax amount must not be negative.");
+            if (line.TaxAmount.HasValue && !line.TaxCodeId.HasValue)
+                return Fail($"Line {lineNo}: a manual tax amount requires a tax code.");
 
             expense.Lines.Add(new ExpenseLine
             {
@@ -423,14 +449,15 @@ public class ExpenseService : ApplicationService, IExpenseService
                 Description = line.Description,
                 AccountId = line.AccountId,
                 Amount = _helper.Round(line.Amount),
-                TaxCodeId = line.TaxCodeId
+                TaxCodeId = line.TaxCodeId,
+                TaxAmount = line.TaxAmount.HasValue ? _helper.Round(line.TaxAmount.Value) : null
             });
         }
 
         expense.SubTotal = _helper.Round(expense.Lines.Sum(l => l.Amount));
         var draftTax = await _helper.CalculateTaxAsync(
-            expense.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId }).ToList(),
-            cancellationToken);
+            expense.Lines.Select(l => new TaxCalculationLine { Amount = l.Amount, TaxCodeId = l.TaxCodeId, TaxAmount = l.TaxAmount }).ToList(),
+            cancellationToken, isPurchase: true);
         if (!draftTax.Succeeded)
             return Fail(draftTax.Message ?? "Tax calculation failed.", draftTax.Code ?? 400);
 

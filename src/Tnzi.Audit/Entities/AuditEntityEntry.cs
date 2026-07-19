@@ -34,7 +34,7 @@ public class AuditEntityEntry : EntityBase<Guid>, IHasCreationTime
     /// <summary>
     /// 获取或设置 操作类型（Added, Modified, Deleted）
     /// </summary>
-    public EntityState OperationType { get; set; }
+    public Metadata.EntityState OperationType { get; set; }
 
     /// <summary>
     /// 获取或设置 变更时间
@@ -45,35 +45,4 @@ public class AuditEntityEntry : EntityBase<Guid>, IHasCreationTime
     /// 获取或设置 属性变更条目集合
     /// </summary>
     public virtual ICollection<AuditPropertyEntry> PropertyEntries { get; set; } = new List<AuditPropertyEntry>();
-}
-
-/// <summary>
-/// 实体状态（对应EF Core的EntityState）
-/// </summary>
-public enum EntityState
-{
-    /// <summary>
-    /// 未变更
-    /// </summary>
-    Unchanged = 0,
-
-    /// <summary>
-    /// 已添加
-    /// </summary>
-    Added = 1,
-
-    /// <summary>
-    /// 已修改
-    /// </summary>
-    Modified = 2,
-
-    /// <summary>
-    /// 已删除
-    /// </summary>
-    Deleted = 3,
-
-    /// <summary>
-    /// 已分离
-    /// </summary>
-    Detached = 4
 }

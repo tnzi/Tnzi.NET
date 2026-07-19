@@ -17,7 +17,7 @@ import {
   type ConnectionInfoDto,
   type OnlineUserDto,
 } from '@tnzi/core/services/signalr'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminSignalRApi>[0]
 
@@ -71,7 +71,7 @@ export function createSignalRBridge(deps: SignalRBridgeDeps = {}): SignalRBridge
     getConnection: async (connectionId: string) =>
       unwrap<ConnectionInfoDto | null>(await api.getConnection(connectionId)),
     disconnectUser: async (userId: string) => {
-      await api.disconnectUser(userId)
+      ensureOk(await api.disconnectUser(userId))
     },
     getGroupConnections: async (groupName: string) =>
       unwrap<string[]>(await api.getGroupConnections(groupName)) ?? [],

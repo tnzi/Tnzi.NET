@@ -93,7 +93,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NSpin, NTag } from 'naive-ui'
-import { formatDateTime } from '@tnzi/core'
+import { downloadBlob, formatDateTime } from '@tnzi/core'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { editAction, deleteAction, viewAction, type RowAction } from '../../../headless/rowActions'
@@ -183,7 +183,7 @@ async function exportJson(id: string): Promise<void> {
   try {
     const data = await bridge.threads.exportJson(id)
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    triggerDownload(URL.createObjectURL(blob), `thread-${id}.json`, true)
+    downloadBlob(blob, `thread-${id}.json`)
     message.success(t('actions.exportJsonSuccess'))
   } catch (err) {
     message.error(err instanceof Error ? err.message : String(err))
@@ -193,19 +193,13 @@ async function exportJson(id: string): Promise<void> {
 function exportMd(id: string): void {
   if (!id) return
   // The MD export is a server file download — hand the browser the URL.
-  triggerDownload(bridge.threads.getExportMarkdownUrl(id), `thread-${id}.md`, false)
-}
-
-/** Programmatic anchor download; revokes object URLs to avoid leaks. */
-function triggerDownload(url: string, filename: string, revoke: boolean): void {
   const a = document.createElement('a')
-  a.href = url
-  a.download = filename
+  a.href = bridge.threads.getExportMarkdownUrl(id)
+  a.download = `thread-${id}.md`
   a.rel = 'noopener'
   document.body.appendChild(a)
   a.click()
   a.remove()
-  if (revoke) URL.revokeObjectURL(url)
 }
 
 // --- declarative row actions (C5) -------------------------------------------

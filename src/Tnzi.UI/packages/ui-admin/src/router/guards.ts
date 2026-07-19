@@ -14,6 +14,17 @@ export interface AuthGuardOptions {
    * here just to follow a deployment prefix; names are prefix-agnostic.
    */
   loginPath?: string
+  /**
+   * Optional async session resolver injected by `defineAdminApp.install()`.
+   * Invoked when the guard finds no active admin session: it runs the
+   * consumer's `auth.restore` hook (rehydrate the core session onto the
+   * HttpClient) then `loadPermissions` (which sets the admin store's `isLogin`
+   * atomically), and returns whether the user ended up authenticated. This is
+   * what lets a consumer delete the hand-rolled `router.beforeEach` that used
+   * to restore the session + load permissions on every navigation. Omitted →
+   * the guard falls back to a plain synchronous `isLogin` check (no restore).
+   */
+  resolveSession?: () => Promise<boolean>
 }
 
 export interface PermissionGuardOptions {
@@ -26,15 +37,30 @@ export interface PermissionGuardOptions {
  * Routes may opt out by setting `meta.requiresAuth = false`.
  */
 export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard {
-  return (to, _from, next) => {
+  return async (to, _from, next) => {
     if (to.meta?.requiresAuth === false) {
       return next()
     }
-    const auth = useAdminAuthStore()
-    if (!auth.isLogin) {
-      return next(options.loginPath ?? { name: 'login' })
+    // When a session resolver is injected it is the SINGLE source of truth and
+    // runs on every guarded navigation — it checks the live client token first
+    // (consumer `auth.restore` rehydrates the core session, then loadPermissions
+    // sets `isLogin`). This is deliberately NOT short-circuited by the store's
+    // `isLogin`: that flag is persisted, so after a cold reload it can read
+    // `true` while the core session isn't restored yet — trusting it would wave
+    // the user onto a page whose every request then 401s. The resolver keys off
+    // the token instead, so a stale persisted flag can't leak through. It stays
+    // cheap when already signed in (token present → no backend call).
+    if (options.resolveSession) {
+      return (await options.resolveSession())
+        ? next()
+        : next(options.loginPath ?? { name: 'login' })
     }
-    next()
+    // No resolver (consumer manages restore itself): plain store check.
+    const auth = useAdminAuthStore()
+    if (auth.isLogin) {
+      return next()
+    }
+    next(options.loginPath ?? { name: 'login' })
   }
 }
 
@@ -55,7 +81,12 @@ export function createPermissionGuard(
     // code: it's reachable with ANY per-group settings view code (see
     // usePermissionGuard.canAnySettings). Backend filters the groups per-code.
     const requiresAnySettings = to.meta?.anySettingsPermission === true
-    if (required || requiredAny.length > 0 || requiresAnySettings) {
+    // Role gate (consumer routes only): a route may declare `meta.roles` instead
+    // of / alongside permission codes. Same fail-open + super-user bypass as the
+    // permission gate; mirrors the sidebar role filter so a hidden role-gated
+    // page can't be reached by direct URL / deep link.
+    const requiredRoles = (to.meta?.roles ?? []) as string[]
+    if (required || requiredAny.length > 0 || requiresAnySettings || requiredRoles.length > 0) {
       // Fail-open while the permission list hasn't loaded yet (no user info):
       // mirrors the menu layer and avoids bouncing a freshly-logged-in user to
       // 403 before their permissions arrive (or in apps that never wire them).
@@ -63,11 +94,13 @@ export function createPermissionGuard(
       const auth = useAdminAuthStore()
       if (auth.userInfo !== null) {
         const { can, canAny, canAnySettings } = usePermissionGuard()
-        const allowed =
+        const permAllowed =
           (required ? can(required) : true) &&
           (requiredAny.length > 0 ? canAny(requiredAny) : true) &&
           (requiresAnySettings ? canAnySettings() : true)
-        if (!allowed) {
+        const roleAllowed =
+          requiredRoles.length === 0 || auth.isSuperUser || auth.hasAnyRole(requiredRoles)
+        if (!permAllowed || !roleAllowed) {
           return next(options.forbiddenPath ?? { name: 'forbidden' })
         }
       }

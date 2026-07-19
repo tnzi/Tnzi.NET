@@ -154,21 +154,4 @@ public class DefaultFinanceReportAdminController : ApiAdminControllerBase
     public virtual async Task<IActionResult> ExportTaxSummary([FromQuery] DateTime from, [FromQuery] DateTime to)
         => CsvFile(await _reportService.ExportTaxSummaryCsvAsync(from, to), "tax_summary");
 
-    /// <summary>
-    /// CSV 文件下载响应（UTF-8 BOM，Excel 直接打开不乱码）。
-    /// 失败按服务返回码透传标准 ApiResult 信封，前端 download() 从信封提取 message
-    /// （否则「缩小导出期间」这类指导性错误消息到不了用户）
-    /// </summary>
-    protected IActionResult CsvFile(Result<string> result, string baseName)
-    {
-        if (!result.Succeeded)
-            return StatusCode(result.Code ?? 400, result.ToApiResult());
-
-        var preamble = Encoding.UTF8.GetPreamble();
-        var body = Encoding.UTF8.GetBytes(result.Data!);
-        var bytes = new byte[preamble.Length + body.Length];
-        Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
-        Buffer.BlockCopy(body, 0, bytes, preamble.Length, body.Length);
-        return File(bytes, "text/csv", $"{baseName}_{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
-    }
 }

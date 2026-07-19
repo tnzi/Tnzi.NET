@@ -19,10 +19,22 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   extension: string;
   contentType: string;
   size: number;
+  /**
+   * @deprecated 后端 DefaultStorageController 已把对外契约收窄为安全 DTO,不再返回该内部存储路径字段。
+   * 保留为可选仅为向后兼容(消费者早已容错);勿在新代码中依赖。
+   */
   path?: string | null;
+  /**
+   * @deprecated 后端 DefaultStorageController 已把对外契约收窄为安全 DTO,不再返回该 MD5 校验字段。
+   * 保留为可选仅为向后兼容;勿在新代码中依赖。
+   */
   md5Hash?: string | null;
   provider: string;
   referenceCount: number;
+  /**
+   * @deprecated 后端 DefaultStorageController 已把对外契约收窄为安全 DTO,不再返回该内部缩略图路径字段(改用 thumbnailUrl)。
+   * 保留为可选仅为向后兼容;勿在新代码中依赖。
+   */
   thumbnailPath?: string | null;
   creatorId?: string | null;
   creatorName?: string | null;
@@ -222,8 +234,10 @@ export interface FileVersionDto {
   id: string;
   fileId: string;
   version: number;
-  path: string;
+  /** @deprecated 后端对外契约已收窄, createVersion/getVersions 不再返回原始存储路径(内部字段)。 */
+  path?: string | null;
   size: number;
+  /** @deprecated 后端对外契约已收窄, createVersion/getVersions 不再返回 md5Hash(内部字段, 由审计端点提供)。 */
   md5Hash?: string | null;
   description?: string | null;
   isCurrent: boolean;

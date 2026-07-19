@@ -141,6 +141,61 @@ public class AuditOperationSplitTests
         result.Data!.TotalCount.ShouldBe(10);
     }
 
+    /// <summary>
+    /// 新旧行混布：采集时定案的 IsWrite 列优先于启发式（能纠正启发式必然误判的样本），
+    /// IsWrite=null 的历史行回退旧启发式。
+    /// </summary>
+    private static List<AuditOperation> StoredClassificationOperations()
+    {
+        var storedRead = CreateOperation("POST", "Staff.OperationsSection", "/api/admin/staff-profiles/operations-section");
+        storedRead.IsWrite = false;    // 启发式会判写（POST 非 /query 非 .Get），存量列定案为读
+
+        var storedWrite = CreateOperation("GET", "Jobs.Trigger", "/api/admin/jobs/trigger");
+        storedWrite.IsWrite = true;    // 启发式会判读（GET），存量列定案为写
+
+        return
+        [
+            storedRead,
+            storedWrite,
+            CreateOperation("POST", "Legacy.Create", "/api/legacy"),        // null → 回退启发式=写
+            CreateOperation("POST", "Legacy.GetList", "/api/legacy/query")  // null → 回退启发式=读
+        ];
+    }
+
+    [Fact]
+    public async Task GetOperationsAsync_WriteView_PrefersStoredIsWrite_AndFallsBackForLegacyRows()
+    {
+        SetupOperationQueryable(StoredClassificationOperations());
+
+        var result = await _service.GetOperationsAsync(new AuditOperationQueryDto
+        {
+            IsWriteOperation = true,
+            PageIndex = 1,
+            PageSize = 50
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.Items.Select(o => o.FunctionName)
+            .ShouldBe(["Jobs.Trigger", "Legacy.Create"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task GetOperationsAsync_ReadView_PrefersStoredIsWrite_AndFallsBackForLegacyRows()
+    {
+        SetupOperationQueryable(StoredClassificationOperations());
+
+        var result = await _service.GetOperationsAsync(new AuditOperationQueryDto
+        {
+            IsWriteOperation = false,
+            PageIndex = 1,
+            PageSize = 50
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.Items.Select(o => o.FunctionName)
+            .ShouldBe(["Staff.OperationsSection", "Legacy.GetList"], ignoreOrder: true);
+    }
+
     [Fact]
     public async Task GetOperationsAsync_IsWriteOperationTrue_ReturnsOnlyWriteMethods()
     {
@@ -244,5 +299,21 @@ public class AuditOperationSplitTests
         result.Data!.ShouldContain("Users.Create");
         result.Data.ShouldNotContain("Users.GetProfile");
         result.Data.ShouldNotContain("Legacy.NoMethod");
+    }
+
+    [Fact]
+    public async Task ExportToCsvAsync_FormulaLikeUserControlledFields_AreEscaped()
+    {
+        // Url/UserName 是用户可控字段,以公式起始字符开头时经核心 CsvBuilder 必须前置单引号防注入
+        var op = CreateOperation("POST", "Users.Create", "=HYPERLINK(\"http://evil\")");
+        op.UserName = "-cmd|calc";
+        SetupOperationQueryable([op]);
+
+        var result = await _service.ExportToCsvAsync(new AuditOperationQueryDto { PageIndex = 1, PageSize = 50 });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.ShouldContain("'=HYPERLINK");
+        result.Data.ShouldContain("'-cmd|calc");
+        result.Data.ShouldNotContain(",=HYPERLINK");
     }
 }

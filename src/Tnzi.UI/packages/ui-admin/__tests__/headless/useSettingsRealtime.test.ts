@@ -17,6 +17,7 @@ vi.mock('@tnzi/core/services/system', () => ({
 }))
 
 import { lastSettingsChange, useSettingsRealtime } from '../../src/headless/useSettingsRealtime'
+import type { AdminSettingsConfig } from '../../src/plugin/settingsConfig'
 import { createSettingsRealtimeClient } from '@tnzi/core/services/system'
 
 describe('useSettingsRealtime', () => {
@@ -38,6 +39,23 @@ describe('useSettingsRealtime', () => {
     useSettingsRealtime({ hubUrl: '/api/hubs/settings', getToken: () => '', onChanged: () => {} })
     const opts = (createSettingsRealtimeClient as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(opts.url).toBe('/api/hubs/settings')
+  })
+
+  it('forwards AdminSettingsConfig.hubUrl through to the client (AdminShellRoot wiring)', () => {
+    // Mirrors AdminShellRoot: `hubUrl: settingsConfig?.hubUrl`, so a config that
+    // sets hubUrl (e.g. under an IIS sub-path) reaches the SignalR client, and an
+    // absent config falls back to the root-relative default.
+    const settingsConfig: AdminSettingsConfig = { hubUrl: '/api/hubs/settings' }
+    useSettingsRealtime({ hubUrl: settingsConfig?.hubUrl, getToken: () => '', onChanged: () => {} })
+    expect(
+      (createSettingsRealtimeClient as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].url,
+    ).toBe('/api/hubs/settings')
+
+    const noHubConfig: AdminSettingsConfig | null = null
+    useSettingsRealtime({ hubUrl: noHubConfig?.hubUrl, getToken: () => '', onChanged: () => {} })
+    expect(
+      (createSettingsRealtimeClient as unknown as ReturnType<typeof vi.fn>).mock.calls[1][0].url,
+    ).toBe('/hubs/settings')
   })
 
   it('start() subscribes Settings.Changed, starts, and routes the payload to onChanged', async () => {

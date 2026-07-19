@@ -26,8 +26,11 @@ public class AuthToken : FullAuditedEntity<Guid>
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// 获取或设置 令牌值（加密存储）
+    /// 获取或设置 令牌值。
+    /// [AuditIgnore]：refresh token 以原值存储并按值等值校验（AuthService.RefreshTokenAsync），
+    /// 属于可用凭证，绝不能随实体级审计把 old/new 值写进审计表。
     /// </summary>
+    [AuditIgnore]
     public string Value { get; set; } = string.Empty;
 
     /// <summary>

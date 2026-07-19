@@ -25,4 +25,27 @@ public abstract class ApiAdminControllerBase : ApiControllerBase
         : base(serviceProvider)
     {
     }
+
+    /// <summary>
+    /// 把服务层导出的 CSV 内容包装为文件下载响应：UTF-8 BOM(Excel 直开不乱码) + text/csv + 时间戳文件名。
+    /// 失败时按 Result 状态码返回 ApiResult 信封(前端 download 客户端解析错误 body 提取 message)。
+    /// CSV 内容生成 MUST 经 <see cref="Tnzi.Utilities.CsvBuilder"/>(公式注入防护),禁止手写转义。
+    /// </summary>
+    /// <param name="result">服务层导出结果(Data 为完整 CSV 文本)</param>
+    /// <param name="baseName">文件名前缀(实际文件名为 {baseName}_{UTC 时间戳}.csv)</param>
+    protected IActionResult CsvFile(Result<string> result, string baseName)
+    {
+        Check.NotNull(result);
+        Check.NotNullOrWhiteSpace(baseName);
+
+        if (!result.Succeeded)
+            return StatusCode(result.Code ?? 400, result.ToApiResult());
+
+        var preamble = Encoding.UTF8.GetPreamble();
+        var body = Encoding.UTF8.GetBytes(result.Data ?? string.Empty);
+        var bytes = new byte[preamble.Length + body.Length];
+        Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+        Buffer.BlockCopy(body, 0, bytes, preamble.Length, body.Length);
+        return File(bytes, "text/csv", $"{baseName}_{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
+    }
 }

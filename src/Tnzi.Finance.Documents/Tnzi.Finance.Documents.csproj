@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>PDF document rendering for the Tnzi.NET finance module: the default ICheckDocumentRenderer backed by PDFsharp (voucher / three-per-page check layouts, MICR line, calibration ruler). Optional module; load it to make finance check printing work out of the box.</Description>
+    <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 支票 PDF 渲染（纯托管、MIT）；把 PdfSharp 依赖从 Finance 核心收进本可选子模块，
+         纯会计消费者不再被传递拉入 PdfSharp。EFT 文件为纯文本，不经此渲染。 -->
+    <PackageReference Include="PdfSharp" Version="6.2.1" />
+  </ItemGroup>
+
+</Project>

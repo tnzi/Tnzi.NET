@@ -3,6 +3,7 @@
     :show="show"
     :mask-closable="false"
     :close-on-esc="false"
+    :auto-focus="false"
     transform-origin="center"
     @update:show="emit('update:show', $event)"
   >
@@ -76,6 +77,7 @@
           @open-conversation="onOpenConversation"
           @back="onBack"
           @drag-start="onDragStart"
+          @retry="onRetry"
         >
           <!-- Window controls, rendered at the far right of the pane header on
                desktop (hidden on phones - the title strip has the close). -->
@@ -128,7 +130,7 @@ import { Icon } from '@iconify/vue'
 import { MessageContentType } from '@tnzi/core/services/chat'
 import { useStorageApi } from '@tnzi/core/services/storage'
 import { formatFileSize } from '@tnzi/core'
-import { useChatStore } from '../../stores/useChatStore'
+import { useChatStore, type ChatMessageView } from '../../stores/useChatStore'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
@@ -153,7 +155,19 @@ const sound = useChatSound()
 // place the sender hears it).
 function onSendText(text: string): void {
   if (!store.activeId) return
-  void store.sendText(store.activeId, text).then(() => sound.playMessage())
+  store.sendText(store.activeId, text)
+    .then(() => sound.playMessage())
+    .catch(() => {
+      // A rejected send (the sender lost chat.use mid-session → 403, or a network
+      // error) is now shown INLINE in the thread: the store keeps the attempted
+      // message flagged failed and TMessageBubble renders a WeChat-style red retry
+      // marker + reason. No toast — the in-window bubble is the feedback.
+    })
+}
+
+function onRetry(message: ChatMessageView): void {
+  if (!store.activeId || message.clientId == null) return
+  void store.resendMessage(store.activeId, message.clientId).then(() => sound.playMessage()).catch(() => { /* re-failed: a fresh inline marker is shown */ })
 }
 
 const t = (k: string) => translatePageKey('chat', k)
@@ -326,15 +340,24 @@ async function uploadAndSend(file: File) {
 
     const contentType = isImage ? MessageContentType.Image : MessageContentType.File
 
-    await store.sendMedia(store.activeId, {
-      contentType,
-      fileId: uploaded.id,
-      fileName: uploaded.originalName || uploaded.fileName,
-      fileSize: uploaded.size,
-    })
-    sound.playMessage()
-  } catch {
-    message?.error(t('window.uploadFailed'))
+    // The upload succeeded; the SEND can still be rejected (sender lost chat.use
+    // → 403). That failure is shown INLINE as a failed media bubble with a retry
+    // marker (the store keeps it), so swallow it here — only a genuine UPLOAD
+    // failure (outer catch) still surfaces as a toast.
+    try {
+      await store.sendMedia(store.activeId, {
+        contentType,
+        fileId: uploaded.id,
+        fileName: uploaded.originalName || uploaded.fileName,
+        fileSize: uploaded.size,
+      })
+      sound.playMessage()
+    } catch { /* send rejected — inline failed bubble + retry, no toast */ }
+  } catch (err: unknown) {
+    // Upload itself failed (network / storage error) — a toast is right here
+    // because no message was ever attempted.
+    const reason = err instanceof Error ? err.message : ''
+    message?.error(reason || t('window.uploadFailed'))
   } finally {
     uploading.value = false
     uploadProgress.value = 0
@@ -468,11 +491,24 @@ function onDroppedFile(file: File) {
   .t-chat-window,
   .t-chat-window--max {
     grid-template-columns: 1fr;
-    width: 96vw;
-    height: 92vh;
+    /* True full-screen on phones (was a 96vw/92vh centered card): reclaims the
+       wasted margins, and `dvh` shrinks with the URL bar / keyboard so the
+       composer at the bottom is never pushed off-screen. No radius/shadow — it
+       reads as a native chat page, not a floating card. */
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
     /* Positioning context for the push-transition (children go absolute while
        sliding). */
     position: relative;
+  }
+
+  /* Larger window controls on touch (30×24 → 40×40 hit area, glyph unchanged). */
+  .t-chat-window__winbtn {
+    width: 40px;
+    height: 40px;
   }
 
   .t-chat-window__left,

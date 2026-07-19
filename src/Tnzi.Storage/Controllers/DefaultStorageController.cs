@@ -35,10 +35,10 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpGet("{id:guid}")]
     [AllowAnonymous]
-    public virtual async Task<ApiResult<FileRecord>> GetById(Guid id)
+    public virtual async Task<ApiResult<FileRecordDto>> GetById(Guid id)
     {
         var result = await FileStorageService.GetRecordAsync(id);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -56,27 +56,27 @@ public class DefaultStorageController : ApiControllerBase
     /// 上传文件
     /// </summary>
     [HttpPost("upload")]
-    public virtual async Task<ApiResult<FileRecord>> Upload(IFormFile file)
+    public virtual async Task<ApiResult<FileRecordDto>> Upload(IFormFile file)
     {
         if (file == null || file.Length == 0)
         {
-            return BadRequest<FileRecord>("File is required");
+            return BadRequest<FileRecordDto>("File is required");
         }
 
         using var stream = file.OpenReadStream();
         var result = await FileStorageService.SaveAsync(file.FileName, stream, isTemporary: true);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
     /// 批量上传
     /// </summary>
     [HttpPost("upload/batch")]
-    public virtual async Task<ApiResult<IEnumerable<FileRecord>>> UploadMany(IEnumerable<IFormFile> files)
+    public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> UploadMany(IEnumerable<IFormFile> files)
     {
         if (files == null || !files.Any())
         {
-            return BadRequest<IEnumerable<FileRecord>>("Files are required");
+            return BadRequest<IEnumerable<FileRecordDto>>("Files are required");
         }
 
         var fileList = new List<(string fileName, Stream stream)>();
@@ -94,7 +94,7 @@ public class DefaultStorageController : ApiControllerBase
             }
 
             var result = await FileStorageService.SaveManyAsync(fileList);
-            return result.ToApiResult();
+            return result.Map(items => items.Select(r => r.MapTo<FileRecordDto>())).ToApiResult();
         }
         finally
         {
@@ -231,10 +231,10 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPut("{id:guid}/rename")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileRecord>> Rename(Guid id, [FromBody] RenameFileRequest request)
+    public virtual async Task<ApiResult<FileRecordDto>> Rename(Guid id, [FromBody] RenameFileRequest request)
     {
         var result = await FileStorageService.RenameAsync(id, request.NewFileName);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -242,11 +242,11 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("{id:guid}/copy")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileRecord>> CopyFile(Guid id, [FromBody] CopyFileRequest? request = null)
+    public virtual async Task<ApiResult<FileRecordDto>> CopyFile(Guid id, [FromBody] CopyFileRequest? request = null)
     {
         var newFileName = request?.NewFileName;
         var result = await FileStorageService.CopyAsync(id, newFileName);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -254,19 +254,20 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("{id:guid}/versions")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileVersion>> CreateVersion(
+    public virtual async Task<ApiResult<FileVersionDto>> CreateVersion(
         Guid id,
         IFormFile file,
         [FromForm] string? description = null)
     {
         if (file == null || file.Length == 0)
         {
-            return BadRequest<FileVersion>("File is required");
+            return BadRequest<FileVersionDto>("File is required");
         }
 
         using var stream = file.OpenReadStream();
         var result = await FileVersionService.CreateVersionAsync(id, stream, description);
-        return result.ToApiResult();
+        // 控制器边界：把 FileVersion 实体投影为安全 DTO，绝不把内部字段（Path / Md5Hash / TenantId）泄漏进 API 契约。
+        return result.Map(v => v.MapTo<FileVersionDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -274,10 +275,11 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpGet("{id:guid}/versions")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<IEnumerable<FileVersion>>> GetVersions(Guid id)
+    public virtual async Task<ApiResult<IEnumerable<FileVersionDto>>> GetVersions(Guid id)
     {
         var result = await FileVersionService.GetVersionsAsync(id);
-        return result.ToApiResult();
+        // 控制器边界：把 FileVersion 实体投影为安全 DTO，绝不把内部字段（Path / Md5Hash / TenantId）泄漏进 API 契约。
+        return result.Map(items => items.Select(v => v.MapTo<FileVersionDto>())).ToApiResult();
     }
 
     /// <summary>
@@ -285,10 +287,10 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("{id:guid}/versions/{version}/restore")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileRecord>> RestoreVersion(Guid id, int version)
+    public virtual async Task<ApiResult<FileRecordDto>> RestoreVersion(Guid id, int version)
     {
         var result = await FileVersionService.RestoreVersionAsync(id, version);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -416,10 +418,10 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("compress")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileRecord>> Compress([FromBody] CompressRequest request)
+    public virtual async Task<ApiResult<FileRecordDto>> Compress([FromBody] CompressRequest request)
     {
         var result = await FileStorageService.CompressAsync(request.FileIds, request.ZipFileName);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
@@ -427,10 +429,10 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("{id:guid}/decompress")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<IEnumerable<FileRecord>>> Decompress(Guid id)
+    public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> Decompress(Guid id)
     {
         var result = await FileStorageService.DecompressAsync(id);
-        return result.ToApiResult();
+        return result.Map(items => items.Select(r => r.MapTo<FileRecordDto>())).ToApiResult();
     }
 
     /// <summary>
@@ -473,14 +475,14 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("upload/chunk/{uploadSessionId:guid}/complete")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileRecord>> CompleteChunkedUpload(
+    public virtual async Task<ApiResult<FileRecordDto>> CompleteChunkedUpload(
         Guid uploadSessionId,
         [FromBody] CompleteChunkedUploadRequest? request = null)
     {
         var result = await FileChunkUploadService.CompleteChunkedUploadAsync(
             uploadSessionId,
             request?.IsTemporary ?? false);
-        return result.ToApiResult();
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>

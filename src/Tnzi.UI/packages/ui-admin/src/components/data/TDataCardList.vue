@@ -18,7 +18,11 @@
         v-for="(row, index) in items"
         :key="keyOf(row, index)"
         class="t-data-cards__card"
-        :class="{ 't-data-cards__card--selected': showSelection && isSelected(row) }"
+        :class="{
+          't-data-cards__card--selected': showSelection && isSelected(row),
+          't-data-cards__card--clickable': isCardClickable(row, index),
+        }"
+        v-bind="cardAttrsOf(row, index)"
       >
         <header class="t-data-cards__head">
           <button
@@ -27,7 +31,7 @@
             class="t-data-cards__check"
             :aria-pressed="isSelected(row)"
             :aria-label="isSelected(row) ? 'Deselect row' : 'Select row'"
-            @click="onToggle(row)"
+            @click.stop="onToggle(row)"
           >
             <TSvgIcon
               :icon="isSelected(row) ? 'mdi:checkbox-marked' : 'mdi:checkbox-blank-outline'"
@@ -52,9 +56,31 @@
           </div>
         </dl>
 
-        <footer v-if="$slots.actions" class="t-data-cards__actions">
+        <!-- .stop so tapping an action never also fires the card-level click
+             handler from `cardProps` (drill-in + row action would both run). -->
+        <footer v-if="$slots.actions" class="t-data-cards__actions" @click.stop>
           <slot name="actions" :row="row" :index="index" />
         </footer>
+      </article>
+
+      <!-- Totals card — the card counterpart of NDataTable's summary row(s),
+           rendered once at the bottom of the list. -->
+      <article v-if="summaryRows.length" class="t-data-cards__card t-data-cards__card--summary">
+        <dl
+          v-for="(srow, si) in summaryRows"
+          :key="`summary-${si}`"
+          class="t-data-cards__fields"
+        >
+          <div v-for="col in summaryColumnsOf(srow)" :key="col.key" class="t-data-cards__field">
+            <dt class="t-data-cards__label">
+              <CellNode v-if="col.labelNode != null" :node="col.labelNode" />
+              <template v-else>{{ col.title }}</template>
+            </dt>
+            <dd class="t-data-cards__value">
+              <CellNode :node="srow[col.key]" />
+            </dd>
+          </div>
+        </dl>
       </article>
     </div>
   </div>
@@ -96,6 +122,13 @@ interface Props {
   /** 1-based serial of the first row on the current page (for the title
    *  fallback when no column qualifies as a title). */
   serialStart?: number
+  /** Row-level attrs/handlers spread onto each card — the card counterpart of
+   *  naive's `row-props`. A result carrying an `onClick` handler also gives
+   *  the card pointer/hover affordance. */
+  cardProps?: (row: Record<string, unknown>, index: number) => Record<string, unknown>
+  /** Summary rows (column key → rendered value) shown as a totals card at the
+   *  bottom of the list — the card counterpart of NDataTable's summary row. */
+  summaryRows?: Record<string, VNodeChild>[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -104,6 +137,8 @@ const props = withDefaults(defineProps<Props>(), {
   selectedKeys: () => [],
   emptyText: 'No data',
   serialStart: 1,
+  cardProps: undefined,
+  summaryRows: () => [],
 })
 
 const emit = defineEmits<{ toggle: [key: string | number] }>()
@@ -174,6 +209,19 @@ function isSelected(row: Record<string, unknown>): boolean {
 function onToggle(row: Record<string, unknown>): void {
   emit('toggle', props.rowKey(row))
 }
+
+function cardAttrsOf(row: Record<string, unknown>, index: number): Record<string, unknown> | undefined {
+  return props.cardProps?.(row, index)
+}
+
+function isCardClickable(row: Record<string, unknown>, index: number): boolean {
+  return typeof cardAttrsOf(row, index)?.onClick === 'function'
+}
+
+/** Summary card fields: declared column order, only keys the row provides. */
+function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
+  return props.columns.filter((c) => !c.hidden && c.key in srow)
+}
 </script>
 
 <style scoped>
@@ -204,6 +252,25 @@ function onToggle(row: Record<string, unknown>): void {
 .t-data-cards__card--selected {
   border-color: var(--tnzi-primary, #646cff);
   box-shadow: 0 0 0 1px var(--tnzi-primary, #646cff);
+}
+.t-data-cards__card--clickable {
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.t-data-cards__card--clickable:hover {
+  border-color: var(--tnzi-primary, #646cff);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+}
+.t-data-cards__card--clickable:active {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+.t-data-cards__card--summary {
+  background: var(--tnzi-layout-bg, #f7f8fa);
+}
+.t-data-cards__card--summary .t-data-cards__value {
+  font-weight: 600;
 }
 
 .t-data-cards__head {

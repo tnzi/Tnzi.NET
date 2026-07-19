@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 条件节点 — 评估条件表达式 → 返回 RouteTo 进行条件边路由

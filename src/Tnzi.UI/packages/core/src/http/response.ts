@@ -76,6 +76,56 @@ export function unwrapData<T>(result: ApiResult<T>): T {
 }
 
 /**
+ * Assert an `ApiResult` envelope reports success; throw otherwise. No-op for
+ * non-envelope values.
+ *
+ * `HttpClient` never rejects on a business failure — it RESOLVES an
+ * `ApiResult { succeeded: false, message }`. A call site that bare-awaits a
+ * void endpoint (`await client.delete(...)`) therefore swallows the refusal.
+ * Wrap every discarded-result write with this helper so business refusals
+ * (403, 409 delete vetoes, validation failures) surface as thrown errors.
+ *
+ * Unlike {@link unwrapData}, this tolerates a legitimately empty `data`
+ * payload on success (void endpoints return no body) — it only reads the
+ * success flag. Non-envelope values (already-unwrapped `T`, `undefined`) pass
+ * through silently.
+ */
+export function ensureOk(result: unknown, fallbackMessage = 'Request failed'): void {
+  if (
+    result &&
+    typeof result === 'object' &&
+    ('succeeded' in (result as object) || 'success' in (result as object))
+  ) {
+    const envelope = result as { succeeded?: boolean; success?: boolean; message?: string | null };
+    const ok = envelope.succeeded ?? envelope.success;
+    if (!ok) throw new Error(envelope.message || fallbackMessage);
+  }
+}
+
+/**
+ * Tolerant result unwrapper: returns `result.data` when `result` looks like an
+ * `ApiResult` envelope (has `data` + `succeeded`/`success`), otherwise passes
+ * `result` through unchanged.
+ *
+ * Complements the strict {@link unwrapData} (which throws on failure / null
+ * data): use `unwrapResult` when the value may already be unwrapped `T` — e.g.
+ * behind `useXxxApi` methods that are inconsistent about returning the full
+ * envelope vs. the bare payload. Does NOT assert success; pair with
+ * {@link ensureOk} when a failure must throw.
+ */
+export function unwrapResult<T>(result: ApiResult<T> | T): T {
+  if (
+    result &&
+    typeof result === 'object' &&
+    'data' in (result as object) &&
+    ('succeeded' in (result as object) || 'success' in (result as object))
+  ) {
+    return (result as ApiResult<T>).data as T;
+  }
+  return result as T;
+}
+
+/**
  * Extract data from HTTP result (returns null on failure).
  */
 export function extractData<T>(result: ApiResult<T>): T | null {

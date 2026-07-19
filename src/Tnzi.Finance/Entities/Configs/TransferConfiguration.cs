@@ -16,6 +16,10 @@ public class TransferConfiguration : EntityTypeConfigurationBase<Transfer, Guid>
         builder.Property(e => e.ExchangeRate).HasExchangeRatePrecision();
         builder.Property(e => e.Amount).HasMoneyPrecision();
         builder.Property(e => e.BaseAmount).HasMoneyPrecision();
+        builder.Property(e => e.TargetCurrency).HasMaxLength(8);
+        builder.Property(e => e.TargetExchangeRate).HasExchangeRatePrecision();
+        builder.Property(e => e.TargetAmount).HasMoneyPrecision();
+        builder.Property(e => e.TargetBaseAmount).HasMoneyPrecision();
 
         if (multiTenancyEnabled)
         {

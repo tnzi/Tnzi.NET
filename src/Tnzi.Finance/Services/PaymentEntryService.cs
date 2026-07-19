@@ -142,7 +142,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         if (payment.Amount <= 0)
             return Fail<PaymentEntryDto>("Payment amount must be greater than zero.", 400);
 
-        var guardResult = await _guards.CheckAsync(nameof(PaymentEntry), payment.Id.ToString(), FinancePostingOperation.Post, payment, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.PaymentEntry, payment.Id.ToString(), FinancePostingOperation.Post, payment, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<PaymentEntryDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
@@ -190,7 +190,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
                 : payment.Memo,
             Currency = payment.Currency,
             ExchangeRate = payment.ExchangeRate,
-            SourceType = nameof(PaymentEntry),
+            SourceType = FinanceSourceTypes.PaymentEntry,
             SourceId = payment.Id.ToString()
         };
 
@@ -233,7 +233,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
                 await _entryRepository.InsertAsync(entry, ct);
 
                 payment.Number = await _numberService.NextFormattedAsync(
-                    nameof(PaymentEntry), _options.PaymentNumberPrefix, _options.JournalNumberPadding, ct);
+                    FinanceSourceTypes.PaymentEntry, _options.PaymentNumberPrefix, _options.JournalNumberPadding, ct);
                 payment.Status = FinanceDocumentStatus.Posted;
                 payment.ExchangeRate = entry.ExchangeRate;
                 payment.BaseAmount = entry.Lines.First(l => l.AccountId == controlResult.Data.Id).Debit
@@ -255,7 +255,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
 
         await PublishEventAsync(new FinanceDocumentPostedEvent
         {
-            DocType = nameof(PaymentEntry),
+            DocType = FinanceSourceTypes.PaymentEntry,
             DocId = payment.Id,
             Number = payment.Number!,
             JournalEntryId = entry.Id,
@@ -279,7 +279,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         if (payment.AppliedTotal != 0)
             return Fail<PaymentEntryDto>("The payment has been applied. Unapply it before voiding.", 409);
 
-        var guardResult = await _guards.CheckAsync(nameof(PaymentEntry), payment.Id.ToString(), FinancePostingOperation.Void, payment, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.PaymentEntry, payment.Id.ToString(), FinancePostingOperation.Void, payment, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<PaymentEntryDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
@@ -323,7 +323,7 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
 
         await PublishEventAsync(new FinanceDocumentVoidedEvent
         {
-            DocType = nameof(PaymentEntry),
+            DocType = FinanceSourceTypes.PaymentEntry,
             DocId = payment.Id,
             Number = payment.Number,
             VoidJournalEntryId = reversal!.Id,

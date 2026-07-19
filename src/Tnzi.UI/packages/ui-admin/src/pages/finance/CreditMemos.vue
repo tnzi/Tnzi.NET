@@ -40,7 +40,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Line editor (create / edit draft) — useDetail + TDetailHost (?entry=new / edit:<id>). -->
+  <!-- Line editor (create / edit draft) - useDetail + TDetailHost (?entry=new / edit:<id>). -->
   <TDetailHost :state="entryDetail" :title="editorTitle" :width="920" :footer="false" :translate="t">
     <DocumentEditor
       :key="editorSeq"
@@ -57,6 +57,11 @@
       @cancel="entryDetail.close()"
     />
   </TDetailHost>
+
+  <!-- Apply panel - allocate a posted credit memo across open invoices (shared with Payments). -->
+  <TDetailHost :state="applyDetail" :title="t('apply.title')" :width="680" :footer="false" :translate="t">
+    <SettlementApplyPanel :bridge="bridge" :source="applySource" @applied="onApplied" @cancel="applyDetail.close()" />
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
@@ -67,11 +72,12 @@ import { formatDateOnly } from '@tnzi/core'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import SettlementApplyPanel, { type SettlementApplySource } from './components/SettlementApplyPanel.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/rowActions'
-import { createFinanceBridge, FinanceDocumentStatus, type CreditMemoDto, type CreateCreditMemoDto } from '../../services/bridges/finance-bridge'
+import { createFinanceBridge, FinanceDocumentStatus, FinancePartyType, SettlementDocType, type CreditMemoDto, type CreateCreditMemoDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
@@ -191,9 +197,12 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
     })),
   }
 
+  const wasCreate = !editingEntry.value?.id
   const saved = editingEntry.value?.id
     ? await bridge.creditMemos.updateDraft(editingEntry.value.id, data)
     : await bridge.creditMemos.createDraft(data)
+  // 幂等：createDraft 成功后把编辑器 hydrate 为该草稿，post 失败重试走 update 而非再建一张孤儿草稿。
+  if (wasCreate) await entryDetail.open('edit', saved)
 
   if (post) {
     await bridge.creditMemos.post(saved.id)
@@ -220,10 +229,39 @@ async function run(action: () => Promise<unknown>, successKey: string) {
 const isDraft = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Draft
 const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Posted
 
+// ── Apply panel (shared SettlementApplyPanel) - apply a posted credit memo to open invoices ──
+const applyDetail = useDetail<CreditMemoDto>({
+  mode: 'drawer',
+  url: 'apply',
+  loadData: (id) => bridge.creditMemos.getById(String(id)),
+})
+
+const applySource = computed<SettlementApplySource | null>(() => {
+  const d = applyDetail.data.value
+  if (!d?.id) return null
+  return {
+    id: d.id,
+    sourceType: SettlementDocType.CreditMemo,
+    partyType: FinancePartyType.Customer,
+    partyId: d.customerId,
+    currency: d.currency,
+    remaining: d.total - d.appliedTotal,
+  }
+})
+
+async function onApplied() {
+  applyDetail.close()
+  await crud.refresh()
+}
+
+const canApply = (row: FinanceDocRow) =>
+  isVoidable(row) && (row.total ?? 0) - (row.appliedTotal ?? 0) > 0
+
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),
   { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.creditMemos.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'apply', label: 'actions.apply', type: 'info', show: (row) => can('finance.document.update') && canApply(row), onClick: (row) => void applyDetail.open('edit', String(row.id ?? '')) },
   { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.creditMemos.voidDoc(String(row.id ?? '')), 'voidSuccess') },
   { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.creditMemos.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]

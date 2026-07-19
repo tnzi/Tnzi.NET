@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 通用工作流中断描述 — 任何节点均可通过 CheckInterruptAsync 返回此对象暂停工作流

@@ -17,6 +17,9 @@ public class ReconciliationDto
     public DateTime? CompletedTime { get; set; }
     public string? Note { get; set; }
 
+    /// <summary>对账币种（派生：科目限定币种 ?? 本位币；期末余额与差额均以此币种计）</summary>
+    public string Currency { get; set; } = string.Empty;
+
     /// <summary>本对账勾选行数</summary>
     public int LineCount { get; set; }
 
@@ -60,11 +63,22 @@ public class ReconciliationCandidateLineDto
     public string? EntryNumber { get; set; }
     public DateTime PostingDate { get; set; }
     public string? Memo { get; set; }
+
+    /// <summary>借方金额（对账币种：本位币科目 = 本位币金额；外币限定科目 = 交易币金额）</summary>
     public decimal Debit { get; set; }
+
+    /// <summary>贷方金额（对账币种：本位币科目 = 本位币金额；外币限定科目 = 交易币金额）</summary>
     public decimal Credit { get; set; }
 
     /// <summary>是否已被本对账勾选</summary>
     public bool IsSelected { get; set; }
+
+    /// <summary>
+    /// 是否被已导入的银行流水行持有（该行是某笔 Matched <see cref="Entities.BankTransaction"/> 的清算记录）。
+    /// 为真时勾选不可取消——解除须走银行流水页的 unmatch（那里会原子地同时释放流水与勾选行）；
+    /// 直接从工作区丢弃会让流水指向一条不存在的勾选行。呈现端据此禁用复选框
+    /// </summary>
+    public bool IsStatementMatched { get; set; }
 }
 
 /// <summary>
@@ -73,6 +87,10 @@ public class ReconciliationCandidateLineDto
 public class ReconciliationWorksheetDto
 {
     public Guid ReconciliationId { get; set; }
+
+    /// <summary>对账币种（派生：科目限定币种 ?? 本位币）</summary>
+    public string Currency { get; set; } = string.Empty;
+
     public decimal StatementEndingBalance { get; set; }
 
     /// <summary>累计已勾选净额（含历史已完成对账 + 本对账当前勾选）</summary>

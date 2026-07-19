@@ -1,6 +1,6 @@
-export { default as Artifact } from './Artifact.vue';
-export { default as ArtifactPreview } from './ArtifactPreview.vue';
-export { default as ArtifactCodeView } from './ArtifactCodeView.vue';
+export { default as TArtifact } from './TArtifact.vue';
+export { default as TArtifactPreview } from './TArtifactPreview.vue';
+export { default as TArtifactCodeView } from './TArtifactCodeView.vue';
 
 // Manus-inspired richer side panel with tabs + built-in Shiki +
 // resizable width + multi-file project mode.

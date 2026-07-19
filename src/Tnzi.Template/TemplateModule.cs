@@ -64,7 +64,7 @@ public class TemplateModule : TnziApplicationModule
     {
         // 注册 IPostConfigureOptions 实现，在服务提供者构建后执行程序集扫描和路径配置
         // 这样可以避免 BuildServiceProvider 反模式，同时支持日志记录
-        context.Services.AddSingleton<IPostConfigureOptions<TemplateOptions>, Options.TemplateOptionsPostConfigure>();
+        context.Services.AddSingleton<IPostConfigureOptions<TemplateOptions>, TemplateOptionsPostConfigure>();
 
         return Task.CompletedTask;
     }

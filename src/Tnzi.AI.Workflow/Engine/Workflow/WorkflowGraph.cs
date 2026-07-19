@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 工作流图 — 纯数据结构，表示节点和边的有向图（含条件边和循环支持）

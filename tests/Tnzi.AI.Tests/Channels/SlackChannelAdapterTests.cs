@@ -400,7 +400,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersSlack()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");
+        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("SlackChannelAdapter");
         source.ShouldContain("options.Slack.Enabled");
     }

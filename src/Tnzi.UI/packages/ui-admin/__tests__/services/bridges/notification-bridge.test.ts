@@ -109,6 +109,35 @@ describe('notification-bridge', () => {
     expect(notificationApi.batchDelete).toHaveBeenCalledWith(['n1', 'n2'])
   })
 
+  it('messages.delete rejects when the API resolves a failure envelope', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.batchDelete = vi.fn(async () => ({
+      succeeded: false,
+      success: false,
+      message: 'Delete vetoed by policy',
+    })) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.messages.delete(['n1'])).rejects.toThrow('Delete vetoed by policy')
+  })
+
+  it('messages.send rejects when the API resolves a failure envelope', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.send = vi.fn(async () => ({ succeeded: false, success: false })) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.messages.send('n1')).rejects.toThrow('Request failed')
+  })
+
+  it('messages.delete tolerates an empty success envelope (void endpoint)', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.batchDelete = vi.fn(async () => ({
+      succeeded: true,
+      success: true,
+      data: null,
+    })) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.messages.delete(['n1'])).resolves.toBeUndefined()
+  })
+
   it('messages.create is a read-only reject stub (messages are sent not CRUDed)', async () => {
     const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never })
     await expect(bridge.messages.create({})).rejects.toThrow()

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NCard, NGrid, NGi } from 'naive-ui'
 import { TCountTo } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useEcharts } from '../../headless/useEcharts'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import { translatePageKey } from '../../pages/_shared/translate'
 import type { EChartsOption } from 'echarts'
 
@@ -107,12 +108,20 @@ const kpiSpan = computed<string>(() => {
   return '24'
 })
 
+// Phone (<768px): a left-side vertical pie legend squeezes the pie into a
+// sliver. Below the breakpoint the legend moves to a horizontal strip at the
+// bottom so the pie keeps its size (see buildPieOption).
+const { isSm } = useBreakpoint()
+
 const { containerRef: lineRef } = useEcharts({
   optionFactory: (mode) => buildLineOption(mode),
 })
-const { containerRef: pieRef } = useEcharts({
+const { containerRef: pieRef, setOption: setPieOption } = useEcharts({
   optionFactory: (mode) => buildPieOption(mode),
 })
+// useEcharts only rebuilds the option on theme-mode change, so re-run the
+// factory when crossing the breakpoint to reposition the legend live.
+watch(isSm, () => setPieOption(true))
 
 function buildLineOption(mode: 'light' | 'dark'): EChartsOption {
   const textColor = mode === 'dark' ? '#d6d6d6' : '#444'
@@ -147,18 +156,22 @@ function buildLineOption(mode: 'light' | 'dark'): EChartsOption {
 
 function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
   const textColor = mode === 'dark' ? '#d6d6d6' : '#444'
+  // Phone: horizontal legend pinned to the bottom keeps the pie from being
+  // crushed by a left-side vertical legend on narrow screens.
+  const legend: EChartsOption['legend'] = isSm.value
+    ? { orient: 'horizontal', bottom: 0, left: 'center', textStyle: { color: textColor } }
+    : { orient: 'vertical', left: 'left', textStyle: { color: textColor } }
   return {
     backgroundColor: 'transparent',
     tooltip: { trigger: 'item' },
-    legend: {
-      orient: 'vertical',
-      left: 'left',
-      textStyle: { color: textColor },
-    },
+    legend,
     series: [
       {
         type: 'pie',
         radius: ['40%', '70%'],
+        // On phones the bottom legend needs vertical room, so nudge the pie
+        // center up; desktop keeps the default centered layout.
+        center: isSm.value ? ['50%', '42%'] : ['50%', '50%'],
         avoidLabelOverlap: false,
         label: { show: false },
         labelLine: { show: false },

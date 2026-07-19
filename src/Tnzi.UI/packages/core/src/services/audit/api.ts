@@ -99,18 +99,12 @@ export function useAdminAuditApi(client: HttpClient) {
         params: { topN, startDate, endDate },
       }),
 
-    /**
-     * Resolve CSV export URL (POST endpoint, returns file download).
-     * Caller must perform a POST with AuditOperationQueryDto body
-     * and handle the blob response manually.
-     */
-    getExportCsvUrl: () => client.resolveUrl(`${ADMIN_BASE}/export/csv`),
+    /** Export audit operations as CSV (Blob download; backend emits UTF-8 BOM) */
+    exportCsv: (query: AuditOperationQueryDto) =>
+      client.download(`${ADMIN_BASE}/export/csv`, { method: 'POST', body: query }),
 
-    /**
-     * Resolve JSON export URL (POST endpoint, returns file download).
-     * Caller must perform a POST with AuditOperationQueryDto body
-     * and handle the blob response manually.
-     */
-    getExportJsonUrl: () => client.resolveUrl(`${ADMIN_BASE}/export/json`),
+    /** Export audit operations as JSON (Blob download) */
+    exportJson: (query: AuditOperationQueryDto) =>
+      client.download(`${ADMIN_BASE}/export/json`, { method: 'POST', body: query }),
   };
 }

@@ -92,7 +92,20 @@ public class VendorService : ApplicationService, IVendorService
         if (vendor == null)
             return Fail("Vendor not found.", 404);
 
-        // P2b：被未清单据引用时拒绝删除
+        // 被单据引用时拒绝删除：Vendor 软删后会被全局过滤器隐藏，而其已过账账单/费用/付款仍留在子账，
+        // 导致往来方名字丢失、账龄回退显示原始 GUID。引导用 IsActive=false 停用而非删除（对齐 Tax/BankAccount 守卫）。
+        // 引用仓储在删除冷路径按需解析（Payroll 影子供应商链路复用本服务但从不调用删除，其最小测试基类未注册
+        // Bill/Expense 仓储且未建模，故不能强加为构造依赖）。
+        var billRepository = GetRequiredService<IRepository<Bill, Guid>>();
+        var expenseRepository = GetRequiredService<IRepository<Expense, Guid>>();
+        var paymentRepository = GetRequiredService<IRepository<PaymentEntry, Guid>>();
+        var referenced =
+            await billRepository.AnyAsync(b => b.VendorId == id, cancellationToken) ||
+            await expenseRepository.AnyAsync(e => e.VendorId == id, cancellationToken) ||
+            await paymentRepository.AnyAsync(p => p.PartyType == FinancePartyType.Vendor && p.PartyId == id, cancellationToken);
+        if (referenced)
+            return Fail("Cannot delete a vendor referenced by bills, expenses, or payments. Deactivate it instead.", 409);
+
         await _vendorRepository.DeleteAsync(vendor, cancellationToken);
         return Ok();
     }

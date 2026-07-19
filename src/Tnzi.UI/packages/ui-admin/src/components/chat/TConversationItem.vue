@@ -26,6 +26,7 @@
         :size="38"
         :system="item.type === ConversationType.System"
         :status="presence !== false && item.type === ConversationType.Direct ? item.peerStatus : null"
+        :disabled="item.type === ConversationType.Direct && item.peerDisabled === true"
       />
     </NBadge>
 
@@ -41,6 +42,21 @@
         <Icon v-if="item.isMuted" icon="mdi:bell-off-outline" class="t-conv-item__mute" :width="13" />
       </div>
     </div>
+
+    <!-- Touch/phone: a persistent "more" button opens the same quick-action menu
+         (pin / mute / mark-read / hide / delete) that right-click opens on
+         desktop — touch devices have no @contextmenu. It reuses the exact same
+         `context-menu` channel: TConversationList reads the click coordinates
+         (clientX/clientY of this tap) to anchor its shared NDropdown. Stops
+         propagation so tapping it doesn't also select the conversation. -->
+    <button
+      v-if="isTouch || isSm"
+      class="t-conv-item__more"
+      :title="t('window.moreActions')"
+      @click.stop="emit('context-menu', $event)"
+    >
+      <Icon icon="mdi:dots-horizontal" :width="20" />
+    </button>
   </div>
 </template>
 
@@ -52,6 +68,7 @@ import type { ConversationListItemDto } from '@tnzi/core/services/chat'
 import { ConversationType } from '@tnzi/core/services/chat'
 import { formatChatTime } from './time'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatAvatar from './TChatAvatar.vue'
 import TGroupAvatar from './TGroupAvatar.vue'
 
@@ -64,9 +81,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: []
-  /** Right-click — the list opens the quick-action context menu at the cursor. */
+  /** Right-click (desktop) or the "more" tap (touch) — the list opens the
+   *  quick-action context menu at the event's cursor coordinates. */
   'context-menu': [e: MouseEvent]
 }>()
+
+const t = (k: string) => translatePageKey('chat', k)
+// Touch / phone gets a persistent "more" button since @contextmenu never fires.
+const { isSm, isTouch } = useBreakpoint()
 
 const timeLabel = computed(() => formatChatTime(props.item.lastMessageAt, translatePageKey('chat', 'window.yesterday')))
 </script>
@@ -150,5 +172,29 @@ const timeLabel = computed(() => formatChatTime(props.item.lastMessageAt, transl
 
 .t-conv-item--sticky {
   background: color-mix(in srgb, var(--chat-hover, #ececec) 60%, transparent);
+}
+
+/* Touch/phone "more" button: a small dots glyph with a ≥40px tap target (the
+   hit area is padded out around the icon so it's comfortable to tap without
+   enlarging the visible glyph). Only rendered on touch/phone via v-if. */
+.t-conv-item__more {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 40px;
+  align-self: stretch;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--chat-text-3, #b0b0b0);
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.t-conv-item__more:active {
+  background: var(--chat-hover, rgb(51 54 57 / 0.08));
+  color: var(--chat-text-2, #6f6f6f);
 }
 </style>

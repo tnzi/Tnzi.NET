@@ -7,6 +7,8 @@ public class GroupService : ApplicationService, IGroupService
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
     private readonly IConversationService _conversationService;
     private readonly IOptionsSnapshot<ChatOptions> _options;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
+    private readonly IChatAccessService? _chatAccess;
 
     public GroupService(
         IServiceProvider serviceProvider,
@@ -14,17 +16,50 @@ public class GroupService : ApplicationService, IGroupService
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
         IConversationService conversationService,
-        IOptionsSnapshot<ChatOptions> options) : base(serviceProvider)
+        IOptionsSnapshot<ChatOptions> options,
+        IFunctionAuthorizationService? functionAuthorization = null,
+        IChatAccessService? chatAccess = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
         _conversationService = Check.NotNull(conversationService);
         _options = Check.NotNull(options);
+        _functionAuthorization = functionAuthorization;
+        _chatAccess = chatAccess;
     }
 
     // Sync — no await in body; using static avoids CS1998 warning.
     private static bool IsOwner(Conversation conv, Guid userId) => conv.OwnerId == userId;
+
+    /// <summary>
+    /// Drop super-admin ids from a member list. The contact directory already hides
+    /// super admins, but the group-member write paths take caller-supplied ids and
+    /// must enforce the same rule so nobody can pull a maintenance account into a
+    /// business group by passing its id directly. Silent (not 403): one stray id
+    /// shouldn't fail the whole operation, and refusing would disclose that the id
+    /// belongs to a super admin. No-op when Authorization isn't loaded.
+    /// </summary>
+    private async Task<List<Guid>> ExcludeSuperAdminsAsync(List<Guid> ids)
+    {
+        if (_functionAuthorization == null || ids.Count == 0) return ids;
+        var supers = await _functionAuthorization.GetSuperAdminUserIdsAsync();
+        return supers.Count == 0 ? ids : ids.Where(id => !supers.Contains(id)).ToList();
+    }
+
+    /// <summary>
+    /// Drop ids that lack <c>chat.use</c>. The picker already hides them, but the
+    /// member write paths take caller-supplied ids, so a disabled user could be
+    /// pulled into a group by passing its id directly — where every message to them
+    /// would just be isolated. Silent (not 403), mirroring the super-admin rule.
+    /// No-op when the gate is inactive (Authorization not loaded).
+    /// </summary>
+    private async Task<List<Guid>> ExcludeDisabledAsync(List<Guid> ids)
+    {
+        if (_chatAccess == null || ids.Count == 0) return ids;
+        var disabled = await _chatAccess.FilterDisabledAsync(ids);
+        return disabled.Count == 0 ? ids : ids.Where(id => !disabled.Contains(id)).ToList();
+    }
 
     private async Task SystemMessageAsync(Guid conversationId, string text, DateTime now, CancellationToken ct)
     {
@@ -52,6 +87,10 @@ public class GroupService : ApplicationService, IGroupService
         var me = GetRequiredCurrentUser().Id!.Value;
 
         var memberIds = (input.MemberIds ?? new List<Guid>()).Where(id => id != Guid.Empty && id != me).Distinct().ToList();
+        // Never seed a business group with a super admin, nor with a user who can't
+        // use chat (no `chat.use`) — both are dropped silently even if passed directly.
+        memberIds = await ExcludeSuperAdminsAsync(memberIds);
+        memberIds = await ExcludeDisabledAsync(memberIds);
         if (opts.MaxGroupMembers > 0 && memberIds.Count + 1 > opts.MaxGroupMembers)
             return Fail<ConversationDto>($"Group size exceeds the maximum of {opts.MaxGroupMembers} members.", 400);
 
@@ -111,6 +150,9 @@ public class GroupService : ApplicationService, IGroupService
         if (!IsOwner(conv, me)) return Fail("Only the group owner can add members.", 403);
 
         var toAdd = (userIds ?? Enumerable.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        // Same rules as CreateGroup: no super admins, and no users lacking `chat.use`.
+        toAdd = await ExcludeSuperAdminsAsync(toAdd);
+        toAdd = await ExcludeDisabledAsync(toAdd);
         if (toAdd.Count == 0) return Fail("No members to add.", 400);
 
         // Load existing members with tracking so UpdateAsync on revoked rows doesn't conflict.

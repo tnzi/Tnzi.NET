@@ -9,11 +9,13 @@ public class ChatConfigServiceTests : Integration.IntegrationTestBase
     private IChatConfigService Config => ServiceProvider.GetRequiredService<IChatConfigService>();
 
     [Fact]
-    public void GetClientConfig_Should_Return_Defaults()
+    public async Task GetClientConfig_Should_Return_Defaults()
     {
-        var r = Config.GetClientConfig();
+        var r = await Config.GetClientConfigAsync();
         r.Succeeded.ShouldBeTrue(r.Message);
-        r.Data!.EnableGroups.ShouldBeTrue();
+        // No Authorization module in the suite → ChatAccessService fails open → enabled.
+        r.Data!.Enabled.ShouldBeTrue();
+        r.Data.EnableGroups.ShouldBeTrue();
         r.Data.MaxGroupMembers.ShouldBe(200);
         r.Data.GroupAvatarMemberCount.ShouldBe(9);
         r.Data.EnablePresence.ShouldBeTrue();
@@ -35,9 +37,9 @@ public class ChatInvisibleDisabledConfigTests : Integration.IntegrationTestBase
     protected override void ConfigureChatOptions(ChatOptions options) => options.AllowInvisible = false;
 
     [Fact]
-    public void GetClientConfig_Should_Report_Invisible_Disabled()
+    public async Task GetClientConfig_Should_Report_Invisible_Disabled()
     {
-        var r = Config.GetClientConfig();
+        var r = await Config.GetClientConfigAsync();
         r.Succeeded.ShouldBeTrue(r.Message);
         r.Data!.AllowInvisible.ShouldBeFalse();
     }
@@ -57,18 +59,18 @@ public class ChatSoundConfigTests : Integration.IntegrationTestBase
     }
 
     [Fact]
-    public void GetClientConfig_Should_Project_Selected_Sounds()
+    public async Task GetClientConfig_Should_Project_Selected_Sounds()
     {
-        var r = Config.GetClientConfig();
+        var r = await Config.GetClientConfigAsync();
         r.Succeeded.ShouldBeTrue(r.Message);
         r.Data!.NotificationSound.ShouldBe(ChatSoundEffect.Bell);
         r.Data.MessageSound.ShouldBe(ChatSoundEffect.None);
     }
 
     [Fact]
-    public void GetClientConfig_Should_Project_Attention_Effects()
+    public async Task GetClientConfig_Should_Project_Attention_Effects()
     {
-        var r = Config.GetClientConfig();
+        var r = await Config.GetClientConfigAsync();
         r.Succeeded.ShouldBeTrue(r.Message);
         r.Data!.NewMessageEffect.ShouldBe(ChatNewMessageEffect.Pulse);
         r.Data.FlashTitleOnMessage.ShouldBeFalse();

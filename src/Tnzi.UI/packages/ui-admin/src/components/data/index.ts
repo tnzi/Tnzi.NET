@@ -9,6 +9,7 @@ export { default as TKpiRow } from './TKpiRow.vue'
 export { default as TEmpty } from './TEmpty.vue'
 export type { ChunkUploader } from './TChunkFileUpload.vue'
 export type { CardColumn } from './TDataCardList.vue'
+export type { TResponsiveSummaryRow } from './TResponsiveTable.vue'
 export type { TKpiCardProps, TKpiCardTone } from './TKpiCard.vue'
 /** @deprecated use TKpiCardProps / TKpiCardTone. */
 export type { TKpiCardProps as TStatCardProps, TKpiCardTone as TStatCardTone } from './TKpiCard.vue'

@@ -9,13 +9,13 @@ public class AuditBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<AuditBackgroundService> _logger;
     private readonly IAuditConsumer _auditConsumer;
-    private readonly IOptionsMonitor<Audit.Options.AuditOptions> _options;
+    private readonly IOptionsMonitor<AuditOptions> _options;
 
     public AuditBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<AuditBackgroundService> logger,
         IAuditConsumer auditConsumer,
-        IOptionsMonitor<Audit.Options.AuditOptions> options)
+        IOptionsMonitor<AuditOptions> options)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);

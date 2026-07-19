@@ -29,7 +29,9 @@ public class CreateSettingDto
     public string Key { get; set; } = null!;
 
     [Required]
-    [MaxLength(2000)]
+    // 64KB：与实体 Value 列（已移除长度上限，映射 text/nvarchar(max)）对齐；
+    // 特大值（如主题快照 64KB）走专用服务写入，通用 CRUD 仍保留有界上限防滥用。
+    [MaxLength(65536)]
     public string Value { get; set; } = null!;
 
     public string? Description { get; set; }
@@ -46,7 +48,9 @@ public class CreateSettingDto
 public class UpdateSettingDto
 {
     [Required]
-    [MaxLength(2000)]
+    // 64KB：与实体 Value 列（已移除长度上限，映射 text/nvarchar(max)）对齐；
+    // 特大值（如主题快照 64KB）走专用服务写入，通用 CRUD 仍保留有界上限防滥用。
+    [MaxLength(65536)]
     public string Value { get; set; } = null!;
 
     public string? Description { get; set; }
@@ -64,7 +68,9 @@ public class SetEncryptedSettingDto
     /// The plain text value to encrypt and store
     /// </summary>
     [Required]
-    [MaxLength(2000)]
+    // 64KB：与实体 Value 列（已移除长度上限，映射 text/nvarchar(max)）对齐；
+    // 特大值（如主题快照 64KB）走专用服务写入，通用 CRUD 仍保留有界上限防滥用。
+    [MaxLength(65536)]
     public string Value { get; set; } = null!;
 
     /// <summary>

@@ -9,5 +9,6 @@ export type { TnziMobileOptions } from './plugin';
 
 export * from './components/index';
 export * from './composables/index';
+export * from './headless/index';
 export * from './adapters/index';
 export * from './stores/index';

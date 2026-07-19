@@ -29,7 +29,7 @@ const onFieldChange = (key: string, value: any) => {
   console.log('Field changed:', key, value);
 };
 
-// TSearchForm
+// TSearchBar
 const searchForm = ref({ ...demoSearchForm });
 const onSearch = (data: unknown) => {
   console.log('Search:', data);
@@ -76,10 +76,10 @@ const onSearchReset = () => {
       </div>
     </van-cell-group>
 
-    <!-- TSearchForm -->
-    <van-cell-group inset title="TSearchForm">
+    <!-- TSearchBar -->
+    <van-cell-group inset title="TSearchBar">
       <div class="component-wrapper">
-        <TSearchForm
+        <TSearchBar
           v-model="searchForm"
           placeholder="Search products..."
           @search="onSearch"

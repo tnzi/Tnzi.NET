@@ -34,4 +34,7 @@ public class BillLine : EntityBase<Guid>, IMultiTenant
 
     /// <summary>税码</summary>
     public Guid? TaxCodeId { get; set; }
+
+    /// <summary>手动税额覆盖（null = 按税率计算；仅在行有税码时合法，>= 0）</summary>
+    public decimal? TaxAmount { get; set; }
 }

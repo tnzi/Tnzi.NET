@@ -9,9 +9,9 @@
  */
 
 import { createApp, ref, h, type App } from 'vue';
-import FloatingChat from './FloatingChat.vue';
-import SidebarChat from './SidebarChat.vue';
-import InlineChat from './InlineChat.vue';
+import TFloatingChat from './TFloatingChat.vue';
+import TSidebarChat from './TSidebarChat.vue';
+import TInlineChat from './TInlineChat.vue';
 import type { ChatMessage } from '@/composables/useChat';
 
 export interface TnziChatOptions {
@@ -40,9 +40,9 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
   const isStreaming = ref(false);
 
   const components = {
-    floating: FloatingChat,
-    sidebar: SidebarChat,
-    inline: InlineChat,
+    floating: TFloatingChat,
+    sidebar: TSidebarChat,
+    inline: TInlineChat,
   } as const;
 
   const component = components[options.mode];

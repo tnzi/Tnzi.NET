@@ -32,5 +32,22 @@ public class FinancePermissions : IPermissionDefinitionProvider
         context.AddCrudPermissions("finance.document", "Finance Documents", parentName: "finance");
         // Complete（锁定对账）走 .update（生命周期状态变更），与单据 post/void 一致。
         context.AddCrudPermissions("finance.reconciliation", "Bank Reconciliations", parentName: "finance");
+        // 期末汇兑重估：非 CRUD 套装（view 只读预览 + execute 过账）。
+        context.AddPermission("finance.revaluation.view", "FX Revaluation", parentName: "finance");
+        context.AddPermission("finance.revaluation.execute", "Run FX Revaluation", parentName: "finance");
+        // 余额汇总运维：非 CRUD 套装（view 只读校验 + execute 全量重建）。
+        context.AddPermission("finance.balanceSummary.view", "Balance Summary", parentName: "finance");
+        context.AddPermission("finance.balanceSummary.execute", "Rebuild Balance Summary", parentName: "finance");
+
+        // P3「输出与摄取」的 6 个 admin 面（一次性声明全套 23 码）。
+        context.AddCrudPermissions("finance.bankAccount", "Bank Accounts", parentName: "finance");
+        context.AddCrudPermissions("finance.bankFeed", "Bank Feed", parentName: "finance");
+        // 支票：占号留痕，无删除端点。
+        context.AddCrudPermissions("finance.check", "Checks", parentName: "finance", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
+        context.AddCrudPermissions("finance.receipt", "Receipts", parentName: "finance");
+        context.AddCrudPermissions("finance.partyBank", "Party Bank Accounts", parentName: "finance");
+        // EFT：写三件套 + 独立 download（导出文件含全量明文账号，与 view 分离）。
+        context.AddCrudPermissions("finance.eft", "EFT Batches", parentName: "finance", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
+        context.AddPermission("finance.eft.download", "Download EFT Files", parentName: "finance");
     }
 }

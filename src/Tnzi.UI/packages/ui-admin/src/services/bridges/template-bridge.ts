@@ -33,7 +33,7 @@ import {
   type LayoutQueryDto,
 } from '@tnzi/core/services/template'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminTemplateApi>[0]
 
@@ -139,9 +139,9 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
     },
     delete: async (ids: string[]) => {
       if (ids.length === 1 && ids[0]) {
-        await ta.delete(ids[0])
+        ensureOk(await ta.delete(ids[0]))
       } else {
-        await ta.deleteBatch(ids)
+        ensureOk(await ta.deleteBatch(ids))
       }
     },
     render: async (id: string, variables: Record<string, unknown>): Promise<string> => {
@@ -185,9 +185,9 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
     },
     delete: async (ids: string[]) => {
       if (ids.length === 1 && ids[0]) {
-        await la.delete(ids[0])
+        ensureOk(await la.delete(ids[0]))
       } else {
-        await la.deleteBatch(ids)
+        ensureOk(await la.deleteBatch(ids))
       }
     },
   }

@@ -46,7 +46,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Line editor (create / edit draft) — useDetail + TDetailHost (?entry=new / edit:<id>). -->
+  <!-- Line editor (create / edit draft) - useDetail + TDetailHost (?entry=new / edit:<id>). -->
   <TDetailHost :state="entryDetail" :title="editorTitle" :width="920" :footer="false" :translate="t">
     <DocumentEditor
       :key="editorSeq"
@@ -64,7 +64,7 @@
     />
   </TDetailHost>
 
-  <!-- Pay Bills — batch settlement over open bills; backend posts one payment
+  <!-- Pay Bills - batch settlement over open bills; backend posts one payment
        per (vendor, currency) group and applies it atomically (?pay=new). -->
   <TDetailHost :state="payDetail" :title="t('pay.title')" :width="860" :footer="false" :translate="t">
     <div class="fin-pay-run">
@@ -100,10 +100,10 @@
           </span>
         </div>
         <div v-for="bill in openBills" :key="bill.id" class="fin-pay-run__row">
-          <span>{{ bill.number ?? bill.id }}</span>
-          <span>{{ bill.vendorName ?? '—' }}</span>
-          <span>{{ formatDateOnly(bill.dueDate, { utc: true, fallback: '—' }) }}</span>
-          <span class="fin-pay-run__num">{{ fmtAmount(bill.outstanding) }} {{ bill.currency }}</span>
+          <span class="fin-pay-run__cell" :data-label="t('pay.bill')">{{ bill.number ?? bill.id }}</span>
+          <span class="fin-pay-run__cell" :data-label="t('pay.vendor')">{{ bill.vendorName ?? '—' }}</span>
+          <span class="fin-pay-run__cell" :data-label="t('pay.dueDate')">{{ formatDateOnly(bill.dueDate, { utc: true, fallback: '—' }) }}</span>
+          <span class="fin-pay-run__cell fin-pay-run__num" :data-label="t('pay.outstanding')">{{ fmtAmount(bill.outstanding) }} {{ bill.currency }}</span>
           <NInputNumber v-model:value="payAllocations[bill.id]" size="small" :min="0" :max="bill.outstanding" :show-button="false" placeholder="0.00" />
         </div>
         <div class="fin-pay-run__footer">
@@ -253,9 +253,12 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
     })),
   }
 
+  const wasCreate = !editingEntry.value?.id
   const saved = editingEntry.value?.id
     ? await bridge.bills.updateDraft(editingEntry.value.id, data)
     : await bridge.bills.createDraft(data)
+  // 幂等：createDraft 成功后 hydrate 编辑器，post 失败重试走 update 而非再建孤儿草稿。
+  if (wasCreate) await entryDetail.open('edit', saved)
 
   if (post) {
     await bridge.bills.post(saved.id)
@@ -456,9 +459,29 @@ const rowActions: RowAction<FinanceDocRow>[] = [
   gap: 8px;
 }
 
+.fin-pay-run__cell[data-label]::before {
+  content: none;
+}
+
+/* Phone (<md): the fixed 5-column allocation grid overflows the fullscreen modal - stack each
+   row to label: value single-column so the panel never scrolls horizontally (content-page iron-law). */
 @media (max-width: 767px) {
   .fin-pay-run__header {
     grid-template-columns: 1fr;
+  }
+  .fin-pay-run__row--head {
+    display: none;
+  }
+  .fin-pay-run__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--tnzi-border, rgba(0, 0, 0, 0.08));
+  }
+  .fin-pay-run__cell[data-label]::before {
+    content: attr(data-label) ': ';
+    color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+    font-size: 12px;
   }
 }
 </style>

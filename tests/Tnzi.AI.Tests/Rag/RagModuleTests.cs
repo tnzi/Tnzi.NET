@@ -4,14 +4,14 @@ using Tnzi.Modules;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// RagModule 单元测试 — 验证模块属性和配置
+/// AIRagModule 单元测试 — 验证模块属性和配置
 /// </summary>
 public class RagModuleTests
 {
     [Fact]
     public void LoadOrder_Is55()
     {
-        var module = new RagModule();
+        var module = new AIRagModule();
 
         module.LoadOrder.ShouldBe(55);
     }
@@ -19,7 +19,7 @@ public class RagModuleTests
     [Fact]
     public void TableNamePrefix_IsRAG()
     {
-        var module = new RagModule();
+        var module = new AIRagModule();
 
         module.TableNamePrefix.ShouldBe("RAG");
     }
@@ -27,7 +27,7 @@ public class RagModuleTests
     [Fact]
     public void DependsOn_AIModule()
     {
-        var dependsOnAttrs = typeof(RagModule)
+        var dependsOnAttrs = typeof(AIRagModule)
             .GetCustomAttributes(typeof(DependsOnAttribute), inherit: true)
             .Cast<DependsOnAttribute>()
             .ToList();
@@ -87,12 +87,13 @@ public class RagModuleTests
     [Fact]
     public void Auto_OverridesAIModuleNoOpVectorStore_WithPgVectorStore()
     {
-        // AIModule 先于 RagModule 用 TryAddScoped 注册了 NoOpVectorStore 占位。
-        // "Auto"（默认）必须覆盖该占位，否则向量检索静默返空。
+        // 生产顺序：AIRagModule.Configure 先注册 PgVectorStore，AIModule 在其后的
+        // PostConfigure 阶段才 TryAdd NoOpVectorStore 回退 —— 该回退对已注册的 Pg 天然让位。
+        // "Auto"（默认）注册的 Pg 必须胜出，否则向量检索静默返空。
         var services = ConfigureModule(
             vectorStoreProvider: "Auto",
             hybridEnabled: false,
-            preRegister: s => s.TryAddScoped<IVectorStore, NoOpVectorStore>());
+            postRegister: s => s.TryAddScoped<IVectorStore, NoOpVectorStore>());
 
         var descriptor = services.LastOrDefault(d => d.ServiceType == typeof(IVectorStore));
 
@@ -103,11 +104,12 @@ public class RagModuleTests
     [Fact]
     public void Default_WhenProviderUnset_OverridesNoOpVectorStore_WithPgVectorStore()
     {
-        // 不配置 VectorStoreProvider 时走默认("Auto")分支，行为应与显式 "Auto" 一致。
+        // 不配置 VectorStoreProvider 时走默认("Auto")分支，行为应与显式 "Auto" 一致：
+        // Configure 注册的 Pg 胜过随后 PostConfigure 才 TryAdd 的 NoOp 回退。
         var services = ConfigureModule(
             vectorStoreProvider: null,
             hybridEnabled: false,
-            preRegister: s => s.TryAddScoped<IVectorStore, NoOpVectorStore>());
+            postRegister: s => s.TryAddScoped<IVectorStore, NoOpVectorStore>());
 
         var descriptor = services.LastOrDefault(d => d.ServiceType == typeof(IVectorStore));
 
@@ -189,13 +191,16 @@ public class RagModuleTests
     #endregion
 
     /// <summary>
-    /// 配置 RagModule 并返回 ServiceCollection，模拟 PreConfigure + Configure 生命周期。
-    /// <paramref name="preRegister"/> 用于在 RagModule 配置前模拟 AIModule（或用户）已有的注册。
+    /// 配置 AIRagModule 并返回 ServiceCollection，模拟 PreConfigure + Configure 生命周期。
+    /// <paramref name="preRegister"/> 用于在 AIRagModule 配置前模拟更早 Configure 的模块（或用户）已有的注册。
+    /// <paramref name="postRegister"/> 用于在 AIRagModule 配置后模拟 AIModule 在 PostConfigure 阶段
+    /// TryAdd 的 NoOp 回退（子模块 Configure 相注册先于它，故此回退天然让位）。
     /// </summary>
     private static ServiceCollection ConfigureModule(
         string? vectorStoreProvider,
         bool hybridEnabled,
-        Action<IServiceCollection>? preRegister = null)
+        Action<IServiceCollection>? preRegister = null,
+        Action<IServiceCollection>? postRegister = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -217,9 +222,11 @@ public class RagModuleTests
 
         services.AddOptions<AIRagOptions>().Bind(configuration.GetSection("AI:Rag"));
 
-        var module = new RagModule();
+        var module = new AIRagModule();
         var context = new ServiceConfigurationContext(services, configuration);
         module.ConfigureServicesAsync(context).GetAwaiter().GetResult();
+
+        postRegister?.Invoke(services);
 
         return services;
     }

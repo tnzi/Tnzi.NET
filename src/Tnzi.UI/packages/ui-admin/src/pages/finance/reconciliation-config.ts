@@ -18,6 +18,7 @@ const STATUS_BADGE: Record<string, { label: string; type: 'warning' | 'success' 
 export function buildReconciliationColumns(t: (key: string) => string): ColumnDef<ReconciliationRow>[] {
   return [
     { key: 'accountName', title: t('columns.account'), minWidth: 180, primary: true, render: (r) => r.accountName ?? r.accountId ?? '—' },
+    { key: 'currency', title: t('columns.currency'), width: 90, render: (r) => (r.currency ? h(TStatusBadge, { value: r.currency, type: 'info', label: r.currency }) : '—') },
     { key: 'statementDate', title: t('columns.statementDate'), width: 130, render: (r) => formatDateOnly(r.statementDate, { utc: true }) },
     { key: 'statementEndingBalance', title: t('columns.endingBalance'), width: 140, render: (r) => amountCell(fmtAmount(r.statementEndingBalance ?? 0)) },
     {

@@ -158,14 +158,7 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
     public virtual async Task<IActionResult> ExportCsv([FromBody] AuditOperationQueryDto query)
     {
         var result = await AuditOperationService.ExportToCsvAsync(query);
-        if (!result.Succeeded)
-        {
-            return new BadRequestObjectResult(result.Message);
-        }
-
-        var bytes = Encoding.UTF8.GetBytes(result.Data!);
-        var fileName = $"audit_export_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
-        return File(bytes, "text/csv", fileName);
+        return CsvFile(result, "audit_export");
     }
 
     /// <summary>
@@ -179,7 +172,8 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
         var result = await AuditOperationService.ExportToJsonAsync(query);
         if (!result.Succeeded)
         {
-            return new BadRequestObjectResult(result.Message);
+            // 按 Result 状态码透传 ApiResult 信封,前端 download 客户端解析错误 body 提取 message
+            return StatusCode(result.Code ?? 400, result.ToApiResult());
         }
 
         var bytes = Encoding.UTF8.GetBytes(result.Data!);

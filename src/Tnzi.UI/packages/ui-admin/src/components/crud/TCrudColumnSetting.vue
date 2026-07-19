@@ -55,6 +55,7 @@
       <VueDraggable
         v-model="localOrder"
         :animation="150"
+        :disabled="bp.isSm.value"
         handle=".t-crud-column-setting__drag"
         filter=".none_draggable"
         class="t-crud-column-setting__list"
@@ -66,7 +67,12 @@
           class="t-crud-column-setting__row"
         >
           <div class="t-crud-column-setting__row-main">
+            <!-- Touch/phone (isSm): hide the tiny 16px drag handle — its hit
+                 area is unusable on touch and the drag gesture fights the
+                 list's vertical scroll. Cards keep only the checkbox toggle
+                 (reordering has little value on a stacked card list). -->
             <span
+              v-if="!bp.isSm.value"
               class="t-crud-column-setting__drag"
               :aria-label="t('admin.crud.dragToReorder')"
             >
@@ -92,6 +98,7 @@ import { NPopover, NCheckbox, NDivider } from 'naive-ui'
 import { VueDraggable } from 'vue-draggable-plus'
 import { TSvgIcon } from '@tnzi/ui'
 import { useColumnSettings, type ColumnDef } from '../../headless/useColumnSettings'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 
 type ColumnSettings = ReturnType<typeof useColumnSettings>
 
@@ -107,6 +114,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   'update:show': [boolean]
 }>()
+
+const bp = useBreakpoint()
 
 function t(key: string): string {
   return props.translate ? props.translate(key) : key

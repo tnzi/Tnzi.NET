@@ -36,8 +36,11 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     public string? Endpoint { get; set; }
 
     /// <summary>
-    /// API key ciphertext — 由 IDataProtectionProvider 加密
+    /// API key ciphertext — 由 IDataProtectionProvider 加密。
+    /// [AuditIgnore]：虽为密文，仍不进实体级审计（审计查看者与 DataProtection
+    /// key ring 宿主可能是不同信任级，密文外泄面越小越好）。
     /// </summary>
+    [AuditIgnore]
     public string? ApiKeyEncrypted { get; set; }
 
     /// <summary>

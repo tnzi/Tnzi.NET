@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 工作流节点共享辅助方法 — 封装 Agent 解析与创建的重复模式

@@ -13,6 +13,9 @@
         v-model="keyword"
         class="t-new-chat__search-input"
         :placeholder="t('window.search')"
+        enterkeyhint="search"
+        autocapitalize="off"
+        autocorrect="off"
         @input="onSearch"
         @focus="focused = true"
         @blur="focused = false"
@@ -22,11 +25,14 @@
       </button>
     </div>
 
-    <!-- Contact list — fixed height so the dialog footprint never jumps as the
-         list fills in (shown immediately on open, no need to type first). The
-         height is inline because NScrollbar's root does not inherit the scoped
-         style attribute, so a scoped height rule would silently not apply. -->
-    <NScrollbar class="t-new-chat__list" style="height: 300px">
+    <!-- Contact list — fixed height on desktop so the dialog footprint never
+         jumps as the list fills in (shown immediately on open, no need to type
+         first). On a phone (isSm) the fixed 300px can be taller than the whole
+         viewport once the keyboard is up, so it flexes to a dvh-capped height
+         instead. The height is inline because NScrollbar's root does not inherit
+         the scoped style attribute, so a scoped height rule would silently not
+         apply. -->
+    <NScrollbar class="t-new-chat__list" :style="{ height: isSm ? 'auto' : '300px', maxHeight: isSm ? '55dvh' : undefined }">
       <div
         v-for="c in contacts"
         :key="c.userId"
@@ -77,6 +83,7 @@ import { Icon } from '@iconify/vue'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../pages/_shared/translate'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatDialog from './TChatDialog.vue'
 import TChatAvatar from './TChatAvatar.vue'
 
@@ -88,6 +95,8 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+// Phone (<md) flexes the fixed list height so it never exceeds the viewport.
+const { isSm } = useBreakpoint()
 
 const keyword = ref('')
 const focused = ref(false)

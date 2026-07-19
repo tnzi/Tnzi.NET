@@ -139,6 +139,43 @@
             <summary>{{ t('detail.requestParameters') }}</summary>
             <pre>{{ detailItem.requestParameters }}</pre>
           </details>
+
+          <!-- Entity-level changes (fetched via fetchDetail — list rows carry no entityEntries) -->
+          <NSpin v-if="detailLoading" size="small" class="t-audit-timeline__entities-spin" />
+          <details v-else-if="detailItem.entityEntries?.length" class="t-audit-timeline__details" open>
+            <summary>{{ t('detail.entityChanges', { n: detailItem.entityEntries.length }) }}</summary>
+            <div
+              v-for="entry in detailItem.entityEntries"
+              :key="entry.id"
+              class="t-audit-timeline__entity"
+            >
+              <div class="t-audit-timeline__entity-head">
+                <NTag size="small" :bordered="false" :type="changeTagType(entry.operationType)">
+                  {{ changeLabel(entry.operationType) }}
+                </NTag>
+                <span class="t-audit-timeline__entity-name" :title="entry.entityTypeFullName ?? ''">
+                  {{ entry.entityTypeName }}
+                </span>
+                <code v-if="entry.entityId" class="t-audit-timeline__entity-id">{{ entry.entityId }}</code>
+              </div>
+              <table v-if="entry.propertyEntries?.length" class="t-audit-timeline__props">
+                <thead>
+                  <tr>
+                    <th>{{ t('detail.property') }}</th>
+                    <th>{{ t('detail.oldValue') }}</th>
+                    <th>{{ t('detail.newValue') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="p in entry.propertyEntries" :key="p.id">
+                    <td class="t-audit-timeline__prop-name">{{ p.propertyName }}</td>
+                    <td><code>{{ p.originalValue ?? '—' }}</code></td>
+                    <td><code>{{ p.newValue ?? '—' }}</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
         </template>
       </NDrawerContent>
     </NDrawer>
@@ -161,7 +198,7 @@ import { useSafeMessage } from '../../_shared/safeMessage'
 // under the `no-restricted-imports` guard against direct
 // `@tnzi/core/services/*` value imports from `pages/**`.
 import type { AuditOperationDto } from '../../../services/bridges/audit-bridge'
-import { AuditResultType } from '../../../services/bridges/audit-bridge'
+import { AuditResultType, EntityChangeType } from '../../../services/bridges/audit-bridge'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import type { CrudPageQuery, CrudPageResult } from '../../../services/types'
@@ -171,6 +208,12 @@ interface Props {
   pageId: string
   /** Bridge fetcher — returns CrudPageResult so we can drive pagination. */
   fetch: (query: CrudPageQuery) => Promise<CrudPageResult<AuditOperationDto>>
+  /**
+   * Full-detail fetcher (bridge `detail`) — list rows carry no entityEntries;
+   * when provided, opening the drawer re-fetches the operation by id so the
+   * entity-level change tree (entityEntries → propertyEntries) can render.
+   */
+  fetchDetail?: (id: string) => Promise<AuditOperationDto>
   /** translate helper from the parent page (interpolation-aware). */
   translate: (key: string, params?: Record<string, unknown>) => string
 }
@@ -340,9 +383,43 @@ async function loadInternal(append = false): Promise<void> {
 
 const detailOpen = ref(false)
 const detailItem = ref<AuditOperationDto | null>(null)
+const detailLoading = ref(false)
+
+function changeLabel(type: EntityChangeType | undefined | null): string {
+  if (type === EntityChangeType.Added) return t('detail.changes.added')
+  if (type === EntityChangeType.Modified) return t('detail.changes.modified')
+  if (type === EntityChangeType.Deleted) return t('detail.changes.deleted')
+  return String(type ?? '—')
+}
+
+function changeTagType(type: EntityChangeType | undefined | null): 'success' | 'warning' | 'error' | 'default' {
+  if (type === EntityChangeType.Added) return 'success'
+  if (type === EntityChangeType.Modified) return 'warning'
+  if (type === EntityChangeType.Deleted) return 'error'
+  return 'default'
+}
+
 function openDetail(item: AuditOperationDto): void {
   detailItem.value = item
   detailOpen.value = true
+  // Enrich with the full record (entityEntries) — the list row is shown
+  // immediately, the change tree streams in when the by-id fetch resolves.
+  if (props.fetchDetail && item.id) {
+    const requestedId = item.id
+    detailLoading.value = true
+    props
+      .fetchDetail(String(requestedId))
+      .then((full) => {
+        if (detailItem.value?.id === requestedId) detailItem.value = full
+      })
+      .catch((e: unknown) => {
+        // Keep the basic row info; surface the enrich failure explicitly.
+        message.error(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (detailItem.value?.id === requestedId) detailLoading.value = false
+      })
+  }
 }
 
 onMounted(() => {
@@ -496,5 +573,68 @@ onMounted(() => {
   max-height: 240px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Entity-level changes inside the detail drawer */
+.t-audit-timeline__entities-spin {
+  margin-top: 12px;
+}
+.t-audit-timeline__entity {
+  margin-top: 8px;
+  border: 1px solid var(--tnzi-border, #e5e7eb);
+  border-radius: 6px;
+  padding: 8px;
+}
+.t-audit-timeline__entity-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.t-audit-timeline__entity-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.t-audit-timeline__entity-id {
+  font-family: var(--tnzi-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--tnzi-base-text-muted, #888);
+  word-break: break-all;
+}
+.t-audit-timeline__props {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.t-audit-timeline__props th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--tnzi-base-text-muted, #888);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--tnzi-border, #e5e7eb);
+}
+.t-audit-timeline__props th:first-child {
+  width: 32%;
+}
+.t-audit-timeline__props td {
+  padding: 4px 6px;
+  border-bottom: 1px dashed var(--tnzi-border, #eef0f2);
+  vertical-align: top;
+}
+.t-audit-timeline__props tr:last-child td {
+  border-bottom: none;
+}
+.t-audit-timeline__prop-name {
+  color: var(--tnzi-base-text-2, #666);
+  word-break: break-all;
+}
+.t-audit-timeline__props code {
+  font-family: var(--tnzi-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Events.Handlers;
 
 /// <summary>
-/// Thread 删除级联清理处理器 — 删除相关的消息、运行记录、产物等关联数据。
+/// Thread 删除级联清理处理器：删除相关的消息、运行记录、产物等关联数据。
 /// </summary>
 /// <remarks>
 /// 清理顺序：
@@ -9,7 +9,11 @@ namespace Tnzi.AI.Events.Handlers;
 /// 2. AgentRunTrace + AgentRunNode + AgentRun（运行记录及追踪）
 /// 3. AgentArtifact（产物记录）
 /// 4. UsageLog（使用日志）
-/// 所有清理操作均静默失败，不影响主流程。
+/// 各仓储均为可选注入，缺失时对应步骤跳过（软依赖）。
+/// 级联删除是持久化副作用，本处理器不吞异常：任何一步失败均让异常冒泡给事件总线
+/// （LocalEventBus 已统一做错误隔离、LogError、重试与死信队列）。各删除按 ThreadId
+/// 谓词幂等（重删已删行=0 行受影响），总线重试整个处理器安全。此前每步包 log-only
+/// try/catch，会架空总线的重试与 DLQ。
 /// </remarks>
 public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
 {
@@ -46,19 +50,16 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         var threadId = evt.ThreadId;
 
         // 1. 删除消息
-        await SafeDeleteAsync("messages", async () =>
+        if (_messageRepository != null)
         {
-            if (_messageRepository == null) return;
             await _messageRepository.AsQueryable()
                 .Where(m => m.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
-        });
+        }
 
         // 2. 删除运行追踪、节点和运行记录（先删子表再删主表）
-        await SafeDeleteAsync("runs and related", async () =>
+        if (_runRepository != null)
         {
-            if (_runRepository == null) return;
-
             // 查询一次 runIds，共享给 traces/nodes 清理
             var runIds = await _runRepository.AsQueryable()
                 .Where(r => r.ThreadId == threadId)
@@ -87,41 +88,24 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
             await _runRepository.AsQueryable()
                 .Where(r => r.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
-        });
+        }
 
         // 3. 删除产物
-        await SafeDeleteAsync("artifacts", async () =>
+        if (_artifactRepository != null)
         {
-            if (_artifactRepository == null) return;
             await _artifactRepository.AsQueryable()
                 .Where(a => a.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
-        });
+        }
 
         // 4. 删除使用日志
-        await SafeDeleteAsync("usage logs", async () =>
+        if (_usageLogRepository != null)
         {
-            if (_usageLogRepository == null) return;
             await _usageLogRepository.AsQueryable()
                 .Where(log => log.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
-        });
+        }
 
         _logger.LogInformation("Cascade cleanup completed for thread {ThreadId}", evt.ThreadId);
-    }
-
-    /// <summary>
-    /// 静默执行清理操作，异常仅记录不传播
-    /// </summary>
-    private async Task SafeDeleteAsync(string resource, Func<Task> action)
-    {
-        try
-        {
-            await action();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to cleanup {Resource} during thread cascade delete", resource);
-        }
     }
 }

@@ -8,7 +8,7 @@ import {
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
 import type { UseFormModalReturn } from './useFormModal'
 import { useDetail, type DetailMode } from './useDetail'
-import { useAdminAuthStore } from '../stores/useAdminAuthStore'
+import { normalizeCrudPermission, canAction, type CrudActionPermissions } from './permissionGates'
 
 /**
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
@@ -49,15 +49,9 @@ export interface CrudPageQuery {
  */
 export type CrudPageResult<T> = PagedList<T>
 
-/**
- * Per-action permission codes gating the page's write affordances. An omitted
- * action stays ungated (visible whenever its data callback exists).
- */
-export interface CrudActionPermissions {
-  create?: string
-  update?: string
-  delete?: string
-}
+// `CrudActionPermissions` moved to `./permissionGates` (shared with
+// `useChildCollection`); imported above and still re-exported via the headless
+// barrel, so `{ CrudActionPermissions }` consumers are unaffected.
 
 /**
  * Operation tag passed to `onError` so a single handler can disambiguate
@@ -80,9 +74,12 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   /**
    * Called whenever fetchData / createData / updateData / deleteData /
    * exportData / importData rejects. The signature lets a page tailor
-   * messaging per operation. Default behavior — when this is omitted —
-   * is to surface the error via `window.$message.error(err.message)`
-   * (the global Naive UI toast registered by `NMessageProvider`).
+   * messaging per operation. Default behavior - when this is omitted -
+   * is to surface the error via `window.$message.error(err.message)`.
+   * `TAdminAppRoot` registers that handle automatically (via its internal
+   * `TAdminWindowHandles` component inside the provider stack); apps that
+   * do NOT mount `TAdminAppRoot` must expose `window.$message` themselves
+   * or the default toast silently no-ops.
    *
    * Return `false` to suppress the default toast; any other return value
    * (including `void`) lets the default toast run after your handler.
@@ -216,10 +213,11 @@ export interface UseCrudPageReturn<T, TId = string | number> {
 }
 
 /**
- * Look up Naive UI's `window.$message` if a `NMessageProvider` registered
- * it. The interface is duck-typed so the helper stays decoupled from
- * naive-ui's type surface and works in test environments where the
- * provider isn't mounted.
+ * Look up the global `window.$message` handle. `TAdminAppRoot` registers
+ * it automatically from inside its provider stack; apps not using
+ * `TAdminAppRoot` must register their own. The interface is duck-typed so
+ * the helper stays decoupled from naive-ui's type surface and works in
+ * test environments where the handle isn't registered.
  */
 interface ToastApi {
   error: (content: string) => void
@@ -239,37 +237,8 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
-/** Expand a string prefix into the three write-action codes. */
-function normalizeCrudPermission(
-  permission?: string | CrudActionPermissions,
-): CrudActionPermissions {
-  if (!permission) return {}
-  if (typeof permission === 'string') {
-    return {
-      create: `${permission}.create`,
-      update: `${permission}.update`,
-      delete: `${permission}.delete`,
-    }
-  }
-  return permission
-}
-
-/**
- * Reactive action-permission check mirroring the sidebar's fail-open
- * semantics: no code declared / no active store (bare test mounts) / user
- * not loaded yet / super admin → allowed. The backend `[ApiAuthorize]`
- * remains the real enforcement layer.
- */
-function canAction(code: string | undefined): boolean {
-  if (!code) return true
-  try {
-    const auth = useAdminAuthStore()
-    if (auth.isSuperUser || auth.userInfo === null) return true
-    return auth.hasPermission(code)
-  } catch {
-    return true
-  }
-}
+// `normalizeCrudPermission` + `canAction` moved to `./permissionGates` (shared
+// with `useChildCollection`); imported at the top of this file.
 
 export function useCrudPage<T, TId = string | number>(
   options: UseCrudPageOptions<T, TId>,

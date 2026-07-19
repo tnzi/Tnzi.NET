@@ -21,6 +21,8 @@ public class ChatModule : TnziApplicationModule
 
         var services = context.Services;
 
+        services.AddScoped<IChatAccessService, ChatAccessService>();
+        services.AddScoped<ChatAccessGuardFilter>();
         services.AddScoped<IChatConfigService, ChatConfigService>();
         services.AddScoped<IChatContactService, ChatContactService>();
         services.AddScoped<IPresenceService, PresenceService>();

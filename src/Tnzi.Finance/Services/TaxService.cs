@@ -9,19 +9,22 @@ public class TaxService : ApplicationService, ITaxService
     private readonly IRepository<TaxRate, Guid> _rateRepository;
     private readonly IRepository<TaxCode, Guid> _codeRepository;
     private readonly IRepository<TaxCodeComponent, Guid> _componentRepository;
+    private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
 
     public TaxService(
         IServiceProvider serviceProvider,
         IRepository<TaxAgency, Guid> agencyRepository,
         IRepository<TaxRate, Guid> rateRepository,
         IRepository<TaxCode, Guid> codeRepository,
-        IRepository<TaxCodeComponent, Guid> componentRepository)
+        IRepository<TaxCodeComponent, Guid> componentRepository,
+        IReadOnlyRepository<JournalLine, Guid> lineRepository)
         : base(serviceProvider)
     {
         _agencyRepository = Check.NotNull(agencyRepository);
         _rateRepository = Check.NotNull(rateRepository);
         _codeRepository = Check.NotNull(codeRepository);
         _componentRepository = Check.NotNull(componentRepository);
+        _lineRepository = Check.NotNull(lineRepository);
     }
 
     // ── 税务机构 ──────────────────────────────────────────────
@@ -162,6 +165,15 @@ public class TaxService : ApplicationService, ITaxService
         if (!validation.Succeeded)
             return Fail<TaxRateDto>(validation.Message ?? "Invalid tax rate.", validation.Code ?? 400);
 
+        // 生效日语义：税率一旦被已过账行引用即不可改率。就地改率会让草稿悄悄按新率重算，
+        // 且 TaxSummary 会用当前率标注按旧率过账的历史金额（base × 显示率对不上）。改率一律新建税率版本。
+        // 名称/机构/启停仍可改（不影响历史过账口径）。
+        if (input.Rate != rate.Rate &&
+            await _lineRepository.AnyAsync(l => l.TaxRateId == id && l.IsPosted, cancellationToken))
+        {
+            return Fail<TaxRateDto>("This tax rate is already used on posted transactions and its rate cannot be changed. Create a new tax rate instead.", 409);
+        }
+
         rate.AgencyId = input.AgencyId;
         rate.Name = input.Name.Trim();
         rate.Rate = input.Rate;
@@ -221,7 +233,8 @@ public class TaxService : ApplicationService, ITaxService
         {
             Name = input.Name.Trim(),
             Description = input.Description,
-            IsActive = input.IsActive
+            IsActive = input.IsActive,
+            IsRecoverable = input.IsRecoverable
         };
 
         foreach (var component in input.Components)
@@ -264,6 +277,7 @@ public class TaxService : ApplicationService, ITaxService
         code.Name = input.Name.Trim();
         code.Description = input.Description;
         code.IsActive = input.IsActive;
+        code.IsRecoverable = input.IsRecoverable;
 
         // 组件全量替换（硬删重建，与草稿行范式一致）
         if (code.Components.Count > 0)

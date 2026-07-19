@@ -85,10 +85,23 @@ vi.mock('../../src/services/bridges/finance-bridge', () => ({
   FinancePartyType: { Customer: 'Customer', Vendor: 'Vendor' },
   SettlementDocType: { Invoice: 'Invoice', Bill: 'Bill', PaymentEntry: 'PaymentEntry', CreditMemo: 'CreditMemo' },
   AccountRootType: { Asset: 'Asset', Liability: 'Liability', Equity: 'Equity', Income: 'Income', Expense: 'Expense' },
-  AccountSystemRole: { AccountsReceivable: 'AccountsReceivable', AccountsPayable: 'AccountsPayable', TaxPayable: 'TaxPayable', TaxReceivable: 'TaxReceivable', RetainedEarnings: 'RetainedEarnings', ExchangeGainLoss: 'ExchangeGainLoss', RoundingDifference: 'RoundingDifference', UndepositedFunds: 'UndepositedFunds', OpeningBalance: 'OpeningBalance' },
+  AccountSystemRole: { AccountsReceivable: 'AccountsReceivable', AccountsPayable: 'AccountsPayable', TaxPayable: 'TaxPayable', TaxReceivable: 'TaxReceivable', RetainedEarnings: 'RetainedEarnings', ExchangeGainLoss: 'ExchangeGainLoss', RoundingDifference: 'RoundingDifference', UndepositedFunds: 'UndepositedFunds', OpeningBalance: 'OpeningBalance', CurrencyExchangeClearing: 'CurrencyExchangeClearing' },
   CashFlowActivity: { Operating: 'Operating', Investing: 'Investing', Financing: 'Financing', CashEquivalent: 'CashEquivalent' },
   JournalEntryStatus: { Draft: 'Draft', Posted: 'Posted', Reversed: 'Reversed' },
   ReconciliationStatus: { Draft: 'Draft', Completed: 'Completed' },
+  BankNumberScheme: { UsAba: 'UsAba', CaEft: 'CaEft' },
+  CheckStockType: { PrePrinted: 'PrePrinted', Blank: 'Blank' },
+  CheckLayout: { Voucher: 'Voucher', ThreePerPage: 'ThreePerPage' },
+  BankAccountType: { Checking: 'Checking', Savings: 'Savings' },
+  BankTransactionSource: { Ofx: 'Ofx', Csv: 'Csv', Provider: 'Provider' },
+  BankTransactionStatus: { Pending: 'Pending', Matched: 'Matched', Excluded: 'Excluded' },
+  BankFeedDocType: { Expense: 'Expense', PaymentEntry: 'PaymentEntry', Transfer: 'Transfer' },
+  CheckStatus: { Issued: 'Issued', Void: 'Void', Spoiled: 'Spoiled' },
+  EftFileFormat: { Nacha: 'Nacha', Cpa005: 'Cpa005' },
+  EftBatchStatus: { Draft: 'Draft', Generated: 'Generated', Voided: 'Voided' },
+  ReceiptStatus: { Uploaded: 'Uploaded', Extracted: 'Extracted', Converted: 'Converted', Failed: 'Failed' },
+  ReceiptDocType: { Expense: 'Expense', Bill: 'Bill' },
+  BalanceSummaryDifferenceKind: { Missing: 'Missing', Extra: 'Extra', Mismatch: 'Mismatch' },
   PAYMENT_METHODS: ['Cash', 'Check', 'CreditCard', 'DebitCard', 'BankTransfer', 'Wire', 'Other'],
   createFinanceBridge: () => ({
     customers: mkCrud(),
@@ -155,6 +168,108 @@ vi.mock('../../src/services/bridges/finance-bridge', () => ({
       setLines: vi.fn(),
       complete: vi.fn(),
     },
+    revaluations: {
+      preview: vi.fn(async () => ({ asOf: '2026-03-31', baseCurrency: 'USD', journalEntryId: null, rows: [], totalAdjustment: 0 })),
+      run: vi.fn(async () => ({ asOf: '2026-03-31', baseCurrency: 'USD', journalEntryId: null, rows: [], totalAdjustment: 0 })),
+    },
+    bankAccounts: {
+      fetch: vi.fn(async () => pagedOne('ba1')),
+      getById: vi.fn(async () => ({ id: 'ba1', nextCheckNumber: 1 })),
+      create: vi.fn(),
+      update: vi.fn(),
+      setNextCheckNumber: vi.fn(),
+      delete: vi.fn(),
+    },
+    partyBankAccounts: {
+      byParty: vi.fn(async () => []),
+      save: vi.fn(),
+      update: vi.fn(),
+      setDefault: vi.fn(),
+      delete: vi.fn(),
+    },
+    bankFeed: {
+      transactions: vi.fn(async () => pagedOne('tx1')),
+      import: vi.fn(),
+      pull: vi.fn(),
+      suggest: vi.fn(),
+      candidates: vi.fn(async () => []),
+      confirm: vi.fn(),
+      unmatch: vi.fn(),
+      exclude: vi.fn(),
+      restore: vi.fn(),
+      createDocument: vi.fn(),
+      batches: vi.fn(async () => pagedOne('bt1')),
+      deleteBatch: vi.fn(),
+    },
+    checks: {
+      queue: vi.fn(async () => []),
+      fetch: vi.fn(async () => pagedOne('ck1')),
+      print: vi.fn(async () => new Blob()),
+      register: vi.fn(),
+      reprint: vi.fn(async () => new Blob()),
+      voidCheck: vi.fn(),
+      spoil: vi.fn(),
+      calibration: vi.fn(async () => new Blob()),
+    },
+    eftBatches: {
+      queue: vi.fn(async () => []),
+      fetch: vi.fn(async () => pagedOne('eb1')),
+      getById: vi.fn(async () => null),
+      create: vi.fn(),
+      generate: vi.fn(),
+      voidBatch: vi.fn(),
+      download: vi.fn(async () => new Blob()),
+    },
+    receipts: {
+      fetch: vi.fn(async () => pagedOne('rc1')),
+      getById: vi.fn(async () => null),
+      create: vi.fn(),
+      extract: vi.fn(),
+      update: vi.fn(),
+      convert: vi.fn(),
+      delete: vi.fn(),
+    },
+    balanceSummary: {
+      verify: vi.fn(async () => ({ isConsistent: true, checkedBuckets: 0, totalDifferences: 0, differences: [] })),
+      rebuild: vi.fn(async () => ({ buckets: 0, lines: 0, durationMs: 0 })),
+    },
+  }),
+}))
+vi.mock('../../src/services/bridges/payroll-bridge', () => ({
+  SalaryComponentType: { Earning: 'Earning', Deduction: 'Deduction', EmployerContribution: 'EmployerContribution' },
+  PayFrequency: { Monthly: 'Monthly', SemiMonthly: 'SemiMonthly', BiWeekly: 'BiWeekly', Weekly: 'Weekly' },
+  PayRunStatus: { Draft: 'Draft', Calculated: 'Calculated', Posted: 'Posted', PartiallyPaid: 'PartiallyPaid', Paid: 'Paid', Voided: 'Voided' },
+  PayRunSource: { Internal: 'Internal', External: 'External', OpeningBalance: 'OpeningBalance' },
+  PayslipPaymentStatus: { Unpaid: 'Unpaid', Paid: 'Paid' },
+  YtdBasis: { CalendarYear: 'CalendarYear', FiscalYear: 'FiscalYear' },
+  createPayrollBridge: () => ({
+    employees: {
+      ...mkCrud(),
+      get: vi.fn(async () => null),
+      ensureVendor: vi.fn(async () => ({ id: '1' })),
+      assignments: vi.fn(async () => []),
+      createAssignment: vi.fn(async () => ({ id: 'a1' })),
+      deleteAssignment: vi.fn(async () => undefined),
+    },
+    components: mkCrud(),
+    structures: { ...mkCrud(), getById: vi.fn(async () => null) },
+    brackets: { ...mkCrud(), getById: vi.fn(async () => null), resolve: vi.fn(async () => ({ id: 'b1', rows: [] })) },
+    runs: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      createDraft: vi.fn(async () => ({ id: 'r1' })),
+      updateDraft: vi.fn(async () => ({ id: 'r1' })),
+      deleteDraft: vi.fn(async () => undefined),
+      calculate: vi.fn(async () => ({ id: 'r1' })),
+      post: vi.fn(async () => ({ id: 'r1' })),
+      pay: vi.fn(async () => ({ id: 'r1' })),
+      voidRun: vi.fn(async () => ({ id: 'r1' })),
+      payslips: vi.fn(async () => []),
+      payslip: vi.fn(async () => null),
+      updatePayslipInputs: vi.fn(async () => ({ id: 'ps1' })),
+      createFromExternal: vi.fn(async () => ({ id: 'r1' })),
+    },
+    countryPacks: { list: vi.fn(async () => []), seed: vi.fn(async () => ({ componentsSeeded: 0, bracketTablesSeeded: 0 })) },
   }),
 }))
 vi.mock('../../src/services/bridges/chat-bridge', () => ({
@@ -188,9 +303,13 @@ vi.mock('../../src/services/bridges/identity-bridge', () => ({
   }),
 }))
 vi.mock('../../src/services/bridges/audit-bridge', () => ({
-  createAuditBridge: () => ({ logs: mkCrud(), operations: mkCrud() }),
-  // re-export mirror — see audit-bridge.ts (PascalCase string enum).
+  createAuditBridge: () => ({
+    logs: { ...mkCrud(), detail: vi.fn(async (id: string) => ({ id, entityEntries: [] })) },
+    operations: { ...mkCrud(), detail: vi.fn(async (id: string) => ({ id, entityEntries: [] })) },
+  }),
+  // re-export mirror — see audit-bridge.ts (PascalCase string enums).
   AuditResultType: { Success: 'Success', Failed: 'Failed', Warning: 'Warning' },
+  EntityChangeType: { Unchanged: 'Unchanged', Added: 'Added', Modified: 'Modified', Deleted: 'Deleted', Detached: 'Detached' },
 }))
 vi.mock('../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
@@ -252,6 +371,11 @@ import FinanceFiscalYears from '../../src/pages/finance/FiscalYears.vue'
 import FinanceCustomers from '../../src/pages/finance/Customers.vue'
 import FinanceVendors from '../../src/pages/finance/Vendors.vue'
 import FinanceItems from '../../src/pages/finance/Items.vue'
+import FinanceBankAccounts from '../../src/pages/finance/BankAccounts.vue'
+import FinanceChecks from '../../src/pages/finance/Checks.vue'
+import FinanceEftBatches from '../../src/pages/finance/EftBatches.vue'
+import FinanceReceipts from '../../src/pages/finance/Receipts.vue'
+import PayrollEmployees from '../../src/pages/payroll/Employees.vue'
 import NotificationTemplates from '../../src/pages/notification/Templates.vue'
 import NotificationMessages from '../../src/pages/notification/Messages.vue'
 import NotificationSubscriptions from '../../src/pages/notification/Subscriptions.vue'
@@ -380,7 +504,9 @@ const PAGES: Array<[string, any]> = [
   ['FinanceAccounts', FinanceAccounts], ['FinanceExchangeRates', FinanceExchangeRates],
   ['FinanceFiscalYears', FinanceFiscalYears],
   ['FinanceCustomers', FinanceCustomers], ['FinanceVendors', FinanceVendors],
-  ['FinanceItems', FinanceItems],
+  ['FinanceItems', FinanceItems], ['FinanceBankAccounts', FinanceBankAccounts],
+  ['FinanceChecks', FinanceChecks], ['FinanceEftBatches', FinanceEftBatches], ['FinanceReceipts', FinanceReceipts],
+  ['PayrollEmployees', PayrollEmployees],
   ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
   ['NotificationSubscriptions', NotificationSubscriptions],
   ['Layouts', Layouts], ['Templates', Templates],

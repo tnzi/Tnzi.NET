@@ -1,7 +1,7 @@
 using Moq;
-using Tnzi.Feature.Features;
-using Tnzi.Feature.Entities;
 using Tnzi.Feature.Services;
+using Tnzi.Feature.Dtos;
+using Tnzi.Feature.Entities;
 
 namespace Tnzi.Feature.Tests;
 

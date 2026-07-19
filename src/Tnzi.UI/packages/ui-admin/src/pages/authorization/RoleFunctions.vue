@@ -42,7 +42,10 @@
                       {{ roleAssignedCount(role.id) }} / {{ totalFunctionCount }}
                     </span>
                   </span>
-                  <code class="t-role-func-page__role-code">{{ role.code }}</code>
+                  <code
+                    v-if="!isCodeRedundant(role.name, role.code)"
+                    class="t-role-func-page__role-code"
+                  >{{ role.code }}</code>
                 </span>
               </li>
             </ul>
@@ -71,7 +74,11 @@
               <div class="t-role-func-page__role-summary">
                 <div class="t-role-func-page__role-title-line">
                   <h3 class="t-role-func-page__selected-name">{{ selectedRole?.name }}</h3>
-                  <NTag size="small" :bordered="false">{{ selectedRole?.code }}</NTag>
+                  <NTag
+                    v-if="!isCodeRedundant(selectedRole?.name, selectedRole?.code)"
+                    size="small"
+                    :bordered="false"
+                  >{{ selectedRole?.code }}</NTag>
                 </div>
                 <div v-if="selectedIsSuper" class="t-role-func-page__role-progress-line">
                   <span class="t-role-func-page__assigned-text">
@@ -123,14 +130,17 @@
                 </NButton>
               </NSpace>
             </header>
-            <div v-if="selectedIsSuper" class="t-role-func-page__super-panel">
-              <TSvgIcon icon="mdi:shield-crown-outline" :size="40" class="t-role-func-page__super-icon" />
-              <h4 class="t-role-func-page__super-title">{{ t('super.badge') }}</h4>
-              <p class="t-role-func-page__super-line">{{ t('super.explain1') }}</p>
-              <p class="t-role-func-page__super-line">{{ t('super.explain2') }}</p>
-              <p class="t-role-func-page__super-hint">
-                <code>Authorization:SuperAdminRoles</code>
-              </p>
+            <!-- Super-admin: a bypass role holds the whole catalogue, so the matrix
+                 below is shown READ-ONLY (all granted, locked) rather than replaced by
+                 an explainer. This banner says why + offers to clear any stale explicit
+                 rows (which have no effect for a bypass role). -->
+            <div v-if="selectedIsSuper" class="t-role-func-page__super-banner">
+              <TSvgIcon icon="mdi:shield-crown-outline" :size="22" class="t-role-func-page__super-banner-icon" />
+              <div class="t-role-func-page__super-banner-text">
+                <span class="t-role-func-page__super-banner-title">{{ t('super.badge') }}</span>
+                <span class="t-role-func-page__super-banner-line">{{ t('super.explain1') }}</span>
+              </div>
+              <code class="t-role-func-page__super-banner-code">Authorization:SuperAdminRoles</code>
               <div
                 v-if="(roleAssignedCount(selectedRoleId!) ?? 0) > 0"
                 class="t-role-func-page__super-stale"
@@ -142,27 +152,29 @@
                 </NButton>
               </div>
             </div>
-            <template v-else>
             <div class="t-role-func-page__toolbar">
               <div class="t-role-func-page__toolbar-btns">
-                <NButton size="small" :disabled="treeLoading" @click="openCompareModal">
-                  <template #icon><TSvgIcon icon="mdi:compare-horizontal" :size="14" /></template>
-                  {{ t('compare.button') }}
-                </NButton>
-                <NButton size="small" :disabled="treeLoading" @click="openCloneModal">
-                  <template #icon><TSvgIcon icon="mdi:content-copy" :size="14" /></template>
-                  {{ t('clone.button') }}
-                </NButton>
-                <NButton
-                  size="small"
-                  type="error"
-                  ghost
-                  :disabled="!checkedFunctionIds.length || treeLoading"
-                  @click="onClearAll"
-                >
-                  {{ t('clearAll') }}
-                </NButton>
-                <span class="t-role-func-page__toolbar-divider" />
+                <!-- Write ops don't apply to a read-only super-admin role. -->
+                <template v-if="!selectedIsSuper">
+                  <NButton size="small" :disabled="treeLoading" @click="openCompareModal">
+                    <template #icon><TSvgIcon icon="mdi:compare-horizontal" :size="14" /></template>
+                    {{ t('compare.button') }}
+                  </NButton>
+                  <NButton size="small" :disabled="treeLoading" @click="openCloneModal">
+                    <template #icon><TSvgIcon icon="mdi:content-copy" :size="14" /></template>
+                    {{ t('clone.button') }}
+                  </NButton>
+                  <NButton
+                    size="small"
+                    type="error"
+                    ghost
+                    :disabled="!checkedFunctionIds.length || treeLoading"
+                    @click="onClearAll"
+                  >
+                    {{ t('clearAll') }}
+                  </NButton>
+                  <span class="t-role-func-page__toolbar-divider" />
+                </template>
                 <NButton size="small" :disabled="treeLoading" @click="toggleExpandAll">
                   <template #icon>
                     <TSvgIcon
@@ -243,6 +255,7 @@
                 :grantable-codes="grantableCodes"
                 :keyword="matrixFilter"
                 :label-overrides="labelOverrides"
+                :readonly="selectedIsSuper"
                 expand-first
                 :translate="t"
                 class="t-role-func-page__matrix"
@@ -260,7 +273,6 @@
                 {{ t('save') }}
               </NButton>
             </div>
-            </template>
           </div>
           </section>
         </template>
@@ -442,6 +454,7 @@ import {
   NForm, NFormItem, NSelect, NDrawer, NDrawerContent,
 } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { isCodeRedundant } from '../../headless/codeLabel'
 import TPermissionMatrix from '../../components/forms/TPermissionMatrix.vue'
 import { ZH_SURFACE_LABELS } from './surface-labels'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
@@ -692,9 +705,15 @@ const surfaceCount = computed(() => {
 
 async function loadAll(): Promise<void> {
   await Promise.all([loadRoles(), loadModulesAndFunctions()])
-  // If a role was already selected, re-pull its assignments so the tree
-  // reflects any external changes.
-  if (selectedRoleId.value) await loadAssignedForRole(selectedRoleId.value)
+  if (selectedRoleId.value) {
+    // If a role was already selected, re-pull its assignments so the tree
+    // reflects any external changes.
+    await loadAssignedForRole(selectedRoleId.value)
+  } else if (roles.value.length > 0) {
+    // Auto-select the first role so the matrix is populated on open — the right
+    // pane should never sit blank waiting for a click.
+    await selectRole(roles.value[0]!.id)
+  }
   // Rail counts + super-role markers are decorative - never block the page.
   void loadRoleCounts().catch(() => undefined)
   void loadSuperRoles().catch(() => undefined)
@@ -1142,45 +1161,52 @@ onMounted(async () => {
 .t-role-func-page__bar-fill.is-super {
   background: var(--tnzi-warning);
 }
-/* Super-admin explainer - replaces the editing chrome for bypass roles. */
-.t-role-func-page__super-panel {
+/* Super-admin banner - sits ABOVE the read-only matrix (a bypass role holds
+   everything, so the matrix shows all-granted + locked rather than editable). */
+.t-role-func-page__super-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--tnzi-warning);
+  border-radius: var(--tnzi-admin-radius-md, 6px);
+  background: color-mix(in srgb, var(--tnzi-warning) 8%, transparent);
+}
+.t-role-func-page__super-banner-icon {
+  color: var(--tnzi-warning);
+  flex-shrink: 0;
+}
+.t-role-func-page__super-banner-text {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 6px;
-  padding: 48px 24px;
-  color: var(--tnzi-base-text-muted);
+  min-width: 0;
 }
-.t-role-func-page__super-icon {
-  color: var(--tnzi-warning);
-}
-.t-role-func-page__super-title {
-  margin: 4px 0 2px;
-  font-size: 15px;
+.t-role-func-page__super-banner-title {
+  font-size: 13px;
+  font-weight: 600;
   color: var(--tnzi-base-text);
 }
-.t-role-func-page__super-line {
-  margin: 0;
-  font-size: 13px;
-  max-width: 460px;
-  line-height: 1.6;
-}
-.t-role-func-page__super-hint {
-  margin: 4px 0 0;
+.t-role-func-page__super-banner-line {
   font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+  line-height: 1.4;
 }
-.t-role-func-page__super-hint code {
+.t-role-func-page__super-banner-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
   background: var(--tnzi-layout-bg);
   padding: 2px 6px;
   border-radius: 4px;
+  color: var(--tnzi-base-text-muted);
+  white-space: nowrap;
 }
 .t-role-func-page__super-stale {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
+  margin-left: auto;
   font-size: 12.5px;
   color: var(--tnzi-warning);
 }

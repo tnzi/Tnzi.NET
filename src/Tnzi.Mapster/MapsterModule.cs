@@ -61,6 +61,10 @@ public class MapsterModule : TnziInfrastructureModule
         // 这里使用模块级 TypeAdapterConfig，避免依赖 Mapster 全局静态配置导致不同宿主之间互相污染。
         context.Services.AddSingleton<IMapper>(sp => new ServiceMapper(sp, config));
 
+        // 核心运行时映射抽象（IObjectMapper）的 Mapster 实现，委托到静态 MapperExtensions。
+        // 让 Tnzi 核心类型（如 CrudAppService）无需引用本程序集即可完成映射。
+        context.Services.AddSingleton<IObjectMapper, MapsterObjectMapper>();
+
         return Task.CompletedTask;
     }
 

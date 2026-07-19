@@ -34,7 +34,7 @@ import TSettingsDialog from '@/shell/TSettingsDialog.vue'
 import TLandingPage from '@/shell/TLandingPage.vue'
 import type { LandingChip } from '@/shell/TLandingPage.vue'
 import TThreadComposer from '@/components/chat/TThreadComposer.vue'
-import MessageResponse from '@/components/chat/MessageResponse.vue'
+import TMessageResponse from '@/components/chat/TMessageResponse.vue'
 import { useAutoScroll } from '@/composables/useAutoScroll'
 import type { ComposerAction } from '@/components/chat/composer-types'
 import { DEFAULT_COMPOSER_ACCEPT } from '@/components/chat/composer-types'
@@ -729,7 +729,7 @@ function onArtifactWidthChange(w: number): void {
                     </button>
                   </div>
                   <template v-else>
-                    <MessageResponse
+                    <TMessageResponse
                       class="t-chat-app__msg-body"
                       :content="msg.content"
                       :streaming="msg.isStreaming ?? false"

@@ -17,8 +17,12 @@ public class AuditOptions
 
     /// <summary>
     /// 是否启用实体变更审计。
-    /// KEEP-STATIC：当前无运行时消费者（EF 拦截器未接线读取此开关），暴露会造成"假热配"。
+    /// 由 EntityAuditSaveChangesInterceptor 经 IOptionsMonitor 热读，关闭时零采集开销；
+    /// 实体条目挂在请求级 AuditOperation 上，持久化同时依赖 EnableOperationAudit 开启。
     /// </summary>
+    [RuntimeSetting(Label = "Entity Audit", I18n = "admin.modules.system.settings.fields.auditEnableEntity",
+        Type = SettingFieldType.Boolean, Subsection = "Capture",
+        Description = "Capture entity-level changes (added/modified/deleted entities with property old/new values) for each audited operation; sensitive fields are redacted")]
     public bool EnableEntityAudit { get; set; } = true;
 
     /// <summary>审计数据保留天数</summary>
@@ -64,10 +68,18 @@ public class AuditOptions
         Description = "Request bodies larger than this size (bytes) are truncated")]
     public int MaxRequestBodySize { get; set; } = 4096;
 
-    /// <summary>需要脱敏的敏感字段名（不区分大小写）</summary>
+    /// <summary>
+    /// 需要脱敏的敏感字段名（不区分大小写，精确匹配）。
+    /// 同时作用于请求体 JSON 字段（RequestBodyRedactor）与实体级审计的属性名
+    /// （EntityAuditSaveChangesInterceptor，记录"变了"但值打码）。
+    /// PasswordHash/SecurityStamp 覆盖 IdentityUser 继承属性——它们无法打
+    /// [AuditIgnore]（属性定义在 ASP.NET Core Identity 基类上）。
+    /// </summary>
     public HashSet<string> SensitiveFields { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         "password",
+        "passwordHash",
+        "securityStamp",
         "token",
         "secret",
         "credential",

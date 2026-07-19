@@ -49,6 +49,51 @@ describe('useChatStore', () => {
     expect(thread[thread.length - 1].content).toBe('yo')
   })
 
+  it('sendText keeps a failed placeholder in the thread when the send is rejected (403)', async () => {
+    // A mid-session chat.use revocation makes the send 403. Instead of a toast,
+    // the attempted message stays inline flagged failed so the window can render
+    // the WeChat-style retry marker + reason.
+    const bridge = mockBridge()
+    bridge.sendMessage = vi.fn(async () => { throw new Error('You no longer have chat access') })
+    const store = useChatStore(); store.init(bridge as never)
+    await store.fetchConversations(); await store.openConversation('c1')
+
+    await expect(store.sendText('c1', 'blocked?')).rejects.toThrow('chat access')
+
+    const thread = store.messagesByConv['c1']
+    const last = thread[thread.length - 1]
+    expect(last.content).toBe('blocked?')
+    expect(last.failed).toBe(true)
+    expect(last.failReason).toBe('You no longer have chat access')
+    expect(last.clientId).toBeTypeOf('number')
+    // The failed send must NOT become the conversation's last-message preview.
+    expect(store.conversations.find(c => c.id === 'c1')!.lastMessagePreview).toBeUndefined()
+  })
+
+  it('resendMessage drops the failed placeholder and re-sends; a success clears the failed state', async () => {
+    let attempt = 0
+    const bridge = mockBridge()
+    bridge.sendMessage = vi.fn(async (id: string, data: { contentType: MessageContentType; content: string }) => {
+      attempt += 1
+      if (attempt === 1) throw new Error('403')
+      return { id: 'm9', conversationId: id, contentType: data.contentType, content: data.content, sentAt: '2026-01-05T00:00:00Z' }
+    })
+    const store = useChatStore(); store.init(bridge as never)
+    await store.fetchConversations(); await store.openConversation('c1')
+
+    await expect(store.sendText('c1', 'retry me')).rejects.toThrow('403')
+    const failed = store.messagesByConv['c1'].find(m => m.failed)!
+    expect(failed).toBeTruthy()
+
+    await store.resendMessage('c1', failed.clientId!)
+
+    const thread = store.messagesByConv['c1']
+    // No failed placeholder remains; the sent message is the real one.
+    expect(thread.some(m => m.failed)).toBe(false)
+    expect(thread[thread.length - 1].id).toBe('m9')
+    expect(thread[thread.length - 1].content).toBe('retry me')
+  })
+
   it('applyIncomingMessage bumps unread when not the active conversation', async () => {
     const store = useChatStore(); store.init(mockBridge() as never)
     await store.fetchConversations() // c1 unread=2, none active

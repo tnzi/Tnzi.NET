@@ -9,6 +9,9 @@
             v-model="memberFilter"
             class="t-conv-info__filter-input"
             :placeholder="t('window.searchMembers')"
+            enterkeyhint="search"
+            autocapitalize="off"
+            autocorrect="off"
             @focus="filterFocused = true"
             @blur="filterFocused = false"
           />

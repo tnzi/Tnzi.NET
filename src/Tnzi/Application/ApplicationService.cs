@@ -320,6 +320,22 @@ public abstract class ApplicationService : IApplicationService
     }
 
     /// <summary>
+    /// 刷新当前活跃工作单元的挂起变更（经 <see cref="IUnitOfWorkManager.SaveChangesAsync"/>）。
+    /// 用于「写后立即把结果投影回读」的场景——事务启用时仓储默认延迟 SaveChanges 到提交，
+    /// 未刷新前新写入的实体对后续查询不可见；调用本方法即时 flush，无需注入裸 <see cref="IUnitOfWork"/>。
+    /// 工作单元管理器不可用（未加载 EFCore 模块）时为无操作。
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    protected async Task FlushAsync(CancellationToken cancellationToken = default)
+    {
+        var unitOfWorkManager = UnitOfWorkManager;
+        if (unitOfWorkManager == null)
+            return;
+
+        await unitOfWorkManager.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// 在工作单元中执行操作并返回结果
     /// 如果工作单元管理器可用，则启用事务并在操作完成后自动提交，发生异常时自动回滚
     /// 如果工作单元管理器不可用，则直接执行操作（无事务）

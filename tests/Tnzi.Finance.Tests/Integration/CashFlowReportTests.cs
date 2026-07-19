@@ -86,10 +86,10 @@ public class CashFlowReportTests : FinanceIntegrationTestBase
     public async Task CashFlow_UnclassifiedAccounts_LandInExplicitBucket_AndCheckStaysZero()
     {
         await SeedCoaAsync();
-        // 无分类的借款科目（模拟存量库科目 CashFlowActivity = null）
+        // 无分类的借款科目（模拟存量库科目 CashFlowActivity = null；用 2900 避开模板已占的 2400 Wages Payable）
         var loan = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.CreateAsync(new CreateAccountDto
         {
-            Code = "2400",
+            Code = "2900",
             Name = "Bank Loan",
             RootType = AccountRootType.Liability
         }));
@@ -98,13 +98,13 @@ public class CashFlowReportTests : FinanceIntegrationTestBase
         // 提款 300：Dr Bank / Cr 借款
         (await PostLedgerAsync(Posting(new DateTime(2026, 5, 5), "cf-loan",
             new LedgerPostingLine { AccountCode = "1120", Debit = 300m },
-            new LedgerPostingLine { AccountCode = "2400", Credit = 300m }))).Succeeded.ShouldBeTrue();
+            new LedgerPostingLine { AccountCode = "2900", Credit = 300m }))).Succeeded.ShouldBeTrue();
 
         var result = await RunAsync(new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
         var report = result.Data!;
 
         var row = report.Unclassified.ShouldHaveSingleItem();
-        row.Code.ShouldBe("2400");
+        row.Code.ShouldBe("2900");
         row.Balance.ShouldBe(300m);
         report.TotalUnclassified.ShouldBe(300m);
         report.NetCashFlow.ShouldBe(300m);

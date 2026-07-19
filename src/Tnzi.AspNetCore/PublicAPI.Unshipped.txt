@@ -15,3 +15,21 @@ virtual Tnzi.AspNetCore.Controllers.DefaultAdminShellController.GetModules(Tnzi.
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions.AspNetCorePermissions() -> void
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void
+Tnzi.AspNetCore.Mvc.ApiAdminControllerBase.CsvFile(Tnzi.Results.Result<string!>! result, string! baseName) -> Microsoft.AspNetCore.Mvc.IActionResult!
+abstract Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.PermissionPrefix.get -> string!
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CrudAdminControllerBase(Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>! service, System.IServiceProvider? serviceProvider = null) -> void
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Service.get -> Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.BatchDelete(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Create(TCreateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CreatePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Delete(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.DeletePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetById(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetList(Tnzi.Data.PagedQueryDto! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Query(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.RequirePermissionAsync(string! permissionCode) -> System.Threading.Tasks.Task!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Update(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.UpdatePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!
+static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.RunPostMigrationStartupTasksAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!

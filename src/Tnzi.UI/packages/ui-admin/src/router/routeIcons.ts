@@ -24,6 +24,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   chat: 'mdi:message-text-outline',
   payment: 'mdi:credit-card-outline',
   finance: 'mdi:scale-balance',
+  payroll: 'mdi:account-cash-outline',
   ai: 'mdi:robot-outline',
   template: 'mdi:file-document-outline',
 
@@ -86,6 +87,12 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'payment.promotions': 'mdi:ticket-percent-outline',
 
   // ── Finance sub-routes ──────────────────────────────────────────
+  // Finance sub-menu group nodes (component-less containers).
+  'finance.group.sales': 'mdi:cart-outline',
+  'finance.group.purchases': 'mdi:basket-outline',
+  'finance.group.banking': 'mdi:bank-outline',
+  'finance.group.ledger': 'mdi:book-open-variant',
+  'finance.group.setup': 'mdi:cog-outline',
   'finance.accounts': 'mdi:file-tree-outline',
   'finance.journals': 'mdi:notebook-outline',
   'finance.rates': 'mdi:swap-horizontal',
@@ -101,7 +108,18 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'finance.payments': 'mdi:cash-check',
   'finance.transfers': 'mdi:bank-transfer',
   'finance.reconciliations': 'mdi:scale-balance',
+  'finance.bankAccounts': 'mdi:bank-outline',
+  'finance.bankFeed': 'mdi:bank-transfer-in',
+  'finance.checks': 'mdi:checkbook',
+  'finance.eftBatches': 'mdi:bank-transfer-out',
+  'finance.receipts': 'mdi:receipt-text-check-outline',
+  'finance.revaluations': 'mdi:currency-usd-off',
   'finance.reports': 'mdi:chart-box-outline',
+
+  // ── Payroll sub-routes ──────────────────────────────────────────
+  'payroll.employees': 'mdi:account-group-outline',
+  'payroll.setup': 'mdi:cog-outline',
+  'payroll.payRuns': 'mdi:cash-multiple',
 
   // ── AI sub-routes ───────────────────────────────────────────────
   'ai.agents': 'mdi:robot-outline',

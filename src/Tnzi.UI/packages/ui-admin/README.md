@@ -53,9 +53,12 @@ import { TAdminAppRoot } from '@tnzi/ui-admin'
 `TAdminAppRoot` mounts the full Naive UI provider stack
 (`NConfigProvider` + `NLoadingBarProvider` + `NMessageProvider` +
 `NNotificationProvider` + `NDialogProvider`), wires it to the admin
-theme context, and renders `<router-view />`. Pass `theme` /
-`themeOverrides` props to override; pass a default slot (or
-`router-view="false"`) to host non-router content.
+theme context, registers the `window.$message` / `$dialog` /
+`$notification` / `$loadingBar` global handles (so `useCrudPage` error
+toasts and the `@tnzi/ui` window-handle adapters work out of the box),
+and renders `<router-view />`. Pass `theme` / `themeOverrides` props to
+override; pass a default slot (or `router-view="false"`) to host
+non-router content.
 
 Sign in and you get the full preset menu + 59 pages, a working 🎨 theme
 drawer in the header, and `v-permission` ready to use.
@@ -409,7 +412,11 @@ crud.refresh().catch(() => undefined)
   backoff
 - `onError(err, op)` — called for every failed fetch/create/update/
   delete/export/import; return `false` to suppress the default
-  `window.$message.error(err.message)` toast
+  `window.$message.error(err.message)` toast. `TAdminAppRoot` registers
+  `window.$message` / `$dialog` / `$notification` / `$loadingBar`
+  automatically from inside its provider stack; apps not using
+  `TAdminAppRoot` must register the handles themselves or the default
+  toast silently no-ops
 
 `useCrudPage` return additions:
 - `dismissError()` — clears `state.error` without re-fetching

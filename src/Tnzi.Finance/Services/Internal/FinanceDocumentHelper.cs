@@ -107,11 +107,11 @@ public sealed class FinanceDocumentHelper
     }
 
     /// <summary>计算税额（包装 <see cref="ITaxCalculator"/> 的业务异常为 Result）</summary>
-    public async Task<Result<TaxCalculationResult>> CalculateTaxAsync(List<TaxCalculationLine> lines, CancellationToken cancellationToken)
+    public async Task<Result<TaxCalculationResult>> CalculateTaxAsync(List<TaxCalculationLine> lines, CancellationToken cancellationToken, bool isPurchase = false)
     {
         try
         {
-            var result = await _taxCalculator.CalculateAsync(new TaxCalculationRequest { Lines = lines }, cancellationToken);
+            var result = await _taxCalculator.CalculateAsync(new TaxCalculationRequest { Lines = lines, IsPurchase = isPurchase }, cancellationToken);
             return Result<TaxCalculationResult>.Success(result);
         }
         catch (BusinessException ex)

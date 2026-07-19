@@ -18,7 +18,7 @@ public class HybridSearchOptions
     /// <summary>
     /// 是否启用混合搜索（默认 false，仅使用向量搜索）
     /// <para>
-    /// 装配门（KEEP-STATIC）：<see cref="RagModule"/> 据此在 <c>ConfigureServicesAsync</c> 决定注册
+    /// 装配门（KEEP-STATIC）：<see cref="AIRagModule"/> 据此在 <c>ConfigureServicesAsync</c> 决定注册
     /// <c>HybridSearchService</c> 还是 <c>VectorTextSearchService</c>，属 DI 装配开关，不可热更新。
     /// </para>
     /// </summary>

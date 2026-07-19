@@ -42,11 +42,15 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
     SettlementDocType: original.SettlementDocType,
     PAYMENT_METHODS: original.PAYMENT_METHODS,
     ItemType: original.ItemType,
+    BankNumberScheme: original.BankNumberScheme,
+    BankAccountType: original.BankAccountType,
+    CashFlowActivity: original.CashFlowActivity,
     createFinanceBridge: () => ({
       accounts: { tree: vi.fn(async () => []) },
       customers: crudSection,
       vendors: crudSection,
       items: crudSection,
+      partyBankAccounts: { byParty: vi.fn(async () => []), save: vi.fn(), update: vi.fn(), setDefault: vi.fn(), delete: vi.fn() },
       taxes: {
         agencies: listOnly, rates: listOnly, codes: listOnly,
         createAgency: vi.fn(), updateAgency: vi.fn(), deleteAgency: vi.fn(),

@@ -101,6 +101,100 @@ public class BankingDomainTests : FinanceIntegrationTestBase
         };
 
     [Fact]
+    public async Task GetPaged_FillsClearedBalanceAndDifference()
+    {
+        // 列表 DTO 的 Difference=0 必须意味着"已配平"，绝不能是"没算" ——
+        // 消费方直接渲染列表 DTO，0 与未计算不可区分就会把"差着几千"显示成"已平"
+        await SeedCoaAsync();
+        var bank = await AccountIdAsync("1120");
+        await SeedBankLedgerAsync(bank);
+
+        var draft = await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(
+            s => s.CreateDraftAsync(new CreateReconciliationDto
+            {
+                AccountId = bank,
+                StatementDate = new DateTime(2026, 3, 31),
+                StatementEndingBalance = 600m
+            }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        var id = draft.Data!.Id;
+
+        async Task<ReconciliationDto> ListedAsync()
+        {
+            var page = await InScopeAsync<IReconciliationService, Result<IPagedList<ReconciliationDto>>>(
+                s => s.GetPagedAsync(new ReconciliationQueryDto()));
+            page.Succeeded.ShouldBeTrue(page.Message);
+            return page.Data!.Items.Single(r => r.Id == id);
+        }
+
+        // 一条未勾：cleared 0、差额 = 全额 600
+        var row = await ListedAsync();
+        row.ClearedBalance.ShouldBe(0m);
+        row.Difference.ShouldBe(600m);
+
+        // 与单实体读同口径
+        var single = await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(s => s.GetAsync(id));
+        row.Difference.ShouldBe(single.Data!.Difference);
+        row.ClearedBalance.ShouldBe(single.Data.ClearedBalance);
+
+        var worksheet = await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
+            s => s.GetWorksheetAsync(id));
+        var allLineIds = worksheet.Data!.Lines.Select(l => l.JournalLineId).ToList();
+
+        // 部分勾选 → 列表随之更新
+        (await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
+            s => s.SetLinesAsync(id, new SetReconciliationLinesDto { JournalLineIds = [allLineIds[0]] }))).Succeeded.ShouldBeTrue();
+        row = await ListedAsync();
+        row.ClearedBalance.ShouldBe(500m);
+        row.Difference.ShouldBe(100m);
+
+        // 完成后冻结为完成时刻的事实（差额 0），不随后续对账推进重算
+        (await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
+            s => s.SetLinesAsync(id, new SetReconciliationLinesDto { JournalLineIds = allLineIds }))).Succeeded.ShouldBeTrue();
+        (await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(s => s.CompleteAsync(id))).Succeeded.ShouldBeTrue();
+
+        row = await ListedAsync();
+        row.ClearedBalance.ShouldBe(600m);
+        row.Difference.ShouldBe(0m);
+    }
+
+    /// <summary>
+    /// 回归（完成竞态）：勾选行本身无并发令牌，SetLinesAsync 必须触碰父对账以轮换其并发戳，
+    /// 才能与 CompleteAsync 的父行更新互斥。若戳不变，"读到 Draft→并发完成→再插行进已完成对账"
+    /// 的 TOCTOU 会静默漂移累计 cleared 锚点。此处断言机制：任何勾选变更后父戳必变。
+    /// </summary>
+    [Fact]
+    public async Task Reconciliation_SetLines_BumpsParentConcurrencyStamp()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdAsync("1120");
+        await SeedBankLedgerAsync(bank);
+
+        var draft = await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(
+            s => s.CreateDraftAsync(new CreateReconciliationDto
+            {
+                AccountId = bank,
+                StatementDate = new DateTime(2026, 3, 31),
+                StatementEndingBalance = 600m
+            }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        var before = (await ReloadAsync<Reconciliation>(draft.Data!.Id))!.ConcurrencyStamp;
+
+        var worksheet = await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
+            s => s.GetWorksheetAsync(draft.Data.Id));
+        var set = await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
+            s => s.SetLinesAsync(draft.Data.Id, new SetReconciliationLinesDto
+            {
+                JournalLineIds = [worksheet.Data!.Lines[0].JournalLineId]
+            }));
+        set.Succeeded.ShouldBeTrue(set.Message);
+
+        var after = (await ReloadAsync<Reconciliation>(draft.Data.Id))!.ConcurrencyStamp;
+        after.ShouldNotBe(before);
+    }
+
+    [Fact]
     public async Task Reconciliation_FullFlow_ClearsLinesAndCompletes()
     {
         await SeedCoaAsync();

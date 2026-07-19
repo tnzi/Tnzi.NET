@@ -20,3 +20,22 @@ export * from './presets'
 // built-in widgets (KPI strip, list, charts, timeline, quick actions +
 // business tiles), and the default deck preset.
 export * from './widgets'
+
+// Bridge plumbing — envelope helpers (`ensureOk` / `unwrapResult`, re-exported
+// from @tnzi/core) + the CRUD query/result adapters, surfaced at the package
+// root so consumer bridges import the whole set from `@tnzi/ui-admin` instead
+// of copying `services/_mappers` (which is otherwise not on the public surface).
+// `CrudPageQuery` / `CrudPageResult` already reach the root via `./headless`.
+export {
+  ensureOk,
+  unwrapResult,
+  mapQueryToListRequest,
+  mapResultToCrud,
+  pagedResult,
+  pageArray,
+} from './services/_mappers'
+export type { BridgeCrudContract } from './services/types'
+// CRUD bridge factories — declare an endpoint base instead of hand-writing the
+// per-resource unwrap/ensureOk plumbing (see services/defineCrudBridge.ts).
+export { defineCrudBridge, defineChildBridge } from './services/defineCrudBridge'
+export type { CrudBridge, CrudBridgeOptions, ChildBridge } from './services/defineCrudBridge'

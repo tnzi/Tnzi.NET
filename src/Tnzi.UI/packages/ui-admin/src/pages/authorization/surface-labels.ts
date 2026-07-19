@@ -24,6 +24,7 @@ export const ZH_SURFACE_LABELS: Record<string, string> = {
   'module:template': '模板',
   'module:ai': 'AI 管理',
   'module:finance': '财务',
+  'module:payroll': '薪酬',
 
   // ── Identity ───────────────────────────────────────────────────────────
   identity: '身份管理',
@@ -125,6 +126,21 @@ export const ZH_SURFACE_LABELS: Record<string, string> = {
   'finance.item': '目录项',
   'finance.tax': '税务设置',
   'finance.document': '财务单据',
+  'finance.reconciliation': '银行对账',
+  'finance.revaluation': '汇兑重估',
+  'finance.bankAccount': '银行账户',
+  'finance.bankFeed': '银行流水',
+  'finance.partyBank': '往来方银行账户',
+  'finance.check': '支票打印',
+  'finance.eft': 'EFT 批量付款',
+  'finance.receipt': '收据采集',
+
+  // ── Payroll ────────────────────────────────────────────────────────────
+  payroll: '薪酬',
+  'payroll.employee': '员工',
+  'payroll.config': '薪酬配置',
+  'payroll.run': '发薪批次',
+  'payroll.pack': '国家薪酬包',
 }
 
 /**

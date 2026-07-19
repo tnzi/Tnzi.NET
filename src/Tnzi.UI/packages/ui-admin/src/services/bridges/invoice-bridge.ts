@@ -25,7 +25,7 @@ import {
   type InvoiceDto as CoreInvoiceDto,
   type MarkInvoicePaidDto as CoreMarkInvoicePaidDto,
 } from '@tnzi/core/services/payment'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 // Re-export under the original bridge names consumed by pages.
 export type InvoiceDto = CoreInvoiceDto
@@ -93,13 +93,13 @@ export function createInvoiceBridge(deps: InvoiceBridgeDeps = {}): InvoiceBridge
     getById: async (id: string) =>
       unwrap<InvoiceDto | null>(await api.get(id)),
     send: async (id: string, recipientEmail?: string) => {
-      await api.send(id, recipientEmail ? { recipientEmail } : undefined)
+      ensureOk(await api.send(id, recipientEmail ? { recipientEmail } : undefined))
     },
     markAsPaid: async (id: string, payload: MarkInvoicePaidDto) => {
-      await api.markAsPaid(id, payload)
+      ensureOk(await api.markAsPaid(id, payload))
     },
     cancel: async (id: string, reason: string) => {
-      await api.cancel(id, reason)
+      ensureOk(await api.cancel(id, reason))
     },
   }
 }

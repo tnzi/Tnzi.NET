@@ -41,9 +41,20 @@ describe('useChatStore deployment config', () => {
     setActivePinia(createPinia())
   })
 
-  it('starts with everything-enabled defaults before loadConfig resolves', () => {
+  it('starts chat disabled (deny-by-default) until loadConfig confirms the grant', () => {
     const store = useChatStore()
-    expect(store.config).toEqual(DEFAULT_CHAT_CONFIG)
+    // Pessimistic initial: the launcher stays hidden (no icon flash) until
+    // GET /chat/config confirms this user holds chat.use.
+    expect(store.config.enabled).toBe(false)
+    // Every other feature still mirrors the all-enabled defaults.
+    expect(store.config).toEqual({ ...DEFAULT_CHAT_CONFIG, enabled: false })
+  })
+
+  it('projects the per-user enabled flag from the server (deny-by-default gate)', async () => {
+    const store = useChatStore()
+    store.init(makeBridge({ getConfig: vi.fn().mockResolvedValue({ ...DEFAULT_CHAT_CONFIG, enabled: false }) }))
+    await store.loadConfig()
+    expect(store.config.enabled).toBe(false)
   })
 
   it('loadConfig applies the server projection', async () => {
@@ -71,16 +82,20 @@ describe('useChatStore deployment config', () => {
     expect(store.config.enableFileMessages).toBe(false)
   })
 
-  it('keeps the all-enabled defaults when the endpoint fails (older backend)', async () => {
+  it('forces enabled:false (deny-by-default) when the endpoint throws', async () => {
+    // A load failure must NOT fail-open into enabled:true — that would mount the
+    // chat host for a user we cannot confirm holds chat.use, hitting the
+    // 403-guarded /conversations + /presence endpoints. Feature flags still
+    // mirror DEFAULT; only `enabled` is forced false.
     const store = useChatStore()
     store.init(makeBridge({ getConfig: vi.fn().mockRejectedValue(new Error('404')) }))
 
     await store.loadConfig()
 
-    expect(store.config).toEqual(DEFAULT_CHAT_CONFIG)
+    expect(store.config).toEqual({ ...DEFAULT_CHAT_CONFIG, enabled: false })
   })
 
-  it('keeps defaults when the bridge lacks getConfig entirely (stale fake/backend)', async () => {
+  it('forces enabled:false when the bridge lacks getConfig entirely (stale fake/backend)', async () => {
     const store = useChatStore()
     const bridge = makeBridge()
     delete (bridge as Partial<ChatImBridge>).getConfig
@@ -88,7 +103,20 @@ describe('useChatStore deployment config', () => {
 
     await store.loadConfig()
 
-    expect(store.config).toEqual(DEFAULT_CHAT_CONFIG)
+    expect(store.config).toEqual({ ...DEFAULT_CHAT_CONFIG, enabled: false })
+  })
+
+  it('forces enabled:false when getConfig resolves to null (forbidden/empty envelope unwrapped)', async () => {
+    // The exact regression: a `{ succeeded, data: null }` envelope unwraps to
+    // null; the old `{ ...DEFAULT, ...null }` spread fail-opened to enabled:true,
+    // mounting TChatHost for a denied user → GET /conversations 403 + crash.
+    const store = useChatStore()
+    store.init(makeBridge({ getConfig: vi.fn().mockResolvedValue(null as never) }))
+
+    await store.loadConfig()
+
+    expect(store.config.enabled).toBe(false)
+    expect(store.config).toEqual({ ...DEFAULT_CHAT_CONFIG, enabled: false })
   })
 
   it('openConversation skips peer presence loading when presence is disabled', async () => {

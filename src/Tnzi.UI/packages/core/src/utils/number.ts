@@ -12,16 +12,27 @@ export function formatNumber(num: number, locale = 'en-US'): string {
 }
 
 /**
- * Format currency
+ * Format currency.
+ *
+ * Null-safe: `null` / `undefined` / `NaN` render `options.fallback` (default
+ * `''`) instead of the literal `$NaN`, so table cells and detail panes can pass
+ * a possibly-absent amount straight through. `minimum/maximumFractionDigits`
+ * override the currency's default precision when supplied.
  */
 export function formatCurrency(
-  amount: number,
+  amount: number | null | undefined,
   currency = 'USD',
-  locale = 'en-US'
+  locale = 'en-US',
+  options?: { fallback?: string; minimumFractionDigits?: number; maximumFractionDigits?: number }
 ): string {
+  if (amount === null || amount === undefined || Number.isNaN(amount)) {
+    return options?.fallback ?? '';
+  }
   return new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
+    minimumFractionDigits: options?.minimumFractionDigits,
+    maximumFractionDigits: options?.maximumFractionDigits,
   }).format(amount);
 }
 

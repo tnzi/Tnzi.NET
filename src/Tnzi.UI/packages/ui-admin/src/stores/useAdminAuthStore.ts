@@ -82,7 +82,12 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
   }
 
   function hasRole(role: string): boolean {
-    return userRoles.value.includes(role)
+    // Case-insensitive, matching `hasPermission` and the route store's role
+    // gate (`meta.roles`) — otherwise a route visible in the sidebar (store
+    // lowercases both sides) would bounce to /403 on click when the backend's
+    // role casing differs from the declared `meta.roles`.
+    const target = role.toLowerCase()
+    return userRoles.value.some((r) => r.toLowerCase() === target)
   }
 
   function hasAnyRole(roles: string[]): boolean {

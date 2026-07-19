@@ -2,6 +2,7 @@ namespace Tnzi.Chat.Controllers;
 
 [DefaultController]
 [ApiAuthorize]
+[ServiceFilter(typeof(ChatAccessGuardFilter))]
 [Route("presence")]
 [ApiExplorerSettings(GroupName = "user")]
 public class DefaultPresenceController : ApiControllerBase

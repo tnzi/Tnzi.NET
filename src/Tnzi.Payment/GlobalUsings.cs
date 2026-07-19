@@ -62,6 +62,7 @@ global using Tnzi.Payment.Extensions;
 global using Tnzi.Payment.Metadata;
 global using Tnzi.Payment.Options;
 global using Tnzi.Payment.Providers;
+global using Tnzi.Payment.Providers.Models;
 global using Tnzi.Payment.Services;
 global using Tnzi.Template.Models;
 global using PaymentEntity = Tnzi.Payment.Entities.Payment;

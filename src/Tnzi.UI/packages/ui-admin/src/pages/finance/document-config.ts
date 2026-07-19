@@ -60,6 +60,13 @@ export function buildDocumentColumns(
 
   if (options?.showApplied) {
     columns.push({ key: 'appliedTotal', title: 'columns.applied', width: 120, mobileHidden: true, render: (row) => amountCell(fmtMoney(row.appliedTotal, row.currency)) })
+    // Outstanding (Total − Applied) - the primary collections/payables figure, emphasised right-aligned.
+    columns.push({
+      key: 'outstanding',
+      title: 'columns.outstanding',
+      width: 130,
+      render: (row) => amountCell(fmtMoney((row[amountKey] ?? 0) - (row.appliedTotal ?? 0), row.currency), true),
+    })
   }
   if (options?.showDueDate) {
     columns.push({ key: 'dueDate', title: 'columns.dueDate', width: 110, mobileHidden: true, render: (row) => formatDateOnly(row.dueDate, { utc: true }) })

@@ -35,7 +35,7 @@ import type {
 } from '@tnzi/core/services/template'
 import type { PagedList } from '@tnzi/core/types'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 /** Server-side pinned module name for notification templates. */
 const NOTIFICATION_TEMPLATE_BASE = '/admin/notification-templates'
@@ -161,8 +161,8 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
     // Messages are sent notifications — create/update are not supported from admin.
     create: backendGapReject('messages.create — notifications are sent, not CRUDed; use send/createAndSend'),
     update: backendGapReject('messages.update — notifications are immutable once created'),
-    delete: (ids: string[]) => api.batchDelete(ids).then(() => undefined),
-    send: (id: string) => api.send(id).then(() => undefined),
+    delete: (ids: string[]) => api.batchDelete(ids).then((res) => ensureOk(res)),
+    send: (id: string) => api.send(id).then((res) => ensureOk(res)),
   }
 
   // /admin/notification-templates CRUD (2026-04-14 unstub). Uses the shared
@@ -205,10 +205,10 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
         delete: async (ids) => {
           if (ids.length === 1) {
-            await client.delete(`${NOTIFICATION_TEMPLATE_BASE}/${encodeURIComponent(String(ids[0]))}`)
+            ensureOk(await client.delete(`${NOTIFICATION_TEMPLATE_BASE}/${encodeURIComponent(String(ids[0]))}`))
             return
           }
-          await client.delete(`${NOTIFICATION_TEMPLATE_BASE}/batch`, { body: ids.map(String) })
+          ensureOk(await client.delete(`${NOTIFICATION_TEMPLATE_BASE}/batch`, { body: ids.map(String) }))
         },
         // Preview hits POST /admin/notifications/preview which renders the
         // template via ITemplateRenderService without creating or sending a
@@ -239,14 +239,14 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
           if (!req.recipientAddress) {
             throw new Error('sendTest: recipientAddress is required.')
           }
-          await api.createAndSend({
+          ensureOk(await api.createAndSend({
             type: req.type ?? NotificationType.Email,
             subject: req.subject ?? 'Test Send',
             content: req.content ?? '',
             templateName: req.templateName ?? undefined,
             templateVariables: req.variables ?? undefined,
             recipients: [{ address: req.recipientAddress }],
-          })
+          }))
         },
       }
     : {
@@ -275,14 +275,14 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
           if (!req.recipientAddress) {
             throw new Error('sendTest: recipientAddress is required.')
           }
-          await api.createAndSend({
+          ensureOk(await api.createAndSend({
             type: req.type ?? NotificationType.Email,
             subject: req.subject ?? 'Test Send',
             content: req.content ?? '',
             templateName: req.templateName ?? undefined,
             templateVariables: req.variables ?? undefined,
             recipients: [{ address: req.recipientAddress }],
-          })
+          }))
         },
       }
 
@@ -346,7 +346,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
         delete: async (ids) => {
           for (const id of ids) {
-            await prefApi.delete(String(id))
+            ensureOk(await prefApi.delete(String(id)))
           }
         },
       }

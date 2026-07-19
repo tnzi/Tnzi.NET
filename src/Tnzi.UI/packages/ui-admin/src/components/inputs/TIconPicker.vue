@@ -207,7 +207,9 @@ function clear(): void {
 
 <style scoped>
 .t-icon-picker__panel {
-  width: 320px;
+  /* Cap to the viewport on narrow screens so the popover never overflows
+     off-screen (desktop stays at the full 320px). */
+  width: min(320px, calc(100vw - 24px));
 }
 .t-icon-picker__search {
   margin-bottom: 8px;
@@ -218,6 +220,12 @@ function clear(): void {
   gap: 4px;
   max-height: 280px;
   overflow-y: auto;
+}
+/* Phone: fewer columns so each cell keeps a comfortable touch size. */
+@media (max-width: 767px) {
+  .t-icon-picker__grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
 }
 .t-icon-picker__cell {
   display: inline-flex;

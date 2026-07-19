@@ -288,28 +288,17 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             };
         }).ToList();
 
-        // 生成 CSV
-        var csv = new StringBuilder();
-        csv.AppendLine("TradeNo,ExternalTradeNo,BusinessOrderNo,BusinessType,ChannelCode,PaymentMethod,OriginalAmount,DiscountAmount,PaidAmount,RefundAmount,NetAmount,Currency,Status,CreationTime,PaidTime");
+        // 生成 CSV(单元格转义统一走核心 CsvBuilder,含公式注入防护;金额 invariant culture 输出)
+        var csv = new CsvBuilder("yyyy-MM-dd HH:mm:ss");
+        csv.AppendRow("TradeNo", "ExternalTradeNo", "BusinessOrderNo", "BusinessType", "ChannelCode", "PaymentMethod", "OriginalAmount", "DiscountAmount", "PaidAmount", "RefundAmount", "NetAmount", "Currency", "Status", "CreationTime", "PaidTime");
 
         foreach (var entry in entries)
         {
-            csv.AppendLine(string.Join(",",
-                EscapeCsvField(entry.TradeNo),
-                EscapeCsvField(entry.ExternalTradeNo ?? ""),
-                EscapeCsvField(entry.BusinessOrderNo),
-                EscapeCsvField(entry.BusinessType),
-                EscapeCsvField(entry.ChannelCode),
-                EscapeCsvField(entry.PaymentMethod),
-                entry.OriginalAmount,
-                entry.DiscountAmount,
-                entry.PaidAmount,
-                entry.RefundAmount,
-                entry.NetAmount,
-                EscapeCsvField(entry.Currency),
-                EscapeCsvField(entry.Status),
-                entry.CreationTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                entry.PaidTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? ""));
+            csv.AppendRow(entry.TradeNo, entry.ExternalTradeNo, entry.BusinessOrderNo,
+                entry.BusinessType, entry.ChannelCode, entry.PaymentMethod,
+                entry.OriginalAmount, entry.DiscountAmount, entry.PaidAmount,
+                entry.RefundAmount, entry.NetAmount, entry.Currency, entry.Status,
+                entry.CreationTime, entry.PaidTime);
         }
 
         var totalRevenue = entries.Sum(e => e.PaidAmount);
@@ -469,19 +458,6 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
         };
 
         return Ok(result);
-    }
-
-    /// <summary>
-    /// 转义 CSV 字段（处理逗号、引号、换行）
-    /// </summary>
-    private static string EscapeCsvField(string value)
-    {
-        if (string.IsNullOrEmpty(value)) return "";
-        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
-        {
-            return $"\"{value.Replace("\"", "\"\"")}\"";
-        }
-        return value;
     }
 
     /// <summary>

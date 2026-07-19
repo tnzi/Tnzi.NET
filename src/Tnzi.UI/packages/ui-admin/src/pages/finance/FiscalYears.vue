@@ -80,6 +80,8 @@ async function reopenYear(row: FiscalYearRow) {
 const rowActions: RowAction<FiscalYearRow>[] = [
   { key: 'close', label: 'actions.close', type: 'warning', show: (row) => can('finance.fiscalYear.update') && !row.isClosed, confirm: 'confirmClose', onClick: closeYear },
   { key: 'reopen', label: 'actions.reopen', show: (row) => can('finance.fiscalYear.update') && row.isClosed === true, confirm: 'confirmReopen', onClick: reopenYear },
-  deleteAction(crud),
+  // 已关闭的年度不提供删除:后端会 409 拒绝(删掉它等于把期间锁悄悄拆了),
+  // 摆一个必然失败的按钮只会让人以为是系统出错。解锁的路径是上面的 Reopen。
+  deleteAction(crud, { show: (row) => row.isClosed !== true }),
 ]
 </script>

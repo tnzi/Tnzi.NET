@@ -32,7 +32,7 @@ Naive UI 组件库的完整展示和测试环境。
 - TDataTable - 数据表格
 - TDataList - 数据列表
 - TForm - 通用表单
-- TDynamicForm - 动态表单
+- TSchemaForm - 声明式 schema 表单
 - TSearchForm - 搜索表单
 - TStatCard - 统计卡片
 - TUserCard - 用户卡片

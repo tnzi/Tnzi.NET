@@ -11,6 +11,7 @@ global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Chat.Dtos;
 global using Tnzi.Chat.Entities;
+global using Tnzi.Chat.Filters;
 global using Tnzi.Chat.Events;
 global using Tnzi.Chat.Events.Handlers;
 global using Tnzi.Chat.Hubs;

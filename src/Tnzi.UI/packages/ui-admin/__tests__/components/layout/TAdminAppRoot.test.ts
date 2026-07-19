@@ -87,6 +87,27 @@ describe('TAdminAppRoot', () => {
     expect(wrapper.html()).toContain('override')
   })
 
+  it('registers window.$message / $dialog / $notification / $loadingBar handles', () => {
+    const w = window as unknown as {
+      $message?: { error?: unknown }
+      $dialog?: { error?: unknown }
+      $notification?: { error?: unknown }
+      $loadingBar?: { start?: unknown }
+    }
+    delete w.$message
+    delete w.$dialog
+    delete w.$notification
+    delete w.$loadingBar
+    mount(TAdminAppRoot, {
+      props: { routerView: false },
+      slots: { default: 'handles' },
+    })
+    expect(typeof w.$message?.error).toBe('function')
+    expect(typeof w.$dialog?.error).toBe('function')
+    expect(typeof w.$notification?.error).toBe('function')
+    expect(typeof w.$loadingBar?.start).toBe('function')
+  })
+
   it('reactively follows isDark when no explicit theme prop is set', async () => {
     const ctx: ThemeContext = createThemeContext(
       mergeThemeSettings({ mode: 'light' }),

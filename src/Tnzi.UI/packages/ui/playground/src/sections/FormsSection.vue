@@ -59,14 +59,13 @@
     </div>
 
     <div class="demo-block">
-      <h2 class="demo-label">Dynamic Form</h2>
+      <h2 class="demo-label">Schema Form</h2>
       <PreviewBox :full-width="true">
         <div style="width: 100%; max-width: 560px; margin: 0 auto;">
-          <TDynamicForm
-            :model="dynamicModel"
-            :fields="demoDynamicFormFields"
-            @submit="handleDynamicSubmit"
-          />
+          <TSchemaForm :schema="demoSchemaFormItems" :model="dynamicModel" />
+          <n-button type="primary" style="margin-top: 12px" @click="handleDynamicSubmit(dynamicModel)">
+            Submit
+          </n-button>
         </div>
       </PreviewBox>
     </div>
@@ -96,9 +95,9 @@ import { useMessage } from 'naive-ui';
 import {
   demoBasicForm,
   demoBasicFormRules,
-  demoDynamicFormFields,
+  demoSchemaFormItems,
 } from '../data/index';
-import { TForm, TDynamicForm, TSearchForm, TImageUpload, createMessageAdapter } from '@tnzi/ui';
+import { TForm, TSchemaForm, TSearchForm, TImageUpload, createMessageAdapter } from '@tnzi/ui';
 import PreviewBox from '../components/PreviewBox.vue';
 
 const message = useMessage();
@@ -131,14 +130,14 @@ function handleBasicReset() {
   Object.assign(basicForm, demoBasicForm);
 }
 
-// Dynamic form
+// Schema form
 const dynamicModel = reactive<Record<string, any>>({});
-for (const field of demoDynamicFormFields) {
+for (const field of demoSchemaFormItems) {
   dynamicModel[field.key] = field.type === 'switch' ? false : null;
 }
 
 function handleDynamicSubmit(data: Record<string, any>) {
-  msgAdapter.success(`Dynamic form: ${JSON.stringify(data)}`);
+  msgAdapter.success(`Schema form: ${JSON.stringify(data)}`);
 }
 
 // Search

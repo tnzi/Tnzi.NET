@@ -75,22 +75,22 @@ describe('Finance Accounts page', () => {
     seedDefault.mockClear()
   })
 
-  it('mounts, fetches the account list and the parent-option tree', async () => {
+  it('mounts and renders the account tree (indented list + parent options)', async () => {
     mount(Accounts, { global: { stubs } })
     await flushPromises()
-    expect(accountsFetch).toHaveBeenCalledTimes(1)
+    // The chart of accounts renders from the tree endpoint (indented hierarchy), not the flat paged list.
     expect(accountsTree).toHaveBeenCalled()
   })
 
   it('seed-default action calls the bridge and refreshes', async () => {
     const wrapper = mount(Accounts, { global: { stubs } })
     await flushPromises()
-    accountsFetch.mockClear()
+    accountsTree.mockClear()
 
     await (wrapper.vm as unknown as AccountsVm).seedDefault()
     await flushPromises()
 
     expect(seedDefault).toHaveBeenCalledTimes(1)
-    expect(accountsFetch).toHaveBeenCalled()
+    expect(accountsTree).toHaveBeenCalled()
   })
 })

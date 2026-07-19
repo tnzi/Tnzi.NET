@@ -9,6 +9,8 @@ public class BroadcastService : ApplicationService, IBroadcastService
     private readonly IRepository<BroadcastLog, Guid> _broadcastLogRepository;
     private readonly IOptions<MultiTenancyOptions> _multiTenancyOptions;
     private readonly IUserRoleService? _userRoleService;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
+    private readonly IChatAccessService _chatAccess;
 
     public BroadcastService(
         IServiceProvider serviceProvider,
@@ -18,7 +20,9 @@ public class BroadcastService : ApplicationService, IBroadcastService
         IRepository<User, Guid> userRepository,
         IRepository<BroadcastLog, Guid> broadcastLogRepository,
         IOptions<MultiTenancyOptions> multiTenancyOptions,
-        IUserRoleService? userRoleService = null) : base(serviceProvider)
+        IChatAccessService chatAccess,
+        IUserRoleService? userRoleService = null,
+        IFunctionAuthorizationService? functionAuthorization = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
@@ -26,7 +30,9 @@ public class BroadcastService : ApplicationService, IBroadcastService
         _userRepository = Check.NotNull(userRepository);
         _broadcastLogRepository = Check.NotNull(broadcastLogRepository);
         _multiTenancyOptions = Check.NotNull(multiTenancyOptions);
+        _chatAccess = Check.NotNull(chatAccess);
         _userRoleService = userRoleService;
+        _functionAuthorization = functionAuthorization;
     }
 
     public Task<Result<int>> BroadcastToUsersAsync(IEnumerable<Guid> userIds, string content)
@@ -80,7 +86,16 @@ public class BroadcastService : ApplicationService, IBroadcastService
             if (_multiTenancyOptions.Value.Enabled)
                 return Fail<int>("System-wide broadcast is not supported in multi-tenant mode; target by role or user instead.", 400);
 
-            var allUsers = await _userRepository.ToListAsync(u => true);
+            // Exclude super admins from a system-wide business broadcast: they are
+            // maintenance/operations accounts, not business recipients, and a
+            // "notify everyone" business message has no meaning for them (it would
+            // just fill their System conversation with business noise). Explicit
+            // role/user targeting (the else branch) is honoured as-is — if an operator
+            // deliberately targets a super-admin role, that is intentional.
+            var excludedIds = _functionAuthorization == null
+                ? new List<Guid>()
+                : (await _functionAuthorization.GetSuperAdminUserIdsAsync()).ToList();
+            var allUsers = await _userRepository.ToListAsync(u => !excludedIds.Contains(u.Id));
             targetIds = allUsers.Select(u => u.Id).ToList();
             targetType = BroadcastTargetType.All;
             summary = "All users";
@@ -143,6 +158,15 @@ public class BroadcastService : ApplicationService, IBroadcastService
     /// </summary>
     private async Task<int> DeliverAsync(List<Guid> ids, ChatNotification notification)
     {
+        // A broadcast is a message too: skip recipients who currently can't use chat
+        // (no chat.use) so nothing accumulates in their System conversation while
+        // disabled. Fail-open when Authorization is absent (FilterDisabledAsync → empty).
+        if (ids.Count > 0)
+        {
+            var disabled = await _chatAccess.FilterDisabledAsync(ids);
+            if (disabled.Count > 0) ids = ids.Where(id => !disabled.Contains(id)).ToList();
+        }
+
         var now = DateTime.UtcNow;
         var preview = notification.Content.Length <= 100 ? notification.Content : notification.Content[..100];
         var delivered = 0;

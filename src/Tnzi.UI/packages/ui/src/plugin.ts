@@ -57,9 +57,12 @@ export interface TnziUiOptions {
    *
    * When true, sets up message, dialog, notification, and loading bar adapters
    * using window.$message / window.$dialog / window.$notification / window.$loadingBar
-   * as the global handles. The application must wrap the root component with
-   * NMessageProvider, NDialogProvider, NNotificationProvider, and NLoadingBarProvider,
-   * and expose the APIs to the window object (e.g., via a setup component).
+   * as the global handles. `@tnzi/ui-admin`'s `TAdminAppRoot` mounts the Naive UI
+   * providers AND registers these window handles automatically, so admin apps
+   * built on it need no extra wiring. Applications not using `TAdminAppRoot`
+   * must wrap the root component with NMessageProvider, NDialogProvider,
+   * NNotificationProvider, and NLoadingBarProvider, and expose the APIs to the
+   * window object from a setup component inside that provider stack.
    *
    * When false, adapters must be registered manually.
    */
@@ -98,8 +101,10 @@ export function createTnziUi(options: TnziUiOptions = {}): Plugin {
 
       // 2. Register all adapters using window.$* global handles.
       //    Naive UI requires NMessageProvider / NDialogProvider / NNotificationProvider /
-      //    NLoadingBarProvider in the component tree, and the actual API instances are
-      //    typically exposed to window in a setup component.
+      //    NLoadingBarProvider in the component tree. @tnzi/ui-admin's TAdminAppRoot
+      //    mounts the providers and registers the window handles automatically;
+      //    apps not using it expose the API instances to window from their own
+      //    setup component inside the provider stack.
       if (registerAdapters) {
         setActiveUiAdapter(createUiAdapter());
         setActiveRuntimeAdapter(createRuntimeAdapter({ router, storagePrefix }));

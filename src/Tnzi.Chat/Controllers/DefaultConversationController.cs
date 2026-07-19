@@ -2,6 +2,7 @@ namespace Tnzi.Chat.Controllers;
 
 [DefaultController]
 [ApiAuthorize]
+[ServiceFilter(typeof(ChatAccessGuardFilter))]
 [Route("conversations")]
 [ApiExplorerSettings(GroupName = "user")]
 public class DefaultConversationController : ApiControllerBase

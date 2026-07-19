@@ -47,5 +47,7 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
         builder.HasIndex(e => e.FunctionName);
         builder.HasIndex(e => e.PermissionName);
         builder.HasIndex(e => new { e.UserId, e.StartTime });
+        // Operations/Logs 视图按 IsWrite 过滤 + StartTime 排序
+        builder.HasIndex(e => new { e.IsWrite, e.StartTime });
     }
 }

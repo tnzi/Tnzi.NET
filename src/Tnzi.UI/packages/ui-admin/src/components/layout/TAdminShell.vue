@@ -767,7 +767,7 @@ function onMixMouseleave(): void {
         </div>
         <TAdminSidebar
           mode="vertical"
-          :width="sider.width ?? 260"
+          :width="mobileDrawerWidth"
           :collapsed-width="sider.collapsedWidth ?? themeStore.siderCollapsedWidth"
           :brand="sider.brand ?? title"
           :brand-subtitle="sider.brandSubtitle"
@@ -797,6 +797,10 @@ function onMixMouseleave(): void {
   display: flex;
   width: 100%;
   height: 100vh;
+  /* dvh: on mobile the URL bar / bottom toolbar collapse-expand would otherwise
+     make a `100vh` shell taller than the visible viewport, pushing the sticky
+     footer under the browser chrome and jittering the layout on scroll. */
+  height: 100dvh;
   min-height: 0;
   background-color: var(--tnzi-layout-bg, #f5f7fa);
 }
@@ -942,6 +946,7 @@ function onMixMouseleave(): void {
 .t-admin-shell[data-scroll-mode='wrapper'] {
   height: auto;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-y: auto;
 }
 .t-admin-shell[data-scroll-mode='wrapper'] .t-admin-shell__main,
@@ -989,6 +994,10 @@ function onMixMouseleave(): void {
   display: flex;
   flex-direction: column;
   box-shadow: var(--tnzi-shadow-drawer, 0 8px 24px rgba(0, 0, 0, 0.12));
+  /* Clear the notch / home indicator so the top brand and bottom settings entry
+     aren't hidden under the system UI in standalone / minimal-chrome mode. */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .t-admin-shell__drawer--open {

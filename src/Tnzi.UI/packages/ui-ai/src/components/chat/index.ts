@@ -1,29 +1,27 @@
 /**
  * Chat components
  *
- * Complete chat interface — messages, input, suggestions,
- * feedback, branching, attachments, and the main ChatBox container.
+ * Complete chat interface: messages, input, suggestions,
+ * feedback, branching, attachments, and the main TChatBox container.
  *
- * The `T`-prefixed components below are Manus-inspired shell primitives
- * added in the shell rewrite: reasoning stages, status banners, task-done
- * rows, follow-up lists, upgrade banners. They are visual-only and slot
- * into any chat consumer that wants a Manus-style post-task UX.
+ * The Manus-inspired shell primitives (reasoning stages, status banners,
+ * task-done rows, follow-up lists, upgrade banners) are visual-only and
+ * slot into any chat consumer that wants a Manus-style post-task UX.
  */
 
-export { default as ScrollButton } from './ScrollButton.vue';
-export { default as ConversationEmpty } from './ConversationEmpty.vue';
-export { default as MessageActions } from './MessageActions.vue';
-export { default as MessageFeedback } from './MessageFeedback.vue';
-export type { FeedbackValue } from './MessageFeedback.vue';
-export { default as MessageBranch } from './MessageBranch.vue';
-export { default as MessageResponse } from './MessageResponse.vue';
-export { default as MessageAttachments } from './MessageAttachments.vue';
-export { default as ChatMessage } from './ChatMessage.vue';
-export { default as MessageList } from './MessageList.vue';
-export { default as Suggestions } from './Suggestions.vue';
-export type { SuggestionItem } from './Suggestions.vue';
-export { default as PromptInput } from './PromptInput.vue';
-export { default as ChatBox } from './ChatBox.vue';
+export { default as TScrollButton } from './TScrollButton.vue';
+export { default as TConversationEmpty } from './TConversationEmpty.vue';
+export { default as TMessageFeedback } from './TMessageFeedback.vue';
+export type { FeedbackValue } from './TMessageFeedback.vue';
+export { default as TMessageBranch } from './TMessageBranch.vue';
+export { default as TMessageResponse } from './TMessageResponse.vue';
+export { default as TMessageAttachments } from './TMessageAttachments.vue';
+export { default as TChatMessage } from './TChatMessage.vue';
+export { default as TMessageList } from './TMessageList.vue';
+export { default as TSuggestions } from './TSuggestions.vue';
+export type { SuggestionItem } from './TSuggestions.vue';
+export { default as TPromptInput } from './TPromptInput.vue';
+export { default as TChatBox } from './TChatBox.vue';
 
 // Manus-inspired shell primitives (added after sidebar rewrite)
 export { default as TReasoningStage } from './TReasoningStage.vue';

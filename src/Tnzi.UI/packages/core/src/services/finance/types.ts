@@ -15,6 +15,19 @@ import {
   SettlementDocType,
   ItemType,
   ReconciliationStatus,
+  BankNumberScheme,
+  CheckStockType,
+  CheckLayout,
+  BankAccountType,
+  BankTransactionSource,
+  BankTransactionStatus,
+  BankFeedDocType,
+  CheckStatus,
+  EftFileFormat,
+  EftBatchStatus,
+  ReceiptStatus,
+  ReceiptDocType,
+  BalanceSummaryDifferenceKind,
 } from './metadata';
 
 export { AccountRootType, AccountSystemRole, CashFlowActivity, JournalEntryStatus };
@@ -41,6 +54,27 @@ export interface AccountDto {
 
 export interface AccountTreeDto extends AccountDto {
   children: AccountTreeDto[];
+}
+
+export interface GetAccountBalancesDto {
+  /** Account ids (de-duplicated; max 500 per request — batch beyond that). */
+  accountIds: string[];
+  /** As-of date, inclusive. Omit for today (UTC). */
+  asOf?: string | null;
+}
+
+/** Base-currency account balance as of end of `asOf` (posted lines only). */
+export interface AccountBalanceDto {
+  accountId: string;
+  asOf: string;
+  debit: number;
+  credit: number;
+  /**
+   * Signed balance (debit - credit). Not sign-normalised: liability/equity/income
+   * accounts are naturally negative — flip by rootType at the presentation layer
+   * if you want them positive.
+   */
+  balance: number;
 }
 
 export interface CreateAccountDto {
@@ -113,8 +147,20 @@ export interface JournalEntryDto {
   exchangeRate: number;
   sourceType?: string | null;
   sourceId?: string | null;
+  /** Base-currency debit total. 0 while draft — use txnTotalDebit. */
   totalDebit: number;
+  /** Base-currency credit total. 0 while draft — use txnTotalCredit. */
   totalCredit: number;
+  /**
+   * Transaction-currency debit total; the only total a draft has.
+   * totalDebit is base-currency and by design is only filled at posting (a draft has no
+   * exchange rate yet, so its base-currency amount does not exist). Do not fall back to
+   * totalDebit: the two are different currencies and swapping them would silently restate
+   * a foreign-currency entry in another currency.
+   */
+  txnTotalDebit: number;
+  /** Transaction-currency credit total. See txnTotalDebit. */
+  txnTotalCredit: number;
   postedTime?: string | null;
   postedById?: string | null;
   reversalOfEntryId?: string | null;
@@ -202,6 +248,8 @@ export interface FiscalYearDto {
   isClosed: boolean;
   closedTime?: string | null;
   closedById?: string | null;
+  reopenedTime?: string | null;
+  reopenedById?: string | null;
 }
 
 export interface CreateFiscalYearDto {
@@ -511,6 +559,8 @@ export interface TaxCodeDto {
   name: string;
   description?: string | null;
   isActive: boolean;
+  /** Purchase tax recoverable (input-tax credit). false = non-recoverable, booked as cost. */
+  isRecoverable: boolean;
   components: TaxCodeComponentDto[];
 }
 
@@ -524,6 +574,8 @@ export interface UpsertTaxCodeDto {
   name: string;
   description?: string | null;
   isActive?: boolean;
+  /** Purchase tax recoverable (default true). false = non-recoverable purchase tax booked as cost. */
+  isRecoverable?: boolean;
   components: UpsertTaxCodeComponentDto[];
 }
 
@@ -593,12 +645,22 @@ export interface InvoiceQueryDto extends PagedQueryDto {
   dateTo?: string;
 }
 
+export interface BillLineDto extends SalesDocLineDto {
+  /** Manual tax amount override (null = computed by rate). */
+  taxAmount?: number | null;
+}
+
+export interface CreateBillLineDto extends CreateSalesDocLineDto {
+  /** Manual tax amount override (requires taxCodeId, must be >= 0; null = computed by rate). */
+  taxAmount?: number | null;
+}
+
 export interface BillDto extends FinanceDocumentBaseDto {
   vendorId: string;
   vendorName?: string | null;
   dueDate?: string | null;
   appliedTotal: number;
-  lines: SalesDocLineDto[];
+  lines: BillLineDto[];
 }
 
 export interface CreateBillDto {
@@ -608,7 +670,7 @@ export interface CreateBillDto {
   currency?: string | null;
   exchangeRate?: number | null;
   memo?: string | null;
-  lines: CreateSalesDocLineDto[];
+  lines: CreateBillLineDto[];
 }
 
 export interface BillQueryDto extends PagedQueryDto {
@@ -644,6 +706,8 @@ export interface ExpenseLineDto {
   accountId: string;
   amount: number;
   taxCodeId?: string | null;
+  /** Manual tax amount override (null = computed by rate). */
+  taxAmount?: number | null;
 }
 
 export interface CreateExpenseLineDto {
@@ -651,6 +715,8 @@ export interface CreateExpenseLineDto {
   accountId: string;
   amount: number;
   taxCodeId?: string | null;
+  /** Manual tax amount override (requires taxCodeId, must be >= 0; null = computed by rate). */
+  taxAmount?: number | null;
 }
 
 export interface ExpenseDto extends FinanceDocumentBaseDto {
@@ -843,9 +909,21 @@ export interface TransferDto {
   exchangeRate: number;
   amount: number;
   baseAmount: number;
+  /** Cross-currency mode: non-null and != currency */
+  targetCurrency?: string | null;
+  /** Cross-currency mode: transaction-currency amount received */
+  targetAmount?: number | null;
+  /** Target-side captured rate (posted) */
+  targetExchangeRate: number;
+  /** Target-side base amount (posted) */
+  targetBaseAmount: number;
   reference?: string | null;
   memo?: string | null;
   journalEntryId?: string | null;
+  /** Target-currency voucher (cross-currency mode) */
+  targetJournalEntryId?: string | null;
+  /** Base-currency residual FX voucher (cross-currency mode) */
+  fxJournalEntryId?: string | null;
   voidJournalEntryId?: string | null;
   concurrencyStamp: string;
   creationTime: string;
@@ -855,10 +933,16 @@ export interface CreateTransferDto {
   fromAccountId: string;
   toAccountId: string;
   transferDate: string;
-  /** Null = base currency */
+  /** Null = base currency; the source-side currency */
   currency?: string | null;
   exchangeRate?: number | null;
   amount: number;
+  /** Null or == currency = same-currency mode; otherwise cross-currency mode */
+  targetCurrency?: string | null;
+  /** Required and > 0 in cross-currency mode */
+  targetAmount?: number | null;
+  /** Null = resolve from the rate table at posting */
+  targetExchangeRate?: number | null;
   reference?: string | null;
   memo?: string | null;
 }
@@ -875,6 +959,8 @@ export interface ReconciliationDto {
   id: string;
   accountId: string;
   accountName?: string | null;
+  /** Derived reconciliation currency (account currency ?? base) */
+  currency: string;
   statementDate: string;
   statementEndingBalance: number;
   status: ReconciliationStatus;
@@ -908,13 +994,24 @@ export interface ReconciliationCandidateLineDto {
   entryNumber?: string | null;
   postingDate: string;
   memo?: string | null;
+  /** Reconciliation-currency debit (base account = base amount; foreign-restricted = transaction amount) */
   debit: number;
+  /** Reconciliation-currency credit */
   credit: number;
   isSelected: boolean;
+  /**
+   * True when an imported bank transaction is matched to this line. The selection
+   * cannot be dropped from the worksheet (the server 409s): release it via unmatch
+   * on the bank feed screen, which frees the transaction and the line atomically.
+   * Presentation layers must disable the checkbox for these rows.
+   */
+  isStatementMatched: boolean;
 }
 
 export interface ReconciliationWorksheetDto {
   reconciliationId: string;
+  /** Derived reconciliation currency (account currency ?? base) */
+  currency: string;
   statementEndingBalance: number;
   clearedBalance: number;
   difference: number;
@@ -923,4 +1020,581 @@ export interface ReconciliationWorksheetDto {
 
 export interface SetReconciliationLinesDto {
   journalLineIds: string[];
+}
+
+// ── Multi-currency: unrealized FX revaluation ───────────────────
+
+/** Period-end revaluation request (preview and run share this shape) */
+export interface RunRevaluationDto {
+  /** Revaluation cut-off date (balances are revalued to this date) */
+  asOf: string;
+  /** Restrict to a subset of accounts; null = all eligible foreign-currency accounts */
+  accountIds?: string[] | null;
+  /** Voucher memo (run only; null = auto-generated) */
+  memo?: string | null;
+}
+
+/** Per-account revaluation row */
+export interface RevaluationRowDto {
+  accountId: string;
+  code: string;
+  name: string;
+  currency: string;
+  /** Transaction-currency balance (Σ TxnDebit − TxnCredit where line currency == account currency) */
+  txnBalance: number;
+  /** Revaluation rate (currency → base, at asOf) */
+  rate: number;
+  /** Target base value (round(txnBalance × rate)) */
+  targetBase: number;
+  /** Book base balance (Σ Debit − Credit, incl. prior revaluations) */
+  bookBase: number;
+  /** targetBase − bookBase (positive = increase base value) */
+  adjustment: number;
+  /** Non-null = not posted (e.g. account inactive) */
+  skipReason?: string | null;
+}
+
+/** Period-end revaluation preview/result (run sets journalEntryId when an increment posts) */
+export interface RevaluationPreviewDto {
+  asOf: string;
+  baseCurrency: string;
+  /** Set only when a run posts an increment */
+  journalEntryId?: string | null;
+  rows: RevaluationRowDto[];
+  /** Net adjustment (base currency; sum of postable adjustments) */
+  totalAdjustment: number;
+}
+
+// ── P3 Phase 0: bank account profile ────────────────────────────
+
+/** Deployment capabilities of the bank-account surface (config-driven, not per-record). */
+export interface BankAccountCapabilitiesDto {
+  /**
+   * Whether account numbers can be stored (`Finance:Encryption:EncryptionKey` is set).
+   * When false the backend rejects writes carrying an account number — disable the
+   * field and explain, rather than failing after the user has typed it. Cheque
+   * printing on pre-printed stock does not need the number; EFT does.
+   */
+  canStoreAccountNumber: boolean;
+}
+
+/** Bank account profile (1:1 on a CashEquivalent funds account; account number returns masked only). */
+export interface BankAccountDto {
+  id: string;
+  accountId: string;
+  /** Resolved funds-account name (service-filled). */
+  accountName?: string | null;
+  name: string;
+  bankName?: string | null;
+  scheme: BankNumberScheme;
+  routingNumber?: string | null;
+  institutionNumber?: string | null;
+  transitNumber?: string | null;
+  /** Masked account number (last 4; never the plaintext/ciphertext). */
+  accountNumberMasked?: string | null;
+  currency?: string | null;
+  nextCheckNumber: number;
+  checkStockType: CheckStockType;
+  checkLayout: CheckLayout;
+  offsetXMm: number;
+  offsetYMm: number;
+  feedProviderKey?: string | null;
+  externalAccountId?: string | null;
+  lastFeedSyncTime?: string | null;
+  eftOriginatorId?: string | null;
+  eftOriginatorName?: string | null;
+  eftFileCreationNumber: number;
+  concurrencyStamp: string;
+  creationTime: string;
+}
+
+export interface CreateBankAccountDto {
+  accountId: string;
+  name: string;
+  bankName?: string | null;
+  scheme?: BankNumberScheme;
+  routingNumber?: string | null;
+  institutionNumber?: string | null;
+  transitNumber?: string | null;
+  /** Account plaintext (write-only: stored encrypted, returned masked). */
+  accountNumber?: string | null;
+  currency?: string | null;
+  /** Starting check number (may be set manually; default 1). */
+  nextCheckNumber?: number;
+  checkStockType?: CheckStockType;
+  checkLayout?: CheckLayout;
+  offsetXMm?: number;
+  offsetYMm?: number;
+  feedProviderKey?: string | null;
+  externalAccountId?: string | null;
+  eftOriginatorId?: string | null;
+  eftOriginatorName?: string | null;
+}
+
+/** Full update; the mounted account and check number cannot change here. */
+export interface UpdateBankAccountDto {
+  name: string;
+  bankName?: string | null;
+  scheme?: BankNumberScheme;
+  routingNumber?: string | null;
+  institutionNumber?: string | null;
+  transitNumber?: string | null;
+  /** Account plaintext (leave blank to keep the current number). */
+  accountNumber?: string | null;
+  currency?: string | null;
+  checkStockType?: CheckStockType;
+  checkLayout?: CheckLayout;
+  offsetXMm?: number;
+  offsetYMm?: number;
+  feedProviderKey?: string | null;
+  externalAccountId?: string | null;
+  eftOriginatorId?: string | null;
+  eftOriginatorName?: string | null;
+}
+
+/** Set the next check number (jump = new check book; no gap guarantee). */
+export interface SetNextCheckNumberDto {
+  nextCheckNumber: number;
+}
+
+export interface BankAccountQueryDto extends PagedQueryDto {
+  accountId?: string | null;
+  keyword?: string | null;
+}
+
+/** Party bank account (remit-to; account number returns masked only). */
+export interface PartyBankAccountDto {
+  id: string;
+  partyType: FinancePartyType;
+  partyId: string;
+  label?: string | null;
+  bankName?: string | null;
+  scheme: BankNumberScheme;
+  routingNumber?: string | null;
+  institutionNumber?: string | null;
+  transitNumber?: string | null;
+  /** Masked account number (last 4). */
+  accountNumberMasked?: string | null;
+  accountType: BankAccountType;
+  currency?: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+  notes?: string | null;
+  creationTime: string;
+}
+
+export interface SavePartyBankAccountDto {
+  partyType: FinancePartyType;
+  partyId: string;
+  label?: string | null;
+  bankName?: string | null;
+  scheme?: BankNumberScheme;
+  routingNumber?: string | null;
+  institutionNumber?: string | null;
+  transitNumber?: string | null;
+  /** Account plaintext (write-only; leave blank on update to keep the current number). */
+  accountNumber?: string | null;
+  accountType?: BankAccountType;
+  currency?: string | null;
+  isDefault?: boolean;
+  isActive?: boolean;
+  notes?: string | null;
+}
+
+export interface PartyBankAccountQueryDto extends PagedQueryDto {
+  partyType?: FinancePartyType | null;
+  partyId?: string | null;
+  isActive?: boolean | null;
+}
+
+// ── P3 Phase 1: bank statement import + matching ────────────────
+
+/** Imported bank transaction (signed amount: positive = deposit = GL debit). */
+export interface BankTransactionDto {
+  id: string;
+  accountId: string;
+  importBatchId: string;
+  txnDate: string;
+  amount: number;
+  currency: string;
+  description?: string | null;
+  payee?: string | null;
+  reference?: string | null;
+  externalId: string;
+  source: BankTransactionSource;
+  status: BankTransactionStatus;
+  matchedJournalLineId?: string | null;
+  reconciliationLineId?: string | null;
+  suggestedJournalLineId?: string | null;
+  matchConfidence?: number | null;
+  matchRule?: string | null;
+  balanceAfter?: number | null;
+  createdDocType?: string | null;
+  createdDocId?: string | null;
+  creationTime: string;
+}
+
+export interface BankTransactionQueryDto extends PagedQueryDto {
+  accountId?: string | null;
+  importBatchId?: string | null;
+  status?: BankTransactionStatus | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  keyword?: string | null;
+}
+
+/**
+ * CSV column mapping (sent with the import request, never persisted; the UI
+ * remembers it per account in localStorage). Column indexes are 0-based;
+ * `amountColumn` and (`debitColumn` + `creditColumn`) are mutually exclusive.
+ */
+export interface CsvMappingDto {
+  hasHeader?: boolean;
+  delimiter?: string;
+  dateColumn: number;
+  /** Date format (e.g. "yyyy-MM-dd"; blank = lenient parse). */
+  dateFormat?: string | null;
+  /** Signed single amount column (or use debit + credit). */
+  amountColumn?: number | null;
+  /** Withdrawal (debit) column index. */
+  debitColumn?: number | null;
+  /** Deposit (credit) column index. */
+  creditColumn?: number | null;
+  descriptionColumn?: number | null;
+  referenceColumn?: number | null;
+  /** Rows to skip before the data (excluding the header). */
+  skipRows?: number;
+  /** Decimal separator ("," = European; thousands stripped first). */
+  decimalSeparator?: string | null;
+  /** Statement currency (blank = bank account profile currency / base). */
+  currency?: string | null;
+}
+
+export interface BankImportResultDto {
+  batchId: string;
+  importedCount: number;
+  skippedCount: number;
+}
+
+export interface PullBankFeedDto {
+  accountId: string;
+}
+
+/** Match-suggestion run result. */
+export interface BankSuggestResultDto {
+  evaluated: number;
+  suggested: number;
+  autoConfirmed: number;
+}
+
+/** Confirm a match (blank journalLineId adopts the engine suggestion). */
+export interface ConfirmBankMatchDto {
+  journalLineId?: string | null;
+}
+
+/** Match candidate (for the user to pick when there are several). */
+export interface BankMatchCandidateDto {
+  journalLineId: string;
+  journalEntryId: string;
+  entryNumber?: string | null;
+  postingDate: string;
+  memo?: string | null;
+  /** Line net amount (debit positive, base currency; same sign as the transaction). */
+  amount: number;
+}
+
+/** Create a draft document from a bank transaction (pre-filled by sign). */
+export interface CreateBankDocumentDto {
+  docType: BankFeedDocType;
+  /** Counter account (Expense's expense account / Transfer's other funds account). */
+  counterAccountId?: string | null;
+  /** Party (required for PaymentEntry). */
+  partyId?: string | null;
+  paymentMethod?: string | null;
+}
+
+export interface BankDocumentResultDto {
+  docType: string;
+  docId: string;
+}
+
+/** Bank statement import batch. */
+export interface BankImportBatchDto {
+  id: string;
+  accountId: string;
+  accountName?: string | null;
+  source: BankTransactionSource;
+  fileName?: string | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  importedCount: number;
+  skippedCount: number;
+  statementEndBalance?: number | null;
+  /** Matched-line count in the batch (>0 = cannot delete). */
+  matchedCount: number;
+  creationTime: string;
+}
+
+export interface BankImportBatchQueryDto extends PagedQueryDto {
+  accountId?: string | null;
+}
+
+// ── P3 Phase 2: check printing ──────────────────────────────────
+
+/** Check register record (Issued / Void / Spoiled all reserve the number). */
+export interface BankCheckDto {
+  id: string;
+  bankAccountId: string;
+  /** Bank account profile name (service-filled). */
+  bankAccountName?: string | null;
+  checkNumber: number;
+  status: CheckStatus;
+  paymentEntryId?: string | null;
+  /** Linked payment number (service-filled). */
+  paymentNumber?: string | null;
+  payeeName?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  issueDate: string;
+  printedTime?: string | null;
+  isManual: boolean;
+  voidReason?: string | null;
+  /** Reprint chain (the new check that replaced this voided one). */
+  replacedByCheckId?: string | null;
+  concurrencyStamp: string;
+  creationTime: string;
+}
+
+/** Print-queue item (a posted outbound check payment awaiting print). */
+export interface CheckQueueItemDto {
+  paymentEntryId: string;
+  paymentNumber?: string | null;
+  bankAccountId: string;
+  bankAccountName?: string | null;
+  /** Payee (vendor name). */
+  payeeName?: string | null;
+  docDate: string;
+  currency: string;
+  amount: number;
+  memo?: string | null;
+  reference?: string | null;
+}
+
+/** Print checks (allocate a number per check and merge into one PDF). */
+export interface PrintChecksDto {
+  /** Payment ids to print (all must be in the queue and share one bank account). */
+  paymentEntryIds: string[];
+  /** Issue date (null = the payment date). */
+  issueDate?: string | null;
+}
+
+/** Register a hand-written check (explicit number, conflict = 409). */
+export interface RegisterManualCheckDto {
+  bankAccountId: string;
+  checkNumber: number;
+  payeeName?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  issueDate: string;
+  /** Optional linked payment. */
+  paymentEntryId?: string | null;
+}
+
+/** Void a check. */
+export interface VoidCheckDto {
+  reason?: string | null;
+}
+
+/** Register a spoiled check (damaged / misaligned blank; reserves the number). */
+export interface SpoilCheckDto {
+  bankAccountId: string;
+  checkNumber: number;
+  reason?: string | null;
+}
+
+export interface CheckQueryDto extends PagedQueryDto {
+  bankAccountId?: string | null;
+  status?: CheckStatus | null;
+  /** Keyword (payee / void reason). */
+  keyword?: string | null;
+}
+
+// ── P3 Phase 3: EFT output ──────────────────────────────────────
+
+/** EFT batch line. */
+export interface EftBatchLineDto {
+  id: string;
+  paymentEntryId: string;
+  paymentNumber?: string | null;
+  partyBankAccountId: string;
+  partyBankAccountMasked?: string | null;
+  amount: number;
+  payeeName?: string | null;
+}
+
+/** EFT batch header. */
+export interface EftBatchDto {
+  id: string;
+  number?: string | null;
+  status: EftBatchStatus;
+  bankAccountId: string;
+  /** Originating bank account name (service-filled). */
+  bankAccountName?: string | null;
+  format: EftFileFormat;
+  currency: string;
+  effectiveDate: string;
+  fileCreationNumber?: number | null;
+  totalCount: number;
+  totalAmount: number;
+  fileName?: string | null;
+  generatedTime?: string | null;
+  voidReason?: string | null;
+  concurrencyStamp: string;
+  creationTime: string;
+  /** Batch lines (returned in the detail). */
+  lines: EftBatchLineDto[];
+}
+
+/** EFT queue item (a posted outbound bank-transfer payment ready to batch). */
+export interface EftQueueItemDto {
+  paymentEntryId: string;
+  paymentNumber?: string | null;
+  partyType: FinancePartyType;
+  partyId: string;
+  payeeName?: string | null;
+  docDate: string;
+  currency: string;
+  amount: number;
+  /** Payee's default bank account. */
+  partyBankAccountId: string;
+  partyBankAccountMasked?: string | null;
+  partyScheme: BankNumberScheme;
+}
+
+/** Create a draft EFT batch. */
+export interface CreateEftBatchDto {
+  bankAccountId: string;
+  format: EftFileFormat;
+  effectiveDate: string;
+  /** Payment ids to include (all batchable, currency/scheme matching the format). */
+  paymentEntryIds: string[];
+}
+
+/** Void an EFT batch. */
+export interface VoidEftBatchDto {
+  reason?: string | null;
+}
+
+export interface EftBatchQueryDto extends PagedQueryDto {
+  bankAccountId?: string | null;
+  status?: EftBatchStatus | null;
+  format?: EftFileFormat | null;
+}
+
+// ── P3 Phase 4: receipt capture ─────────────────────────────────
+
+/** Receipt capture record. */
+export interface ReceiptDto {
+  id: string;
+  fileId: string;
+  originalFileName?: string | null;
+  status: ReceiptStatus;
+  vendorName?: string | null;
+  docDate?: string | null;
+  currency?: string | null;
+  subtotal?: number | null;
+  taxAmount?: number | null;
+  total?: number | null;
+  reference?: string | null;
+  lineItemsJson?: string | null;
+  confidence?: number | null;
+  matchedVendorId?: string | null;
+  matchedVendorName?: string | null;
+  convertedDocType?: string | null;
+  convertedDocId?: string | null;
+  failReason?: string | null;
+  concurrencyStamp: string;
+  creationTime: string;
+}
+
+/** Register a receipt after upload (fileId from the user upload). */
+export interface CreateReceiptDto {
+  fileId: string;
+  fileName?: string | null;
+  /** Currency hint (optional). */
+  currency?: string | null;
+}
+
+/** Manually correct the extracted fields. */
+export interface UpdateReceiptExtractionDto {
+  vendorName?: string | null;
+  docDate?: string | null;
+  currency?: string | null;
+  subtotal?: number | null;
+  taxAmount?: number | null;
+  total?: number | null;
+  reference?: string | null;
+  /** Pin a vendor (overrides the match suggestion). */
+  matchedVendorId?: string | null;
+}
+
+/** Convert a receipt into a document draft. */
+export interface ConvertReceiptDto {
+  /** Target document type (Expense | Bill). */
+  docType: ReceiptDocType;
+  /** Vendor (falls back to matchedVendorId; 400 when still unresolved). */
+  vendorId?: string | null;
+  /** Expense / cost account for the single draft line. */
+  accountId?: string | null;
+  /** Paid-from account (expense conversion only). */
+  paidFromAccountId?: string | null;
+}
+
+/** Receipt conversion result. */
+export interface ReceiptConvertResultDto {
+  docType: string;
+  docId: string;
+}
+
+export interface ReceiptQueryDto extends PagedQueryDto {
+  status?: ReceiptStatus | null;
+  /** Keyword (vendor / file name / reference). */
+  keyword?: string | null;
+}
+
+// ── Batch F: account period-balance summary (report acceleration) ─
+
+/** Balance-summary full rebuild result (current tenant). */
+export interface BalanceSummaryRebuildDto {
+  /** Number of buckets written after the rebuild. */
+  buckets: number;
+  /** Posted ledger lines that fed the aggregation. */
+  lines: number;
+  /** Rebuild duration in milliseconds. */
+  durationMs: number;
+}
+
+/** One balance-summary difference (expected = ledger aggregation, stored = bucket). */
+export interface BalanceSummaryDifferenceDto {
+  accountId: string;
+  /** Accounting period (yyyyMM). */
+  period: number;
+  currency: string;
+  kind: BalanceSummaryDifferenceKind;
+  expectedDebit: number;
+  expectedCredit: number;
+  storedDebit: number;
+  storedCredit: number;
+}
+
+/** Balance-summary verify result (diagnoses bucket vs ledger consistency; no repair). */
+export interface BalanceSummaryVerifyDto {
+  /** True when there is no difference at all. */
+  isConsistent: boolean;
+  /** Buckets checked (the ledger-expected count). */
+  checkedBuckets: number;
+  /** Total differences (may exceed the truncation cap on `differences`). */
+  totalDifferences: number;
+  /** Difference detail (first 100 only, guards against huge responses). */
+  differences: BalanceSummaryDifferenceDto[];
 }

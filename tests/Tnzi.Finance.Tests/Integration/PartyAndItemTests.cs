@@ -92,6 +92,54 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
     }
 
     [Fact]
+    public async Task Customer_ReferencedByInvoice_CannotBeDeleted()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Referenced Co", "REF-1");
+        customer.Succeeded.ShouldBeTrue(customer.Message);
+
+        var draft = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.CreateDraftAsync(new CreateInvoiceDto
+        {
+            CustomerId = customer.Data!.Id,
+            DocDate = new DateTime(2026, 3, 10),
+            Lines = [new CreateInvoiceLineDto { Description = "X", Quantity = 1, UnitPrice = 100m }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        // 被单据引用 → 拒删 409（引导停用），死注释修复的回归
+        var blocked = await InScopeAsync<ICustomerService, Result>(s => s.DeleteAsync(customer.Data.Id));
+        blocked.Succeeded.ShouldBeFalse();
+        blocked.Code.ShouldBe(409);
+
+        // 无引用客户仍可删
+        var free = await CreateCustomerAsync("Free Co", "FREE-1");
+        (await InScopeAsync<ICustomerService, Result>(s => s.DeleteAsync(free.Data!.Id))).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Vendor_ReferencedByBill_CannotBeDeleted()
+    {
+        await SeedCoaAsync();
+        var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "Ref Vendor", Code = "RV-1" }));
+        vendor.Succeeded.ShouldBeTrue(vendor.Message);
+
+        var bill = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 3, 10),
+            Lines = [new CreateBillLineDto { Description = "X", Quantity = 1, UnitPrice = 100m }]
+        }));
+        bill.Succeeded.ShouldBeTrue(bill.Message);
+
+        var blocked = await InScopeAsync<IVendorService, Result>(s => s.DeleteAsync(vendor.Data.Id));
+        blocked.Succeeded.ShouldBeFalse();
+        blocked.Code.ShouldBe(409);
+
+        var free = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "Free Vendor", Code = "FV-1" }));
+        (await InScopeAsync<IVendorService, Result>(s => s.DeleteAsync(free.Data!.Id))).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Item_DefaultAccount_MustBePostable()
     {
         // 分组科目不可作为默认科目
@@ -131,6 +179,32 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
         valid.Data.SalesPrice.ShouldBe(150m);
     }
 
+    /// <summary>回归：item 收入科目须 RootType=Income、费用科目须 RootType=Expense，
+    /// 否则无行覆盖的销售/采购单会把收入/成本静默过到资产负债类科目（TB 仍平但报表错）。</summary>
+    [Fact]
+    public async Task Item_DefaultAccount_MustMatchRootType()
+    {
+        await SeedCoaAsync();
+        var assetLeaf = await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("1120")); // 银行=资产叶子
+        var incomeLeaf = await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("4100")); // 服务收入
+
+        // 资产科目作收入默认 → 拒绝
+        var invalid = await InScopeAsync<IItemService, Result<ItemDto>>(s => s.CreateAsync(new CreateItemDto
+        {
+            Name = "MisItem",
+            IncomeAccountId = assetLeaf!.Id
+        }));
+        invalid.Succeeded.ShouldBeFalse();
+
+        // 收入科目作收入默认 → 通过
+        var ok = await InScopeAsync<IItemService, Result<ItemDto>>(s => s.CreateAsync(new CreateItemDto
+        {
+            Name = "GoodItem",
+            IncomeAccountId = incomeLeaf!.Id
+        }));
+        ok.Succeeded.ShouldBeTrue(ok.Message);
+    }
+
     [Fact]
     public async Task Item_NegativePrice_Rejected()
     {
@@ -140,5 +214,48 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
             SalesPrice = -1m
         }));
         result.Succeeded.ShouldBeFalse();
+    }
+
+    /// <summary>回归：被单据行引用的 item 不可删（死注释修复）——软删会隐藏主数据但行项仍在子账。</summary>
+    [Fact]
+    public async Task Item_ReferencedByInvoiceLine_CannotBeDeleted()
+    {
+        await SeedCoaAsync();
+        var incomeLeaf = await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("4100"));
+        var customer = await CreateCustomerAsync("Item Ref Co", "IREF-1");
+        customer.Succeeded.ShouldBeTrue(customer.Message);
+
+        var item = await InScopeAsync<IItemService, Result<ItemDto>>(s => s.CreateAsync(new CreateItemDto
+        {
+            Name = "Billable Service",
+            Type = ItemType.Service,
+            SalesPrice = 200m,
+            IncomeAccountId = incomeLeaf!.Id
+        }));
+        item.Succeeded.ShouldBeTrue(item.Message);
+
+        var draft = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.CreateDraftAsync(new CreateInvoiceDto
+        {
+            CustomerId = customer.Data!.Id,
+            DocDate = new DateTime(2026, 4, 1),
+            Lines = [new CreateInvoiceLineDto { ItemId = item.Data!.Id, Description = "Svc", Quantity = 1, UnitPrice = 200m }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        // 被单据行引用 → 拒删 409（引导停用）
+        var blocked = await InScopeAsync<IItemService, Result>(s => s.DeleteAsync(item.Data.Id));
+        blocked.Succeeded.ShouldBeFalse();
+        blocked.Code.ShouldBe(409);
+
+        // 无引用 item 仍可删
+        var free = await InScopeAsync<IItemService, Result<ItemDto>>(s => s.CreateAsync(new CreateItemDto
+        {
+            Name = "Unused Item",
+            Type = ItemType.Service,
+            SalesPrice = 10m,
+            IncomeAccountId = incomeLeaf.Id
+        }));
+        free.Succeeded.ShouldBeTrue(free.Message);
+        (await InScopeAsync<IItemService, Result>(s => s.DeleteAsync(free.Data!.Id))).Succeeded.ShouldBeTrue();
     }
 }

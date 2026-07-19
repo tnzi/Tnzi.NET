@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Entities.Configs;
+namespace Tnzi.AI.Workflow.Entities.Configs;
 
 /// <summary>
 /// WorkflowExecution 实体配置类

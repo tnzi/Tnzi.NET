@@ -5,6 +5,10 @@ import TChatHost from '../../../src/components/chat/TChatHost.vue'
 
 // --- Fake bridge ---
 const fakeBridge = {
+  // enabled:true = this user holds chat.use, so TChatHost proceeds past the
+  // deny-by-default gate and fetches conversations. enablePresence:false keeps
+  // the mount path off the presence branch.
+  getConfig: vi.fn().mockResolvedValue({ enabled: true, enablePresence: false }),
   listConversations: vi.fn().mockResolvedValue([]),
   getUnreadCount: vi.fn().mockResolvedValue(0),
   getOrCreateDirect: vi.fn(),

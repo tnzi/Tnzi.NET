@@ -81,7 +81,7 @@ public class AIRagOptions
     public int MaxTopK { get; set; } = 100;
 
     /// <summary>
-    /// 数据库表名前缀（必须与 RagModule.TableNamePrefix 一致）
+    /// 数据库表名前缀（必须与 AIRagModule.TableNamePrefix 一致）
     /// </summary>
     public string TableNamePrefix { get; set; } = "RAG";
 

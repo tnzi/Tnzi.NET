@@ -42,6 +42,15 @@ public class FinanceTestDbContext : TnziDbContext<FinanceTestDbContext>
         modelBuilder.ApplyConfiguration(new TransferConfiguration());
         modelBuilder.ApplyConfiguration(new ReconciliationConfiguration());
         modelBuilder.ApplyConfiguration(new ReconciliationLineConfiguration());
+        modelBuilder.ApplyConfiguration(new BankAccountConfiguration());
+        modelBuilder.ApplyConfiguration(new PartyBankAccountConfiguration());
+        modelBuilder.ApplyConfiguration(new BankTransactionConfiguration());
+        modelBuilder.ApplyConfiguration(new BankImportBatchConfiguration());
+        modelBuilder.ApplyConfiguration(new BankCheckConfiguration());
+        modelBuilder.ApplyConfiguration(new EftBatchConfiguration());
+        modelBuilder.ApplyConfiguration(new EftBatchLineConfiguration());
+        modelBuilder.ApplyConfiguration(new ReceiptConfiguration());
+        modelBuilder.ApplyConfiguration(new AccountPeriodBalanceConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

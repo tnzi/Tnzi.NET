@@ -52,14 +52,12 @@ public class AuditOperationQueryDto : PagedQueryDto
 
     /// <summary>
     /// 获取或设置 是否仅返回变更类操作（可选）。
-    /// true = 仅写操作（POST/PUT/PATCH/DELETE，即"业务操作"视图）；
-    /// false = 仅读请求（GET/HEAD/OPTIONS 等非写方法）；
-    /// null = 全部请求（请求级审计日志视图）。
+    /// true = 仅写操作（"业务操作"视图）；false = 仅读请求；null = 全部请求（审计日志视图）。
     /// <para>
-    /// query-via-POST 惯例排除：框架的列表查询统一暴露为 <c>POST .../query</c>
-    /// 端点（如 <c>POST /admin/agents/query</c>），语义上是纯读 —
-    /// 请求路径以 "/query" 结尾（大小写不敏感）的 POST 记录被归入读请求
-    /// （IsWriteOperation=false 包含、=true 排除）。
+    /// 分类以采集时定案的 <c>AuditOperation.IsWrite</c> 列为准（[AuditRead] 特性 &gt;
+    /// 方法级操作权限码 &gt; 三层门约定 admin 面（类级 .view）无操作码=读 &gt;
+    /// HTTP 方法+伪读启发式，见 AuditOperationClassifier）；列引入前的历史行（IsWrite=null）回退旧启发式
+    /// （写方法 + 非 <c>POST .../query</c> / 非 <c>.Get</c> 方法名才算写）。
     /// </para>
     /// </summary>
     public bool? IsWriteOperation { get; set; }
@@ -104,19 +102,6 @@ public class AuditOperationStatistics
     /// 获取或设置 最小执行时间（毫秒）
     /// </summary>
     public long MinElapsed { get; set; }
-}
-
-/// <summary>
-/// 审计趋势分组类型
-/// </summary>
-public enum AuditTrendGroupBy
-{
-    /// <summary>按天分组</summary>
-    Daily,
-    /// <summary>按周分组</summary>
-    Weekly,
-    /// <summary>按月分组</summary>
-    Monthly
 }
 
 /// <summary>
@@ -230,7 +215,7 @@ public class AuditEntityEntryDto
     public string? EntityTypeName { get; set; }
     public string? EntityTypeFullName { get; set; }
     public string? EntityId { get; set; }
-    public Entities.EntityState OperationType { get; set; }
+    public Metadata.EntityState OperationType { get; set; }
     public DateTime CreationTime { get; set; }
     public List<AuditPropertyEntryDto> PropertyEntries { get; set; } = new();
 }

@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 审批节点 — 通过通用中断机制暂停工作流，等待人工审批（ResumeWithInputAsync）

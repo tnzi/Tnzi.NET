@@ -37,6 +37,8 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
             new EFCoreRepository<ChatTestDbContext, UserPresence, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
         services.AddScoped<IRepository<BroadcastLog, Guid>>(sp =>
             new EFCoreRepository<ChatTestDbContext, BroadcastLog, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
+        services.AddScoped<IRepository<MessageBlock, Guid>>(sp =>
+            new EFCoreRepository<ChatTestDbContext, MessageBlock, Guid>(sp.GetRequiredService<ChatTestDbContext>(), serviceProvider: sp));
 
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
@@ -74,6 +76,11 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
             .ReturnsAsync(Array.Empty<UserPresenceDto>());
         services.AddScoped(_ => presenceMock.Object);
 
+        // Chat access gate. No IPermissionChecker / IFunctionAuthorizationService is
+        // registered in the integration suite, so ChatAccessService fails open (everyone
+        // may use chat) — enforcement/isolation tests register mocks to flip it on.
+        services.AddScoped<IChatAccessService, ChatAccessService>();
+
         services.AddScoped<IChatContactService, ChatContactService>();
         services.AddScoped<IConversationService, ConversationService>();
 
@@ -107,6 +114,7 @@ public class ChatTestDbContext : TnziDbContext<ChatTestDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ChatMessageConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.UserPresenceConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.BroadcastLogConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.MessageBlockConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

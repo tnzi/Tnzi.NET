@@ -91,15 +91,16 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// Logs / Operations 语义分流在查询端实现：写入端是单一管道、单一表
     /// （AuditMiddleware → Audit_Operation），两个 admin 视图读取同一存储 —
     /// 若在写入端丢弃 GET 类请求，则请求级审计日志（Logs 视图）会丢失数据。
-    /// 因此 Operations 视图通过 <see cref="AuditOperationQueryDto.IsWriteOperation"/>=true
-    /// 在查询端过滤出 POST/PUT/PATCH/DELETE 变更类记录。
+    /// Operations 视图通过 <see cref="AuditOperationQueryDto.IsWriteOperation"/>=true
+    /// 过滤出变更类记录。
     /// <para>
-    /// 伪读 POST 排除：框架有两类语义上纯读的 POST，写操作视图均排除、读视图包含 —
-    /// (1) query-via-POST 列表查询惯例（<c>POST .../query</c>，如 <c>POST /admin/agents/query</c>）。
-    /// Url 字段存储的是 Path + QueryString，故同时匹配 "/query" 结尾与 "/query?" 中缀；
-    /// (2) 约定无副作用的 <c>Get*</c> 控制器方法（FunctionName 形如
-    /// <c>DefaultUserAdmin.GetList</c>，按 ".Get" 段判别），它们可能经
-    /// <c>POST .../list</c>、<c>POST .../summary</c> 等非 /query 路径暴露。
+    /// 分类来源分两代：新行以采集时定案的 <c>AuditOperation.IsWrite</c> 列为准
+    /// （AuditOperationClassifier：[AuditRead] &gt; 方法级操作权限码 &gt;
+    /// 三层门约定 admin 面（类级 .view）无操作码=读 &gt; HTTP 方法+伪读启发式）；<c>IsWrite=null</c> 的
+    /// 历史行回退旧的查询时启发式 — (1) query-via-POST 列表查询惯例
+    /// （<c>POST .../query</c>，Url 存 Path + QueryString，匹配 "/query" 结尾与
+    /// "/query?" 中缀）；(2) 约定无副作用的 <c>Get*</c> 控制器方法
+    /// （FunctionName 按 ".Get" 段判别）。
     /// </para>
     /// </remarks>
     private static IQueryable<AuditOperation> ApplyQueryFilters(IQueryable<AuditOperation> queryable, AuditOperationQueryDto query)
@@ -148,21 +149,25 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (query.IsWriteOperation.HasValue)
         {
-            // 写方法 + 非"伪读 POST"才算写操作。框架有两类语义上纯读的 POST：
-            // 1. query-via-POST 列表查询惯例（POST .../query）；
-            // 2. 约定无副作用的 Get* 控制器方法（FunctionName 形如 "DefaultUserAdmin.GetList"，
-            //    可能经 POST .../list、POST .../summary 等路径暴露 — 按 ".Get" 段判别）。
+            // 采集时定案的 IsWrite 列优先（AuditOperationClassifier：[AuditRead] > 方法级
+            // 操作权限码 > admin 面无操作码=读 > HTTP 方法+伪读启发式）。
+            // IsWrite=null 的历史行（列引入前）回退旧的查询时启发式：
+            // 写方法 + 非"伪读 POST"（/query 路径惯例、.Get 方法名）才算写操作。
             queryable = query.IsWriteOperation.Value
-                ? queryable.Where(o => o.HttpMethod != null
-                    && WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
-                    && !(o.HttpMethod.ToUpper() == "POST"
-                        && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
-                            || o.FunctionName.Contains(".Get"))))
-                : queryable.Where(o => o.HttpMethod == null
-                    || !WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
-                    || (o.HttpMethod.ToUpper() == "POST"
-                        && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
-                            || o.FunctionName.Contains(".Get"))));
+                ? queryable.Where(o => o.IsWrite != null
+                    ? o.IsWrite == true
+                    : o.HttpMethod != null
+                        && WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
+                        && !(o.HttpMethod.ToUpper() == "POST"
+                            && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
+                                || o.FunctionName.Contains(".Get"))))
+                : queryable.Where(o => o.IsWrite != null
+                    ? o.IsWrite == false
+                    : o.HttpMethod == null
+                        || !WriteHttpMethods.Contains(o.HttpMethod.ToUpper())
+                        || (o.HttpMethod.ToUpper() == "POST"
+                            && ((o.Url != null && (o.Url.ToLower().EndsWith("/query") || o.Url.ToLower().Contains("/query?")))
+                                || o.FunctionName.Contains(".Get"))));
         }
 
         return queryable;
@@ -252,31 +257,19 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     {
         var operations = await GetFilteredOperationsAsync(query, cancellationToken);
 
-        var sb = new StringBuilder();
-        // CSV header
-        sb.AppendLine("Id,FunctionName,UserName,Ip,HttpMethod,Url,HttpStatusCode,Elapsed,ResultType,Message,StartTime,EndTime,CreationTime");
+        // 单元格转义统一走核心 CsvBuilder(含公式注入防护,Url/Message 等用户可控字段必须防护)
+        var csv = new CsvBuilder();
+        csv.AppendRow("Id", "FunctionName", "UserName", "Ip", "HttpMethod", "Url", "HttpStatusCode", "Elapsed", "ResultType", "Message", "StartTime", "EndTime", "CreationTime");
 
         foreach (var op in operations)
         {
-            sb.AppendLine(string.Join(",",
-                EscapeCsv(op.Id.ToString()),
-                EscapeCsv(op.FunctionName),
-                EscapeCsv(op.UserName),
-                EscapeCsv(op.Ip),
-                EscapeCsv(op.HttpMethod),
-                EscapeCsv(op.Url),
-                op.HttpStatusCode?.ToString() ?? "",
-                op.Elapsed.ToString(),
-                op.ResultType.ToString(),
-                EscapeCsv(op.Message),
-                op.StartTime.ToString("o"),
-                op.EndTime?.ToString("o") ?? "",
-                op.CreationTime.ToString("o")
-            ));
+            csv.AppendRow(op.Id, op.FunctionName, op.UserName, op.Ip, op.HttpMethod, op.Url,
+                op.HttpStatusCode, op.Elapsed, op.ResultType, op.Message,
+                op.StartTime, op.EndTime, op.CreationTime);
         }
 
         LogInformation("Exported {Count} audit operations to CSV", operations.Count);
-        return Ok<string>(sb.ToString());
+        return Ok<string>(csv.ToString());
     }
 
     /// <summary>
@@ -307,23 +300,6 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             .OrderByDescending(o => o.CreationTime)
             .Take(10000) // Export safety limit
             .ToListAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Escape a value for CSV output
-    /// </summary>
-    private static string EscapeCsv(string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            return "";
-
-        // If value contains comma, quote, or newline, wrap in quotes and escape inner quotes
-        if (value.Contains(',') || value.Contains('"') || value.Contains('\n') || value.Contains('\r'))
-        {
-            return $"\"{value.Replace("\"", "\"\"")}\"";
-        }
-
-        return value;
     }
 
     /// <summary>

@@ -1,6 +1,4 @@
-using Tnzi.AI.Enums;
-
-namespace Tnzi.AI.Entities;
+namespace Tnzi.AI.Skills.Entities;
 
 /// <summary>
 /// 技能实体 — 存储租户级和用户级自定义技能。

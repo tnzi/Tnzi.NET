@@ -7,11 +7,11 @@
 import type {
   IMenuItem,
   ITableColumn,
-  IDynamicFormField,
   IFormRule,
   ITabItem,
   IBreadcrumbItem,
 } from '@tnzi/core/types/shared-ui';
+import type { FormSchemaItem } from '@tnzi/ui';
 
 // IUserCardProps and IStatCardProps are UI contracts — define locally for demo usage
 interface IUserCardUser {
@@ -133,9 +133,12 @@ export const demoBasicFormRules: Record<string, IFormRule[]> = {
   phone: [{ pattern: /^\d{10,11}$/, message: 'Invalid phone number' }],
 };
 
-export const demoDynamicFormFields: IDynamicFormField[] = [
+// 基于 TSchemaForm 的声明式 schema（TDynamicForm/IDynamicFormField 已退役）。
+// 内置字段类型仅 text/textarea/number/switch/select/date，故 email 归 text、
+// radio 归 select。
+export const demoSchemaFormItems: FormSchemaItem[] = [
   { key: 'username', label: 'Username', type: 'text', required: true, placeholder: 'Enter username' },
-  { key: 'email', label: 'Email', type: 'email', required: true, placeholder: 'Enter email' },
+  { key: 'email', label: 'Email', type: 'text', required: true, placeholder: 'Enter email' },
   { key: 'age', label: 'Age', type: 'number', min: 1, max: 150, placeholder: 'Enter age' },
   {
     key: 'role',
@@ -151,7 +154,7 @@ export const demoDynamicFormFields: IDynamicFormField[] = [
   {
     key: 'department',
     label: 'Department',
-    type: 'radio',
+    type: 'select',
     options: [
       { label: 'Engineering', value: 'eng' },
       { label: 'Marketing', value: 'mkt' },

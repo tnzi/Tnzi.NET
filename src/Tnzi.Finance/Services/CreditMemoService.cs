@@ -179,7 +179,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         if (creditMemo.Lines.Count == 0)
             return Fail<CreditMemoDto>("The creditMemo has no lines.", 400);
 
-        var guardResult = await _guards.CheckAsync(nameof(CreditMemo), creditMemo.Id.ToString(), FinancePostingOperation.Post, creditMemo, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.CreditMemo, creditMemo.Id.ToString(), FinancePostingOperation.Post, creditMemo, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<CreditMemoDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
@@ -226,7 +226,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
             Memo = string.IsNullOrWhiteSpace(creditMemo.Memo) ? "CreditMemo" : $"Credit memo: {creditMemo.Memo}",
             Currency = creditMemo.Currency,
             ExchangeRate = creditMemo.ExchangeRate,
-            SourceType = nameof(CreditMemo),
+            SourceType = FinanceSourceTypes.CreditMemo,
             SourceId = creditMemo.Id.ToString()
         };
 
@@ -279,7 +279,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
 
                 // 单据号分配在全部可失败校验之后（回滚回收）
                 creditMemo.Number = await _numberService.NextFormattedAsync(
-                    nameof(CreditMemo), _options.CreditMemoNumberPrefix, _options.JournalNumberPadding, ct);
+                    FinanceSourceTypes.CreditMemo, _options.CreditMemoNumberPrefix, _options.JournalNumberPadding, ct);
                 creditMemo.Status = FinanceDocumentStatus.Posted;
                 creditMemo.SubTotal = subTotal;
                 creditMemo.TaxTotal = tax.TaxTotal;
@@ -302,7 +302,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
 
         await PublishEventAsync(new FinanceDocumentPostedEvent
         {
-            DocType = nameof(CreditMemo),
+            DocType = FinanceSourceTypes.CreditMemo,
             DocId = creditMemo.Id,
             Number = creditMemo.Number!,
             JournalEntryId = entry.Id,
@@ -326,7 +326,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         if (creditMemo.AppliedTotal != 0)
             return Fail<CreditMemoDto>("The credit memo has been applied. Unapply it before voiding.", 409);
 
-        var guardResult = await _guards.CheckAsync(nameof(CreditMemo), creditMemo.Id.ToString(), FinancePostingOperation.Void, creditMemo, cancellationToken);
+        var guardResult = await _guards.CheckAsync(FinanceSourceTypes.CreditMemo, creditMemo.Id.ToString(), FinancePostingOperation.Void, creditMemo, cancellationToken);
         if (!guardResult.Succeeded)
             return Fail<CreditMemoDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
@@ -370,7 +370,7 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
 
         await PublishEventAsync(new FinanceDocumentVoidedEvent
         {
-            DocType = nameof(CreditMemo),
+            DocType = FinanceSourceTypes.CreditMemo,
             DocId = creditMemo.Id,
             Number = creditMemo.Number,
             VoidJournalEntryId = reversal!.Id,

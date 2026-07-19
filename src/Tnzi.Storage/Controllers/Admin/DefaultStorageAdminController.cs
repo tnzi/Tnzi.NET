@@ -66,24 +66,24 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// 获取临时文件列表
     /// </summary>
     [HttpGet("temporary")]
-    public virtual async Task<ApiResult<IEnumerable<FileRecord>>> GetTemporaryFiles([FromQuery] int? olderThanHours = null)
+    public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> GetTemporaryFiles([FromQuery] int? olderThanHours = null)
     {
         var olderThan = olderThanHours.HasValue
             ? TimeSpan.FromHours(olderThanHours.Value)
             : TimeSpan.FromHours(24);
 
         var result = await FileReferenceService.GetTemporaryFilesAsync(olderThan);
-        return result.ToApiResult();
+        return result.Map(items => items.Select(r => r.MapTo<FileRecordDto>())).ToApiResult();
     }
 
     /// <summary>
     /// 查询文件列表（支持分页、筛选、排序）
     /// </summary>
     [HttpPost("query")]
-    public virtual async Task<ApiResult<IPagedList<FileRecord>>> QueryFiles([FromBody] FileQueryRequest request)
+    public virtual async Task<ApiResult<IPagedList<FileRecordDto>>> QueryFiles([FromBody] FileQueryRequest request)
     {
         var result = await FileStorageService.QueryFilesAsync(request);
-        return result.ToApiResult();
+        return result.Map(MapPaged).ToApiResult();
     }
 
     /// <summary>
@@ -269,21 +269,32 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPut("{id:guid}/tags")]
     [ApiAuthorize(PermissionName = "storage.file.update")]
-    public virtual async Task<ApiResult<FileInfoDto>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
+    public virtual async Task<ApiResult<FileRecordDto>> SetFileTags(Guid id, [FromBody] SetFileTagsRequest request)
     {
         var result = await FileStorageService.SetFileTagsAsync(id, request.Tags);
-        return result.ToApiResult();
+        // 控制器边界：投影为安全 DTO，绝不把内部字段（Path 等）泄漏进 API 契约。
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>
     /// Get files by tag
     /// </summary>
     [HttpGet("by-tag/{tag}")]
-    public virtual async Task<ApiResult<IPagedList<FileRecord>>> GetFilesByTag(string tag, [FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20)
+    public virtual async Task<ApiResult<IPagedList<FileRecordDto>>> GetFilesByTag(string tag, [FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20)
     {
         var result = await FileStorageService.GetFilesByTagAsync(tag, pageIndex, pageSize);
-        return result.ToApiResult();
+        return result.Map(MapPaged).ToApiResult();
     }
+
+    /// <summary>
+    /// 把 FileRecord 分页列表投影为对外安全 DTO 分页列表
+    /// </summary>
+    private static IPagedList<FileRecordDto> MapPaged(IPagedList<FileRecord> paged) =>
+        new PagedList<FileRecordDto>(
+            paged.Items.Select(r => r.MapTo<FileRecordDto>()).ToList(),
+            paged.PageIndex,
+            paged.PageSize,
+            paged.TotalCount);
 
     // File metadata
 
@@ -292,10 +303,11 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPut("{id:guid}/metadata")]
     [ApiAuthorize(PermissionName = "storage.file.update")]
-    public virtual async Task<ApiResult<FileInfoDto>> SetMetadata(Guid id, [FromBody] SetFileMetadataRequest request)
+    public virtual async Task<ApiResult<FileRecordDto>> SetMetadata(Guid id, [FromBody] SetFileMetadataRequest request)
     {
         var result = await FileStorageService.SetMetadataAsync(id, request.Metadata);
-        return result.ToApiResult();
+        // 控制器边界：投影为安全 DTO，绝不把内部字段（Path 等）泄漏进 API 契约。
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
     /// <summary>

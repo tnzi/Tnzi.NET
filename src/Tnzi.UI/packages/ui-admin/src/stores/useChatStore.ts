@@ -6,9 +6,15 @@ import type { NewMessagePayload, MessageReadPayload } from '@tnzi/core/services/
 import { MessageContentType, UserPresenceStatus, ChatSoundEffect, ChatNewMessageEffect } from '@tnzi/core/services/chat'
 import { useAdminAuthStore } from './useAdminAuthStore'
 
-/** Everything enabled — used until GET /chat/config resolves (and as the
- *  fallback when it fails, e.g. against an older backend without the endpoint). */
+/** Default FEATURE FLAGS (groups / sounds / presence / limits) used as the base
+ *  every real `GET /chat/config` payload is spread over. `enabled: true` here is
+ *  only the flag base — it is NOT a fail-open: `loadConfig()` forces `enabled`
+ *  back to `false` whenever the config can't be confirmed (null/forbidden/empty
+ *  result or a throw), so a user without `chat.use` is deny-by-default and never
+ *  calls chat's 403-guarded endpoints. The pre-load `config` ref (below) likewise
+ *  starts `enabled: false` so the launcher never flashes before the probe. */
 export const DEFAULT_CHAT_CONFIG: ChatClientConfigDto = Object.freeze({
+  enabled: true,
   enableGroups: true,
   maxGroupMembers: 0,
   groupAvatarMemberCount: 9,
@@ -22,19 +28,42 @@ export const DEFAULT_CHAT_CONFIG: ChatClientConfigDto = Object.freeze({
   enableFileMessages: true,
 })
 
+/**
+ * A message as held in the local thread. Extends the server DTO with a few
+ * client-only fields for an optimistic-on-failure send: when a send is rejected
+ * (the sender lost `chat.use` mid-session → 403, or a network error) the
+ * attempted message is kept in the thread and flagged `failed`, so the window
+ * can show a WeChat-style red retry marker + reason INLINE instead of a
+ * disappearing toast. Cleared once the message sends (the real DTO replaces it).
+ */
+export interface ChatMessageView extends ChatMessageDto {
+  /** A send that failed — the bubble shows the red retry marker + reason. */
+  failed?: boolean
+  /** Failure reason surfaced in-window (the backend 403 message, etc.). */
+  failReason?: string
+  /** Stable client id used to retry / remove this local placeholder. */
+  clientId?: number
+}
+
 export const useChatStore = defineStore('admin-chat', () => {
+  // Monotonic id for local (failed) message placeholders — unique per store.
+  let clientSeq = 0
   let bridge: ChatImBridge | null = null
 
   const conversations = ref<ConversationListItemDto[]>([])
-  // Deployment-level feature config (server ChatOptions projection).
-  const config = ref<ChatClientConfigDto>({ ...DEFAULT_CHAT_CONFIG })
+  // Deployment-level feature config (server ChatOptions projection) + this
+  // user's `chat.use` grant. Starts `enabled: false` (pessimistic): chat is
+  // deny-by-default, so the launcher stays hidden until GET /chat/config
+  // confirms the grant — no icon flash for a disabled user. loadConfig() flips
+  // it from the server value, or fails open to DEFAULT_CHAT_CONFIG.
+  const config = ref<ChatClientConfigDto>({ ...DEFAULT_CHAT_CONFIG, enabled: false })
   const activeId = ref<string | null>(null)
   // Whether the chat window (NModal) is currently open. "User is viewing a
   // conversation" = window visible AND conversation active: activeId alone
   // survives closing the window (so reopening lands on the same thread), and
   // must therefore never suppress the unread badge / notification sound.
   const windowVisible = ref(false)
-  const messagesByConv = ref<Record<string, ChatMessageDto[]>>({})
+  const messagesByConv = ref<Record<string, ChatMessageView[]>>({})
   const loading = ref(false)
   const presenceByUser = ref<Record<string, { status: UserPresenceStatus; lastSeenAt?: string | null }>>({})
   const myStatus = ref<UserPresenceStatus>(UserPresenceStatus.Online)
@@ -52,7 +81,9 @@ export const useChatStore = defineStore('admin-chat', () => {
 
   async function fetchConversations() {
     loading.value = true
-    try { conversations.value = await requireBridge().listConversations() }
+    // `?? []` keeps the `conversations` ref invariant (never undefined) even if a
+    // bridge/backend hands back null — every getter (totalUnread/sorted/map) reads it.
+    try { conversations.value = (await requireBridge().listConversations()) ?? [] }
     finally { loading.value = false }
   }
 
@@ -60,9 +91,24 @@ export const useChatStore = defineStore('admin-chat', () => {
    *  failure so the chat window still works against older backends. */
   async function loadConfig() {
     try {
-      config.value = { ...DEFAULT_CHAT_CONFIG, ...(await requireBridge().getConfig()) }
+      const cfg = await requireBridge().getConfig()
+      // DENY-BY-DEFAULT: enable chat ONLY from a real config payload (the backend
+      // projects `enabled` from the user's `chat.use` grant). A null / forbidden /
+      // empty result — e.g. a `{ succeeded, data: null }` envelope unwrapped to
+      // null, or a 401 during the login→redirect token transition — must NOT
+      // fail-open into `enabled: true`. Spreading such a null over DEFAULT
+      // (`{ ...DEFAULT, ...null }` → enabled:true) mounted TChatHost for a user
+      // WITHOUT chat.use, which then hit the 403-guarded /conversations +
+      // /presence endpoints and crashed on the null result. Feature flags still
+      // come from DEFAULT; only `enabled` is forced false when unconfirmed.
+      config.value =
+        cfg && typeof cfg === 'object'
+          ? { ...DEFAULT_CHAT_CONFIG, ...cfg }
+          : { ...DEFAULT_CHAT_CONFIG, enabled: false }
     } catch {
-      config.value = { ...DEFAULT_CHAT_CONFIG }
+      // Genuine load failure (network / no endpoint): stay deny-by-default so a
+      // user we can't confirm never calls chat's permission-guarded endpoints.
+      config.value = { ...DEFAULT_CHAT_CONFIG, enabled: false }
     }
   }
 
@@ -76,8 +122,65 @@ export const useChatStore = defineStore('admin-chat', () => {
   }
 
   async function sendText(id: string, content: string) {
-    const msg = await requireBridge().sendMessage(id, { contentType: MessageContentType.Text, content })
-    appendMessage(id, msg)
+    try {
+      const msg = await requireBridge().sendMessage(id, { contentType: MessageContentType.Text, content })
+      appendMessage(id, msg)
+    } catch (e) {
+      // Keep the attempted message in the thread, flagged failed, so the window
+      // shows a WeChat-style retry marker + reason inline (no toast). Re-throw so
+      // the caller skips the "sent" sound.
+      pushFailed(id, { contentType: MessageContentType.Text, content }, e)
+      throw e
+    }
+  }
+
+  /** Append a failed local placeholder for a send that the server rejected. It
+   *  deliberately does NOT touch the conversation's preview/last-message (the
+   *  message never sent), only the open thread. */
+  function pushFailed(
+    id: string,
+    partial: { contentType: MessageContentType; content?: string; fileId?: string; fileName?: string; fileSize?: number },
+    e: unknown,
+  ) {
+    const me = useAdminAuthStore().userInfo
+    const cid = ++clientSeq
+    const failed: ChatMessageView = {
+      id: `local-fail-${cid}`,
+      conversationId: id,
+      senderId: me?.id ?? '',
+      senderName: me?.shortName || me?.displayName || '',
+      senderAvatarFileId: null,
+      contentType: partial.contentType,
+      content: partial.content ?? '',
+      fileId: partial.fileId ?? null,
+      fileName: partial.fileName ?? null,
+      fileSize: partial.fileSize ?? null,
+      sentAt: new Date().toISOString(),
+      failed: true,
+      failReason: e instanceof Error ? e.message : '',
+      clientId: cid,
+    }
+    const cur = messagesByConv.value[id] ?? []
+    messagesByConv.value = { ...messagesByConv.value, [id]: [...cur, failed] }
+  }
+
+  /** Retry a failed local message: drop the placeholder, then re-send. A still-
+   *  revoked grant just fails again (a fresh placeholder); a re-granted one sends. */
+  async function resendMessage(id: string, clientId: number) {
+    const cur = messagesByConv.value[id] ?? []
+    const failed = cur.find((m) => m.clientId === clientId)
+    if (!failed) return
+    messagesByConv.value = { ...messagesByConv.value, [id]: cur.filter((m) => m.clientId !== clientId) }
+    if (failed.contentType === MessageContentType.Text) {
+      await sendText(id, failed.content)
+    } else if (failed.fileId) {
+      await sendMedia(id, {
+        contentType: failed.contentType,
+        fileId: failed.fileId,
+        fileName: failed.fileName ?? '',
+        fileSize: failed.fileSize ?? 0,
+      })
+    }
   }
 
   async function markRead(id: string) {
@@ -86,7 +189,7 @@ export const useChatStore = defineStore('admin-chat', () => {
     if (conv) conv.unreadCount = 0
   }
 
-  function appendMessage(id: string, msg: ChatMessageDto) {
+  function appendMessage(id: string, msg: ChatMessageView) {
     const cur = messagesByConv.value[id] ?? []
     if (cur.some(m => m.id === msg.id)) return
     messagesByConv.value = { ...messagesByConv.value, [id]: [...cur, msg] }
@@ -237,13 +340,21 @@ export const useChatStore = defineStore('admin-chat', () => {
 
   // Part 3: media send
   async function sendMedia(id: string, payload: { contentType: MessageContentType; fileId: string; fileName: string; fileSize: number }) {
-    const msg = await requireBridge().sendMessage(id, {
-      contentType: payload.contentType,
-      fileId: payload.fileId,
-      fileName: payload.fileName,
-      fileSize: payload.fileSize,
-    })
-    appendMessage(id, msg)
+    try {
+      const msg = await requireBridge().sendMessage(id, {
+        contentType: payload.contentType,
+        fileId: payload.fileId,
+        fileName: payload.fileName,
+        fileSize: payload.fileSize,
+      })
+      appendMessage(id, msg)
+    } catch (e) {
+      // Same inline-failure treatment as text: keep the media message flagged
+      // failed with a retry marker instead of a toast (the upload succeeded, only
+      // the send was rejected). Re-throw so the caller skips the "sent" sound.
+      pushFailed(id, { contentType: payload.contentType, fileId: payload.fileId, fileName: payload.fileName, fileSize: payload.fileSize }, e)
+      throw e
+    }
   }
 
   return {
@@ -254,7 +365,7 @@ export const useChatStore = defineStore('admin-chat', () => {
     appendMessage, applyIncomingMessage, applyRead, refreshUnread,
     searchContacts, startDirect, createGroup,
     getConversationDetail, addMembers, removeMember, renameGroup,
-    dissolveGroup, leaveGroup, sendMedia,
+    dissolveGroup, leaveGroup, sendMedia, resendMessage,
     applyPresenceChange, loadPresence, loadMyStatus, setMyStatus,
     setMemberSettings, clearHistory, hideConversation, deleteConversation,
     setNotice, searchMessages, getContactProfile,

@@ -60,6 +60,14 @@ describe('useAdminAuthStore', () => {
     expect(store.isLogin).toBe(false)
   })
 
+  it('logout resets the super-user flag (no cross-session leak)', () => {
+    const store = useAdminAuthStore()
+    store.setUserInfo({ id: '1', username: 'a', roles: [], permissions: [] })
+    store.setSuperUser(true)
+    store.logout()
+    expect(store.isSuperUser).toBe(false)
+  })
+
   it('hasRole returns true when role present', () => {
     const store = useAdminAuthStore()
     store.setUserInfo({ id: '1', username: 'a', roles: ['admin', 'editor'], permissions: [] })

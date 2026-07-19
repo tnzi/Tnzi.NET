@@ -14,6 +14,12 @@ public class ConversationListItemDto
     public int MemberCount { get; set; }
     public Guid? PeerUserId { get; set; }
     public UserPresenceStatus? PeerStatus { get; set; }
+    /// <summary>
+    /// Direct peer 已失去 <c>chat.use</c>（无法再收发消息）。前端据此在会话列表用
+    /// 特殊「不可用」标识替换常规在线状态点——已建立的会话不会消失，但要一眼看出
+    /// 对方已不能参与聊天。仅 Direct 会话有意义；gate 未激活时恒 false。
+    /// </summary>
+    public bool PeerDisabled { get; set; }
     public bool IsSticky { get; set; }
     public string? Remark { get; set; }
 
@@ -215,6 +221,12 @@ public class UpdateNoticeDto
 /// </summary>
 public class ChatClientConfigDto
 {
+    /// <summary>
+    /// 当前用户是否可使用聊天（是否持 <c>chat.use</c>）。false = 未被授予，前端隐藏
+    /// 聊天入口/图标；写路径与消息投递仍由服务端强制。默认 true 以兼容旧后端。
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>是否启用群聊（建群/加人入口）。</summary>
     public bool EnableGroups { get; set; }
 

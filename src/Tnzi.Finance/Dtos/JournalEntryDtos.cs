@@ -14,8 +14,27 @@ public class JournalEntryDto
     public decimal ExchangeRate { get; set; }
     public string? SourceType { get; set; }
     public string? SourceId { get; set; }
+
+    /// <summary>借方合计（本位币）。草稿为 0 —— 见 <see cref="TxnTotalDebit"/>。</summary>
     public decimal TotalDebit { get; set; }
+
+    /// <summary>贷方合计（本位币）。草稿为 0 —— 见 <see cref="TxnTotalCredit"/>。</summary>
     public decimal TotalCredit { get; set; }
+
+    /// <summary>
+    /// 借方合计（交易币种）。与分录行的 <c>Debit</c>/<c>TxnDebit</c> 成对关系一致。
+    /// </summary>
+    /// <remarks>
+    /// 草稿唯一可用的合计。<see cref="TotalDebit"/> 是本位币口径、按设计只在过账时冗余
+    /// （草稿尚无汇率，本位币金额根本不存在），所以草稿读它恒为 0；而交易币金额建草稿时
+    /// 就已写入，任何状态都取得到。不要把本值回填进 <see cref="TotalDebit"/>：两者币种口径
+    /// 不同，混用会让外币凭证的合计悄悄变成另一种货币的数字。
+    /// </remarks>
+    public decimal TxnTotalDebit { get; set; }
+
+    /// <summary>贷方合计（交易币种）。见 <see cref="TxnTotalDebit"/>。</summary>
+    public decimal TxnTotalCredit { get; set; }
+
     public DateTime? PostedTime { get; set; }
     public Guid? PostedById { get; set; }
     public Guid? ReversalOfEntryId { get; set; }

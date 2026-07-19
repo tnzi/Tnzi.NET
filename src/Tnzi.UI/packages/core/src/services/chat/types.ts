@@ -22,6 +22,12 @@ export interface ConversationListItemDto {
   lastMessagePreview?: string | null; lastMessageAt?: string | null;
   unreadCount: number; isMuted: boolean; memberCount: number;
   peerUserId?: string | null; peerStatus?: UserPresenceStatus | null;
+  /**
+   * Direct peer has lost `chat.use` (can no longer take part). The conversation stays,
+   * but the list shows a distinct "unavailable" marker instead of the normal presence
+   * dot. Direct-only; false when the gate is inactive. Backend: PeerDisabled.
+   */
+  peerDisabled?: boolean;
   isSticky: boolean; remark?: string | null;
   /** Group composite avatar: earliest N joined members (Group only; null otherwise). */
   memberAvatars?: ChatContactDto[] | null;
@@ -98,6 +104,10 @@ export enum ChatNewMessageEffect {
 
 /** Deployment-level chat feature configuration. Backend: ChatClientConfigDto (GET /chat/config) */
 export interface ChatClientConfigDto {
+  /** Whether the CURRENT user may use chat at all (holds the `chat.use` permission).
+   *  False hides every chat entry point. Chat is deny-by-default: a role/user must be
+   *  granted `chat.use`. Fails open (true) when the Authorization module is absent. */
+  enabled: boolean;
   enableGroups: boolean;
   maxGroupMembers: number;
   groupAvatarMemberCount: number;

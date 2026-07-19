@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Templates;
+namespace Tnzi.AI.Workflow.Templates;
 
 /// <summary>
 /// 并行团队模板。

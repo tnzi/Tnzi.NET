@@ -33,6 +33,16 @@ public static class TnziEFCoreExtensions
             {
                 options.AddInterceptors(interceptor);
             }
+
+            // 模块贡献的 EF 拦截器 seam：模块把拦截器注册为 IInterceptor 服务即可挂进
+            // 所有 Tnzi DbContext（如 Tnzi.Audit 的实体级审计 SaveChanges 拦截器）。
+            // options 生命周期为 Scoped，拦截器可注册为 Scoped 并注入 per-request 服务。
+            // 未注册任何 IInterceptor 时（模块未加载）零开销。
+            var moduleInterceptors = serviceProvider.GetServices<IInterceptor>().ToArray();
+            if (moduleInterceptors.Length > 0)
+            {
+                options.AddInterceptors(moduleInterceptors);
+            }
         });
         services.AddScoped<IDbInitializer, EFCoreDbInitializer<TDbContext>>();
         services.AddScoped<IUnitOfWork, EFCoreUnitOfWork<TDbContext>>();
@@ -50,6 +60,13 @@ public static class TnziEFCoreExtensions
         var registrar = new Services.RepositoryRegistrar();
         registrar.RegisterRepositoriesFromDbContext(services, typeof(TDbContext));
         registrar.RegisterRepositoriesFromEntityRegisters(services, typeof(TDbContext), isPrimary);
+
+        // 注册单据连续编号服务(框架级通用原语:发票号/支票号等法定连续号)。
+        // 挂在 DbContext 注册漏斗内(而非 EFCoreModule.ConfigureServices):它依赖
+        // IRepository<DocumentSequence>,仅当应用配置了 DbContext 时该仓储才存在——
+        // 无数据库的轻宿主(如 HostingLite)加载 EFCoreModule 时无条件注册会在
+        // ValidateOnBuild 阶段因仓储缺失炸掉宿主。TryAdd 兼容多 DbContext 与自定义替换。
+        services.TryAddScoped<IDocumentNumberService, DocumentNumberService>();
 
         // 注册 Dapper 支持
         RegisterDapperServices(services, typeof(TDbContext));

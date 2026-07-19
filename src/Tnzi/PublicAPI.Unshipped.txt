@@ -96,3 +96,86 @@ static Tnzi.Settings.SettingsPermissionNaming.IsSettingsPermissionCode(string? c
 static Tnzi.Settings.SettingsPermissionNaming.Slug(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
 static Tnzi.Settings.SettingsPermissionNaming.UpdateCode(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
 static Tnzi.Settings.SettingsPermissionNaming.ViewCode(Tnzi.Settings.SettingDefinitionGroup! group) -> string!
+Tnzi.Security.Authorization.IFunctionAuthorizationService.GetSuperAdminUserIdsAsync() -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlySet<System.Guid>!>!
+Tnzi.Utilities.CsvBuilder
+Tnzi.Utilities.CsvBuilder.AppendRow(params object?[]! cells) -> Tnzi.Utilities.CsvBuilder!
+Tnzi.Utilities.CsvBuilder.CsvBuilder(string! dateTimeFormat = "o") -> void
+override Tnzi.Utilities.CsvBuilder.ToString() -> string!
+static Tnzi.Utilities.CsvBuilder.EscapeCell(string? value) -> string!
+Tnzi.Security.AesGcmHelper
+static Tnzi.Security.AesGcmHelper.Decrypt(string! protectedValue, byte[]! key) -> string!
+static Tnzi.Security.AesGcmHelper.Decrypt(string! protectedValue, byte[]! key, byte[]? associatedData) -> string!
+static Tnzi.Security.AesGcmHelper.Encrypt(string! plaintext, byte[]! key) -> string!
+static Tnzi.Security.AesGcmHelper.Encrypt(string! plaintext, byte[]! key, byte[]? associatedData) -> string!
+static Tnzi.Security.AesGcmHelper.GenerateKeyBase64() -> string!
+static Tnzi.Security.AesGcmHelper.IsProtected(string? value) -> bool
+Tnzi.Domain.Entities.AuditIgnoreAttribute
+Tnzi.Domain.Entities.AuditIgnoreAttribute.AuditIgnoreAttribute() -> void
+~override Tnzi.Domain.Entities.ChildCollectionSyncResult.Equals(object obj) -> bool
+~override Tnzi.Domain.Entities.ChildCollectionSyncResult.ToString() -> string
+override Tnzi.Domain.Entities.ChildCollectionSyncResult.GetHashCode() -> int
+static Tnzi.Data.DataScopeExtensions.ApplyDataScope<TEntity>(this System.Linq.IQueryable<TEntity!>! source, System.Collections.Generic.IEnumerable<Tnzi.Data.IDataScopeProvider<TEntity!>!>! providers) -> System.Linq.IQueryable<TEntity!>!
+static Tnzi.Data.DataScopeExtensions.ApplyDataScope<TEntity>(this System.Linq.IQueryable<TEntity!>! source, System.IServiceProvider! serviceProvider) -> System.Linq.IQueryable<TEntity!>!
+static Tnzi.Data.DataScopeExtensions.BuildDataScopeFilter<TEntity>(System.Collections.Generic.IEnumerable<Tnzi.Data.IDataScopeProvider<TEntity!>!>! providers) -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
+static Tnzi.Data.DataScopeExtensions.BuildDataScopeFilter<TEntity>(this System.IServiceProvider! serviceProvider) -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
+static Tnzi.Data.DataScopeExtensions.CanAccessAsync<TEntity, TKey>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!, TKey>! repository, System.IServiceProvider! serviceProvider, TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Tnzi.Data.DataScopeExtensions.CanAccessAsync<TEntity>(this System.IServiceProvider! serviceProvider, TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Tnzi.Domain.Entities.ChildCollectionSync.ReplaceChildren<TParent, TChild, TKey>(TParent parent, System.Func<TParent, System.Collections.Generic.ICollection<TChild!>!>! childrenSelector, System.Collections.Generic.IEnumerable<TChild!>! newItems, System.Func<TChild!, TKey>! keySelector) -> Tnzi.Domain.Entities.ChildCollectionSyncResult
+static Tnzi.Domain.Entities.ChildCollectionSyncResult.operator !=(Tnzi.Domain.Entities.ChildCollectionSyncResult left, Tnzi.Domain.Entities.ChildCollectionSyncResult right) -> bool
+static Tnzi.Domain.Entities.ChildCollectionSyncResult.operator ==(Tnzi.Domain.Entities.ChildCollectionSyncResult left, Tnzi.Domain.Entities.ChildCollectionSyncResult right) -> bool
+Tnzi.Application.ApplicationService.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>
+Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.CrudAppService(System.IServiceProvider! serviceProvider, Tnzi.Domain.Repositories.IRepository<TEntity!, TKey>! repository) -> void
+Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.Mapper.get -> Tnzi.Mapping.IObjectMapper!
+Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.Repository.get -> Tnzi.Domain.Repositories.IRepository<TEntity!, TKey>!
+Tnzi.Data.DataScopeExtensions
+Tnzi.Data.IDataScopeProvider<TEntity>
+Tnzi.Data.IDataScopeProvider<TEntity>.CanAccessAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Tnzi.Data.IDataScopeProvider<TEntity>.GetFilter() -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
+Tnzi.Domain.Entities.ChildCollectionSync
+Tnzi.Domain.Entities.ChildCollectionSyncResult
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Added.get -> int
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Added.init -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.ChildCollectionSyncResult() -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.ChildCollectionSyncResult(int Added, int HardRemoved, int SoftDeleted, int Revived) -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Deconstruct(out int Added, out int HardRemoved, out int SoftDeleted, out int Revived) -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Equals(Tnzi.Domain.Entities.ChildCollectionSyncResult other) -> bool
+Tnzi.Domain.Entities.ChildCollectionSyncResult.HardRemoved.get -> int
+Tnzi.Domain.Entities.ChildCollectionSyncResult.HardRemoved.init -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Revived.get -> int
+Tnzi.Domain.Entities.ChildCollectionSyncResult.Revived.init -> void
+Tnzi.Domain.Entities.ChildCollectionSyncResult.SoftDeleted.get -> int
+Tnzi.Domain.Entities.ChildCollectionSyncResult.SoftDeleted.init -> void
+Tnzi.Mapping.IObjectMapper
+Tnzi.Mapping.IObjectMapper.Map<TSource, TTarget>(TSource source, TTarget destination) -> TTarget
+Tnzi.Mapping.IObjectMapper.Map<TTarget>(object! source) -> TTarget
+Tnzi.Mapping.IObjectMapper.MapToList<TTarget>(System.Collections.Generic.IEnumerable<object!>? source) -> System.Collections.Generic.List<TTarget>!
+Tnzi.TnziOptions.ApplyMigrationsInProduction.get -> bool?
+Tnzi.TnziOptions.ApplyMigrationsInProduction.set -> void
+Tnzi.TnziOptions.SeedInProduction.get -> bool?
+Tnzi.TnziOptions.SeedInProduction.set -> void
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.AfterCreateAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.AfterDeleteAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.AfterUpdateAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.ApplyScopeAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.BatchDeleteAsync(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result!>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.BeforeCreateAsync(TCreateDto input, TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.BeforeDeleteAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.BeforeUpdateAsync(TUpdateDto input, TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.CreateAsync(TCreateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result!>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.IsInScopeAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<bool>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.QueryAsync(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<Tnzi.Data.IPagedList<TDto>!>!>!
+virtual Tnzi.Application.CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto>.UpdateAsync(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.BatchDeleteAsync(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.CreateAsync(TCreateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.DeleteAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.GetByIdAsync(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.QueryAsync(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<Tnzi.Data.IPagedList<TDto>!>!>!
+Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>.UpdateAsync(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<TDto>!>!
+Tnzi.TnziOptions.ShouldApplyMigrations(bool isProduction) -> bool
+Tnzi.TnziOptions.ShouldSeed(bool isProduction) -> bool
+Tnzi.Data.IPostMigrationStartupTask
+Tnzi.Data.IPostMigrationStartupTask.ExecuteAsync(System.IServiceProvider! serviceProvider, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!

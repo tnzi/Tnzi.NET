@@ -60,30 +60,44 @@ const cashFlow = vi.fn(async () => ({
   checkDifference: 0,
 }))
 const tree = vi.fn(async () => [])
-
-vi.mock('../../../src/services/bridges/finance-bridge', () => ({
-  createFinanceBridge: () => ({
-    accounts: { tree },
-    reports: {
-      trialBalance,
-      balanceSheet: vi.fn(),
-      profitAndLoss: vi.fn(),
-      generalLedger: vi.fn(),
-      arAging: vi.fn(),
-      apAging: vi.fn(),
-      taxSummary,
-      cashFlow,
-      exportTrialBalanceCsv,
-      exportCashFlowCsv: vi.fn(),
-      exportBalanceSheetCsv: vi.fn(),
-      exportProfitAndLossCsv: vi.fn(),
-      exportGeneralLedgerCsv: vi.fn(),
-      exportArAgingCsv: vi.fn(),
-      exportApAgingCsv: vi.fn(),
-      exportTaxSummaryCsv: vi.fn(),
-    },
-  }),
+const verify = vi.fn(async () => ({
+  isConsistent: false,
+  checkedBuckets: 12,
+  totalDifferences: 2,
+  differences: [
+    { accountId: 'a1', period: 202601, currency: 'USD', kind: 'Mismatch', expectedDebit: 100, expectedCredit: 0, storedDebit: 90, storedCredit: 0 },
+  ],
 }))
+const rebuild = vi.fn(async () => ({ buckets: 12, lines: 340, durationMs: 42 }))
+
+vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/services/bridges/finance-bridge')>()
+  return {
+    BalanceSummaryDifferenceKind: original.BalanceSummaryDifferenceKind,
+    createFinanceBridge: () => ({
+      accounts: { tree },
+      reports: {
+        trialBalance,
+        balanceSheet: vi.fn(),
+        profitAndLoss: vi.fn(),
+        generalLedger: vi.fn(),
+        arAging: vi.fn(),
+        apAging: vi.fn(),
+        taxSummary,
+        cashFlow,
+        exportTrialBalanceCsv,
+        exportCashFlowCsv: vi.fn(),
+        exportBalanceSheetCsv: vi.fn(),
+        exportProfitAndLossCsv: vi.fn(),
+        exportGeneralLedgerCsv: vi.fn(),
+        exportArAgingCsv: vi.fn(),
+        exportApAgingCsv: vi.fn(),
+        exportTaxSummaryCsv: vi.fn(),
+      },
+      balanceSummary: { verify, rebuild },
+    }),
+  }
+})
 
 import Reports from '../../../src/pages/finance/Reports.vue'
 
@@ -104,6 +118,12 @@ interface ReportsVm {
   runCashFlow: () => Promise<void>
   exportCsv: (active: string) => Promise<void>
   canExport: (active: string) => boolean
+  runVerify: () => Promise<void>
+  onMaintenanceSelect: (key: string) => void
+  showMaintenance: boolean
+  maintenanceOptions: Array<{ label: string; key: string }>
+  verifyShow: boolean
+  verifyResult: unknown
   tb: unknown
   tax: unknown
   cf: { checkDifference: number } | null
@@ -117,6 +137,8 @@ describe('Finance Reports page', () => {
     cashFlow.mockClear()
     exportTrialBalanceCsv.mockClear()
     tree.mockClear()
+    verify.mockClear()
+    rebuild.mockClear()
   })
 
   it('mounts and loads account options for the GL tab', async () => {
@@ -183,5 +205,39 @@ describe('Finance Reports page', () => {
       objectUrl.mockRestore()
       revoke.mockRestore()
     }
+  })
+
+  it('shows the balance-summary maintenance dropdown (fail-open with no user loaded)', async () => {
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as ReportsVm
+    // usePermissionGuard fail-opens when userInfo === null (no user in a bare mount).
+    expect(vm.showMaintenance).toBe(true)
+    expect(vm.maintenanceOptions).toHaveLength(2)
+  })
+
+  it('verifies the balance summary and opens the result modal', async () => {
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as ReportsVm
+    await vm.runVerify()
+    await flushPromises()
+
+    expect(verify).toHaveBeenCalledTimes(1)
+    expect(vm.verifyShow).toBe(true)
+    expect(vm.verifyResult).toBeTruthy()
+  })
+
+  it('rebuilds the balance summary (confirm falls through without a dialog provider)', async () => {
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as ReportsVm
+    vm.onMaintenanceSelect('rebuild')
+    await flushPromises()
+
+    expect(rebuild).toHaveBeenCalledTimes(1)
   })
 })

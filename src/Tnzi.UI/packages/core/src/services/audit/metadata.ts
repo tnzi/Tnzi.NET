@@ -34,14 +34,19 @@ export function getAuditResultTypeLabel(type: AuditResultType): string {
 }
 
 /**
- * Entity change type (maps to backend Tnzi.Audit.Entities.EntityState)
+ * Entity change type (maps to backend Tnzi.Audit.Entities.EntityState).
+ *
+ * Serialized as PascalCase member names by the backend's global
+ * `JsonStringEnumConverter` (same wire format as {@link AuditResultType}) —
+ * string-valued members keep comparisons and rendering aligned with the
+ * response strings.
  */
 export enum EntityChangeType {
-  Unchanged = 0,
-  Added = 1,
-  Modified = 2,
-  Deleted = 3,
-  Detached = 4,
+  Unchanged = 'Unchanged',
+  Added = 'Added',
+  Modified = 'Modified',
+  Deleted = 'Deleted',
+  Detached = 'Detached',
 }
 
 /**

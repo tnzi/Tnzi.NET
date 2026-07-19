@@ -22,6 +22,9 @@
           v-model="keyword"
           class="t-conv-list__search-input"
           :placeholder="t('window.search')"
+          enterkeyhint="search"
+          autocapitalize="off"
+          autocorrect="off"
           @focus="focused = true"
           @blur="focused = false"
         />

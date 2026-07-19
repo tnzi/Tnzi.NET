@@ -97,7 +97,20 @@ public class ItemService : ApplicationService, IItemService
         if (item == null)
             return Fail("Item not found.", 404);
 
-        // P2b：被单据行引用时拒绝删除
+        // 被单据行引用时拒绝删除：Item 软删后会被全局过滤器隐藏，而其已过账的发票/账单/贷项行仍留在子账，
+        // 导致行项名称丢失、报表回退显示原始 GUID。引导用 IsActive=false 停用而非删除（对齐 Customer/Vendor/Tax 守卫）。
+        // 引用仓储在删除冷路径按需解析（避免把 InvoiceLine/BillLine/CreditMemoLine 依赖强加到共享服务图上的
+        // Payroll 最小测试基类；那里从不调用本删除路径）。
+        var invoiceLineRepository = GetRequiredService<IReadOnlyRepository<InvoiceLine, Guid>>();
+        var billLineRepository = GetRequiredService<IReadOnlyRepository<BillLine, Guid>>();
+        var creditMemoLineRepository = GetRequiredService<IReadOnlyRepository<CreditMemoLine, Guid>>();
+        var referenced =
+            await invoiceLineRepository.AnyAsync(l => l.ItemId == id, cancellationToken) ||
+            await billLineRepository.AnyAsync(l => l.ItemId == id, cancellationToken) ||
+            await creditMemoLineRepository.AnyAsync(l => l.ItemId == id, cancellationToken);
+        if (referenced)
+            return Fail("Cannot delete an item referenced by invoice, bill, or credit-memo lines. Deactivate it instead.", 409);
+
         await _itemRepository.DeleteAsync(item, cancellationToken);
         return Ok();
     }
@@ -117,16 +130,22 @@ public class ItemService : ApplicationService, IItemService
             return Fail($"Item code '{code}' already exists.", 409);
         }
 
-        // 默认科目须存在且为可过账叶子科目
-        foreach (var accountId in new[] { input.IncomeAccountId, input.ExpenseAccountId })
+        // 默认科目须存在、可过账叶子，且类型匹配槽位：收入科目 RootType=Income、费用科目 RootType=Expense。
+        // 否则一张无行覆盖的销售/采购单会静默把收入/成本过到资产负债类科目（凭证仍借贷平、TB 仍归零，
+        // 但 P&L 收入少计、资产多计，无任何报错）——QuickBooks/Xero/Odoo 均对 item 默认科目做同类限制。
+        if (input.IncomeAccountId is { } incomeId)
         {
-            if (!accountId.HasValue)
-                continue;
-
-            var isPostable = await _accountRepository.AnyAsync(
-                a => a.Id == accountId.Value && !a.IsGroup, cancellationToken);
-            if (!isPostable)
-                return Fail("The default account must be an existing postable (non-group) account.");
+            var ok = await _accountRepository.AnyAsync(
+                a => a.Id == incomeId && !a.IsGroup && a.RootType == AccountRootType.Income, cancellationToken);
+            if (!ok)
+                return Fail("The default income account must be a postable (non-group) Income account.");
+        }
+        if (input.ExpenseAccountId is { } expenseId)
+        {
+            var ok = await _accountRepository.AnyAsync(
+                a => a.Id == expenseId && !a.IsGroup && a.RootType == AccountRootType.Expense, cancellationToken);
+            if (!ok)
+                return Fail("The default expense account must be a postable (non-group) Expense account.");
         }
 
         return Ok();

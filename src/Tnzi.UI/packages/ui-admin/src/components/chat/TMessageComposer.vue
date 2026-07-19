@@ -27,7 +27,9 @@
       </div>
     </div>
 
-    <!-- Textarea on top -->
+    <!-- Textarea on top. enterkeyhint="send": Enter (without Shift) sends here,
+         so the soft keyboard shows a "send" action key; Shift+Enter still makes
+         a newline (unchanged in onKeydown). -->
     <textarea
       ref="textareaRef"
       v-model="text"
@@ -35,6 +37,7 @@
       :disabled="disabled"
       :placeholder="t('window.inputPlaceholder')"
       rows="3"
+      enterkeyhint="send"
       @keydown="onKeydown"
     />
 
@@ -348,13 +351,30 @@ function insertEmoji(emoji: string) {
   color: #fff;
   cursor: not-allowed;
 }
+
+/* Touch: enlarge the tool + send hit areas to ≥40px (the visible glyphs stay
+   the same size — the extra room is padding/min-size so they're comfortable to
+   tap). Coarse-pointer only, so desktop keeps the compact chrome. */
+@media (pointer: coarse) {
+  .t-composer__tool {
+    width: 40px;
+    height: 40px;
+  }
+
+  .t-composer__send {
+    height: 40px;
+    padding: 0 24px;
+  }
+}
 </style>
 
 <style>
 /* Unscoped — emoji panel renders inside the teleported `raw` popover (so we own
    all padding; naive's default popover padding caused an oversized right gap). */
 .t-composer__emoji-pop {
-  width: 300px;
+  /* Cap at the viewport width (minus a small gutter) so the fixed 300px panel
+     never overflows a narrow phone screen. */
+  width: min(300px, calc(100vw - 24px));
   padding: 8px;
   background: var(--chat-surface, #fff);
   border: 1px solid var(--chat-border, #e6e6e6);

@@ -128,12 +128,19 @@ if (client) {
     // all and seeds the notification-sound default (users can still mute
     // per-conversation on top of it).
     await store.loadConfig()
+    // Deny-by-default guard: if the backend didn't confirm this user may use chat
+    // (`chat.use`), make NO further chat calls. AdminShellRoot already gates
+    // mounting on `config.enabled`, but re-checking here means TChatHost never
+    // hits the 403-guarded /conversations + /presence endpoints for a disabled
+    // user even if it is ever mounted in an unconfirmed state (login-transition
+    // race). Without this, a denied user 403'd on every mount + crashed.
+    if (!store.config.enabled) return
     sound.configure({
       enabled: store.config.enableMessageSound,
       notification: store.config.notificationSound,
       message: store.config.messageSound,
     })
-    await store.fetchConversations()
+    await store.fetchConversations().catch(() => undefined)
     if (store.config.enablePresence) {
       await store.loadMyStatus().catch(() => undefined)
       const peerIds = store.conversations.map(c => c.peerUserId).filter(Boolean) as string[]

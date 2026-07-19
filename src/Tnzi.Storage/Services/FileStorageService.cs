@@ -826,10 +826,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(batch);
     }
 
-    public async Task<Result<FileInfoDto>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
+    public async Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<FileInfoDto>(record);
+        var check = EnsureFileRecordExists<FileRecord>(record);
         if (check != null)
             return check;
 
@@ -837,26 +837,26 @@ public class FileStorageService : ApplicationService, IFileStorageService
         await _repository.UpdateAsync(record, cancellationToken);
 
         LogInformation("File tags updated: {FileId}, Tags: {Tags}", fileId, record.Tags ?? string.Empty);
-        return Ok(record.MapTo<FileInfoDto>(), "File tags updated successfully");
+        return Ok(record, "File tags updated successfully");
     }
 
-    public async Task<Result<FileInfoDto>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default)
+    public async Task<Result<FileRecord>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<FileInfoDto>(record);
+        var check = EnsureFileRecordExists<FileRecord>(record);
         if (check != null)
             return check;
 
         // Validate metadata size before saving
         var serialized = JsonSerializer.Serialize(metadata);
         if (serialized.Length > 4096)
-            return Fail<FileInfoDto>($"Metadata JSON exceeds maximum allowed size (4096 chars). Current size: {serialized.Length} chars.", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<FileRecord>($"Metadata JSON exceeds maximum allowed size (4096 chars). Current size: {serialized.Length} chars.", 400, ErrorCodes.VALIDATION_ERROR);
 
         record!.SetMetadata(metadata);
         await _repository.UpdateAsync(record, cancellationToken);
 
         LogInformation("File metadata updated: {FileId}, Keys: {Keys}", fileId, metadata.Count > 0 ? string.Join(", ", metadata.Keys) : "(cleared)");
-        return Ok(record.MapTo<FileInfoDto>(), "File metadata updated successfully");
+        return Ok(record, "File metadata updated successfully");
     }
 
     public async Task<Result<Dictionary<string, string>>> GetMetadataAsync(Guid fileId, CancellationToken cancellationToken = default)

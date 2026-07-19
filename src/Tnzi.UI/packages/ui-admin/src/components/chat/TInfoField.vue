@@ -186,6 +186,14 @@ function onBlur() {
   opacity: 1;
 }
 
+/* Touch devices have no hover, so the hover-only pencil would never appear and
+   the field would read as non-editable. Keep it permanently visible there. */
+@media (hover: none) {
+  .t-info-field__edit-btn {
+    opacity: 1;
+  }
+}
+
 .t-info-field__edit-btn:hover {
   background: var(--chat-hover, rgb(51 54 57 / 0.08));
   color: var(--chat-text-2, #6f6f6f);

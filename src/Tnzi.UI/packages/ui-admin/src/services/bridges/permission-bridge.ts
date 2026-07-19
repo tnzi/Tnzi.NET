@@ -24,7 +24,7 @@
  */
 import type { HttpClient } from '@tnzi/core/http'
 import { usePermissionAdminApi, PermissionBehavior, ToolPermissionScope } from '@tnzi/core/services/ai'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 // Re-export the enums as runtime values (consumers may import them as values
 // or, as ToolPermissions.vue does, as types).
@@ -89,7 +89,7 @@ export function createPermissionBridge(deps: PermissionBridgeDeps = {}): Permiss
     updatePersistedRule: async (id, input) =>
       unwrap<PersistedPermissionRuleDto | null>(await api.updatePersistedRule(id, input)),
     deletePersistedRule: async (id: string) => {
-      await api.deletePersistedRule(id)
+      ensureOk(await api.deletePersistedRule(id))
     },
   }
 }

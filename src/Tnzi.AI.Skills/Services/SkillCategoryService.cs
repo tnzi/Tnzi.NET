@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Skills.Services;
 
 /// <summary>
 /// 技能分类管理服务实现

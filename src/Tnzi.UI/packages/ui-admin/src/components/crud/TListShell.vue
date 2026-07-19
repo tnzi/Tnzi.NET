@@ -95,6 +95,7 @@
       >
         <template v-if="mobilePanel === 'keyword'">
           <NInput
+            ref="mobileKeywordRef"
             v-model:value="simpleQuery"
             clearable
             :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
@@ -312,9 +313,10 @@
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
-import { computed, ref, useSlots, watch } from 'vue'
+import { computed, nextTick, ref, useSlots, watch } from 'vue'
 import { NAlert, NButton, NCard, NInput, NPagination, NPopconfirm, NTooltip } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { downloadBlob } from '@tnzi/core/utils'
 import TFormModal from './TFormModal.vue'
 import TDrawerShell from '../overlay/TDrawerShell.vue'
 import TCrudSearchDrawer from './TCrudSearchDrawer.vue'
@@ -437,8 +439,14 @@ const mobilePanel = ref<'none' | 'keyword' | 'advanced'>(
   props.defaultAdvancedMode && !!props.searchFields?.length ? 'advanced' : 'none',
 )
 const mobileAdvRef = ref<{ apply: () => void; reset: () => void } | null>(null)
+// The mobile keyword NInput — focused when the user taps 🔍 so the keyboard
+// pops immediately (this is a user-initiated expand, not an auto-open surprise).
+const mobileKeywordRef = ref<{ focus: () => void } | null>(null)
 function toggleMobilePanel(mode: 'keyword' | 'advanced'): void {
   mobilePanel.value = mobilePanel.value === mode ? 'none' : mode
+  if (mode === 'keyword' && mobilePanel.value === 'keyword') {
+    void nextTick(() => mobileKeywordRef.value?.focus())
+  }
 }
 function onMobileAdvSearch(): void {
   mobileAdvRef.value?.apply()
@@ -485,16 +493,7 @@ function onRefresh(): void {
 }
 async function onExport(): Promise<void> {
   const blob = await props.state.exportAll()
-  if (blob && typeof URL !== 'undefined' && typeof document !== 'undefined') {
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${props.title ?? 'export'}.csv`
-    document.body.appendChild(anchor)
-    anchor.click()
-    document.body.removeChild(anchor)
-    URL.revokeObjectURL(url)
-  }
+  if (blob) downloadBlob(blob, `${props.title ?? 'export'}.csv`)
 }
 function onImport(): void {
   if (typeof document === 'undefined') return

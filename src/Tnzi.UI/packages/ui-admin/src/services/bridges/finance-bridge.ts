@@ -26,8 +26,17 @@ import {
   useAdminFinanceSettlementApi,
   useAdminFinanceTransferApi,
   useAdminFinanceReconciliationApi,
+  useAdminFinanceRevaluationApi,
+  useAdminFinanceBankAccountApi,
+  useAdminFinancePartyBankAccountApi,
+  useAdminFinanceBankFeedApi,
+  useAdminFinanceCheckApi,
+  useAdminFinanceEftBatchApi,
+  useAdminFinanceReceiptApi,
+  useAdminFinanceBalanceSummaryApi,
   type AccountDto as CoreAccountDto,
   type AccountTreeDto as CoreAccountTreeDto,
+  type AccountBalanceDto as CoreAccountBalanceDto,
   type CreateAccountDto as CoreCreateAccountDto,
   type UpdateAccountDto as CoreUpdateAccountDto,
   type JournalEntryDto as CoreJournalEntryDto,
@@ -89,14 +98,54 @@ import {
   type CreateReconciliationDto as CoreCreateReconciliationDto,
   type ReconciliationWorksheetDto as CoreReconciliationWorksheetDto,
   type ReconciliationCandidateLineDto as CoreReconciliationCandidateLineDto,
+  type RunRevaluationDto as CoreRunRevaluationDto,
+  type RevaluationPreviewDto as CoreRevaluationPreviewDto,
+  type RevaluationRowDto as CoreRevaluationRowDto,
+  type BankAccountDto as CoreBankAccountDto,
+  type BankAccountCapabilitiesDto as CoreBankAccountCapabilitiesDto,
+  type CreateBankAccountDto as CoreCreateBankAccountDto,
+  type UpdateBankAccountDto as CoreUpdateBankAccountDto,
+  type SetNextCheckNumberDto as CoreSetNextCheckNumberDto,
+  type PartyBankAccountDto as CorePartyBankAccountDto,
+  type SavePartyBankAccountDto as CoreSavePartyBankAccountDto,
+  type BankTransactionDto as CoreBankTransactionDto,
+  type CsvMappingDto as CoreCsvMappingDto,
+  type BankImportResultDto as CoreBankImportResultDto,
+  type BankSuggestResultDto as CoreBankSuggestResultDto,
+  type ConfirmBankMatchDto as CoreConfirmBankMatchDto,
+  type BankMatchCandidateDto as CoreBankMatchCandidateDto,
+  type CreateBankDocumentDto as CoreCreateBankDocumentDto,
+  type BankDocumentResultDto as CoreBankDocumentResultDto,
+  type BankImportBatchDto as CoreBankImportBatchDto,
+  type BankTransactionSource as CoreBankTransactionSource,
+  type BankCheckDto as CoreBankCheckDto,
+  type CheckQueueItemDto as CoreCheckQueueItemDto,
+  type PrintChecksDto as CorePrintChecksDto,
+  type RegisterManualCheckDto as CoreRegisterManualCheckDto,
+  type VoidCheckDto as CoreVoidCheckDto,
+  type SpoilCheckDto as CoreSpoilCheckDto,
+  type EftBatchDto as CoreEftBatchDto,
+  type EftBatchLineDto as CoreEftBatchLineDto,
+  type EftQueueItemDto as CoreEftQueueItemDto,
+  type CreateEftBatchDto as CoreCreateEftBatchDto,
+  type VoidEftBatchDto as CoreVoidEftBatchDto,
+  type ReceiptDto as CoreReceiptDto,
+  type CreateReceiptDto as CoreCreateReceiptDto,
+  type UpdateReceiptExtractionDto as CoreUpdateReceiptExtractionDto,
+  type ConvertReceiptDto as CoreConvertReceiptDto,
+  type ReceiptConvertResultDto as CoreReceiptConvertResultDto,
+  type BalanceSummaryRebuildDto as CoreBalanceSummaryRebuildDto,
+  type BalanceSummaryVerifyDto as CoreBalanceSummaryVerifyDto,
+  type BalanceSummaryDifferenceDto as CoreBalanceSummaryDifferenceDto,
 } from '@tnzi/core/services/finance'
 import type { PagedList } from '@tnzi/core'
 import type { FinancePartyType, SettlementDocType } from '@tnzi/core/services/finance'
-import { unwrapResult as unwrap, pagedResult } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, pagedResult } from '../_mappers'
 
 // Re-export the DTO types under bridge names consumed by pages/configs.
 export type AccountDto = CoreAccountDto
 export type AccountTreeDto = CoreAccountTreeDto
+export type AccountBalanceDto = CoreAccountBalanceDto
 export type CreateAccountDto = CoreCreateAccountDto
 export type UpdateAccountDto = CoreUpdateAccountDto
 export type JournalEntryDto = CoreJournalEntryDto
@@ -158,6 +207,44 @@ export type ReconciliationDto = CoreReconciliationDto
 export type CreateReconciliationDto = CoreCreateReconciliationDto
 export type ReconciliationWorksheetDto = CoreReconciliationWorksheetDto
 export type ReconciliationCandidateLineDto = CoreReconciliationCandidateLineDto
+export type RunRevaluationDto = CoreRunRevaluationDto
+export type RevaluationPreviewDto = CoreRevaluationPreviewDto
+export type RevaluationRowDto = CoreRevaluationRowDto
+export type BankAccountDto = CoreBankAccountDto
+export type BankAccountCapabilitiesDto = CoreBankAccountCapabilitiesDto
+export type CreateBankAccountDto = CoreCreateBankAccountDto
+export type UpdateBankAccountDto = CoreUpdateBankAccountDto
+export type SetNextCheckNumberDto = CoreSetNextCheckNumberDto
+export type PartyBankAccountDto = CorePartyBankAccountDto
+export type SavePartyBankAccountDto = CoreSavePartyBankAccountDto
+export type BankTransactionDto = CoreBankTransactionDto
+export type CsvMappingDto = CoreCsvMappingDto
+export type BankImportResultDto = CoreBankImportResultDto
+export type BankSuggestResultDto = CoreBankSuggestResultDto
+export type ConfirmBankMatchDto = CoreConfirmBankMatchDto
+export type BankMatchCandidateDto = CoreBankMatchCandidateDto
+export type CreateBankDocumentDto = CoreCreateBankDocumentDto
+export type BankDocumentResultDto = CoreBankDocumentResultDto
+export type BankImportBatchDto = CoreBankImportBatchDto
+export type BankCheckDto = CoreBankCheckDto
+export type CheckQueueItemDto = CoreCheckQueueItemDto
+export type PrintChecksDto = CorePrintChecksDto
+export type RegisterManualCheckDto = CoreRegisterManualCheckDto
+export type VoidCheckDto = CoreVoidCheckDto
+export type SpoilCheckDto = CoreSpoilCheckDto
+export type EftBatchDto = CoreEftBatchDto
+export type EftBatchLineDto = CoreEftBatchLineDto
+export type EftQueueItemDto = CoreEftQueueItemDto
+export type CreateEftBatchDto = CoreCreateEftBatchDto
+export type VoidEftBatchDto = CoreVoidEftBatchDto
+export type ReceiptDto = CoreReceiptDto
+export type CreateReceiptDto = CoreCreateReceiptDto
+export type UpdateReceiptExtractionDto = CoreUpdateReceiptExtractionDto
+export type ConvertReceiptDto = CoreConvertReceiptDto
+export type ReceiptConvertResultDto = CoreReceiptConvertResultDto
+export type BalanceSummaryRebuildDto = CoreBalanceSummaryRebuildDto
+export type BalanceSummaryVerifyDto = CoreBalanceSummaryVerifyDto
+export type BalanceSummaryDifferenceDto = CoreBalanceSummaryDifferenceDto
 
 export {
   AccountRootType,
@@ -170,7 +257,21 @@ export {
   SettlementDocType,
   ItemType,
   ReconciliationStatus,
+  BankNumberScheme,
+  CheckStockType,
+  CheckLayout,
+  BankAccountType,
+  BankTransactionSource,
+  BankTransactionStatus,
+  BankFeedDocType,
+  CheckStatus,
+  EftFileFormat,
+  EftBatchStatus,
+  ReceiptStatus,
+  ReceiptDocType,
+  BalanceSummaryDifferenceKind,
   PAYMENT_METHODS,
+  FINANCE_SOURCE_TYPES,
 } from '@tnzi/core/services/finance'
 
 /** Page-facing paged query (CrudPageQuery-compatible subset). */
@@ -191,6 +292,8 @@ export interface FinanceBridge {
   accounts: {
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<AccountDto>>
     tree(includeInactive?: boolean): Promise<AccountTreeDto[]>
+    /** Base-currency balances as of end of `asOf` (default today); posted lines only. */
+    balances(accountIds: string[], asOf?: string): Promise<AccountBalanceDto[]>
     create(data: CoreCreateAccountDto): Promise<AccountDto>
     update(id: string, data: CoreUpdateAccountDto): Promise<AccountDto>
     delete(ids: string[]): Promise<void>
@@ -284,6 +387,12 @@ export interface FinanceBridge {
     setLines(id: string, journalLineIds: string[]): Promise<ReconciliationWorksheetDto>
     complete(id: string): Promise<ReconciliationDto>
   }
+  revaluations: {
+    /** Preview the period-end revaluation (no posting) */
+    preview(data: RunRevaluationDto): Promise<RevaluationPreviewDto>
+    /** Run the revaluation (posts a summary voucher; no-op when the increment is 0) */
+    run(data: RunRevaluationDto): Promise<RevaluationPreviewDto>
+  }
   settlements: {
     applications(docType: SettlementDocType, docId: string): Promise<PaymentApplicationDto[]>
     openDocuments(partyType: FinancePartyType, partyId: string): Promise<OpenDocumentDto[]>
@@ -291,6 +400,90 @@ export interface FinanceBridge {
     unapply(applicationId: string): Promise<void>
     /** Batch settlement (Pay Bills / Receive Payments); atomic on the backend. */
     pay(data: CoreBatchPaymentDto): Promise<BatchPaymentResultDto>
+  }
+  bankAccounts: {
+    /** Deployment capabilities (whether account numbers can be stored at all). */
+    capabilities(): Promise<BankAccountCapabilitiesDto>
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<BankAccountDto>>
+    getById(id: string): Promise<BankAccountDto | null>
+    create(data: CoreCreateBankAccountDto): Promise<BankAccountDto>
+    update(id: string, data: CoreUpdateBankAccountDto): Promise<BankAccountDto>
+    /** Set the next check number (jump = new check book). */
+    setNextCheckNumber(id: string, nextCheckNumber: number): Promise<BankAccountDto>
+    delete(ids: string[]): Promise<void>
+  }
+  partyBankAccounts: {
+    /** List a party's bank accounts (default first). */
+    byParty(partyType: FinancePartyType, partyId: string): Promise<PartyBankAccountDto[]>
+    save(data: CoreSavePartyBankAccountDto): Promise<PartyBankAccountDto>
+    update(id: string, data: CoreSavePartyBankAccountDto): Promise<PartyBankAccountDto>
+    /** Mark this account as the party's default. */
+    setDefault(id: string): Promise<PartyBankAccountDto>
+    delete(id: string): Promise<void>
+  }
+  bankFeed: {
+    transactions(query: FinancePagedQuery): Promise<FinancePagedResult<BankTransactionDto>>
+    /** Import an OFX / CSV statement (multipart). */
+    import(accountId: string, source: CoreBankTransactionSource, file: File, mapping?: CoreCsvMappingDto): Promise<BankImportResultDto>
+    /** Pull from the registered bank feed provider (400 when none). */
+    pull(accountId: string): Promise<BankImportResultDto>
+    /** Run the match engine over all pending transactions for the account. */
+    suggest(accountId: string): Promise<BankSuggestResultDto>
+    candidates(transactionId: string): Promise<BankMatchCandidateDto[]>
+    /** Confirm a match (generates a draft-reconciliation cleared line; 400 when no draft). */
+    confirm(transactionId: string, data: CoreConfirmBankMatchDto): Promise<BankTransactionDto>
+    unmatch(transactionId: string): Promise<BankTransactionDto>
+    exclude(transactionId: string): Promise<BankTransactionDto>
+    restore(transactionId: string): Promise<BankTransactionDto>
+    /** Create a draft document from a transaction (pre-filled by sign). */
+    createDocument(transactionId: string, data: CoreCreateBankDocumentDto): Promise<BankDocumentResultDto>
+    batches(query: FinancePagedQuery): Promise<FinancePagedResult<BankImportBatchDto>>
+    deleteBatch(id: string): Promise<void>
+  }
+  checks: {
+    /** Print queue (posted outbound check payments awaiting print). */
+    queue(bankAccountId?: string): Promise<CheckQueueItemDto[]>
+    /** Paged check register. */
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<BankCheckDto>>
+    /** Print checks → merged PDF blob. */
+    print(data: CorePrintChecksDto): Promise<Blob>
+    register(data: CoreRegisterManualCheckDto): Promise<BankCheckDto>
+    /** Reprint (void the original + new check) → merged PDF blob. */
+    reprint(id: string): Promise<Blob>
+    voidCheck(id: string, data: CoreVoidCheckDto): Promise<BankCheckDto>
+    spoil(data: CoreSpoilCheckDto): Promise<BankCheckDto>
+    /** Alignment calibration test page → PDF blob. */
+    calibration(bankAccountId: string): Promise<Blob>
+    /** Positive-pay issued-check file (CSV blob) over an issue-date window. */
+    exportPositivePay(bankAccountId: string, from: string, to: string): Promise<Blob>
+  }
+  eftBatches: {
+    /** Batchable queue (posted outbound bank-transfer payments). */
+    queue(): Promise<EftQueueItemDto[]>
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<EftBatchDto>>
+    getById(id: string): Promise<EftBatchDto | null>
+    create(data: CoreCreateEftBatchDto): Promise<EftBatchDto>
+    /** Generate the file (Draft → Generated; immutable afterwards). */
+    generate(id: string): Promise<EftBatchDto>
+    voidBatch(id: string, data: CoreVoidEftBatchDto): Promise<EftBatchDto>
+    /** Download the generated EFT file → plaintext blob (gated on finance.eft.download). */
+    download(id: string): Promise<Blob>
+  }
+  receipts: {
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<ReceiptDto>>
+    getById(id: string): Promise<ReceiptDto | null>
+    create(data: CoreCreateReceiptDto): Promise<ReceiptDto>
+    /** Extract fields (501 when no IReceiptExtractor is registered; load Tnzi.Finance.Ai for the default). */
+    extract(id: string): Promise<ReceiptDto>
+    update(id: string, data: CoreUpdateReceiptExtractionDto): Promise<ReceiptDto>
+    convert(id: string, data: CoreConvertReceiptDto): Promise<ReceiptConvertResultDto>
+    delete(id: string): Promise<void>
+  }
+  balanceSummary: {
+    /** Verify the summary buckets against the ledger (read-only; Missing/Extra/Mismatch). */
+    verify(): Promise<BalanceSummaryVerifyDto>
+    /** Fully rebuild the current tenant's summary buckets from the ledger. */
+    rebuild(): Promise<BalanceSummaryRebuildDto>
   }
 }
 
@@ -337,7 +530,15 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       payments: section as never,
       transfers: section as never,
       reconciliations: section as never,
+      revaluations: section as never,
       settlements: section as never,
+      bankAccounts: section as never,
+      partyBankAccounts: section as never,
+      bankFeed: section as never,
+      checks: section as never,
+      eftBatches: section as never,
+      receipts: section as never,
+      balanceSummary: section as never,
     }
   }
 
@@ -376,7 +577,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       update: async (id: string, data: TUpdate) => unwrap<TDto>((await api.update(id, data)) as never),
       delete: async (ids: string[]) => {
         for (const id of ids) {
-          unwrap<void>((await api.delete(id)) as never)
+          ensureOk((await api.delete(id)) as never)
         }
       },
     }
@@ -409,7 +610,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       createDraft: async (data) => unwrap<TDto>((await api.createDraft(data)) as never),
       updateDraft: async (id, data) => unwrap<TDto>((await api.updateDraft(id, data)) as never),
       deleteDraft: async (id) => {
-        unwrap<void>((await api.deleteDraft(id)) as never)
+        ensureOk((await api.deleteDraft(id)) as never)
       },
       post: async (id) => unwrap<TDto>((await api.post(id)) as never),
       voidDoc: async (id) => unwrap<TDto>((await api.void(id)) as never),
@@ -435,11 +636,15 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       },
       tree: async (includeInactive = false) =>
         unwrap<AccountTreeDto[]>(await accountApi.getTree(includeInactive)) ?? [],
+      balances: async (accountIds, asOf) =>
+        accountIds.length === 0
+          ? []
+          : unwrap<AccountBalanceDto[]>(await accountApi.getBalances({ accountIds, asOf: asOf ?? null })) ?? [],
       create: async (data) => unwrap<AccountDto>(await accountApi.create(data)),
       update: async (id, data) => unwrap<AccountDto>(await accountApi.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) {
-          unwrap<void>(await accountApi.delete(id))
+          ensureOk(await accountApi.delete(id))
         }
       },
       seedDefault: async () => unwrap<number>(await accountApi.seedDefault()),
@@ -465,7 +670,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       createDraft: async (data) => unwrap<JournalEntryDto>(await journalApi.createDraft(data)),
       updateDraft: async (id, data) => unwrap<JournalEntryDto>(await journalApi.updateDraft(id, data)),
       deleteDraft: async (id) => {
-        unwrap<void>(await journalApi.deleteDraft(id))
+        ensureOk(await journalApi.deleteDraft(id))
       },
       post: async (id) => unwrap<JournalEntryDto>(await journalApi.post(id)),
       reverse: async (id, data) => unwrap<JournalEntryDto>(await journalApi.reverse(id, data)),
@@ -487,7 +692,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       upsert: async (data) => unwrap<ExchangeRateDto>(await rateApi.upsert(data)),
       delete: async (ids) => {
         for (const id of ids) {
-          unwrap<void>(await rateApi.delete(id))
+          ensureOk(await rateApi.delete(id))
         }
       },
       refresh: async () => unwrap<number>(await rateApi.refresh()),
@@ -497,14 +702,14 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       list: async () => unwrap<FiscalYearDto[]>(await fiscalApi.getList()) ?? [],
       create: async (data) => unwrap<FiscalYearDto>(await fiscalApi.create(data)),
       close: async (id) => {
-        unwrap<void>(await fiscalApi.close(id))
+        ensureOk(await fiscalApi.close(id))
       },
       reopen: async (id) => {
-        unwrap<void>(await fiscalApi.reopen(id))
+        ensureOk(await fiscalApi.reopen(id))
       },
       delete: async (ids) => {
         for (const id of ids) {
-          unwrap<void>(await fiscalApi.delete(id))
+          ensureOk(await fiscalApi.delete(id))
         }
       },
     },
@@ -549,19 +754,19 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       createAgency: async (data) => unwrap<TaxAgencyDto>(await taxApi.createAgency(data)),
       updateAgency: async (id, data) => unwrap<TaxAgencyDto>(await taxApi.updateAgency(id, data)),
       deleteAgency: async (id) => {
-        unwrap<void>(await taxApi.deleteAgency(id))
+        ensureOk(await taxApi.deleteAgency(id))
       },
       rates: async (agencyId) => unwrap<TaxRateDto[]>(await taxApi.getRates(agencyId)) ?? [],
       createRate: async (data) => unwrap<TaxRateDto>(await taxApi.createRate(data)),
       updateRate: async (id, data) => unwrap<TaxRateDto>(await taxApi.updateRate(id, data)),
       deleteRate: async (id) => {
-        unwrap<void>(await taxApi.deleteRate(id))
+        ensureOk(await taxApi.deleteRate(id))
       },
       codes: async () => unwrap<TaxCodeDto[]>(await taxApi.getCodes()) ?? [],
       createCode: async (data) => unwrap<TaxCodeDto>(await taxApi.createCode(data)),
       updateCode: async (id, data) => unwrap<TaxCodeDto>(await taxApi.updateCode(id, data)),
       deleteCode: async (id) => {
-        unwrap<void>(await taxApi.deleteCode(id))
+        ensureOk(await taxApi.deleteCode(id))
       },
     },
 
@@ -590,12 +795,20 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         create: async (data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.create(data)),
         update: async (id: string, data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.update(id, data)),
         delete: async (id: string) => {
-          unwrap<void>(await api.delete(id))
+          ensureOk(await api.delete(id))
         },
         worksheet: async (id: string) => unwrap<ReconciliationWorksheetDto>(await api.getWorksheet(id)),
         setLines: async (id: string, journalLineIds: string[]) =>
           unwrap<ReconciliationWorksheetDto>(await api.setLines(id, { journalLineIds })),
         complete: async (id: string) => unwrap<ReconciliationDto>(await api.complete(id)),
+      }
+    })(),
+
+    revaluations: (() => {
+      const api = useAdminFinanceRevaluationApi(client)
+      return {
+        preview: async (data: RunRevaluationDto) => unwrap<RevaluationPreviewDto>(await api.preview(data)),
+        run: async (data: RunRevaluationDto) => unwrap<RevaluationPreviewDto>(await api.run(data)),
       }
     })(),
 
@@ -606,9 +819,187 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         unwrap<OpenDocumentDto[]>(await settlementApi.getOpenDocuments(partyType, partyId)) ?? [],
       apply: async (data) => unwrap<PaymentApplicationDto[]>(await settlementApi.apply(data)),
       unapply: async (applicationId) => {
-        unwrap<void>(await settlementApi.unapply(applicationId))
+        ensureOk(await settlementApi.unapply(applicationId))
       },
       pay: async (data) => unwrap<BatchPaymentResultDto>(await settlementApi.pay(data)),
     },
+
+    bankAccounts: (() => {
+      const api = useAdminFinanceBankAccountApi(client)
+      return {
+        capabilities: async () =>
+          unwrap<BankAccountCapabilitiesDto>(await api.getCapabilities()),
+        fetch: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<BankAccountDto>>(
+            await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              keyword: query.searchText || undefined,
+              accountId: (filters.accountId as string | undefined) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        getById: async (id: string) => unwrap<BankAccountDto | null>(await api.get(id)),
+        create: async (data: CoreCreateBankAccountDto) => unwrap<BankAccountDto>(await api.create(data)),
+        update: async (id: string, data: CoreUpdateBankAccountDto) => unwrap<BankAccountDto>(await api.update(id, data)),
+        setNextCheckNumber: async (id: string, nextCheckNumber: number) =>
+          unwrap<BankAccountDto>(await api.setNextCheckNumber(id, { nextCheckNumber })),
+        delete: async (ids: string[]) => {
+          for (const id of ids) ensureOk(await api.delete(id))
+        },
+      }
+    })(),
+
+    partyBankAccounts: (() => {
+      const api = useAdminFinancePartyBankAccountApi(client)
+      return {
+        byParty: async (partyType, partyId) =>
+          unwrap<PartyBankAccountDto[]>(await api.getByParty(partyType, partyId)) ?? [],
+        save: async (data: CoreSavePartyBankAccountDto) => unwrap<PartyBankAccountDto>(await api.create(data)),
+        update: async (id: string, data: CoreSavePartyBankAccountDto) => unwrap<PartyBankAccountDto>(await api.update(id, data)),
+        setDefault: async (id: string) => unwrap<PartyBankAccountDto>(await api.setDefault(id)),
+        delete: async (id: string) => {
+          ensureOk(await api.delete(id))
+        },
+      }
+    })(),
+
+    bankFeed: (() => {
+      const api = useAdminFinanceBankFeedApi(client)
+      return {
+        transactions: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<BankTransactionDto>>(
+            await api.getTransactions({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              keyword: query.searchText || undefined,
+              accountId: (filters.accountId as string | undefined) ?? undefined,
+              importBatchId: (filters.importBatchId as string | undefined) ?? undefined,
+              status: (filters.status as never) ?? undefined,
+              dateFrom: (filters.dateFrom as string | undefined) ?? undefined,
+              dateTo: (filters.dateTo as string | undefined) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        import: async (accountId, source, file, mapping) =>
+          unwrap<BankImportResultDto>(await api.import(accountId, source, file, mapping)),
+        pull: async (accountId) => unwrap<BankImportResultDto>(await api.pull({ accountId })),
+        suggest: async (accountId) => unwrap<BankSuggestResultDto>(await api.suggest(accountId)),
+        candidates: async (transactionId) =>
+          unwrap<BankMatchCandidateDto[]>(await api.getCandidates(transactionId)) ?? [],
+        confirm: async (transactionId, data) => unwrap<BankTransactionDto>(await api.confirm(transactionId, data)),
+        unmatch: async (transactionId) => unwrap<BankTransactionDto>(await api.unmatch(transactionId)),
+        exclude: async (transactionId) => unwrap<BankTransactionDto>(await api.exclude(transactionId)),
+        restore: async (transactionId) => unwrap<BankTransactionDto>(await api.restore(transactionId)),
+        createDocument: async (transactionId, data) =>
+          unwrap<BankDocumentResultDto>(await api.createDocument(transactionId, data)),
+        batches: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<BankImportBatchDto>>(
+            await api.getBatches({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              accountId: (filters.accountId as string | undefined) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        deleteBatch: async (id: string) => {
+          ensureOk(await api.deleteBatch(id))
+        },
+      }
+    })(),
+
+    checks: (() => {
+      const api = useAdminFinanceCheckApi(client)
+      return {
+        queue: async (bankAccountId?: string) =>
+          unwrap<CheckQueueItemDto[]>(await api.getQueue(bankAccountId)) ?? [],
+        fetch: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<BankCheckDto>>(
+            await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              keyword: query.searchText || undefined,
+              bankAccountId: (filters.bankAccountId as string | undefined) ?? undefined,
+              status: (filters.status as never) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        print: async (data: CorePrintChecksDto) => unwrap<Blob>(await api.print(data)),
+        register: async (data: CoreRegisterManualCheckDto) => unwrap<BankCheckDto>(await api.register(data)),
+        reprint: async (id: string) => unwrap<Blob>(await api.reprint(id)),
+        voidCheck: async (id: string, data: CoreVoidCheckDto) => unwrap<BankCheckDto>(await api.void(id, data)),
+        spoil: async (data: CoreSpoilCheckDto) => unwrap<BankCheckDto>(await api.spoil(data)),
+        calibration: async (bankAccountId: string) => unwrap<Blob>(await api.calibration(bankAccountId)),
+        exportPositivePay: async (bankAccountId: string, from: string, to: string) =>
+          unwrap<Blob>(await api.exportPositivePay(bankAccountId, from, to)),
+      }
+    })(),
+
+    eftBatches: (() => {
+      const api = useAdminFinanceEftBatchApi(client)
+      return {
+        queue: async () => unwrap<EftQueueItemDto[]>(await api.getQueue()) ?? [],
+        fetch: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<EftBatchDto>>(
+            await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              bankAccountId: (filters.bankAccountId as string | undefined) ?? undefined,
+              status: (filters.status as never) ?? undefined,
+              format: (filters.format as never) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        getById: async (id: string) => unwrap<EftBatchDto | null>(await api.get(id)),
+        create: async (data: CoreCreateEftBatchDto) => unwrap<EftBatchDto>(await api.create(data)),
+        generate: async (id: string) => unwrap<EftBatchDto>(await api.generate(id)),
+        voidBatch: async (id: string, data: CoreVoidEftBatchDto) => unwrap<EftBatchDto>(await api.void(id, data)),
+        download: async (id: string) => unwrap<Blob>(await api.download(id)),
+      }
+    })(),
+
+    receipts: (() => {
+      const api = useAdminFinanceReceiptApi(client)
+      return {
+        fetch: async (query: FinancePagedQuery) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<ReceiptDto>>(
+            await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              keyword: query.searchText || undefined,
+              status: (filters.status as never) ?? undefined,
+            } as never),
+          )
+          return toPaged(result, query)
+        },
+        getById: async (id: string) => unwrap<ReceiptDto | null>(await api.get(id)),
+        create: async (data: CoreCreateReceiptDto) => unwrap<ReceiptDto>(await api.create(data)),
+        extract: async (id: string) => unwrap<ReceiptDto>(await api.extract(id)),
+        update: async (id: string, data: CoreUpdateReceiptExtractionDto) => unwrap<ReceiptDto>(await api.update(id, data)),
+        convert: async (id: string, data: CoreConvertReceiptDto) => unwrap<ReceiptConvertResultDto>(await api.convert(id, data)),
+        delete: async (id: string) => {
+          ensureOk(await api.delete(id))
+        },
+      }
+    })(),
+
+    balanceSummary: (() => {
+      const api = useAdminFinanceBalanceSummaryApi(client)
+      return {
+        verify: async () => unwrap<BalanceSummaryVerifyDto>(await api.verify()),
+        rebuild: async () => unwrap<BalanceSummaryRebuildDto>(await api.rebuild()),
+      }
+    })(),
   }
 }

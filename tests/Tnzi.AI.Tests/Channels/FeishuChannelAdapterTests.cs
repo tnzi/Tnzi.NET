@@ -219,7 +219,7 @@ public class FeishuChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersFeishu()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");
+        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("FeishuChannelAdapter");
         source.ShouldContain("options.Feishu.Enabled");
     }

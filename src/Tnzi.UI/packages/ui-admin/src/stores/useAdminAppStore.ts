@@ -38,8 +38,13 @@ export const useAdminAppStore = defineStore('admin-app', () => {
    *  - Con: on a hard reload, the very first frame of the sidebar / tabs /
    *    breadcrumb sees an empty override map and humanises host-app route
    *    titles to English until `extendLocaleMessages` runs. Host apps MUST
-   *    call it synchronously between `app.use(pinia)` and `app.mount('#app')`
+   *    call it synchronously between `install()` and `app.mount('#app')`
    *    to keep that window down to one render frame — i.e. invisible.
+   *    ⚠️ AFTER `install()`, never before: install() registers
+   *    pinia-plugin-persistedstate, and persistence only attaches to stores
+   *    created after that registration — touching this store earlier
+   *    silently disables persistence for the WHOLE admin-app store
+   *    (sider collapse / locale / ops view stop surviving reloads).
    */
   const messageOverrides = ref<{ en: Record<string, unknown>; 'zh-cn': Record<string, unknown> }>({
     en: {},
@@ -52,6 +57,17 @@ export const useAdminAppStore = defineStore('admin-app', () => {
    * Mirrors soybean-admin's `appStore.mixSiderFixed`.
    */
   const mixSiderFixed = ref(false)
+  /**
+   * Sidebar toggle: show or hide the FRAMEWORK BUILT-IN admin menus (the
+   * route groups shipped by `defaultAdminRoutes`, stamped `meta.builtIn`).
+   * OFF leaves only the consumer app's own menus plus neutral built-ins
+   * (the landing dashboard). DISPLAY ONLY — navigation guards and deep
+   * links are untouched, so hidden pages stay reachable by URL (no lockout
+   * path). Default ON. Only consumed when the signed-in user is a super
+   * admin (the toggle renders super-admin-only); harmless residue for
+   * everyone else.
+   */
+  const showBuiltInMenus = ref(true)
 
   // Saved desktop config for mobile restoration
   const desktopSiderCollapseSnapshot = ref<boolean | null>(null)
@@ -122,6 +138,13 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     mixSiderFixed.value = v
   }
 
+  function toggleBuiltInMenus(): void {
+    showBuiltInMenus.value = !showBuiltInMenus.value
+  }
+  function setShowBuiltInMenus(v: boolean): void {
+    showBuiltInMenus.value = v
+  }
+
   /**
    * Register additional locale messages on top of the bundled dictionaries.
    * Pass partial trees keyed by locale code; both locales are optional so
@@ -149,6 +172,7 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     fullContent,
     reloadFlag,
     mixSiderFixed,
+    showBuiltInMenus,
     messageOverrides,
     isMobile,
     isTablet,
@@ -160,12 +184,14 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     reloadPage,
     toggleMixSiderFixed,
     setMixSiderFixed,
+    toggleBuiltInMenus,
+    setShowBuiltInMenus,
     extendLocaleMessages,
   }
 }, {
   persist: {
     key: 'tnzi-admin-app',
-    pick: ['siderCollapse', 'locale', 'mixSiderFixed'],
+    pick: ['siderCollapse', 'locale', 'mixSiderFixed', 'showBuiltInMenus'],
   },
 })
 

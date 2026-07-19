@@ -373,7 +373,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersDingtalk()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");
+        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("DingtalkChannelAdapter");
         source.ShouldContain("options.Dingtalk.Enabled");
     }

@@ -14,7 +14,7 @@ export {
   demoTableActions,
   demoBasicForm,
   demoBasicFormRules,
-  demoDynamicFormFields,
+  demoSchemaFormItems,
   demoSearchForm,
   demoUsers,
   demoStatCards,

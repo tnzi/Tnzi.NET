@@ -174,7 +174,7 @@ import type {
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminAgentApi>[0]
@@ -504,7 +504,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     updateMemory: async (id, memoryId, data) =>
       unwrap<AgentMemoryDto>(await agentApi.updateMemory(String(id), String(memoryId), data)),
     deleteMemory: async (id, memoryId) => {
-      await agentApi.deleteMemory(String(id), String(memoryId))
+      ensureOk(await agentApi.deleteMemory(String(id), String(memoryId)))
     },
   }
 
@@ -522,7 +522,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         title: (data as { title?: string }).title ?? '',
       })),
     delete: async (ids) => {
-      for (const id of ids) await threadApi.delete(String(id))
+      for (const id of ids) ensureOk(await threadApi.delete(String(id)))
     },
     getDetail: async (id, messageLimit) =>
       unwrap<AgentThreadDetailDto>(await threadApi.getDetail(String(id), messageLimit)),
@@ -539,7 +539,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         )),
       ),
     cancel: async (id: string) => {
-      await agentRunApi.cancel(id)
+      ensureOk(await agentRunApi.cancel(id))
     },
     getTraces: async (id: string) => {
       const items = unwrap<AgentRunTraceDto[] | undefined>(await agentRunApi.getRunTraces(id))
@@ -561,7 +561,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     update: async (id: string, data: UpdateWorkflowDefinitionDto) =>
       unwrap<WorkflowDefinitionDto>(await workflowApi.update(String(id), data)),
     delete: async (ids: string[]) => {
-      await workflowApi.batchDelete(ids.map(String))
+      ensureOk(await workflowApi.batchDelete(ids.map(String)))
     },
     getById: async (id: string) =>
       unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
@@ -571,11 +571,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     // batchEnable returns affected-row count; we re-fetch the definition so the contract
     // (Promise<WorkflowDefinitionDto>) is honoured for callers that want the updated entity.
     publish: async (id: string): Promise<WorkflowDefinitionDto> => {
-      await workflowApi.batchEnable([String(id)])
+      ensureOk(await workflowApi.batchEnable([String(id)]))
       return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
     },
     unpublish: async (id: string): Promise<WorkflowDefinitionDto> => {
-      await workflowApi.batchDisable([String(id)])
+      ensureOk(await workflowApi.batchDisable([String(id)]))
       return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
     },
     run: async (id: string, input: string, userId?: string) => {
@@ -616,11 +616,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrap<WorkflowExecutionResultDto>(await workflowApi.resumeExecution(executionId)),
     approveStep: async (executionId: string, stepId: string, comment?: string) => {
       const body: WorkflowStepApprovalDto | undefined = comment ? { feedback: comment } : undefined
-      await workflowApi.approveStep(executionId, stepId, body)
+      ensureOk(await workflowApi.approveStep(executionId, stepId, body))
     },
     rejectStep: async (executionId: string, stepId: string, reason: string) => {
       const body: WorkflowStepApprovalDto = { feedback: reason }
-      await workflowApi.rejectStep(executionId, stepId, body)
+      ensureOk(await workflowApi.rejectStep(executionId, stepId, body))
     },
   }
 
@@ -641,14 +641,14 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     update: async (id: string, data: UpdateSkillDto) =>
       unwrap<SkillSummaryDto>(await skillApi.update(String(id), data)),
     delete: async (ids: string[]) => {
-      await skillApi.batchDelete(ids.map(String))
+      ensureOk(await skillApi.batchDelete(ids.map(String)))
     },
     activate: async (id: string) => {
       // Admin "activate" maps to batchEnable on a single id.
-      await skillApi.batchEnable([String(id)])
+      ensureOk(await skillApi.batchEnable([String(id)]))
     },
     deactivate: async (id: string) => {
-      await skillApi.batchDisable([String(id)])
+      ensureOk(await skillApi.batchDisable([String(id)]))
     },
     getBySlug: async (slug: string) => unwrap<SkillDetailDto>(await skillApi.getBySlug(slug)),
     search: async (query: string, maxResults?: number) => {
@@ -678,7 +678,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     update: async (id, data) =>
       unwrap<SkillCategoryDto>(await skillCategoryApi!.update(String(id), data)),
     delete: async (id) => {
-      await skillCategoryApi!.delete(String(id))
+      ensureOk(await skillCategoryApi!.delete(String(id)))
     },
     getSkills: async (categoryId) => {
       const items = unwrap<SkillSummaryDto[] | undefined>(
@@ -704,7 +704,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     update: async (id: string, data: UpdateProviderDto): Promise<ProviderDto> =>
       unwrap<ProviderDto>(await providerApi.update(String(id), data)),
     delete: async (ids: string[]): Promise<void> => {
-      for (const id of ids) await providerApi.delete(String(id))
+      for (const id of ids) ensureOk(await providerApi.delete(String(id)))
     },
     test: async (id: string): Promise<{ ok: boolean; latency: number; error?: string }> => {
       const result = unwrap<ProviderTestResultDto>(await providerApi.test(String(id)))
@@ -845,7 +845,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     create: async (data) => unwrap<KnowledgeBaseDto>(await kbApi.create(data)),
     update: async (id, data) => unwrap<KnowledgeBaseDto>(await kbApi.update(String(id), data)),
     delete: async (ids) => {
-      for (const id of ids) await kbApi.delete(String(id))
+      for (const id of ids) ensureOk(await kbApi.delete(String(id)))
     },
     getById: async (id) => unwrap<KnowledgeBaseDto>(await kbApi.getById(String(id))),
     reindex: async (id) => unwrap<ReindexResultDto>(await kbApi.reindex(String(id))),
@@ -856,7 +856,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     uploadDocument: async (kbId, file) =>
       unwrap<DocumentUploadResultDto>(await kbApi.uploadDocument(String(kbId), file)),
     deleteDocument: async (kbId, docId) => {
-      await kbApi.deleteDocument(String(kbId), String(docId))
+      ensureOk(await kbApi.deleteDocument(String(kbId), String(docId)))
     },
     searchTest: async (kbId, data) => {
       const items = unwrap<SearchResultDto[] | undefined>(await kbApi.searchTest(String(kbId), data))
@@ -887,7 +887,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     update: async (id: string, data: UpdateMcpServerRegistrationDto): Promise<McpServerRow> =>
       unwrap<McpServerRegistrationDto>(await mcpApi.update(String(id), data)),
     delete: async (ids: string[]): Promise<void> => {
-      for (const id of ids) await mcpApi.delete(String(id))
+      for (const id of ids) ensureOk(await mcpApi.delete(String(id)))
     },
     test: async (id: string): Promise<{ ok: boolean; latency: number; error?: string }> => {
       const result = unwrap<McpServerTestResultDto>(await mcpApi.test(String(id)))
@@ -911,10 +911,10 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       return Array.isArray(items) ? items : []
     },
     exposeAgent: async (agentId, options) => {
-      await mcpApi.exposeAgent(String(agentId), options)
+      ensureOk(await mcpApi.exposeAgent(String(agentId), options))
     },
     removeAgent: async (agentId) => {
-      await mcpApi.removeAgent(String(agentId))
+      ensureOk(await mcpApi.removeAgent(String(agentId)))
     },
   }
 

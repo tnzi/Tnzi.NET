@@ -23,6 +23,27 @@ public class AuthorizationOptionsValidator : OptionsValidatorBase<AuthorizationO
         // 超管角色列表形态校验。空 List 是合法（= 不启用超管短路），但若
         // 用户*提供*了 List 又写了垃圾值则提前 fail。
         ValidateRoleList(options.SuperAdminRoles, "Authorization.SuperAdminRoles", errors);
+        ValidateRoleList(options.BootstrapSuperAdminUsers, "Authorization.BootstrapSuperAdminUsers", errors);
+
+        // DisableSuperAdminBypass 与超管相关配置互斥——同时出现说明部署意图
+        // 自相矛盾（validator 跑在 PostConfigure 之后，禁用时约定默认不会填充，
+        // 此处看到的非空列表一定来自显式配置）。fail fast 优于静默择一。
+        if (options.DisableSuperAdminBypass)
+        {
+            if (options.SuperAdminRoles.Count > 0)
+            {
+                errors.Add(
+                    "Authorization.DisableSuperAdminBypass is true but SuperAdminRoles is also configured; " +
+                    "remove one of them (a disabled bypass with configured super-admin roles is contradictory).");
+            }
+
+            if (options.BootstrapSuperAdminUsers.Count > 0)
+            {
+                errors.Add(
+                    "Authorization.DisableSuperAdminBypass is true but BootstrapSuperAdminUsers is also configured; " +
+                    "bootstrap assigns users to a super-admin role, which cannot exist while the bypass is disabled.");
+            }
+        }
 
         // PermissionCategoryOverrides 键形态校验（值是枚举，绑定阶段已保证合法）。
         if (options.PermissionCategoryOverrides is { Count: > 0 })

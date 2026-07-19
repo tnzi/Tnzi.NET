@@ -29,7 +29,7 @@ import {
   type SubscriptionQueryDto,
 } from '@tnzi/core/services/payment'
 import type { CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPaymentApi>[0]
 
@@ -148,7 +148,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
   const subscriptions: PaymentSubscriptionContract = {
     fetch: fetchSubscriptions,
     cancelAtPeriodEnd: async (id: string): Promise<void> => {
-      await sa.cancel(id, { reason: undefined, immediate: false })
+      ensureOk(await sa.cancel(id, { reason: undefined, immediate: false }))
     },
   }
 
@@ -168,10 +168,10 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
   const refunds: PaymentRefundContract = {
     fetch: fetchRefunds,
     approve: async (id: string): Promise<void> => {
-      await ra.approve(id, { approved: true })
+      ensureOk(await ra.approve(id, { approved: true }))
     },
     reject: async (id: string, reason: string): Promise<void> => {
-      await ra.approve(id, { approved: false, remark: reason })
+      ensureOk(await ra.approve(id, { approved: false, remark: reason }))
     },
   }
 

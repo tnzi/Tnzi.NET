@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow;
+namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
 /// 工作流引擎 — 统一协调器，基于 WorkflowGraph 拓扑排序 + 就绪队列模型执行工作流

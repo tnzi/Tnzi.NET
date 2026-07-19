@@ -5,7 +5,7 @@ using Tnzi.Modules;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// C10: RagModule.OnApplicationInitializationAsync 启动探测 — 验证嵌入提供商不可解析时 LogWarning（不 throw），
+/// C10: AIRagModule.OnApplicationInitializationAsync 启动探测 — 验证嵌入提供商不可解析时 LogWarning（不 throw），
 /// 未配置 DefaultEmbeddingProvider 时静默跳过。
 /// </summary>
 public class RagEmbeddingStartupGuardTests
@@ -20,7 +20,7 @@ public class RagEmbeddingStartupGuardTests
 
         var (logger, context) = BuildContext(factory.Object, defaultEmbeddingProvider: "deepseek");
 
-        var module = new RagModule();
+        var module = new AIRagModule();
         await Should.NotThrowAsync(() => module.OnApplicationInitializationAsync(context));
 
         logger.WarningCount.ShouldBe(1);
@@ -35,7 +35,7 @@ public class RagEmbeddingStartupGuardTests
 
         var (logger, context) = BuildContext(factory.Object, defaultEmbeddingProvider: "deepseek");
 
-        var module = new RagModule();
+        var module = new AIRagModule();
         await Should.NotThrowAsync(() => module.OnApplicationInitializationAsync(context));
 
         logger.WarningCount.ShouldBe(1);
@@ -49,7 +49,7 @@ public class RagEmbeddingStartupGuardTests
 
         var (logger, context) = BuildContext(factory.Object, defaultEmbeddingProvider: null);
 
-        var module = new RagModule();
+        var module = new AIRagModule();
         await Should.NotThrowAsync(() => module.OnApplicationInitializationAsync(context));
 
         logger.WarningCount.ShouldBe(0);
@@ -67,19 +67,19 @@ public class RagEmbeddingStartupGuardTests
 
         var (logger, context) = BuildContext(factory.Object, defaultEmbeddingProvider: "openai");
 
-        var module = new RagModule();
+        var module = new AIRagModule();
         await Should.NotThrowAsync(() => module.OnApplicationInitializationAsync(context));
 
         logger.WarningCount.ShouldBe(0);
     }
 
-    private static (CapturingLogger<RagModule> Logger, ApplicationInitializationContext Context) BuildContext(
+    private static (CapturingLogger<AIRagModule> Logger, ApplicationInitializationContext Context) BuildContext(
         IChatClientFactory factory, string? defaultEmbeddingProvider)
     {
         var services = new ServiceCollection();
 
-        var logger = new CapturingLogger<RagModule>();
-        services.AddSingleton<ILogger<RagModule>>(logger);
+        var logger = new CapturingLogger<AIRagModule>();
+        services.AddSingleton<ILogger<AIRagModule>>(logger);
         services.AddSingleton(factory);
         services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new AIRagOptions
         {

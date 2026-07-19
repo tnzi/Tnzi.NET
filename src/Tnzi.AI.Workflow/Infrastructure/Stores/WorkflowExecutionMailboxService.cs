@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Infrastructure.Stores;
+namespace Tnzi.AI.Workflow.Infrastructure.Stores;
 
 /// <summary>
 /// 基于 WorkflowExecution 的执行邮箱

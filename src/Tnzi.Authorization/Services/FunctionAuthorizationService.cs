@@ -61,6 +61,44 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
+    /// Forward lookup of every super-admin user id — the union of members across
+    /// all roles named in <c>Authorization:SuperAdminRoles</c>. Symmetric with
+    /// <see cref="IsSuperAdminAsync"/> (the reverse "is this one user a super admin").
+    /// Callers use it to strip super admins out of business-facing user listings
+    /// (chat directory, group-member candidates, broadcast audience). Returns an
+    /// empty set when super admins are not configured or the role / user-role
+    /// services are unavailable (no super-admin concept → hide no one).
+    /// </summary>
+    public async Task<IReadOnlySet<Guid>> GetSuperAdminUserIdsAsync()
+    {
+        var superRoles = _options?.Value.SuperAdminRoles;
+        if (superRoles is not { Count: > 0 } || _userRoleService == null || _roleRepository == null)
+            return new HashSet<Guid>();
+
+        // Match on NormalizedName (upper-cased) — Identity keeps it in sync and the
+        // seeder writes it upper-cased, so this is the case-insensitive equivalent
+        // of the OrdinalIgnoreCase name match in IsSuperAdminAsync, translated to a
+        // single SQL IN. Use the repository ToListAsync(predicate) overload (not
+        // IQueryable+EF ToListAsync) so the set is testable without a live provider.
+        var normalized = superRoles
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.ToUpperInvariant())
+            .ToHashSet();
+        if (normalized.Count == 0) return new HashSet<Guid>();
+
+        var superRoleRows = await _roleRepository.ToListAsync(
+            r => r.NormalizedName != null && normalized.Contains(r.NormalizedName));
+
+        var result = new HashSet<Guid>();
+        foreach (var roleId in superRoleRows.Select(r => r.Id))
+        {
+            var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
+            foreach (var uid in userIds) result.Add(uid);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// 委托支配判定（权限集包含模型）：超管支配一切角色；其余授权者仅支配
     /// "显式权限集 ⊆ 自己有效权限集" 的角色，且永远不能支配超管配置角色
     /// （超管角色通常零显式授权，否则会被任何人平凡支配）。

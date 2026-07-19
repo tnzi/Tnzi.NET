@@ -3,6 +3,7 @@
     :show="show"
     :z-index="zIndex"
     :mask-closable="maskClosable"
+    :auto-focus="false"
     @update:show="emit('update:show', $event)"
   >
     <div class="t-chat-dialog" :style="{ width }">
@@ -57,6 +58,9 @@ function close() { emit('update:show', false) }
   display: flex;
   flex-direction: column;
   max-width: 92vw;
+  /* Cap the height so a short phone (or the keyboard eating half the screen)
+     never pushes the header/footer off-view; the body scrolls instead. */
+  max-height: 90dvh;
   background: var(--chat-surface, #fff);
   border-radius: var(--tnzi-admin-radius-lg, 12px);
   box-shadow: var(--tnzi-shadow-drawer, 0 12px 48px rgba(0, 0, 0, 0.22));
@@ -107,6 +111,8 @@ function close() { emit('update:show', false) }
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  /* Scroll long content within the height-capped dialog. */
+  overflow-y: auto;
   padding: 12px 16px;
 }
 

@@ -5,6 +5,9 @@ namespace Tnzi.Finance.Services;
 /// </summary>
 public class FinancialReportService : ApplicationService, IFinancialReportService
 {
+    /// <summary>结构性 tie-out 校验容差（半分，吸收本位币舍入尾差；超出即聚合缺陷）。</summary>
+    private const decimal TieOutTolerance = 0.005m;
+
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
     private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
     private readonly IReadOnlyRepository<Invoice, Guid> _invoiceRepository;
@@ -12,6 +15,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     private readonly IReadOnlyRepository<Customer, Guid> _customerRepository;
     private readonly IReadOnlyRepository<Vendor, Guid> _vendorRepository;
     private readonly IReadOnlyRepository<TaxRate, Guid> _taxRateRepository;
+    private readonly IReadOnlyRepository<CreditMemo, Guid> _creditMemoRepository;
+    private readonly IReadOnlyRepository<PaymentEntry, Guid> _paymentRepository;
+    private readonly IReadOnlyRepository<PaymentApplication, Guid> _applicationRepository;
+    private readonly BalanceSummaryReader _reader;
     private readonly FinanceOptions _options;
 
     public FinancialReportService(
@@ -23,6 +30,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         IReadOnlyRepository<Customer, Guid> customerRepository,
         IReadOnlyRepository<Vendor, Guid> vendorRepository,
         IReadOnlyRepository<TaxRate, Guid> taxRateRepository,
+        IReadOnlyRepository<CreditMemo, Guid> creditMemoRepository,
+        IReadOnlyRepository<PaymentEntry, Guid> paymentRepository,
+        IReadOnlyRepository<PaymentApplication, Guid> applicationRepository,
+        BalanceSummaryReader reader,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
@@ -33,6 +44,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         _customerRepository = Check.NotNull(customerRepository);
         _vendorRepository = Check.NotNull(vendorRepository);
         _taxRateRepository = Check.NotNull(taxRateRepository);
+        _creditMemoRepository = Check.NotNull(creditMemoRepository);
+        _paymentRepository = Check.NotNull(paymentRepository);
+        _applicationRepository = Check.NotNull(applicationRepository);
+        _reader = Check.NotNull(reader);
         _options = Check.NotNull(options).Value;
     }
 
@@ -46,8 +61,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        var opening = await SumByAccountAsync(l => l.PostingDate < fromDate, cancellationToken);
-        var period = await SumByAccountAsync(l => l.PostingDate >= fromDate && l.PostingDate < toExclusive, cancellationToken);
+        var sums = await _reader.SumOpeningAndPeriodByAccountAsync(fromDate, toExclusive, cancellationToken);
 
         var accounts = await GetPostableAccountsAsync(cancellationToken);
 
@@ -60,12 +74,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
 
         foreach (var account in accounts)
         {
-            var hasOpening = opening.TryGetValue(account.Id, out var o);
-            var hasPeriod = period.TryGetValue(account.Id, out var p);
-            if (!hasOpening && !hasPeriod)
+            if (!sums.TryGetValue(account.Id, out var s))
                 continue;
 
-            var openingBalance = o.Debit - o.Credit;
+            var openingBalance = s.OpeningDebit - s.OpeningCredit;
             var row = new TrialBalanceRowDto
             {
                 AccountId = account.Id,
@@ -73,9 +85,9 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
                 Name = account.Name,
                 RootType = account.RootType,
                 OpeningBalance = openingBalance,
-                PeriodDebit = p.Debit,
-                PeriodCredit = p.Credit,
-                ClosingBalance = openingBalance + p.Debit - p.Credit
+                PeriodDebit = s.PeriodDebit,
+                PeriodCredit = s.PeriodCredit,
+                ClosingBalance = openingBalance + s.PeriodDebit - s.PeriodCredit
             };
 
             if (row.OpeningBalance == 0 && row.PeriodDebit == 0 && row.PeriodCredit == 0 && row.ClosingBalance == 0)
@@ -95,7 +107,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     {
         var toExclusive = asOf.ToUtcDate().AddDays(1);
 
-        var sums = await SumByAccountAsync(l => l.PostingDate < toExclusive, cancellationToken);
+        var sums = await _reader.SumByAccountAsync(null, toExclusive, cancellationToken);
         var accounts = await GetPostableAccountsAsync(cancellationToken);
 
         var report = new BalanceSheetReportDto
@@ -132,6 +144,13 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         report.TotalLiabilities = report.Liabilities.Sum(r => r.Balance);
         report.TotalEquity = report.Equity.Sum(r => r.Balance) + report.CurrentEarnings;
         report.BalanceCheck = report.TotalAssets - report.TotalLiabilities - report.TotalEquity;
+        // Structural tie-out: for a double-entry ledger the balance sheet must balance.
+        // A non-zero check is never a data condition, it is a report aggregation defect,
+        // so surface it server-side instead of only exposing a silent number in the DTO.
+        if (Math.Abs(report.BalanceCheck) > TieOutTolerance)
+            Logger.LogWarning(
+                "Balance sheet does not tie out as of {AsOf}: assets {Assets} - liabilities {Liabilities} - equity {Equity} = {Diff}.",
+                asOf, report.TotalAssets, report.TotalLiabilities, report.TotalEquity, report.BalanceCheck);
 
         return Ok(report);
     }
@@ -144,7 +163,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        var sums = await SumByAccountAsync(l => l.PostingDate >= fromDate && l.PostingDate < toExclusive, cancellationToken);
+        var sums = await _reader.SumByAccountAsync(fromDate, toExclusive, cancellationToken);
         var accounts = await GetPostableAccountsAsync(cancellationToken);
 
         var report = new ProfitAndLossReportDto
@@ -191,23 +210,13 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        // 期初/期间借贷四项聚合合并为单次往返（条件求和）
-        var sums = await PostedLines
-            .Where(l => l.AccountId == accountId && l.PostingDate < toExclusive)
-            .GroupBy(l => 1)
-            .Select(g => new
-            {
-                OpeningDebit = g.Sum(l => l.PostingDate < fromDate ? l.Debit : 0m),
-                OpeningCredit = g.Sum(l => l.PostingDate < fromDate ? l.Credit : 0m),
-                PeriodDebit = g.Sum(l => l.PostingDate >= fromDate ? l.Debit : 0m),
-                PeriodCredit = g.Sum(l => l.PostingDate >= fromDate ? l.Credit : 0m)
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+        // 期初/期间借贷四项聚合（读路径按开关走汇总桶或明细条件求和）；行明细始终走明细（行序依赖）
+        var sums = await _reader.SumOpeningAndPeriodForAccountAsync(accountId, fromDate, toExclusive, cancellationToken);
 
-        var openingDebit = sums?.OpeningDebit ?? 0m;
-        var openingCredit = sums?.OpeningCredit ?? 0m;
-        var periodDebit = sums?.PeriodDebit ?? 0m;
-        var periodCredit = sums?.PeriodCredit ?? 0m;
+        var openingDebit = sums.OpeningDebit;
+        var openingCredit = sums.OpeningCredit;
+        var periodDebit = sums.PeriodDebit;
+        var periodCredit = sums.PeriodCredit;
 
         var lines = await ProjectLedgerLines(OrderedPeriodLines(accountId, fromDate, toExclusive))
             .CreateAsync(paging.PageIndex, paging.PageSize, cancellationToken);
@@ -274,18 +283,6 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
             SourceId = l.JournalEntry.SourceId
         });
 
-    private async Task<Dictionary<Guid, (decimal Debit, decimal Credit)>> SumByAccountAsync(
-        Expression<Func<JournalLine, bool>> predicate, CancellationToken cancellationToken)
-    {
-        var sums = await PostedLines
-            .Where(predicate)
-            .GroupBy(l => l.AccountId)
-            .Select(g => new { AccountId = g.Key, Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) })
-            .ToListAsync(cancellationToken);
-
-        return sums.ToDictionary(s => s.AccountId, s => (s.Debit, s.Credit));
-    }
-
     private Task<List<Account>> GetPostableAccountsAsync(CancellationToken cancellationToken)
         => _accountRepository.AsNoTracking()
             .Where(a => !a.IsGroup)
@@ -308,38 +305,136 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         });
     }
 
+    // AR/AP 账龄的时点与 tie-out 铁律：
+    // ① 时点（point-in-time）——每单据的已核销额按 PaymentApplication.CreationTime <= asOf 重建，
+    //    而非读当前 AppliedTotal；故 asOf 之后才发生的核销/付清不会追溯抹掉历史账龄。
+    // ② tie-out——除未清发票/账单（正行），还纳入未核销收付款（预收/超收现金）与未核销贷项（客户信用）
+    //    作为负行；因每笔核销恰好把源(收付款/贷项)与目标(发票/账单)配平，账龄合计 = GL 控制科目余额
+    //    （审计首查的子账↔总账对账关系）。
+    // 局限：单据 as-of 判据用 DocDate（沿模块既有口径）；DocDate == 过账日 时与 GL 精确一致，
+    //    倒填过账或作废时点晚于 asOf 的边缘情形不追溯（罕见，RequireFiscalYearForPosting 默认 false）。
+
     public async Task<Result<AgingReportDto>> GetArAgingAsync(DateTime asOf, CancellationToken cancellationToken = default)
     {
         var asOfDate = asOf.ToUtcDate();
-        var open = await _invoiceRepository.AsNoTracking()
-            .Where(i => (i.Status == FinanceDocumentStatus.Posted || i.Status == FinanceDocumentStatus.PartiallyPaid) &&
-                        i.AppliedTotal < i.Total && i.DocDate <= asOfDate)
-            .Select(i => new OpenAgingItem(i.CustomerId, i.DueDate ?? i.DocDate, (i.Total - i.AppliedTotal) * i.ExchangeRate))
-            .ToListAsync(cancellationToken);
+        var appliedCutoff = asOfDate.AddDays(1); // 含 asOf 当日记账的核销
 
+        var appliedToInvoice = await AppliedByTargetAsync(SettlementDocType.Invoice, appliedCutoff, cancellationToken);
+        var (appliedByPayment, appliedByCreditMemo) = await AppliedBySourceAsync(appliedCutoff, cancellationToken);
+
+        var items = new List<OpenAgingItem>();
+
+        // 未清发票（正行）：本位币开口额 = (Total − 时点已核销) × 捕获汇率，按 DueDate 分桶
+        var invoices = await _invoiceRepository.AsNoTracking()
+            .Where(i => i.JournalEntryId != null && i.Status != FinanceDocumentStatus.Voided && i.DocDate <= asOfDate)
+            .Select(i => new { i.Id, i.CustomerId, Due = i.DueDate ?? i.DocDate, i.Total, i.ExchangeRate })
+            .ToListAsync(cancellationToken);
+        foreach (var inv in invoices)
+        {
+            var openTxn = inv.Total - appliedToInvoice.GetValueOrDefault(inv.Id);
+            if (openTxn <= 0) continue;
+            items.Add(new OpenAgingItem(inv.CustomerId, inv.Due, openTxn * inv.ExchangeRate));
+        }
+
+        // 未核销贷项（负行=客户信用，归 Current）
+        var creditMemos = await _creditMemoRepository.AsNoTracking()
+            .Where(c => c.JournalEntryId != null && c.Status != FinanceDocumentStatus.Voided && c.DocDate <= asOfDate)
+            .Select(c => new { c.Id, c.CustomerId, c.Total, c.ExchangeRate })
+            .ToListAsync(cancellationToken);
+        foreach (var cm in creditMemos)
+        {
+            var openTxn = cm.Total - appliedByCreditMemo.GetValueOrDefault(cm.Id);
+            if (openTxn <= 0) continue;
+            items.Add(new OpenAgingItem(cm.CustomerId, asOfDate, -openTxn * cm.ExchangeRate));
+        }
+
+        // 未核销收款（负行=预收/超收现金，归 Current）
+        var payments = await _paymentRepository.AsNoTracking()
+            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
+                     && p.Direction == PaymentDirection.Inbound && p.PartyType == FinancePartyType.Customer
+                     && p.DocDate <= asOfDate)
+            .Select(p => new { p.Id, p.PartyId, p.Amount, p.ExchangeRate })
+            .ToListAsync(cancellationToken);
+        foreach (var pay in payments)
+        {
+            var openTxn = pay.Amount - appliedByPayment.GetValueOrDefault(pay.Id);
+            if (openTxn <= 0) continue;
+            items.Add(new OpenAgingItem(pay.PartyId, asOfDate, -openTxn * pay.ExchangeRate));
+        }
+
+        var partyIds = items.Select(i => i.PartyId).Distinct().ToList();
         var names = await _customerRepository.AsNoTracking()
-            .Where(c => open.Select(o => o.PartyId).Contains(c.Id))
+            .Where(c => partyIds.Contains(c.Id))
             .Select(c => new { c.Id, c.Name })
             .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
 
-        return Ok(BuildAging(asOfDate, open, names));
+        return Ok(BuildAging(asOfDate, items, names));
     }
 
     public async Task<Result<AgingReportDto>> GetApAgingAsync(DateTime asOf, CancellationToken cancellationToken = default)
     {
         var asOfDate = asOf.ToUtcDate();
-        var open = await _billRepository.AsNoTracking()
-            .Where(b => (b.Status == FinanceDocumentStatus.Posted || b.Status == FinanceDocumentStatus.PartiallyPaid) &&
-                        b.AppliedTotal < b.Total && b.DocDate <= asOfDate)
-            .Select(b => new OpenAgingItem(b.VendorId, b.DueDate ?? b.DocDate, (b.Total - b.AppliedTotal) * b.ExchangeRate))
-            .ToListAsync(cancellationToken);
+        var appliedCutoff = asOfDate.AddDays(1);
 
+        var appliedToBill = await AppliedByTargetAsync(SettlementDocType.Bill, appliedCutoff, cancellationToken);
+        var (appliedByPayment, _) = await AppliedBySourceAsync(appliedCutoff, cancellationToken);
+
+        var items = new List<OpenAgingItem>();
+
+        // 未清账单（正行）
+        var bills = await _billRepository.AsNoTracking()
+            .Where(b => b.JournalEntryId != null && b.Status != FinanceDocumentStatus.Voided && b.DocDate <= asOfDate)
+            .Select(b => new { b.Id, b.VendorId, Due = b.DueDate ?? b.DocDate, b.Total, b.ExchangeRate })
+            .ToListAsync(cancellationToken);
+        foreach (var bill in bills)
+        {
+            var openTxn = bill.Total - appliedToBill.GetValueOrDefault(bill.Id);
+            if (openTxn <= 0) continue;
+            items.Add(new OpenAgingItem(bill.VendorId, bill.Due, openTxn * bill.ExchangeRate));
+        }
+
+        // 未核销付款（负行=预付/超付现金，归 Current）
+        var payments = await _paymentRepository.AsNoTracking()
+            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
+                     && p.Direction == PaymentDirection.Outbound && p.PartyType == FinancePartyType.Vendor
+                     && p.DocDate <= asOfDate)
+            .Select(p => new { p.Id, p.PartyId, p.Amount, p.ExchangeRate })
+            .ToListAsync(cancellationToken);
+        foreach (var pay in payments)
+        {
+            var openTxn = pay.Amount - appliedByPayment.GetValueOrDefault(pay.Id);
+            if (openTxn <= 0) continue;
+            items.Add(new OpenAgingItem(pay.PartyId, asOfDate, -openTxn * pay.ExchangeRate));
+        }
+
+        var partyIds = items.Select(i => i.PartyId).Distinct().ToList();
         var names = await _vendorRepository.AsNoTracking()
-            .Where(v => open.Select(o => o.PartyId).Contains(v.Id))
+            .Where(v => partyIds.Contains(v.Id))
             .Select(v => new { v.Id, v.Name })
             .ToDictionaryAsync(v => v.Id, v => v.Name, cancellationToken);
 
-        return Ok(BuildAging(asOfDate, open, names));
+        return Ok(BuildAging(asOfDate, items, names));
+    }
+
+    /// <summary>时点已核销（按目标单据聚合）：application 记账时刻严格早于 appliedCutoff（= asOf 次日零点）</summary>
+    private async Task<Dictionary<Guid, decimal>> AppliedByTargetAsync(SettlementDocType targetType, DateTime appliedCutoff, CancellationToken cancellationToken)
+        => await _applicationRepository.AsNoTracking()
+            .Where(a => a.TargetType == targetType && a.CreationTime < appliedCutoff)
+            .GroupBy(a => a.TargetId)
+            .Select(g => new { TargetId = g.Key, Applied = g.Sum(x => x.AppliedAmount) })
+            .ToDictionaryAsync(x => x.TargetId, x => x.Applied, cancellationToken);
+
+    /// <summary>时点已核销（按核销源聚合）：拆出收付款源与贷项源两张字典</summary>
+    private async Task<(Dictionary<Guid, decimal> ByPayment, Dictionary<Guid, decimal> ByCreditMemo)> AppliedBySourceAsync(DateTime appliedCutoff, CancellationToken cancellationToken)
+    {
+        var rows = await _applicationRepository.AsNoTracking()
+            .Where(a => a.CreationTime < appliedCutoff)
+            .GroupBy(a => new { a.SourceType, a.SourceId })
+            .Select(g => new { g.Key.SourceType, g.Key.SourceId, Applied = g.Sum(x => x.AppliedAmount) })
+            .ToListAsync(cancellationToken);
+        var byPayment = rows.Where(r => r.SourceType == SettlementDocType.PaymentEntry).ToDictionary(r => r.SourceId, r => r.Applied);
+        var byCreditMemo = rows.Where(r => r.SourceType == SettlementDocType.CreditMemo).ToDictionary(r => r.SourceId, r => r.Applied);
+        return (byPayment, byCreditMemo);
     }
 
     private sealed record OpenAgingItem(Guid PartyId, DateTime DueDate, decimal OutstandingBase);
@@ -456,19 +551,8 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        // 期初 + 期间条件求和合并为单次全账本扫描（与 GetGeneralLedgerAsync 的合并聚合同款）
-        var sums = await PostedLines
-            .Where(l => l.PostingDate < toExclusive)
-            .GroupBy(l => l.AccountId)
-            .Select(g => new
-            {
-                AccountId = g.Key,
-                OpeningDebit = g.Sum(l => l.PostingDate < fromDate ? l.Debit : 0m),
-                OpeningCredit = g.Sum(l => l.PostingDate < fromDate ? l.Credit : 0m),
-                PeriodDebit = g.Sum(l => l.PostingDate >= fromDate ? l.Debit : 0m),
-                PeriodCredit = g.Sum(l => l.PostingDate >= fromDate ? l.Credit : 0m)
-            })
-            .ToDictionaryAsync(x => x.AccountId, cancellationToken);
+        // 期初 + 期间借贷（读路径按开关走汇总桶或单次全账本条件求和）
+        var sums = await _reader.SumOpeningAndPeriodByAccountAsync(fromDate, toExclusive, cancellationToken);
         var accounts = await GetPostableAccountsAsync(cancellationToken);
 
         var report = new CashFlowReportDto
@@ -521,6 +605,12 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         report.NetCashFlow = report.TotalOperating + report.TotalInvesting + report.TotalFinancing + report.TotalUnclassified;
         report.ClosingCash = report.OpeningCash + report.CashMovement;
         report.CheckDifference = report.NetCashFlow - report.CashMovement;
+        // Structural tie-out (see GetBalanceSheetAsync): net cash flow must equal the
+        // movement in cash accounts. A non-zero difference is an aggregation defect.
+        if (Math.Abs(report.CheckDifference) > TieOutTolerance)
+            Logger.LogWarning(
+                "Cash flow statement does not tie out for {From}..{To}: net cash flow {Net} - cash movement {Movement} = {Diff}.",
+                from, to, report.NetCashFlow, report.CashMovement, report.CheckDifference);
 
         return Ok(report);
     }
@@ -555,13 +645,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        var openingSums = await PostedLines
-            .Where(l => l.AccountId == accountId && l.PostingDate < fromDate)
-            .GroupBy(l => 1)
-            .Select(g => new { Debit = g.Sum(l => l.Debit), Credit = g.Sum(l => l.Credit) })
-            .FirstOrDefaultAsync(cancellationToken);
+        // 期初余额走读路径（汇总桶或明细）；行明细全量始终读明细（运行余额行序依赖）
+        var openingSums = await _reader.SumOpeningAndPeriodForAccountAsync(accountId, fromDate, toExclusive, cancellationToken);
 
-        var openingBalance = (openingSums?.Debit ?? 0m) - (openingSums?.Credit ?? 0m);
+        var openingBalance = openingSums.OpeningDebit - openingSums.OpeningCredit;
 
         // 成功路径单次扫描（多取一行探测超限）；拒绝超限而非静默截断：
         // 截断的运行余额会误导对账。精确行数仅在拒绝路径补一次未排序计数

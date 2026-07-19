@@ -11,6 +11,8 @@ public class TaxCodeConfiguration : EntityTypeConfigurationBase<TaxCode, Guid>
 
         builder.Property(c => c.Name).HasMaxLength(128).IsRequired();
         builder.Property(c => c.Description).HasMaxLength(500);
+        // 默认可抵扣：存量税码（如加拿大 GST/HST）迁移后须保持进项抵扣，不能默认 false 而误路由到成本科目。
+        builder.Property(c => c.IsRecoverable).HasDefaultValue(true);
 
         if (multiTenancyEnabled)
         {

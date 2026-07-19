@@ -7,25 +7,31 @@ public class ConversationService : ApplicationService, IConversationService
     private readonly IRepository<Conversation, Guid> _conversationRepository;
     private readonly IRepository<ConversationMember, Guid> _memberRepository;
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
+    private readonly IRepository<MessageBlock, Guid> _messageBlockRepository;
     private readonly IChatContactService _contactService;
     private readonly IPresenceService _presence;
     private readonly IOptionsSnapshot<ChatOptions> _options;
+    private readonly IChatAccessService _access;
 
     public ConversationService(
         IServiceProvider serviceProvider,
         IRepository<Conversation, Guid> conversationRepository,
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
+        IRepository<MessageBlock, Guid> messageBlockRepository,
         IChatContactService contactService,
         IPresenceService presence,
-        IOptionsSnapshot<ChatOptions> options) : base(serviceProvider)
+        IOptionsSnapshot<ChatOptions> options,
+        IChatAccessService access) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
+        _messageBlockRepository = Check.NotNull(messageBlockRepository);
         _contactService = Check.NotNull(contactService);
         _presence = Check.NotNull(presence);
         _options = Check.NotNull(options);
+        _access = Check.NotNull(access);
     }
 
     internal static string DirectKeyFor(Guid a, Guid b) =>
@@ -107,16 +113,33 @@ public class ConversationService : ApplicationService, IConversationService
                 return Fail<ChatMessageDto>("File reference is required for media messages.", 400);
         }
 
+        var conv = await _conversationRepository.AsQueryable(withTracking: true)
+            .FirstOrDefaultAsync(c => c.Id == conversationId);
+        if (conv == null)
+            return Fail<ChatMessageDto>("Conversation not found.", 404);
+
+        // Active recipients (excluding me).
+        var others = await _memberRepository.AsQueryable(withTracking: true)
+            .Where(m => m.ConversationId == conversationId && m.UserId != me && m.RemovedAt == null)
+            .ToListAsync();
+        var otherIds = others.Select(o => o.UserId).ToList();
+
+        // Recipients who currently can't use chat (no chat.use) — isolated from this message.
+        var disabled = await _access.FilterDisabledAsync(otherIds);
+
+        // Direct chat whose sole recipient is disabled: intercept. Persist nothing and
+        // surface a message so the sender's UI can explain the delivery failure. Because
+        // the message never lands, the recipient can never see it — even after re-enable.
+        if (conv.Type == ConversationType.Direct && otherIds.Count > 0 && otherIds.All(disabled.Contains))
+            return Fail<ChatMessageDto>("This user is currently unavailable and can't receive messages.", 403);
+
         var now = DateTime.UtcNow;
         var preview = ChatPreview.Build(input.ContentType, input.Content);
-        var otherMemberIds = new List<Guid>();
+        // Only deliverable (non-disabled) recipients get unread bumps + realtime pushes.
+        var deliveredIds = otherIds.Where(id => !disabled.Contains(id)).ToList();
 
         var message = await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var conv = await _conversationRepository.FindAsync(conversationId);
-            if (conv == null)
-                return (ChatMessage?)null;
-
             var msg = new ChatMessage
             {
                 ConversationId = conversationId,
@@ -134,17 +157,25 @@ public class ConversationService : ApplicationService, IConversationService
             conv.LastMessagePreview = preview;
             await _conversationRepository.UpdateAsync(conv, ct);
 
-            var others = await _memberRepository.AsQueryable(withTracking: true)
-                .Where(m => m.ConversationId == conversationId && m.UserId != me && m.RemovedAt == null)
-                .ToListAsync(ct);
-            foreach (var o in others)
+            // Deliver to able recipients: bump unread + re-surface a hidden conversation.
+            var deliveredMembers = others.Where(o => !disabled.Contains(o.UserId)).ToList();
+            foreach (var o in deliveredMembers)
             {
                 o.UnreadCount += 1;
-                // A new message re-surfaces a hidden conversation in the recipient's list.
                 o.IsHidden = false;
             }
-            if (others.Count > 0) await _memberRepository.UpdateManyAsync(others, ct);
-            otherMemberIds.AddRange(others.Select(o => o.UserId));
+            if (deliveredMembers.Count > 0) await _memberRepository.UpdateManyAsync(deliveredMembers, ct);
+
+            // Isolation rows for disabled recipients: they will never see this message,
+            // even after re-enable. FK filled from the nav property on SaveChanges (the
+            // message Id is only generated at commit).
+            if (disabled.Count > 0)
+            {
+                var blocks = otherIds.Where(disabled.Contains)
+                    .Select(id => new MessageBlock { Message = msg, UserId = id })
+                    .ToList();
+                await _messageBlockRepository.InsertManyAsync(blocks, ct);
+            }
 
             // Sending into a conversation I previously hid re-surfaces it for me too.
             if (member.IsHidden)
@@ -181,7 +212,7 @@ public class ConversationService : ApplicationService, IConversationService
                 SenderId = me,
                 ContentType = message.ContentType,
                 Preview = preview,
-                RecipientUserIds = otherMemberIds,
+                RecipientUserIds = deliveredIds,
                 Message = dto
             });
         }
@@ -209,10 +240,16 @@ public class ConversationService : ApplicationService, IConversationService
             beforeAt = cursor?.SentAt;
         }
 
+        // Messages isolated from me (received while I couldn't use chat) stay hidden even
+        // after I'm re-enabled. Correlated NOT EXISTS (column-to-column) rather than a
+        // materialized `Contains`, which mis-translates for Guid collections on SQLite.
+        var myBlocks = _messageBlockRepository.AsQueryable().Where(b => b.UserId == me);
+
         var q = _messageRepository.AsQueryable()
             .Where(m => m.ConversationId == conversationId);
         if (member.ClearedAt.HasValue)
             q = q.Where(m => m.SentAt > member.ClearedAt.Value);
+        q = q.Where(m => !myBlocks.Any(b => b.MessageId == m.Id));
         if (beforeAt.HasValue)
             q = q.Where(m => m.SentAt < beforeAt.Value);
 
@@ -386,13 +423,20 @@ public class ConversationService : ApplicationService, IConversationService
             });
         }
 
-        // 富化 Direct peer 在线状态
+        // 富化 Direct peer 在线状态 + chat.use 禁用标识
         var peerIds = items.Where(i => i.PeerUserId.HasValue).Select(i => i.PeerUserId!.Value).Distinct().ToList();
         if (peerIds.Count > 0)
         {
             var presenceMap = (await _presence.ResolveEffectiveAsync(peerIds)).ToDictionary(p => p.UserId);
+            // A peer who lost chat.use gets a distinct "unavailable" marker in the list
+            // (the conversation stays, but they can no longer take part). Empty when the
+            // gate is inactive → no one flagged.
+            var disabledPeers = await _access.FilterDisabledAsync(peerIds);
             foreach (var i in items.Where(i => i.PeerUserId.HasValue))
+            {
                 if (presenceMap.TryGetValue(i.PeerUserId!.Value, out var pr)) i.PeerStatus = pr.Status;
+                i.PeerDisabled = disabledPeers.Contains(i.PeerUserId!.Value);
+            }
         }
 
         var ordered = items
@@ -538,11 +582,14 @@ public class ConversationService : ApplicationService, IConversationService
         if (query.Before.HasValue)
             beforeAt = (await _messageRepository.FindAsync(query.Before.Value))?.SentAt;
 
+        var myBlocks = _messageBlockRepository.AsQueryable().Where(b => b.UserId == me);
+
         var q = _messageRepository.AsQueryable()
             .Where(m => m.ConversationId == conversationId
                         && m.ContentType == MessageContentType.Text
                         && m.Content.ToLower().Contains(kw));
         if (member.ClearedAt.HasValue) q = q.Where(m => m.SentAt > member.ClearedAt.Value);
+        q = q.Where(m => !myBlocks.Any(b => b.MessageId == m.Id));
         if (beforeAt.HasValue) q = q.Where(m => m.SentAt < beforeAt.Value);
 
         var page = await q.OrderByDescending(m => m.SentAt).ThenByDescending(m => m.Id).Take(limit + 1).ToListAsync();

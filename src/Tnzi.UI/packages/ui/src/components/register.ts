@@ -2,64 +2,44 @@
  * @tnzi/ui/components/register
  *
  * Global component registration for Tnzi UI (Naive UI).
- * Separated from plugin.ts to support tree-shaking:
- * when `registerComponents: false`, bundlers can eliminate all component imports.
+ *
+ * The registration list is derived exhaustively from the components barrel
+ * (`./index`, the single source of truth), so every exported `T*` component is
+ * registered automatically and the list can never drift from what the package
+ * actually exports. This honours the documented contract that
+ * `registerComponents: true` registers "all T* components".
+ *
+ * Tree-shaking note: this module does `import * as components from './index'`
+ * (the full barrel), and `plugin.ts` imports it statically. So whenever the
+ * `createTnziUi` plugin is used, the whole component barrel is pulled into the
+ * bundle EVEN IF `registerComponents: false` — that option only skips the runtime
+ * `app.component()` calls, it does not tree-shake. For a minimal bundle, do NOT
+ * rely on the plugin's global registration: use the on-demand `TnziUiResolver`
+ * (`unplugin-vue-components`, covers every `T*` name) plus direct named imports,
+ * so only the components you actually reference are bundled.
  */
 
-import type { App } from 'vue';
+import type { App, Component } from 'vue';
 
-// Auth components
-import TLoginForm from './auth/TLoginForm.vue';
-import TRegisterForm from './auth/TRegisterForm.vue';
-import TPasswordReset from './auth/TPasswordReset.vue';
+import * as components from './index';
 
-// Data components
-import TTable from './data/TTable.vue';
-
-// List components
-import TDataList from './list/TDataList.vue';
-
-// Form components
-import TForm from './form/TForm.vue';
-import TDynamicForm from './form/TDynamicForm.vue';
-import TSearchForm from './form/TSearchForm.vue';
-
-// Card components
-import TUserCard from './card/TUserCard.vue';
-import TStatCard from './card/TStatCard.vue';
-
-// Layout components
-import TAppHeader from './layout/TAppHeader.vue';
-import TBreadcrumb from './layout/TBreadcrumb.vue';
-
-// Navigation components
-import TMenu from './navigation/TMenu.vue';
-import TNavBar from './navigation/TNavBar.vue';
-import TTabBar from './navigation/TTabBar.vue';
-
-// Icon components
-import { TIcon } from './icon/index';
+/** A runtime export is registrable when it is a Vue component (object or functional). */
+function isComponent(value: unknown): value is Component {
+  return value != null && (typeof value === 'object' || typeof value === 'function');
+}
 
 /**
- * Register all Tnzi UI components globally.
- * This function is only called when `registerComponents: true` in plugin options.
- * When not called, the bundler can tree-shake all component imports.
+ * Register all Tnzi UI `T*` components globally.
+ * Only called when `registerComponents: true` in plugin options.
  */
 export function registerAllComponents(app: App): void {
-  app.component('TLoginForm', TLoginForm);
-  app.component('TRegisterForm', TRegisterForm);
-  app.component('TPasswordReset', TPasswordReset);
-  app.component('TTable', TTable);
-  app.component('TDataList', TDataList);
-  app.component('TForm', TForm);
-  app.component('TDynamicForm', TDynamicForm);
-  app.component('TSearchForm', TSearchForm);
-  app.component('TUserCard', TUserCard);
-  app.component('TStatCard', TStatCard);
-  app.component('TAppHeader', TAppHeader);
-  app.component('TBreadcrumb', TBreadcrumb);
-  app.component('TMenu', TMenu);
-  app.component('TNavBar', TNavBar);
-  app.component('TTabBar', TTabBar);
-  app.component('TIcon', TIcon);
+  for (const [name, value] of Object.entries(components)) {
+    // Only T-prefixed components: type-only exports do not exist at runtime, and
+    // the sole non-component runtime export (WIDGET_CONTEXT_KEY, a Symbol) is
+    // excluded by both the name check and the component guard. Allow a digit after
+    // `T` so status/error pages (T403/T404/T500) are also registered.
+    if (/^T[A-Z0-9]/.test(name) && isComponent(value)) {
+      app.component(name, value);
+    }
+  }
 }

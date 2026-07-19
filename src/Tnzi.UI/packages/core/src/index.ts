@@ -29,6 +29,9 @@ export * from "./state/index";
 // Headless (无头交互控制器) ★  新增
 export * from "./headless/index";
 
+// Guards (UI 框架无关的 vue-router 认证守卫工厂) ★  新增
+export * from "./guards/index";
+
 // Utilities
 export * from "./utils/index";
 

@@ -44,6 +44,10 @@ public static class DefaultChartOfAccounts
             CashFlowActivity: CashFlowActivity.Operating),
         new("1500", "Fixed Assets", AccountRootType.Asset, ParentCode: "1000", SubType: "FixedAsset",
             CashFlowActivity: CashFlowActivity.Investing),
+        // 换汇过渡科目：跨币种划转的两侧资金行经此归零。非现金等价物（不进现金桶），
+        // 归经营活动；正常余额恒为 0，仅作过渡。
+        new("1900", "Currency Exchange Clearing", AccountRootType.Asset, ParentCode: "1000", SubType: "Clearing",
+            SystemRole: AccountSystemRole.CurrencyExchangeClearing, CashFlowActivity: CashFlowActivity.Operating),
 
         new("2000", "Liabilities", AccountRootType.Liability, IsGroup: true),
         new("2100", "Accounts Payable", AccountRootType.Liability, ParentCode: "2000", SubType: "Payable",
@@ -52,6 +56,9 @@ public static class DefaultChartOfAccounts
             SystemRole: AccountSystemRole.TaxPayable, CashFlowActivity: CashFlowActivity.Operating),
         new("2300", "Accrued Liabilities", AccountRootType.Liability, ParentCode: "2000",
             CashFlowActivity: CashFlowActivity.Operating),
+        // 应付工资：薪酬批次过账贷记员工净额、付款时借记冲平（Payroll 子模块经 WagesPayable 角色解析）
+        new("2400", "Wages Payable", AccountRootType.Liability, ParentCode: "2000", SubType: "Payable",
+            SystemRole: AccountSystemRole.WagesPayable, CashFlowActivity: CashFlowActivity.Operating),
 
         new("3000", "Equity", AccountRootType.Equity, IsGroup: true),
         new("3100", "Owner's Equity", AccountRootType.Equity, ParentCode: "3000",
@@ -72,6 +79,8 @@ public static class DefaultChartOfAccounts
         new("5800", "Exchange Gain/Loss", AccountRootType.Expense, ParentCode: "5000",
             SystemRole: AccountSystemRole.ExchangeGainLoss),
         new("5900", "Rounding Differences", AccountRootType.Expense, ParentCode: "5000",
-            SystemRole: AccountSystemRole.RoundingDifference)
+            SystemRole: AccountSystemRole.RoundingDifference),
+        new("5950", "Non-recoverable Tax", AccountRootType.Expense, ParentCode: "5000",
+            SystemRole: AccountSystemRole.NonRecoverableTaxExpense, CashFlowActivity: CashFlowActivity.Operating)
     ];
 }

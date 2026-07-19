@@ -56,7 +56,7 @@ import {
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
 
 // HttpClient type derived from the factory signature so we don't need a separate import.
 type HttpClient = Parameters<typeof useAdminUserApi>[0]
@@ -331,39 +331,35 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     create: async (data) => unwrap(await userApi.create(data)) as UserListItemDto,
     update: async (id, data) => unwrap(await userApi.update(id, data)) as UserListItemDto,
     delete: async (ids) => {
-      await userApi.deleteMany(ids)
+      ensureOk(await userApi.deleteMany(ids))
     },
-    export: async (q) => {
-      const csv = unwrap<string>(
-        await userApi.exportCsv(mapQuery(q) as unknown as UserListQueryDto),
-      )
-      return new Blob([csv], { type: 'text/csv' })
-    },
+    export: async (q) =>
+      unwrap<Blob>(await userApi.exportCsv(mapQuery(q) as unknown as UserListQueryDto)),
     import: async (file) => {
-      await userApi.importCsv(file)
+      ensureOk(await userApi.importCsv(file))
     },
     enable: async (id) => {
-      await userApi.enable(id)
+      ensureOk(await userApi.enable(id))
     },
     disable: async (id, reason) => {
-      await userApi.disable(id, reason ?? null)
+      ensureOk(await userApi.disable(id, reason ?? null))
     },
     lock: async (id, until, reason) => {
-      await userApi.lock(id, { lockoutEnd: until ?? null, reason: reason ?? null })
+      ensureOk(await userApi.lock(id, { lockoutEnd: until ?? null, reason: reason ?? null }))
     },
     unlock: async (id) => {
-      await userApi.unlock(id)
+      ensureOk(await userApi.unlock(id))
     },
     resetPassword: async (id, newPassword) => {
-      await userApi.resetPassword(id, { newPassword })
+      ensureOk(await userApi.resetPassword(id, { newPassword }))
     },
     assignRoles: async (userId, roleIds) => {
       if (roleIds.length === 0) return
-      await userApi.assignRoles(userId, { roleIds })
+      ensureOk(await userApi.assignRoles(userId, { roleIds }))
     },
     removeRoles: async (userId, roleIds) => {
       if (roleIds.length === 0) return
-      await userApi.removeRoles(userId, { roleIds })
+      ensureOk(await userApi.removeRoles(userId, { roleIds }))
     },
     setRoles: async (userId, roleIds, currentRoleIds) => {
       // Diff against the current set so we issue at most two REST calls
@@ -378,14 +374,14 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
       for (const id of current) {
         if (!target.has(id)) toRemove.push(id)
       }
-      if (toAdd.length > 0) await userApi.assignRoles(userId, { roleIds: toAdd })
-      if (toRemove.length > 0) await userApi.removeRoles(userId, { roleIds: toRemove })
+      if (toAdd.length > 0) ensureOk(await userApi.assignRoles(userId, { roleIds: toAdd }))
+      if (toRemove.length > 0) ensureOk(await userApi.removeRoles(userId, { roleIds: toRemove }))
     },
     assignToOrganization: async (userId, organizationId) => {
-      await userApi.assignToOrganization(userId, { organizationId })
+      ensureOk(await userApi.assignToOrganization(userId, { organizationId }))
     },
     removeFromOrganization: async (userId) => {
-      await userApi.removeFromOrganization(userId)
+      ensureOk(await userApi.removeFromOrganization(userId))
     },
   }
 
@@ -399,7 +395,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     create: async (data) => unwrap(await roleApi.create(data)) as RoleDto,
     update: async (id, data) => unwrap(await roleApi.update(id, data)) as RoleDto,
     delete: async (ids) => {
-      await roleApi.deleteMany(ids)
+      ensureOk(await roleApi.deleteMany(ids))
     },
     getAll: async () => unwrap(await roleApi.getAll()) as RoleDto[],
     getDetail: async (id) => unwrap(await roleApi.getDetail(id)) as RoleDetailDto,
@@ -422,7 +418,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     delete: async (ids) => {
       // Tenant admin API has no batch delete — loop sequentially.
       for (const id of ids) {
-        await tenantApi.delete(id)
+        ensureOk(await tenantApi.delete(id))
       }
     },
   }
@@ -447,10 +443,10 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         update: async (id, data) =>
           unwrap(await organizationApi.update(id, data)) as OrganizationDto,
         delete: async (id) => {
-          await organizationApi.delete(id)
+          ensureOk(await organizationApi.delete(id))
         },
         move: async (id, newParentId) => {
-          await organizationApi.move(id, { newParentId })
+          ensureOk(await organizationApi.move(id, { newParentId }))
         },
         getChildren: async (id) =>
           unwrap(await organizationApi.getChildren(id)) as OrganizationDto[],
@@ -499,10 +495,10 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         activeUsers: async (top) =>
           unwrap(await sessionApi.getActiveUsers(top)) as ActiveUserSummaryDto[],
         revoke: async (sessionId) => {
-          await sessionApi.revokeSession(sessionId)
+          ensureOk(await sessionApi.revokeSession(sessionId))
         },
         revokeAllForUser: async (userId, excludeSessionId) => {
-          await sessionApi.revokeAllSessions(userId, excludeSessionId ?? null)
+          ensureOk(await sessionApi.revokeAllSessions(userId, excludeSessionId ?? null))
         },
         cleanExpired: async (inactiveMinutes) =>
           unwrap(await sessionApi.cleanExpired(inactiveMinutes)) as number,
@@ -525,55 +521,55 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         updateDetail: async (data) =>
           unwrap(await profileApi.updateDetail(data)) as UserDetailDto,
         changePassword: async (data) => {
-          await profileApi.changePassword(data)
+          ensureOk(await profileApi.changePassword(data))
         },
         getSessions: async () => unwrap(await profileApi.getSessions()) as UserSessionDto[],
         revokeSession: async (sessionId) => {
-          await profileApi.revokeSession(sessionId)
+          ensureOk(await profileApi.revokeSession(sessionId))
         },
         revokeAllSessions: async () => {
-          await profileApi.revokeAllSessions()
+          ensureOk(await profileApi.revokeAllSessions())
         },
         getTwoFactorStatus: async () =>
           unwrap(await profileApi.getTwoFactorStatus()) as TwoFactorStatusDto,
         getLinkedAccounts: async () =>
           unwrap(await profileApi.getLinkedAccounts()) as UserLoginDto[],
         unlinkAccount: async (provider) => {
-          await profileApi.unlinkAccount(provider)
+          ensureOk(await profileApi.unlinkAccount(provider))
         },
         getLoginHistory: async (params) =>
           unwrap(await profileApi.getLoginHistory(params)) as LoginLogDto[],
         deactivate: async (data) => {
-          await profileApi.deactivateAccount(data)
+          ensureOk(await profileApi.deactivateAccount(data))
         },
         deleteAccount: async () => {
-          await profileApi.deleteAccount()
+          ensureOk(await profileApi.deleteAccount())
         },
         exportPersonalData: async () =>
           unwrap(await profileApi.exportPersonalData()) as PersonalDataExportDto,
         sendChangeEmailCode: async (data) => {
-          await profileApi.sendChangeEmailCode(data)
+          ensureOk(await profileApi.sendChangeEmailCode(data))
         },
         confirmChangeEmail: async (data) => {
-          await profileApi.confirmChangeEmail(data)
+          ensureOk(await profileApi.confirmChangeEmail(data))
         },
         sendChangePhoneCode: async (data) => {
-          await profileApi.sendChangePhoneCode(data)
+          ensureOk(await profileApi.sendChangePhoneCode(data))
         },
         confirmChangePhone: async (data) => {
-          await profileApi.confirmChangePhone(data)
+          ensureOk(await profileApi.confirmChangePhone(data))
         },
         enableTwoFactor: async (data) =>
           unwrap(await profileApi.enableTwoFactor(data)) as string,
         disableTwoFactor: async () => {
-          await profileApi.disableTwoFactor()
+          ensureOk(await profileApi.disableTwoFactor())
         },
         getTotpSetup: async () => unwrap(await profileApi.getTotpSetup()) as TotpSetupDto,
         enableTotp: async (data) => {
-          await profileApi.enableTotp(data)
+          ensureOk(await profileApi.enableTotp(data))
         },
         disableTotp: async () => {
-          await profileApi.disableTotp()
+          ensureOk(await profileApi.disableTotp())
         },
       }
     : {

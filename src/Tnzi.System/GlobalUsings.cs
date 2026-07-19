@@ -30,6 +30,7 @@ global using Tnzi.Settings;
 global using Tnzi.System.Controllers.Admin;
 global using Tnzi.System.Dtos;
 global using Tnzi.System.Entities;
+global using Tnzi.System.Metadata;
 global using Tnzi.System.Options;
 global using Tnzi.System.Services;
 global using Tnzi.System.Settings;

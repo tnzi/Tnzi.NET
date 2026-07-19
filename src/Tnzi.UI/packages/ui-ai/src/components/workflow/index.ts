@@ -1,14 +1,14 @@
-export { default as WorkflowCanvas } from './WorkflowCanvas.vue';
-export { default as WorkflowNode } from './WorkflowNode.vue';
-export { default as WorkflowEdge } from './WorkflowEdge.vue';
-export { default as WorkflowConnection } from './WorkflowConnection.vue';
-export { default as WorkflowControls } from './WorkflowControls.vue';
-export { default as WorkflowPanel } from './WorkflowPanel.vue';
-export { default as WorkflowToolbar } from './WorkflowToolbar.vue';
-export { default as WorkflowMinimap } from './WorkflowMinimap.vue';
+export { default as TWorkflowCanvas } from './TWorkflowCanvas.vue';
+export { default as TWorkflowNode } from './TWorkflowNode.vue';
+export { default as TWorkflowEdge } from './TWorkflowEdge.vue';
+export { default as TWorkflowConnection } from './TWorkflowConnection.vue';
+export { default as TWorkflowControls } from './TWorkflowControls.vue';
+export { default as TWorkflowPanel } from './TWorkflowPanel.vue';
+export { default as TWorkflowToolbar } from './TWorkflowToolbar.vue';
+export { default as TWorkflowMinimap } from './TWorkflowMinimap.vue';
 
 // Re-export @vue-flow primitives so consumers writing custom node templates
-// against WorkflowCanvas's `#node-<type>` slots can register handles without
+// against TWorkflowCanvas's `#node-<type>` slots can register handles without
 // needing a direct `@vue-flow/core` dependency.
 export { Handle, Position } from '@vue-flow/core';
 export type { NodeProps, EdgeProps, Connection, NodeChange, EdgeChange } from '@vue-flow/core';

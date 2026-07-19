@@ -438,4 +438,127 @@ describe('useAdminRouteStore', () => {
     store.clearRoutes()
     expect(store.availableModules).toBeNull()
   })
+
+  // ── Built-in-menus toggle ─────────────────────────────────────────────
+  // Display-only, top-level only: with the toggle OFF (super admin), groups
+  // stamped `meta.builtIn` hide except neutral ones (no permission anywhere
+  // in the subtree — the landing dashboard); consumer routes (unstamped)
+  // always stay. Never touches guards/tabs/reachability.
+
+  const builtInRoutes: AdminRouteRecord[] = [
+    { name: 'dashboard', path: '/dashboard', meta: { title: 'Dashboard', order: 0, builtIn: true } },
+    {
+      name: 'identity',
+      path: '/identity',
+      meta: { title: 'Identity', order: 1, builtIn: true },
+      children: [
+        { name: 'identity.users', path: 'users', meta: { title: 'Users', permission: 'user.view' } },
+      ],
+    },
+    {
+      name: 'blog',
+      path: '/blog',
+      meta: { title: 'Blog', order: 2 },
+      children: [
+        { name: 'blog.posts', path: 'posts', meta: { title: 'Posts', permission: 'acme.blog.post.view' } },
+      ],
+    },
+  ]
+
+  function loginSuper(): void {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'u', roles: [], permissions: [] })
+    auth.setSuperUser(true)
+  }
+
+  it('built-in toggle OFF: hides built-in groups, keeps consumer + neutral routes', async () => {
+    const { useAdminAppStore } = await import('../../src/stores/useAdminAppStore')
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(builtInRoutes)
+    loginSuper()
+    useAdminAppStore().setShowBuiltInMenus(false)
+    const names = store.menus.map((m) => m.key)
+    expect(names).not.toContain('identity') // built-in with permission leaves → hidden
+    expect(names).toContain('blog') // consumer route (unstamped) → stays
+    expect(names).toContain('dashboard') // built-in but neutral (no permission) → stays
+  })
+
+  it('built-in toggle defaults ON: full menu unchanged', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(builtInRoutes)
+    loginSuper()
+    const names = store.menus.map((m) => m.key)
+    expect(names).toEqual(['dashboard', 'identity', 'blog'])
+  })
+
+  it('built-in toggle OFF never applies to non-super users (no cross-session residue)', async () => {
+    const { useAdminAppStore } = await import('../../src/stores/useAdminAppStore')
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(builtInRoutes)
+    useAdminAppStore().setShowBuiltInMenus(false) // persisted OFF from a prior super session
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'u', roles: [], permissions: ['user.view'] })
+    expect(store.menus.map((m) => m.key)).toContain('identity')
+  })
+})
+
+describe('useAdminRouteStore — role gating (meta.roles)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  // Consumer routes may declare `meta.roles` (ANY-of). Framework routes never
+  // do, so role gating is zero-impact for apps that don't use it.
+  const roleRoutes: AdminRouteRecord[] = [
+    { name: 'staff', path: '/admin/staff', meta: { title: 'Staff', roles: ['Owner', 'Management'], order: 1 } },
+    { name: 'files', path: '/admin/files', meta: { title: 'Files', order: 2 } }, // public (no roles)
+    { name: 'both', path: '/admin/both', meta: { title: 'Both', permission: 'x.view', roles: ['Owner'], order: 3 } },
+  ]
+
+  function loginAs(roles: string[], permissions: string[] = [], superUser = false): void {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'u', roles, permissions })
+    if (superUser) auth.setSuperUser(true)
+  }
+
+  it('menus: hides a role-gated route when the user lacks all its roles', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(roleRoutes)
+    loginAs(['Lawyer'])
+    const names = store.menus.map((m) => m.key)
+    expect(names).not.toContain('staff')
+    expect(names).toContain('files') // public route unaffected
+  })
+
+  it('menus: shows a role-gated route with ANY-of the declared roles (case-insensitive)', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(roleRoutes)
+    loginAs(['management']) // lowercase — must still match 'Management'
+    expect(store.menus.map((m) => m.key)).toContain('staff')
+  })
+
+  it('menus: super-user bypasses the role gate', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(roleRoutes)
+    loginAs([], [], true)
+    expect(store.menus.map((m) => m.key)).toContain('staff')
+  })
+
+  it('menus: a route with BOTH permission and roles requires both', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(roleRoutes)
+    loginAs(['Owner'], []) // has role, lacks x.view permission
+    expect(store.menus.map((m) => m.key)).not.toContain('both')
+    // grant the permission too → now visible
+    useAdminAuthStore().setUserInfo({ id: 'u1', username: 'u', roles: ['Owner'], permissions: ['x.view'] })
+    expect(store.menus.map((m) => m.key)).toContain('both')
+  })
+
+  it('deniedRouteNames: denies a role-gated route the user cannot hold', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(roleRoutes)
+    loginAs(['Lawyer'])
+    expect(store.deniedRouteNames.has('staff')).toBe(true)
+    expect(store.deniedRouteNames.has('files')).toBe(false)
+  })
 })

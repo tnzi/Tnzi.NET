@@ -49,6 +49,13 @@ export interface AdminLoginConfig {
   /** Brand title shown next to the logo. */
   brand?: string
   /**
+   * Component mounted in the admin header's notification slot (e.g. a
+   * `THeaderBell`). The shell exposes the real `#header-notification` slot and
+   * renders this component there — replacing the old pattern of Teleporting a
+   * bell into the header's internal DOM because the slot wasn't reachable.
+   */
+  headerNotification?: Component
+  /**
    * Secondary line shown under the brand title in the admin sidebar header
    * (brand name on top, this muted sub-line below). Omit for a single-line
    * brand. Not rendered on the login page (which uses `tagline` instead) nor

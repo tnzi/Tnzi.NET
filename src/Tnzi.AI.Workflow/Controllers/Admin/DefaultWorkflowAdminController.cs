@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Controllers.Admin;
+namespace Tnzi.AI.Workflow.Controllers.Admin;
 
 /// <summary>
 /// 工作流管理控制器

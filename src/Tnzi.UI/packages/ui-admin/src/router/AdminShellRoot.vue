@@ -30,6 +30,7 @@ import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useChatStore } from '../stores/useChatStore'
+import { createChatImBridge } from '../services/bridges/chat-im-bridge'
 import type { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useAdminLoginConfig } from '../plugin/loginConfig'
 import { useAdminChatConfig } from '../plugin/chatConfig'
@@ -131,13 +132,49 @@ const chatConfig = useAdminChatConfig()
 // backends without the endpoint). Reactive: if a later refresh drops Chat,
 // the host unmounts and tears the socket down.
 const moduleAvailability = useModuleAvailability()
-const builtinChatEnabled = computed(
+const chatStore = useChatStore()
+
+// Whether chat COULD run here: consumer opted in (default on) AND the backend
+// loaded the Chat module. This gates the lightweight GET /chat/config probe.
+const builtinChatPossible = computed(
   () => chatConfig?.enabled !== false && moduleAvailability.canActivate('chat'),
+)
+
+// Load the per-user config independently of TChatHost. Chat is deny-by-default:
+// the launcher only appears once /chat/config confirms this user holds
+// `chat.use`. Probing here (not inside TChatHost) means a disabled user never
+// mounts TChatHost at all — no conversation fetch, no SignalR socket, no icon.
+//
+// ★ The chat store's bridge MUST be initialised HERE (not only in TChatHost's
+// setup) so `loadConfig()` actually runs `getConfig()`. Previously the bridge
+// was init'd ONLY by TChatHost, so this `loadConfig()` threw at `requireBridge()`
+// and fell into the fail-open catch → enabled:true → TChatHost mounted for EVERY
+// user (even those without chat.use), which then 403'd on /conversations. Wiring
+// the bridge up front lets `getConfig()` return the real per-user `enabled`
+// (false for a denied user) so TChatHost never mounts for them. TChatHost
+// re-inits the same (stateless) bridge idempotently when it does mount.
+watch(
+  builtinChatPossible,
+  (possible) => {
+    if (possible && storageClient) {
+      chatStore.init(createChatImBridge({ client: storageClient }))
+      void chatStore.loadConfig()
+    }
+  },
+  { immediate: true },
+)
+
+// The actual launcher/host gate: possible AND this user may use chat.
+// `config.enabled` starts false (no icon flash for a disabled user) and flips
+// true only after the probe confirms the grant. Deny-by-default: a config that
+// can't be confirmed (null/forbidden/throw) stays `enabled:false`, so a denied
+// user never mounts TChatHost or hits its 403-guarded endpoints.
+const builtinChatEnabled = computed(
+  () => builtinChatPossible.value && chatStore.config.enabled === true,
 )
 
 // Presence in the header avatar — only when the built-in chat is live AND a
 // client is present (TChatHost then inits the chat bridge + loads my status).
-const chatStore = useChatStore()
 const presenceEnabled = computed(() => builtinChatEnabled.value && !!storageClient)
 function onSetPresence(status: UserPresenceStatus): void {
   void chatStore.setMyStatus(status).catch(() => undefined)
@@ -239,12 +276,17 @@ const themeBtnVisible = computed(
 // without it never opens a doomed socket. Fail-open on old backends (no signal).
 const settingsConfig = useAdminSettingsConfig()
 const settingsRealtime = useSettingsRealtime({
+  // Optional hub URL override (e.g. '/api/hubs/settings' under a sub-path).
+  // Undefined when unset, so useSettingsRealtime falls back to '/hubs/settings'.
+  hubUrl: settingsConfig?.hubUrl,
   getToken: () => storageClient?.getAccessToken?.() ?? authStore.token ?? '',
   onChanged: (p) => {
     if (p.key === 'Appearance:AdminTheme') {
       void globalTheme.load()
     } else if (p.key.startsWith('Chat:')) {
-      if (builtinChatEnabled.value) void chatStore.loadConfig()
+      // Re-fetch on the could-run gate, not the ready gate: a config change
+      // (or a re-grant) must be able to flip `enabled` back on from disabled.
+      if (builtinChatPossible.value) void chatStore.loadConfig()
     }
     // Consumer routes (defineAdminApp({ settings: { realtime } })) run after the
     // built-ins — matched by exact key or prefix, isolated so one bad handler
@@ -357,6 +399,13 @@ function defaultTranslate(key: string, fallback?: string): string {
         :allow-invisible="chatStore.config.allowInvisible"
         :translate="loginConfig.translate ?? defaultTranslate"
       />
+    </template>
+    <!-- Header notification bell — a consumer component (e.g. THeaderBell)
+         mounted in the shell's real header-notification slot via
+         defineAdminApp({ login: { headerNotification } }). Replaces the old
+         Teleport-into-header-internals hack. -->
+    <template v-if="loginConfig.headerNotification" #header-notification>
+      <component :is="loginConfig.headerNotification" />
     </template>
     <!-- Phase A (post-0.2.52): wrap router outlet in TAdminRouterView so route -->
     <!-- transitions actually trigger. A bare <router-view> is mounted inside -->

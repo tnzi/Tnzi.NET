@@ -30,5 +30,11 @@ public class FinanceOptionsValidator : OptionsValidatorBase<FinanceOptions>
 
         if (options.ReportExportMaxRows <= 0)
             errors.Add("ReportExportMaxRows must be greater than 0.");
+
+        if (options.BankMatchDateWindowDays is < 0 or > 90)
+            errors.Add("BankMatchDateWindowDays must be between 0 and 90.");
+
+        if (options.BankImportMaxRows <= 0)
+            errors.Add("BankImportMaxRows must be greater than 0.");
     }
 }

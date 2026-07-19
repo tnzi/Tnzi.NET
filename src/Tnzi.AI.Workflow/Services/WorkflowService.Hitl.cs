@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流服务 - HITL（人在回路）执行控制：Resume / ResumeWithInput / Approve / Reject /

@@ -6,6 +6,7 @@ import { defineAdminApp } from '../../src/plugin/defineAdminApp'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
+import { useAdminAppStore } from '../../src/stores/useAdminAppStore'
 import { ADMIN_LOGIN_CONFIG_KEY, type AdminLoginConfig } from '../../src/plugin/loginConfig'
 
 const dummyClient = {
@@ -343,12 +344,12 @@ describe('defineAdminApp', () => {
     expect(beforeEachCount({ enabled: true }) - beforeEachCount()).toBe(1)
   })
 
-  it('auth guard redirects by route NAME (deployment-prefix agnostic)', () => {
+  it('auth guard redirects by route NAME (deployment-prefix agnostic)', async () => {
     const app = createApp({ render: () => h('div') })
     const pinia = createPinia()
     app.use(pinia)
     setActivePinia(pinia)
-    const guards: Array<(to: unknown, from: unknown, next: (arg?: unknown) => void) => void> = []
+    const guards: Array<(to: unknown, from: unknown, next: (arg?: unknown) => void) => Promise<void> | void> = []
     const router = {
       beforeEach: vi.fn((g) => guards.push(g)),
       afterEach: vi.fn(),
@@ -357,10 +358,12 @@ describe('defineAdminApp', () => {
     defineAdminApp({ client: dummyClient, auth: { enabled: true } }).install(app, pinia, router)
     // Fresh store = not logged in → the auth guard must redirect via the
     // NAMED login route, so the target resolves correctly under any
-    // basePath / router history base instead of a hardcoded '/login'.
+    // basePath / router history base instead of a hardcoded '/login'. The guard
+    // is async now (it first gives `resolveSession` a chance to restore), so
+    // await each guard before asserting the redirect landed.
     const redirects: unknown[] = []
     const to = { meta: {}, name: 'x', path: '/admin/x', fullPath: '/admin/x', query: {}, params: {} }
-    for (const g of guards) g(to, {}, (arg?: unknown) => { if (arg) redirects.push(arg) })
+    for (const g of guards) await g(to, {}, (arg?: unknown) => { if (arg) redirects.push(arg) })
     expect(redirects).toContainEqual({ name: 'login' })
   })
 
@@ -435,6 +438,88 @@ describe('defineAdminApp', () => {
 
     expect(auth.userInfo?.permissions).toEqual(['user.view'])
     expect(auth.isSuperUser).toBe(true)
+  })
+
+  it('mirrors the LIVE client token into the admin store when no token is passed (self-fetch mode → isLogin)', async () => {
+    // The auth guard's resolveSession + the post-login after() both call
+    // loadPermissions() with no token — the session already lives on the client.
+    // loadPermissions must mirror that token so `isLogin` flips true, else a
+    // just-authenticated user bounces back to login. getAccessToken is a
+    // `this`-method (reads this._token) — locks in the method-call access too.
+    const client = {
+      _token: 'live-token',
+      get: async () => ({ success: true, code: 200, data: null }),
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+      getAccessToken(this: { _token: string | null }) {
+        return this._token
+      },
+    } as never
+    const { loadPermissions } = defineAdminApp({ client })
+    const auth = useAdminAuthStore()
+    expect(auth.isLogin).toBe(false)
+    // Identity resolved (id + permissions supplied) but NO token passed.
+    await loadPermissions({ id: 'u1', username: 'john', roles: ['Admin'], permissions: ['user.view'] })
+    expect(auth.isLogin).toBe(true) // token mirrored from the live client session
+    expect(auth.userInfo?.id).toBe('u1')
+  })
+
+  it('does not set isLogin when neither a passed token nor a live client token exists', async () => {
+    const client = {
+      get: async () => ({ success: true, code: 200, data: null }),
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+      getAccessToken() {
+        return null
+      },
+    } as never
+    const { loadPermissions } = defineAdminApp({ client })
+    const auth = useAdminAuthStore()
+    await loadPermissions({ id: 'u1', username: 'john', permissions: ['user.view'] })
+    expect(auth.isLogin).toBe(false) // no token anywhere → not signed in
+    expect(auth.userInfo).not.toBeNull() // identity still populated (name/avatar/myId)
+  })
+
+  it('stamps meta.builtIn on preset module groups but not on addModules routes (regression)', () => {
+    // Same class of bug as the forgotten `permission`/`moduleGate` copies:
+    // if the stamp (or its walk copy) is dropped, the built-in-menus toggle
+    // silently never filters anything. Assert through the REAL install path.
+    const consumerRoute: RouteRecordRaw = {
+      name: 'blog',
+      path: 'blog',
+      meta: { title: 'Blog' },
+      children: [
+        { name: 'blog.posts', path: 'posts', component: async () => ({}), meta: { title: 'Posts', permission: 'acme.blog.post.view' } },
+      ],
+    }
+    const app = createApp({ render: () => h('div') })
+    const pinia = createPinia()
+    app.use(pinia)
+    setActivePinia(pinia)
+    const router = {
+      beforeEach: vi.fn(),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    } as unknown as Router
+    defineAdminApp({ client: dummyClient, addModules: [consumerRoute] }).install(app, pinia, router)
+    const store = useAdminRouteStore()
+
+    expect(store.allRoutes.find((r) => r.name === 'identity')?.meta?.builtIn).toBe(true)
+    expect(store.allRoutes.find((r) => r.name === 'blog')?.meta?.builtIn).toBeUndefined()
+
+    // …and it drives the toggle end-to-end: super admin + toggle OFF hides
+    // built-in groups, keeps the consumer module and the neutral dashboard.
+    useAdminAuthStore().setSuperUser(true)
+    useAdminAuthStore().setUserInfo({ id: 'u1', username: 'u', roles: [], permissions: [] })
+    const appStore = useAdminAppStore()
+    appStore.setShowBuiltInMenus(false)
+    const menuKeys = store.menus.map((m) => m.key)
+    expect(menuKeys).not.toContain('identity')
+    expect(menuKeys).toContain('blog')
+    expect(menuKeys).toContain('dashboard')
+    // install() wired pinia-plugin-persistedstate, so the OFF above landed in
+    // localStorage — reset it or later tests hydrate the polluted value.
+    appStore.setShowBuiltInMenus(true)
   })
 
   describe('session-expired redirect', () => {
@@ -537,6 +622,71 @@ describe('defineAdminApp', () => {
     })
   })
 
+  describe('auth guard session restore (auth.enabled + restore)', () => {
+    function setupGuard(restore?: () => Promise<void> | void, token: string | null = null) {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+
+      const guards: unknown[] = []
+      // getAccessToken is a `this`-dependent METHOD (mirrors the real HttpClient
+      // `return this.accessToken`), so resolveSession extracting it into a bare
+      // variable and calling it unbound would throw here — locks in the fix.
+      const client = {
+        _token: token,
+        get: async () => ({ success: true, code: 200, data: null }),
+        post: async () => ({ success: true, code: 200, data: null }),
+        getAccessToken(this: { _token: string | null }) {
+          return this._token
+        },
+      } as never
+      const router = {
+        beforeEach: vi.fn((g: unknown) => {
+          guards.push(g)
+        }),
+        afterEach: vi.fn(),
+        onError: vi.fn(),
+        replace: vi.fn(),
+        currentRoute: {
+          value: { name: 'identity.users', path: '/admin/identity/users', fullPath: '/admin/identity/users' },
+        },
+      } as unknown as Router
+
+      const { install } = defineAdminApp({ client, auth: { enabled: true, restore } })
+      install(app, pinia, router)
+      return { guards }
+    }
+
+    const signedOutRoute = {
+      meta: { requiresAuth: true },
+      name: 'x',
+      path: '/admin/x',
+      fullPath: '/admin/x',
+      query: {},
+    }
+
+    it('threads the restore hook into a registered auth guard (called once, signed out)', async () => {
+      const restore = vi.fn(async () => {})
+      const { guards } = setupGuard(restore)
+      // Invoke every registered guard: only the auth guard's resolveSession runs
+      // the restore hook, so the count is order-independent.
+      for (const g of guards) await (g as (...a: unknown[]) => unknown)(signedOutRoute, {}, vi.fn())
+      expect(restore).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not run restore when the client already carries a token (core session live)', async () => {
+      const restore = vi.fn(async () => {})
+      // Client token present → resolveSession is token-first → no restore needed.
+      const { guards } = setupGuard(restore, 'live-token')
+      const authStore = useAdminAuthStore()
+      authStore.setToken('t')
+      authStore.setUserInfo({ id: '1', username: 'u', roles: [], permissions: [] })
+      for (const g of guards) await (g as (...a: unknown[]) => unknown)(signedOutRoute, {}, vi.fn())
+      expect(restore).not.toHaveBeenCalled()
+    })
+  })
+
   describe('deliberate sign-out (wrapped login.user.onLogout)', () => {
     function installWithLogout(onLogout: () => void | Promise<void>) {
       const app = createApp({ render: () => h('div') })
@@ -592,6 +742,138 @@ describe('defineAdminApp', () => {
       expect(auth.isLogin).toBe(false)
       expect(auth.userInfo).toBeNull()
       expect(auth.isSuperUser).toBe(false)
+    })
+  })
+
+  describe('runtime (default auth orchestration)', () => {
+    function makeRuntime() {
+      const auth = {
+        accessToken: null as string | null,
+        login: vi.fn(async () => {}),
+        logout: vi.fn(async () => {}),
+        restoreAuth: vi.fn(async () => {}),
+        applyTokenSession: vi.fn(async () => {}),
+      }
+      const ok = { succeeded: true, success: true, code: 200, data: {} }
+      const authApi = {
+        sendCodeLoginCode: vi.fn(async () => ok),
+        sendPasswordRecoveryCode: vi.fn(async () => ok),
+        sendQuickRegisterCode: vi.fn(async () => ok),
+        codeLogin: vi.fn(async () => ({ ...ok, data: { accessToken: 'a', refreshToken: 'r', expiresIn: 1 } })),
+        resetPasswordByCode: vi.fn(async () => ok),
+        quickRegister: vi.fn(async () => ({ ...ok, data: { userId: 'u', userName: 'n', requirePasswordSetup: false } })),
+        setPassword: vi.fn(async () => ok),
+      }
+      const http = {
+        get: async () => ({ success: true, code: 200, data: null }),
+        post: async () => ({ success: true, code: 200, data: null }),
+        addUnauthorizedListener: () => () => {},
+        getAccessToken: () => auth.accessToken,
+      }
+      return { http, auth, authApi }
+    }
+
+    function installWithRuntime(runtime: ReturnType<typeof makeRuntime>, login?: AdminLoginConfig) {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      const router = {
+        beforeEach: vi.fn(),
+        afterEach: vi.fn(),
+        onError: vi.fn(),
+        replace: vi.fn(),
+        currentRoute: { value: { name: 'login', path: '/admin/login', fullPath: '/admin/login', query: {} } },
+      } as unknown as Router
+      defineAdminApp({ runtime: runtime as never, login }).install(app, pinia, router)
+      const cfg = app._context.provides[
+        ADMIN_LOGIN_CONFIG_KEY as unknown as string | symbol
+      ] as AdminLoginConfig
+      return { cfg, router }
+    }
+
+    it('auto-generates the five standard login callbacks from the runtime', () => {
+      const { cfg } = installWithRuntime(makeRuntime())
+      const cbs = cfg.callbacks!
+      expect(typeof cbs.pwdLogin).toBe('function')
+      expect(typeof cbs.codeLogin).toBe('function')
+      expect(typeof cbs.sendCode).toBe('function')
+      expect(typeof cbs.resetPwd).toBe('function')
+      expect(typeof cbs.register).toBe('function')
+    })
+
+    it('a consumer callback overrides the framework default for its slot', () => {
+      const customSendCode = vi.fn(async () => {})
+      // sendCode is not wrapped by after() (only pwd/code are), so the override
+      // is the exact function — proving the consumer wins its slot.
+      const { cfg } = installWithRuntime(makeRuntime(), { callbacks: { sendCode: customSendCode } })
+      expect(cfg.callbacks!.sendCode).toBe(customSendCode)
+    })
+
+    it('provides a default onLogout that calls auth.logout() + redirects to login by name', async () => {
+      const runtime = makeRuntime()
+      const { cfg, router } = installWithRuntime(runtime)
+      expect(typeof cfg.user?.onLogout).toBe('function')
+      await cfg.user!.onLogout!()
+      expect(runtime.auth.logout).toHaveBeenCalledTimes(1)
+      expect((router as unknown as { replace: ReturnType<typeof vi.fn> }).replace).toHaveBeenCalledWith({
+        name: 'login',
+      })
+    })
+
+    it('drives pwdLogin through the runtime auth manager (then the framework after() runs)', async () => {
+      const runtime = makeRuntime()
+      const { cfg } = installWithRuntime(runtime)
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+      })
+      expect(runtime.auth.login).toHaveBeenCalledWith({ userName: 'admin', password: 'pw' })
+    })
+
+    it('enables the auth guard by default and threads runtime.auth.restoreAuth as the restore hook', async () => {
+      const runtime = makeRuntime()
+      const guards: unknown[] = []
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      const router = {
+        beforeEach: vi.fn((g: unknown) => guards.push(g)),
+        afterEach: vi.fn(),
+        onError: vi.fn(),
+        replace: vi.fn(),
+        currentRoute: { value: { name: 'x', path: '/admin/x', fullPath: '/admin/x' } },
+      } as unknown as Router
+      defineAdminApp({ runtime: runtime as never }).install(app, pinia, router)
+      const signedOut = { meta: { requiresAuth: true }, name: 'x', path: '/admin/x', fullPath: '/admin/x', query: {} }
+      for (const g of guards) await (g as (...a: unknown[]) => unknown)(signedOut, {}, vi.fn())
+      expect(runtime.auth.restoreAuth).toHaveBeenCalled()
+    })
+
+    it('uses runtime.http as the client when `client` is omitted', () => {
+      // No throw = the client was resolved from runtime.http.
+      expect(() => defineAdminApp({ runtime: makeRuntime() as never })).not.toThrow()
+    })
+
+    it('throws when neither client nor runtime is supplied', () => {
+      expect(() => defineAdminApp({} as never)).toThrow(/requires either .client. .* or .runtime./)
+    })
+  })
+
+  describe('locales option', () => {
+    it('registers host-app i18n overrides into the admin-app store at install time', () => {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      defineAdminApp({
+        client: dummyClient,
+        locales: { en: { tnzi: { admin: { modules: { foo: { title: 'Foo' } } } } } },
+      }).install(app, pinia)
+      const store = useAdminAppStore()
+      const en = store.messageOverrides.en as Record<string, unknown>
+      expect(en.tnzi).toBeTruthy()
     })
   })
 

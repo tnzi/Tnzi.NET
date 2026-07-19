@@ -1,10 +1,18 @@
 <template>
   <TTabsPage :title="title" icon="mdi:chart-box-outline" :translate="t" :sections="tabs" default-section="trial-balance">
-      <!-- Per-tab CSV export (server-generated, UTF-8 BOM) -->
+      <!-- Per-tab CSV export (server-generated, UTF-8 BOM) + balance-summary maintenance -->
       <template #actions="{ active }">
         <NButton size="small" :loading="exporting" :disabled="!canExport(active)" @click="exportCsv(active)">
           {{ t('actions.export') }}
         </NButton>
+        <NDropdown
+          v-if="showMaintenance"
+          trigger="click"
+          :options="maintenanceOptions"
+          @select="onMaintenanceSelect"
+        >
+          <NButton size="small" :loading="maintenanceLoading">{{ t('maintenance.menu') }}</NButton>
+        </NDropdown>
       </template>
 
       <!-- ── Trial Balance ─────────────────────────────────── -->
@@ -206,21 +214,60 @@
         </template>
         <TEmpty v-else-if="!taxLoading" :description="t('runHint')" />
       </template>
+
+      <!-- ── Balance-summary verify result (tab-agnostic overlay) ── -->
+      <template #overlays>
+        <TModalShell
+          v-model:show="verifyShow"
+          :title="t('maintenance.verifyTitle')"
+          :width="760"
+        >
+          <template v-if="verifyResult">
+            <div class="fin-reports__totals fin-reports__totals--top">
+              <TStatusBadge
+                :value="verifyResult.isConsistent"
+                :type="verifyResult.isConsistent ? 'success' : 'error'"
+                :label="verifyResult.isConsistent ? t('maintenance.consistent') : t('maintenance.inconsistent')"
+              />
+              <span>{{ t('maintenance.checkedBuckets') }}: <strong>{{ verifyResult.checkedBuckets }}</strong></span>
+              <span>{{ t('maintenance.totalDifferences') }}: <strong>{{ verifyResult.totalDifferences }}</strong></span>
+            </div>
+            <TResponsiveTable
+              v-if="verifyResult.differences.length"
+              :columns="diffColumns"
+              :data="verifyResult.differences"
+              size="small"
+              mobile="scroll"
+              :pagination="false"
+              :bordered="false"
+            />
+            <p v-if="verifyResult.totalDifferences > verifyResult.differences.length" class="fin-reports__truncation">
+              {{ t('maintenance.truncated', { shown: verifyResult.differences.length, total: verifyResult.totalDifferences }) }}
+            </p>
+            <TEmpty v-else-if="verifyResult.isConsistent" :description="t('maintenance.consistentHint')" />
+          </template>
+        </TModalShell>
+      </template>
   </TTabsPage>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { NButton, NDatePicker, NPagination, NSelect, type DataTableColumns } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
+import { NButton, NDatePicker, NDropdown, NPagination, NSelect, useDialog, type DataTableColumns } from 'naive-ui'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TEmpty from '../../components/data/TEmpty.vue'
+import TModalShell from '../../components/overlay/TModalShell.vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import {
   createFinanceBridge,
+  BalanceSummaryDifferenceKind,
   type AgingReportDto,
   type AgingRowDto,
   type AccountTreeDto,
   type BalanceSheetReportDto,
+  type BalanceSummaryDifferenceDto,
+  type BalanceSummaryVerifyDto,
   type GeneralLedgerLineDto,
   type GeneralLedgerReportDto,
   type ProfitAndLossReportDto,
@@ -232,10 +279,12 @@ import {
   type TrialBalanceRowDto,
 } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { formatDateOnly } from '@tnzi/core'
+import { downloadBlob, formatDateOnly } from '@tnzi/core'
 import { amountCell, fmtAmount, tsToIsoDate } from './money'
+import { financeSourceTypeLabel } from './source-type'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.reports')
@@ -356,7 +405,7 @@ const glColumns: DataTableColumns<GeneralLedgerLineDto> = [
   { key: 'postingDate', title: t('columns.postingDate'), width: 120, render: (r) => formatDateOnly(r.postingDate, { utc: true }) },
   { key: 'entryNumber', title: t('generalLedger.entryNumber'), width: 130, render: (r) => r.entryNumber ?? '—' },
   { key: 'memo', title: t('columns.memo'), minWidth: 180, render: (r) => r.memo ?? '—' },
-  { key: 'source', title: t('generalLedger.source'), width: 130, render: (r) => r.sourceType ?? '—' },
+  { key: 'source', title: t('generalLedger.source'), width: 130, render: (r) => financeSourceTypeLabel(r.sourceType) },
   { key: 'debit', title: t('generalLedger.debit'), width: 120, render: (r) => amountCell(r.debit > 0 ? fmtAmount(r.debit) : '—') },
   { key: 'credit', title: t('generalLedger.credit'), width: 120, render: (r) => amountCell(r.credit > 0 ? fmtAmount(r.credit) : '—') },
   { key: 'runningBalance', title: t('generalLedger.balance'), width: 130, render: (r) => amountCell(fmtAmount(r.runningBalance), true) },
@@ -401,10 +450,10 @@ const apLoading = ref(false)
 const agingColumns: DataTableColumns<AgingRowDto> = [
   { key: 'partyName', title: t('aging.party'), minWidth: 160 },
   { key: 'current', title: t('aging.current'), width: 110, render: (r) => amountCell(fmtAmount(r.current)) },
-  { key: 'days1To30', title: '1-30', width: 100, render: (r) => amountCell(fmtAmount(r.days1To30)) },
-  { key: 'days31To60', title: '31-60', width: 100, render: (r) => amountCell(fmtAmount(r.days31To60)) },
-  { key: 'days61To90', title: '61-90', width: 100, render: (r) => amountCell(fmtAmount(r.days61To90)) },
-  { key: 'over90', title: '90+', width: 100, render: (r) => amountCell(fmtAmount(r.over90)) },
+  { key: 'days1To30', title: t('aging.d1to30'), width: 100, render: (r) => amountCell(fmtAmount(r.days1To30)) },
+  { key: 'days31To60', title: t('aging.d31to60'), width: 100, render: (r) => amountCell(fmtAmount(r.days31To60)) },
+  { key: 'days61To90', title: t('aging.d61to90'), width: 100, render: (r) => amountCell(fmtAmount(r.days61To90)) },
+  { key: 'over90', title: t('aging.over90'), width: 100, render: (r) => amountCell(fmtAmount(r.over90)) },
   { key: 'total', title: t('aging.total'), width: 120, render: (r) => amountCell(fmtAmount(r.total), true) },
 ]
 
@@ -497,7 +546,7 @@ async function exportCsv(active: string) {
   exporting.value = true
   try {
     const blob = await exporter.run()
-    triggerDownload(blob, `${active.replaceAll('-', '_')}_${new Date().toISOString().slice(0, 10)}.csv`)
+    downloadBlob(blob, `${active.replaceAll('-', '_')}_${new Date().toISOString().slice(0, 10)}.csv`)
   } catch (error) {
     showError(error)
   } finally {
@@ -505,17 +554,105 @@ async function exportCsv(active: string) {
   }
 }
 
-/** Programmatic anchor download; revokes the object URL to avoid leaks. */
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.rel = 'noopener'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+// ── Balance-summary maintenance (Batch F) ──────────────────────
+// verify = read-only diagnosis (finance.balanceSummary.view);
+// rebuild = full recompute of the current tenant's summary buckets
+// (finance.balanceSummary.execute). The whole dropdown is hidden when the
+// user holds neither code (fail-open for super-admin / not-yet-loaded).
+const { can } = usePermissionGuard()
+const canVerifyBalance = computed(() => can('finance.balanceSummary.view'))
+const canRebuildBalance = computed(() => can('finance.balanceSummary.execute'))
+const showMaintenance = computed(() => canVerifyBalance.value || canRebuildBalance.value)
+
+const maintenanceOptions = computed(() => {
+  const opts: Array<{ label: string; key: string }> = []
+  if (canVerifyBalance.value) opts.push({ label: t('maintenance.verify'), key: 'verify' })
+  if (canRebuildBalance.value) opts.push({ label: t('maintenance.rebuild'), key: 'rebuild' })
+  return opts
+})
+
+const maintenanceLoading = ref(false)
+const verifyShow = ref(false)
+const verifyResult = ref<BalanceSummaryVerifyDto | null>(null)
+
+const dialog = safeDialog()
+function safeDialog() {
+  try {
+    return useDialog()
+  } catch {
+    return null
+  }
+}
+
+function formatPeriod(period: number): string {
+  const year = Math.floor(period / 100)
+  const month = period % 100
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+function diffKindLabel(kind: BalanceSummaryDifferenceKind): string {
+  if (kind === BalanceSummaryDifferenceKind.Missing) return t('maintenance.kind.missing')
+  if (kind === BalanceSummaryDifferenceKind.Extra) return t('maintenance.kind.extra')
+  if (kind === BalanceSummaryDifferenceKind.Mismatch) return t('maintenance.kind.mismatch')
+  return String(kind)
+}
+
+const diffColumns: DataTableColumns<BalanceSummaryDifferenceDto> = [
+  { key: 'kind', title: t('maintenance.diff.kind'), width: 110, render: (r) => diffKindLabel(r.kind) },
+  { key: 'accountId', title: t('maintenance.diff.account'), minWidth: 180, ellipsis: { tooltip: true } },
+  { key: 'period', title: t('maintenance.diff.period'), width: 100, render: (r) => formatPeriod(r.period) },
+  { key: 'currency', title: t('maintenance.diff.currency'), width: 90 },
+  { key: 'expected', title: t('maintenance.diff.expected'), minWidth: 170, render: (r) => amountCell(`${t('maintenance.diff.dr')} ${fmtAmount(r.expectedDebit)} / ${t('maintenance.diff.cr')} ${fmtAmount(r.expectedCredit)}`) },
+  { key: 'stored', title: t('maintenance.diff.actual'), minWidth: 170, render: (r) => amountCell(`${t('maintenance.diff.dr')} ${fmtAmount(r.storedDebit)} / ${t('maintenance.diff.cr')} ${fmtAmount(r.storedCredit)}`) },
+]
+
+function onMaintenanceSelect(key: string) {
+  if (key === 'verify') void runVerify()
+  else if (key === 'rebuild') confirmRebuild()
+}
+
+async function runVerify() {
+  if (maintenanceLoading.value) return
+  maintenanceLoading.value = true
+  try {
+    verifyResult.value = await bridge.balanceSummary.verify()
+    verifyShow.value = true
+  } catch (error) {
+    showError(error)
+  } finally {
+    maintenanceLoading.value = false
+  }
+}
+
+function confirmRebuild() {
+  const run = async () => {
+    if (maintenanceLoading.value) return
+    maintenanceLoading.value = true
+    try {
+      const result = await bridge.balanceSummary.rebuild()
+      message.success(t('maintenance.rebuildSuccess', {
+        buckets: result.buckets,
+        lines: result.lines,
+        durationMs: result.durationMs,
+      }))
+    } catch (error) {
+      showError(error)
+    } finally {
+      maintenanceLoading.value = false
+    }
+  }
+  if (dialog) {
+    dialog.warning({
+      title: t('maintenance.rebuildConfirmTitle'),
+      content: t('maintenance.rebuildConfirmContent'),
+      positiveText: t('maintenance.rebuildConfirmOk'),
+      negativeText: t('maintenance.cancel'),
+      positiveButtonProps: { type: 'primary' },
+      onPositiveClick: () => void run(),
+    })
+  } else {
+    void run()
+  }
 }
 
 onMounted(async () => {
@@ -582,6 +719,12 @@ onMounted(async () => {
 
 .fin-reports__check--bad {
   color: var(--tnzi-error, #d03050);
+}
+
+.fin-reports__truncation {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--tnzi-text-3, #909399);
 }
 
 .fin-reports__pagination {

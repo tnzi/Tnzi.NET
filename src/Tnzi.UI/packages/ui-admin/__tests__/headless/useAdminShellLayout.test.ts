@@ -226,6 +226,13 @@ describe('useAdminShellLayout', () => {
     expect(layout.footerVisible.value).toBe(false)
   })
 
+  it('tabsVisible: hidden on mobile even when the theme toggle is on (tabs are a desktop affordance)', () => {
+    const layout = setupShell({ mode: 'vertical', isMobile: true })
+    const theme = useAdminThemeStore()
+    theme.tabVisible = true
+    expect(layout.tabsVisible.value).toBe(false)
+  })
+
   it('headerVisible: always true in horizontal/hybrid modes (header hosts the menu)', () => {
     const layout = setupShell({ mode: 'horizontal', header: { visible: false } })
     expect(layout.headerVisible.value).toBe(true)

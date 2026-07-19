@@ -27,22 +27,44 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
 
         // 获取所有注册的 DbContext 类型并保存更改
         var dbContextTypes = GetAllRegisteredDbContextTypes();
+        var transactionEnabled = IsEnabledTransaction;
 
         foreach (var dbContextType in dbContextTypes)
         {
             try
             {
-                var dbContext = _serviceProvider.GetService(dbContextType) as DbContext;
-                if (dbContext != null)
+                if (_serviceProvider.GetService(dbContextType) is not DbContext dbContext)
                 {
-                    var changes = await dbContext.SaveChangesAsync(cancellationToken);
-                    totalChanges += changes;
+                    continue;
+                }
 
-                    if (changes > 0)
-                    {
-                        _logger?.LogDebug("Saved {Count} changes for DbContext {DbContextType}",
-                            changes, dbContextType.Name);
-                    }
+                int changes;
+                if (transactionEnabled && dbContext.ChangeTracker.HasChanges())
+                {
+                    // Route through the UnitOfWork so the deferred physical transaction is
+                    // started (via the UoW's EnsureTransactionStartedAsync) BEFORE saving.
+                    // A bare dbContext.SaveChangesAsync as the first save inside an enabled-
+                    // but-not-yet-started transaction runs in autocommit mode, escaping the
+                    // transaction (a later rollback can't undo it) — the same hazard already
+                    // fixed for EfCoreRepository.SaveChangesAsync (2026-07-02). This is the
+                    // transaction-safe path behind ApplicationService.FlushAsync.
+                    var unitOfWork = GetUnitOfWork(dbContextType);
+                    changes = unitOfWork != null
+                        ? await unitOfWork.SaveChangesAsync(cancellationToken)
+                        : await dbContext.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    // No active transaction (autocommit is correct), or nothing to save.
+                    changes = await dbContext.SaveChangesAsync(cancellationToken);
+                }
+
+                totalChanges += changes;
+
+                if (changes > 0)
+                {
+                    _logger?.LogDebug("Saved {Count} changes for DbContext {DbContextType}",
+                        changes, dbContextType.Name);
                 }
             }
             catch (Exception ex)

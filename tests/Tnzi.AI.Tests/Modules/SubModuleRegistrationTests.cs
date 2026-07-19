@@ -179,13 +179,13 @@ public class SubModuleRegistrationTests
     }
 
     // =========================================================================
-    // SandboxModule
+    // AISandboxModule
     // =========================================================================
 
     [Fact]
     public void SandboxModule_LoadOrder_Is57()
     {
-        new SandboxModule().LoadOrder.ShouldBe(57);
+        new AISandboxModule().LoadOrder.ShouldBe(57);
     }
 
     [Fact]
@@ -247,19 +247,19 @@ public class SubModuleRegistrationTests
     }
 
     // =========================================================================
-    // ChannelsModule
+    // AIChannelsModule
     // =========================================================================
 
     [Fact]
     public void ChannelsModule_LoadOrder_Is58()
     {
-        new ChannelsModule().LoadOrder.ShouldBe(58);
+        new AIChannelsModule().LoadOrder.ShouldBe(58);
     }
 
     [Fact]
     public void ChannelsModule_TableNamePrefix_IsAI()
     {
-        new ChannelsModule().TableNamePrefix.ShouldBe("AI");
+        new AIChannelsModule().TableNamePrefix.ShouldBe("AI");
     }
 
     [Fact]
@@ -374,7 +374,7 @@ public class SubModuleRegistrationTests
             .Bind(config.GetSection("AI:Sandbox"));
 
         var context = new ServiceConfigurationContext(services, config);
-        new SandboxModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        new AISandboxModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
         return services;
     }
 
@@ -401,7 +401,7 @@ public class SubModuleRegistrationTests
             .Bind(config.GetSection("AI:Channels"));
 
         var context = new ServiceConfigurationContext(services, config);
-        new ChannelsModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        new AIChannelsModule().ConfigureServicesAsync(context).GetAwaiter().GetResult();
         return services;
     }
 }

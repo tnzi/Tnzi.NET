@@ -48,6 +48,21 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 批量读取科目余额（本位币，截至基准日日终）
+    /// </summary>
+    /// <remarks>
+    /// POST-读：科目集经请求体传递（一页科目的 GUID 列表会超出 URL 长度上限），
+    /// 不改数据，仅由类级 <c>finance.account.view</c> 把守。
+    /// </remarks>
+    [HttpPost("balances")]
+    public virtual async Task<ApiResult<List<AccountBalanceDto>>> GetBalances([FromBody] GetAccountBalancesDto request)
+    {
+        var result = await _accountService.GetBalancesAsync(
+            request.AccountIds ?? [], request.AsOf ?? DateTime.UtcNow);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 创建科目
     /// </summary>
     [HttpPost]

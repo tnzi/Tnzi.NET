@@ -37,7 +37,7 @@ import {
   type PermissionComparisonDto,
 } from '@tnzi/core/services/authorization'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminFunctionModuleApi>[0]
@@ -223,16 +223,16 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     update: async (id, data) => unwrap(await fmApi.update(String(id), data)) as FunctionModuleDto,
     delete: async (ids) => {
       for (const id of ids) {
-        await fmApi.delete(String(id))
+        ensureOk(await fmApi.delete(String(id)))
       }
     },
     getAll: async (): Promise<FunctionModuleDto[]> =>
       unwrap<FunctionModuleDto[]>(await fmApi.getList()),
     enable: async (id: string) => {
-      await fmApi.enable(String(id))
+      ensureOk(await fmApi.enable(String(id)))
     },
     disable: async (id: string) => {
-      await fmApi.disable(String(id))
+      ensureOk(await fmApi.disable(String(id)))
     },
     previewCascade: async (id: string): Promise<ModuleCascadePreview> => {
       // BFS over the flat module list to gather every descendant of `id`,
@@ -296,14 +296,14 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     update: async (id, data) => unwrap(await mfApi.update(id, data)) as ModuleFunctionDto,
     delete: async (ids) => {
       for (const id of ids) {
-        await mfApi.delete(id)
+        ensureOk(await mfApi.delete(id))
       }
     },
     enable: async (id) => {
-      unwrap(await mfApi.enable(id))
+      ensureOk(await mfApi.enable(id))
     },
     disable: async (id) => {
-      unwrap(await mfApi.disable(id))
+      ensureOk(await mfApi.disable(id))
     },
   }
 
@@ -340,10 +340,10 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       return Array.isArray(ids) ? ids : []
     },
     setForRole: async (roleId: string, functionIds: string[]): Promise<void> => {
-      await rfApi.setFunctions(roleId, functionIds)
+      ensureOk(await rfApi.setFunctions(roleId, functionIds))
     },
     clearForRole: async (roleId: string): Promise<void> => {
-      await rfApi.clearFunctions(roleId)
+      ensureOk(await rfApi.clearFunctions(roleId))
     },
     compare: async (roleAId, roleBId) =>
       unwrap<PermissionComparisonDto>(
@@ -366,17 +366,17 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       return Array.isArray(ids) ? ids : []
     },
     setForUser: async (userId: string, functionIds: string[]): Promise<void> => {
-      await requireUfApi().setFunctions(userId, functionIds)
+      ensureOk(await requireUfApi().setFunctions(userId, functionIds))
     },
     clearForUser: async (userId: string): Promise<void> => {
-      await requireUfApi().clearFunctions(userId)
+      ensureOk(await requireUfApi().clearFunctions(userId))
     },
     getDeniedIds: async (userId: string): Promise<string[]> => {
       const ids = unwrap<string[]>(await requireUfApi().getDeniedFunctionIds(userId))
       return Array.isArray(ids) ? ids : []
     },
     setDeniedForUser: async (userId: string, functionIds: string[]): Promise<void> => {
-      await requireUfApi().setDeniedFunctions(userId, functionIds)
+      ensureOk(await requireUfApi().setDeniedFunctions(userId, functionIds))
     },
   }
 
@@ -399,7 +399,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     update: async (id, data) => unwrap(await erApi.update(String(id), data)) as EntityRoleDto,
     delete: async (ids) => {
       for (const id of ids) {
-        await erApi.delete(String(id))
+        ensureOk(await erApi.delete(String(id)))
       }
     },
     getByEntityInfo: async (entityInfoId: string) => {
@@ -418,16 +418,16 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       if (enable) {
         if (existing) {
           if (!existing.isEnabled || (filter !== undefined && existing.filter !== filter)) {
-            await erApi.update(existing.id, { operation, filter, isEnabled: true })
+            ensureOk(await erApi.update(existing.id, { operation, filter, isEnabled: true }))
           }
         } else {
-          await erApi.create({ entityInfoId, roleId, operation, filter })
+          ensureOk(await erApi.create({ entityInfoId, roleId, operation, filter }))
         }
       } else if (existing) {
         // Toggle-off currently deletes the row outright — matches the prior CRUD
         // behaviour and keeps the matrix readable (no zombie isEnabled=false
         // rows clogging getByEntityInfo results).
-        await erApi.delete(existing.id)
+        ensureOk(await erApi.delete(existing.id))
       }
     },
   }

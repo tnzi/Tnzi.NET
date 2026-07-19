@@ -65,6 +65,11 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
                 SourceId = e.SourceId,
                 TotalDebit = e.TotalDebit,
                 TotalCredit = e.TotalCredit,
+                // 交易币合计只能由行聚合（头上没有这两个冗余列）。头部投影不联行，
+                // 但这是相关子查询、不是 JOIN，不会把头记录乘开。草稿的合计只有这里有，
+                // 否则列表上每张草稿都显示 0，恰恰看不出它平不平。
+                TxnTotalDebit = e.Lines.Sum(l => l.TxnDebit),
+                TxnTotalCredit = e.Lines.Sum(l => l.TxnCredit),
                 PostedTime = e.PostedTime,
                 PostedById = e.PostedById,
                 ReversalOfEntryId = e.ReversalOfEntryId,

@@ -283,6 +283,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { downloadBlob } from '@tnzi/core'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
@@ -494,14 +495,7 @@ async function doExport(): Promise<void> {
   try {
     const skills = await bridge.skills.exportSkills()
     const blob = new Blob([JSON.stringify(skills, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `skills-export-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, `skills-export-${new Date().toISOString().slice(0, 10)}.json`)
     message?.success(t('importExport.exportSuccess', { count: skills.length }))
   } catch {
     message?.error(t('importExport.exportFailed'))

@@ -29,9 +29,12 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(ChatModule))]
 [OptionalDependsOn(typeof(PaymentModule))]
 [OptionalDependsOn(typeof(FinanceModule))]
-[OptionalDependsOn(typeof(RagModule))]
-[OptionalDependsOn(typeof(Tnzi.AI.Sandbox.SandboxModule))]
-[OptionalDependsOn(typeof(ChannelsModule))]
+[OptionalDependsOn(typeof(FinanceAiModule))]
+[OptionalDependsOn(typeof(FinanceDocumentsModule))]
+[OptionalDependsOn(typeof(PayrollModule))]
+[OptionalDependsOn(typeof(AIRagModule))]
+[OptionalDependsOn(typeof(Tnzi.AI.Sandbox.AISandboxModule))]
+[OptionalDependsOn(typeof(AIChannelsModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：

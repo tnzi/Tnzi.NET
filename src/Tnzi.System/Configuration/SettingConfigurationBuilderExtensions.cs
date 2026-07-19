@@ -12,6 +12,10 @@ public static class SettingConfigurationBuilderExtensions
     /// <summary>
     /// 把 SettingConfigurationSource 加到 IConfigurationBuilder。
     /// 同一个 builder 多次调用幂等（返回已有的 source 实例）。
+    /// SystemModule 在 PreConfigureServicesAsync 中自动调用本方法（宿主配置为 ConfigurationManager 时，
+    /// TnziApp 流程即是），因此通常无需手动接线；手动调用仅在需要 <paramref name="excludedKeys"/>
+    /// 或宿主传入非 builder 型 IConfiguration 时才有必要。
+    /// 配置 System:Settings:EnableConfigurationSource=false 可关闭自动接线。
     /// </summary>
     /// <param name="builder">IConfigurationBuilder 实例。</param>
     /// <param name="excludedKeys">

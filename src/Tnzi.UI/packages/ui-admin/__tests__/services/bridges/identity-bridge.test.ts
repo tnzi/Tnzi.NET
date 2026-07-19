@@ -15,7 +15,7 @@ function mockUserApi() {
     create: vi.fn(async (data: unknown) => ({ ...(data as object), id: 'new' })),
     update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
     deleteMany: vi.fn(async () => undefined),
-    exportCsv: vi.fn(async () => 'id,userName\n1,alice'),
+    exportCsv: vi.fn(async () => new Blob(['id,userName\n1,alice'], { type: 'text/csv' })),
     importCsv: vi.fn(async () => ({ successCount: 1, failureCount: 0, errors: [] })),
   } as any
 }

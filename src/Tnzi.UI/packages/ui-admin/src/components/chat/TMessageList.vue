@@ -16,6 +16,7 @@
             :is-system="isSystem"
             :my-name="myName"
             :my-avatar-file-id="myAvatarFileId"
+            @retry="emit('retry', $event)"
           />
         </template>
       </div>
@@ -27,13 +28,13 @@
 import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { NScrollbar, NImageGroup } from 'naive-ui'
 import { MessageContentType } from '@tnzi/core/services/chat'
-import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import TMessageBubble from './TMessageBubble.vue'
 import { translatePageKey } from '../../pages/_shared/translate'
+import type { ChatMessageView } from '../../stores/useChatStore'
 import { formatMessageSeparator, shouldShowSeparator } from './time'
 
 const props = defineProps<{
-  messages: ChatMessageDto[]
+  messages: ChatMessageView[]
   myId?: string
   myName?: string
   myAvatarFileId?: string | null
@@ -42,12 +43,17 @@ const props = defineProps<{
   isSystem?: boolean
 }>()
 
+const emit = defineEmits<{
+  /** A failed message's retry marker was clicked — bubble up to resend. */
+  retry: [message: ChatMessageView]
+}>()
+
 const scrollbarRef = ref<InstanceType<typeof NScrollbar> | null>(null)
 const yesterdayLabel = () => translatePageKey('chat', 'window.yesterday')
 
 type Row =
   | { type: 'sep'; key: string; label: string }
-  | { type: 'msg'; key: string; msg: ChatMessageDto }
+  | { type: 'msg'; key: string; msg: ChatMessageView }
 
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
@@ -62,7 +68,7 @@ const rows = computed<Row[]>(() => {
   return out
 })
 
-function isMine(msg: ChatMessageDto): boolean {
+function isMine(msg: ChatMessageView): boolean {
   if (msg.contentType === MessageContentType.System) return false
   if (!msg.senderId || !props.myId) return false
   return msg.senderId === props.myId

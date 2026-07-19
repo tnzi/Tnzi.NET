@@ -13,8 +13,9 @@
  * `./form-schema.css` and must be imported by the application shell
  * (typically through the package's `style.css` aggregate).
  */
-import { defineComponent, h, type PropType, type VNodeChild } from 'vue'
+import { computed, defineComponent, h, type PropType, type VNodeChild } from 'vue'
 import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NDatePicker } from 'naive-ui'
+import { useBreakpoints } from '../../composables/theme/useBreakpoints'
 import './form-schema.css'
 
 export type FormSchemaBuiltinFieldType = 'text' | 'textarea' | 'number' | 'switch' | 'select' | 'date'
@@ -134,6 +135,16 @@ const TSchemaForm = defineComponent({
     fieldRenderers: { type: Object as PropType<Record<string, FieldRenderer>>, default: undefined },
   },
   setup(props: Props) {
+    // 手机端（<768px）强制单列：`:columns="2"` 等多列表单在窄屏会把每个
+    // 字段挤成一条缝（消费方 BankFeed/Receipts 等）。塌成单列后每个字段
+    // 都能占满整行。`useBreakpoints()` 已处理 SSR/无 window 场景——`isSm`
+    // 在非浏览器环境为 false，故服务端渲染仍按调用方传入的列数。
+    const bp = useBreakpoints()
+    // 有效列数：手机端恒为 1，桌面端用调用方传入的 columns。所有依赖列数
+    // 的分支（fieldSpan / grid 模板 / labelPlacement）统一读它，一处修复
+    // 惠及全部 `:columns>1` 的消费方。
+    const effectiveCols = computed(() => (bp.isSm.value ? 1 : (props.columns ?? 1)))
+
     function tr(key: string | undefined, fallback: string): string {
       if (!key) return fallback
       if (!props.translate) return fallback
@@ -217,7 +228,7 @@ const TSchemaForm = defineComponent({
     // column mode honours an explicit `item.span`, defaults textareas to
     // the full row, and everything else to 1 column.
     function fieldSpan(item: FormSchemaItem): number {
-      const cols = props.columns ?? 1
+      const cols = effectiveCols.value
       if (cols <= 1) return 1
       if (typeof item.span === 'number' && item.span > 0) {
         return Math.min(item.span, cols)
@@ -228,7 +239,7 @@ const TSchemaForm = defineComponent({
     }
 
     return () => {
-      const cols = props.columns ?? 1
+      const cols = effectiveCols.value
       const multiCol = cols > 1
       const items = props.schema.filter((item) => !item.visible || item.visible(props.model))
       // Visual tightening (label-padding shrink, feedback-block compression,

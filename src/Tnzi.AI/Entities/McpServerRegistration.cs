@@ -42,8 +42,10 @@ public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
     public string Transport { get; set; } = string.Empty;
 
     /// <summary>
-    /// Auth token / API key ciphertext — 由 IDataProtectionProvider 加密
+    /// Auth token / API key ciphertext — 由 IDataProtectionProvider 加密。
+    /// [AuditIgnore]：虽为密文，仍不进实体级审计（缩小密文外泄面）。
     /// </summary>
+    [AuditIgnore]
     public string? AuthTokenEncrypted { get; set; }
 
     /// <summary>

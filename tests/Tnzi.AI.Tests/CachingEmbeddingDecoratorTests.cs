@@ -153,7 +153,7 @@ public class CachingEmbeddingDecoratorTests
     [Fact]
     public void DI_Registration_ResolvesDecoratorWithKeyedInner()
     {
-        // Arrange — simulate RagModule's keyed service registration
+        // Arrange — simulate AIRagModule's keyed service registration
         var innerMock = new Mock<IEmbeddingService>();
         var services = new ServiceCollection();
 
@@ -163,7 +163,7 @@ public class CachingEmbeddingDecoratorTests
             o.EmbeddingCache = new EmbeddingCacheOptions { Enabled = true, TtlHours = 24 };
         });
 
-        // Register inner as keyed service (same as RagModule does)
+        // Register inner as keyed service (same as AIRagModule does)
         services.AddKeyedScoped<IEmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey, (_, _) => innerMock.Object);
         services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();
 

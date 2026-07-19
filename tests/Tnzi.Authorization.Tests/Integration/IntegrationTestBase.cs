@@ -18,7 +18,7 @@ public class AuthorizationTestDbContext : TnziDbContext<AuthorizationTestDbConte
 {
     public AuthorizationTestDbContext(
         DbContextOptions<AuthorizationTestDbContext> options,
-        Security.Claims.ICurrentUser currentUser)
+        Tnzi.Security.Claims.ICurrentUser currentUser)
         : base(options, currentUser)
     {
     }

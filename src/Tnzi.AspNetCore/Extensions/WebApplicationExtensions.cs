@@ -36,17 +36,62 @@ public static class WebApplicationExtensions
     }
 
     /// <summary>
+    /// Run every registered <see cref="IPostMigrationStartupTask"/> once, AFTER the
+    /// migration phase, on every boot. Framework infrastructure that needs the schema
+    /// to exist (e.g. syncing the code-declared permission catalogue + refreshing the
+    /// in-memory snapshot) registers a task here instead of doing DB work in module
+    /// init — which runs BEFORE migrations and fails on a brand-new empty database (the
+    /// old "boot the app twice" bug). Errors are isolated: a failing task logs and
+    /// startup continues. No-op when no tasks are registered.
+    /// </summary>
+    public static async Task RunPostMigrationStartupTasksAsync(this WebApplication app)
+    {
+        var tasks = app.Services.GetServices<IPostMigrationStartupTask>().ToList();
+        if (tasks.Count == 0)
+        {
+            return;
+        }
+
+        var logger = app.Services.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("Tnzi.PostMigrationStartup");
+        foreach (var task in tasks)
+        {
+            try
+            {
+                await task.ExecuteAsync(app.Services);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Post-migration startup task {TaskType} failed; startup continues.", task.GetType().Name);
+            }
+        }
+    }
+
+    /// <summary>
     /// 初始化所有数据库（迁移和种子数据）
     /// </summary>
     private static async Task InitializeDatabasesAsync(IServiceProvider serviceProvider, TnziOptions options)
     {
-        // 性能优化：在生产环境跳过数据库初始化检查
         var env = serviceProvider.GetService<IWebHostEnvironment>();
-        if (options.SkipDatabaseInitInProduction && env?.IsProduction() == true)
+        var isProduction = env?.IsProduction() == true;
+
+        // Orthogonal production gates: migrations (idempotent, safe) vs seeding (may mutate data).
+        // Backward-compatible overlay on the legacy SkipDatabaseInitInProduction master switch —
+        // when a new option is unset it falls back to the legacy switch, so existing appsettings
+        // (default true → skip both; explicit false → run both) behave exactly as before.
+        // Set ApplyMigrationsInProduction=true to migrate-without-seeding in production.
+        // Non-production always runs both.
+        var runMigrations = options.ShouldApplyMigrations(isProduction);
+        var runSeed = options.ShouldSeed(isProduction);
+
+        var rootLogger = serviceProvider.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("Tnzi.DatabaseInitialization");
+
+        if (isProduction && !runMigrations && !runSeed)
         {
-            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
-            var logger = loggerFactory.CreateLogger("Tnzi.DatabaseInitialization");
-            logger.LogInformation("Skipping database initialization in production environment (SkipDatabaseInitInProduction = true).");
+            rootLogger.LogInformation(
+                "Skipping database initialization in production environment (migrations and seeding both disabled).");
             return;
         }
 
@@ -67,61 +112,76 @@ public static class WebApplicationExtensions
                 return;
             }
 
-            logger2.LogInformation("Initializing {Count} database(s)...", dbInitializers.Count);
-
             // 执行数据库迁移
-            foreach (var initializer in dbInitializers)
+            if (runMigrations)
             {
-                try
-                {
-                    await initializer.MigrateAsync();
-                }
-                catch (Exception ex)
-                {
-                    logger2.LogError(ex, "Database migration failed for {InitializerType}", initializer.GetType().Name);
-
-                    if (options.FailFastOnDatabaseInitError)
-                    {
-                        // 输出到控制台以便可见
-                        Console.WriteLine($"[DB Init ERROR] {ex.GetType().Name}: {ex.Message}");
-                        if (ex.InnerException != null)
-                        {
-                            Console.WriteLine($"[DB Init ERROR] Inner: {ex.InnerException.Message}");
-                        }
-                        throw;
-                    }
-                    else
-                    {
-                        // 不中断启动，只记录警告
-                        logger2.LogWarning(ex, "Database migration failed but continuing startup (FailFastOnDatabaseInitError = false)");
-                    }
-                }
-            }
-
-            logger2.LogInformation("Database migration completed.");
-
-            // 执行种子数据初始化
-            var seeders = scope.ServiceProvider.GetServices<IDataSeeder>().ToList();
-            if (seeders.Count > 0)
-            {
-                logger2.LogDebug("Found {Count} data seeder(s), initializing seed data...", seeders.Count);
-                foreach (var seeder in seeders)
+                logger2.LogInformation("Migrating {Count} database(s)...", dbInitializers.Count);
+                foreach (var initializer in dbInitializers)
                 {
                     try
                     {
-                        await seeder.SeedAsync(scope.ServiceProvider);
+                        await initializer.MigrateAsync();
                     }
                     catch (Exception ex)
                     {
-                        logger2.LogError(ex, "Seed data initialization failed for {SeederType}", seeder.GetType().Name);
-                        // 种子数据失败不中断启动，只记录日志（除非 FailFastOnDatabaseInitError = true）
+                        logger2.LogError(ex, "Database migration failed for {InitializerType}", initializer.GetType().Name);
+
                         if (options.FailFastOnDatabaseInitError)
                         {
+                            // 输出到控制台以便可见
+                            Console.WriteLine($"[DB Init ERROR] {ex.GetType().Name}: {ex.Message}");
+                            if (ex.InnerException != null)
+                            {
+                                Console.WriteLine($"[DB Init ERROR] Inner: {ex.InnerException.Message}");
+                            }
                             throw;
+                        }
+                        else
+                        {
+                            // 不中断启动，只记录警告
+                            logger2.LogWarning(ex, "Database migration failed but continuing startup (FailFastOnDatabaseInitError = false)");
                         }
                     }
                 }
-                logger2.LogDebug("Seed data initialization completed.");
+
+                logger2.LogInformation("Database migration completed.");
+            }
+            else
+            {
+                logger2.LogInformation(
+                    "Skipping database migrations in production (ApplyMigrationsInProduction is not enabled).");
+            }
+
+            // 执行种子数据初始化
+            if (runSeed)
+            {
+                var seeders = scope.ServiceProvider.GetServices<IDataSeeder>().ToList();
+                if (seeders.Count > 0)
+                {
+                    logger2.LogDebug("Found {Count} data seeder(s), initializing seed data...", seeders.Count);
+                    foreach (var seeder in seeders)
+                    {
+                        try
+                        {
+                            await seeder.SeedAsync(scope.ServiceProvider);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger2.LogError(ex, "Seed data initialization failed for {SeederType}", seeder.GetType().Name);
+                            // 种子数据失败不中断启动，只记录日志（除非 FailFastOnDatabaseInitError = true）
+                            if (options.FailFastOnDatabaseInitError)
+                            {
+                                throw;
+                            }
+                        }
+                    }
+                    logger2.LogDebug("Seed data initialization completed.");
+                }
+            }
+            else
+            {
+                logger2.LogInformation(
+                    "Skipping seed data in production (SeedInProduction is not enabled).");
             }
         }
         catch (Exception ex)

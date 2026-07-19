@@ -7,8 +7,10 @@ namespace Tnzi.Finance.Entities;
 /// 替代以 SourceType="BankTransfer" 手工凭证包装转账的做法：原生单据可追溯、可作废（冲销）。
 /// 遵循单据范式：编号过账时分配（scope 独立）、Posted 不可变、作废 = 引擎冲销、
 /// 乐观并发 409。双方科目须为可过账的资金叶子科目（CashFlowActivity = CashEquivalent）。
-/// 首版两科目须兼容同一交易币种（科目限定币种时须相等）；跨币种换汇划转
-/// 与多币种校验一体设计，后续版本经汇率换算落地。
+/// 同币种模式：<see cref="Currency"/>/<see cref="Amount"/> 为唯一金额，Target* 字段全空。
+/// 跨币种模式（路线 C）：转出侧记 <see cref="Currency"/>/<see cref="Amount"/>，转入侧记
+/// <see cref="TargetCurrency"/>/<see cref="TargetAmount"/>，过账产出三张单币凭证（转出币/转入币/
+/// 本位币 residual FX），两侧资金行经换汇过渡科目在同工作单元内精确归零。
 /// </remarks>
 public class Transfer : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
 {
@@ -48,9 +50,27 @@ public class Transfer : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
     /// <summary>摘要</summary>
     public string? Memo { get; set; }
 
-    /// <summary>过账凭证</summary>
+    /// <summary>转入侧币种（null = 同币种模式；非空且 != Currency = 跨币种模式）</summary>
+    public string? TargetCurrency { get; set; }
+
+    /// <summary>转入侧金额（交易币，跨币种模式必填）</summary>
+    public decimal? TargetAmount { get; set; }
+
+    /// <summary>转入侧捕获汇率（过账时定格）</summary>
+    public decimal TargetExchangeRate { get; set; }
+
+    /// <summary>转入侧金额（本位币，过账时定格）</summary>
+    public decimal TargetBaseAmount { get; set; }
+
+    /// <summary>过账凭证（同币种模式 = 唯一凭证；跨币种模式 = 转出币凭证）</summary>
     public Guid? JournalEntryId { get; set; }
 
-    /// <summary>作废冲销凭证</summary>
+    /// <summary>转入币凭证（跨币种模式）</summary>
+    public Guid? TargetJournalEntryId { get; set; }
+
+    /// <summary>本位币 residual 汇兑损益凭证（跨币种模式，residual != 0 时）</summary>
+    public Guid? FxJournalEntryId { get; set; }
+
+    /// <summary>作废冲销凭证（同币种模式 = 唯一冲销凭证；跨币种模式冲销经 SourceType 反查全部凭证）</summary>
     public Guid? VoidJournalEntryId { get; set; }
 }

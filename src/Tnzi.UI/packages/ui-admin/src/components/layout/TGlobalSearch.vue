@@ -181,7 +181,10 @@ watch(
       query.value = ''
       highlighted.value = 0
       await nextTick()
-      inputRef.value?.focus?.()
+      // Desktop: focus immediately (Ctrl/Cmd+K power-user flow — start typing
+      // right away). Phone: skip auto-focus so the soft keyboard doesn't
+      // instantly cover the menu list the user opened to browse.
+      if (!bp.isSm.value) inputRef.value?.focus?.()
     }
   },
   { immediate: true },

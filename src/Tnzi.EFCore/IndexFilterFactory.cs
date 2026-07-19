@@ -128,6 +128,24 @@ public static class IndexFilterFactory
     }
 
     /// <summary>
+    /// 构建 "{列} = {true 字面量}" 的布尔判真表达式（按 provider 的标识符引用规则与布尔字面量）。
+    /// </summary>
+    private static string BuildIsTrueExpression(string columnName, DatabaseProvider provider)
+    {
+        var column = QuoteIdentifier(columnName, provider);
+        return provider switch
+        {
+            DatabaseProvider.SqlServer => $"{column} = 1",
+            DatabaseProvider.PostgreSQL => $"{column} = true",
+            DatabaseProvider.MySql => $"{column} = TRUE",
+            DatabaseProvider.Sqlite => $"{column} = 1",
+            _ => throw new NotSupportedException(
+                $"Database provider {provider} is not supported. " +
+                $"Supported providers: {string.Join(", ", _filters.Keys)}.")
+        };
+    }
+
+    /// <summary>
     /// 获取 "IsDeleted = false" 的过滤 SQL，允许自定义 IsDeleted 列名。
     /// </summary>
     /// <param name="isDeletedColumn">IsDeleted 属性对应的实际数据库列名</param>
@@ -335,6 +353,30 @@ public static class IndexFilterFactory
     {
         var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
         return GetColumnEqualsAndIsDeletedFalse(columnName, value, provider);
+    }
+
+    /// <summary>
+    /// 获取 "columnName = true AND IsDeleted = false" 的过滤 SQL，
+    /// 用于按布尔标志列限定的部分唯一索引（如"每往来方至多一个默认账户"）同时排除软删除行
+    /// </summary>
+    /// <param name="columnName">布尔列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnTrueAndIsDeletedFalse(string columnName, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(columnName);
+        return $"{BuildIsTrueExpression(columnName, provider)} AND {GetIsDeletedFalse(provider)}";
+    }
+
+    /// <summary>
+    /// 获取 "columnName = true AND IsDeleted = false" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">布尔列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnTrueAndIsDeletedFalse(string columnName)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnTrueAndIsDeletedFalse(columnName, provider);
     }
 
     /// <summary>

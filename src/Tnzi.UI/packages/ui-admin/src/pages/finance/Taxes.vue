@@ -160,6 +160,8 @@ const codeSchema: FormSchemaItem[] = [
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   // 组件 = 多选税率（按选择顺序生成 order；复合税暂经 API 配置，UI 后续增强）
   { key: 'components', labelKey: 'form.components', label: 'Rates', type: 'finance-tax-components', required: true },
+  // 编辑时显示（创建默认可抵扣，经 toCodePayload；不显误导性 off 开关，同 activeField 约定）
+  { key: 'isRecoverable', labelKey: 'form.isRecoverable', label: 'Recoverable (purchase ITC)', type: 'switch', visible: (m) => !!m.id },
   activeField,
 ]
 
@@ -170,6 +172,7 @@ function toCodePayload(d: Record<string, unknown>): UpsertTaxCodeDto {
     name: String(d.name ?? ''),
     description: (d.description as string | null) || null,
     isActive: d.isActive !== false,
+    isRecoverable: d.isRecoverable !== false,
     components: rateIds.map((taxRateId, index) => ({ taxRateId, order: index + 1 })),
   }
 }

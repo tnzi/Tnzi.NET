@@ -9,27 +9,27 @@
 import type { App } from 'vue';
 
 // Auth components
-import LoginForm from './auth/LoginForm.vue';
-import RegisterForm from './auth/RegisterForm.vue';
-import PasswordReset from './auth/PasswordReset.vue';
+import TLoginForm from './auth/TLoginForm.vue';
+import TRegisterForm from './auth/TRegisterForm.vue';
+import TPasswordReset from './auth/TPasswordReset.vue';
 
 // Form components
-import Form from './form/Form.vue';
-import SearchBar from './form/SearchBar.vue';
-import DynamicForm from './form/DynamicForm.vue';
+import TForm from './form/TForm.vue';
+import TSearchBar from './form/TSearchBar.vue';
+import TDynamicForm from './form/TDynamicForm.vue';
 
 // List components
-import DataList from './list/DataList.vue';
-import SwipeCell from './list/SwipeCell.vue';
+import TDataList from './list/TDataList.vue';
+import TSwipeCell from './list/TSwipeCell.vue';
 
 // Card components
-import StatCard from './card/StatCard.vue';
-import UserCard from './card/UserCard.vue';
+import TStatCard from './card/TStatCard.vue';
+import TUserCard from './card/TUserCard.vue';
 
 // Navigation components
-import Menu from './navigation/Menu.vue';
-import MobileNavBar from './navigation/MobileNavBar.vue';
-import MobileTabBar from './navigation/MobileTabBar.vue';
+import TMenu from './navigation/TMenu.vue';
+import TNavBar from './navigation/TNavBar.vue';
+import TTabBar from './navigation/TTabBar.vue';
 
 /**
  * Register all Tnzi UI components globally.
@@ -37,17 +37,17 @@ import MobileTabBar from './navigation/MobileTabBar.vue';
  * When not called, the bundler can tree-shake all component imports.
  */
 export function registerAllComponents(app: App): void {
-  app.component('LoginForm', LoginForm);
-  app.component('RegisterForm', RegisterForm);
-  app.component('PasswordReset', PasswordReset);
-  app.component('Form', Form);
-  app.component('SearchBar', SearchBar);
-  app.component('DynamicForm', DynamicForm);
-  app.component('DataList', DataList);
-  app.component('SwipeCell', SwipeCell);
-  app.component('StatCard', StatCard);
-  app.component('UserCard', UserCard);
-  app.component('Menu', Menu);
-  app.component('MobileNavBar', MobileNavBar);
-  app.component('MobileTabBar', MobileTabBar);
+  app.component('TLoginForm', TLoginForm);
+  app.component('TRegisterForm', TRegisterForm);
+  app.component('TPasswordReset', TPasswordReset);
+  app.component('TForm', TForm);
+  app.component('TSearchBar', TSearchBar);
+  app.component('TDynamicForm', TDynamicForm);
+  app.component('TDataList', TDataList);
+  app.component('TSwipeCell', TSwipeCell);
+  app.component('TStatCard', TStatCard);
+  app.component('TUserCard', TUserCard);
+  app.component('TMenu', TMenu);
+  app.component('TNavBar', TNavBar);
+  app.component('TTabBar', TTabBar);
 }

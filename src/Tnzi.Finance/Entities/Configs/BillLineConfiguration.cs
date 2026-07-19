@@ -11,6 +11,7 @@ public class BillLineConfiguration : EntityTypeConfigurationBase<BillLine, Guid>
         builder.Property(l => l.Quantity).HasQuantityPrecision();
         builder.Property(l => l.UnitPrice).HasMoneyPrecision();
         builder.Property(l => l.Amount).HasMoneyPrecision();
+        builder.Property(l => l.TaxAmount).HasMoneyPrecision();
 
         builder.HasIndex(l => l.BillId);
         builder.HasIndex(l => l.ItemId);

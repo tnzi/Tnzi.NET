@@ -1,4 +1,4 @@
-using Tnzi.AI.Sandbox;
+using Tnzi.AI.Sandbox.Services;
 
 namespace Tnzi.AI.Tests.Sandbox;
 

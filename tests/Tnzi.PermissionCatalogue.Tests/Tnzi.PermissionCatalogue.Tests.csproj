@@ -31,6 +31,7 @@
        leaks into any module's own integration tests (entity auto-discovery
        scans loaded assemblies). -->
   <ItemGroup>
+    <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
@@ -47,6 +48,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment\Tnzi.Payment.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" />

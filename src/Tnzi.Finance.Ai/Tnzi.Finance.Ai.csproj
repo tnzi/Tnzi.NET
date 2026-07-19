@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>AI-backed implementations for the Tnzi.NET finance module: vision + structured-output receipt/invoice field extraction (default IReceiptExtractor). Optional module; load it to make finance receipt capture work out of the box.</Description>
+    <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Microsoft.Extensions.AI DataContent / structured output are experimental (MEAI001);
+         consumed by the vision-based receipt extractor. -->
+    <NoWarn>$(NoWarn);CS1591;MEAI001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

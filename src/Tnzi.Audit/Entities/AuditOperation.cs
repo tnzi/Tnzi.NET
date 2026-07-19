@@ -2,27 +2,6 @@
 namespace Tnzi.Audit.Entities;
 
 /// <summary>
-/// 操作结果类型
-/// </summary>
-public enum AuditResultType
-{
-    /// <summary>
-    /// 成功
-    /// </summary>
-    Success = 1,
-
-    /// <summary>
-    /// 失败
-    /// </summary>
-    Failed = 2,
-
-    /// <summary>
-    /// 警告
-    /// </summary>
-    Warning = 3
-}
-
-/// <summary>
 /// 操作审计实体（不可变审计记录，仅记录创建时间）
 /// </summary>
 public class AuditOperation : CreationAuditedEntity<Guid>
@@ -86,6 +65,14 @@ public class AuditOperation : CreationAuditedEntity<Guid>
     /// 获取或设置 执行耗时（毫秒）
     /// </summary>
     public long Elapsed { get; set; }
+
+    /// <summary>
+    /// 获取或设置 是否为写操作（变更类）。
+    /// 采集时经 AuditOperationClassifier 定案（[AuditRead] &gt; 方法级操作权限码 &gt;
+    /// 三层门约定 admin 面（类级 .view）无操作码=读 &gt; HTTP 方法+伪读启发式）；
+    /// null = 本列引入前的历史行，查询端回退旧启发式分类。
+    /// </summary>
+    public bool? IsWrite { get; set; }
 
     /// <summary>
     /// 获取或设置 HTTP方法

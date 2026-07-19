@@ -20,6 +20,8 @@ global using System.Text.Json.Serialization;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.AI.Dtos;
+// 别名：消歧 Tnzi.AI.Metadata.ErrorCodes 与 Tnzi.Exceptions.ErrorCodes
+global using ErrorCodes = Tnzi.AI.Metadata.ErrorCodes;
 global using Tnzi.AI.Engine;
 global using Tnzi.AI.Infrastructure;
 global using Tnzi.AI.Infrastructure.Providers;

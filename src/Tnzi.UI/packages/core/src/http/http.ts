@@ -308,17 +308,26 @@ export class HttpClient {
    * Downloads are exempt from the default request timeout — large files can
    * legitimately take longer than {@link DEFAULT_REQUEST_TIMEOUT}. An explicit
    * per-request `timeout` is still honored when provided.
+   *
+   * Defaults to GET; pass `method: 'POST'` with `body` for export endpoints
+   * that take a query payload (e.g. filtered CSV exports).
    */
-  async download(url: string, options?: RequestOptions): Promise<ApiResult<Blob>> {
+  async download(url: string, options?: RequestOptions & { method?: 'GET' | 'POST' }): Promise<ApiResult<Blob>> {
     const timeoutMs = options?.timeout ?? 0;
     const timeout = this.createTimeoutSignal(timeoutMs, options?.signal);
+    const method = options?.method ?? 'GET';
     try {
       const fullUrl = this.buildUrl(url, options?.params);
-      const headers = this.buildHeaders(options?.headers);
+      const headers = this.buildHeaders(options?.headers) as Record<string, string>;
+      const hasBody = options?.body !== undefined && options.body !== null;
+      if (hasBody && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
 
       const response = await fetch(fullUrl, {
-        method: 'GET',
+        method,
         headers,
+        body: hasBody ? JSON.stringify(options!.body) : undefined,
         signal: timeout.signal,
         credentials: options?.withCredentials ? 'include' : 'same-origin',
       });
@@ -357,7 +366,7 @@ export class HttpClient {
     } catch (error) {
       if (timeout.timedOut() && isDomAbortError(error)) {
         return createFailedApiResult<Blob>({
-          message: `${new TimeoutError(timeoutMs).message}: GET ${url}`,
+          message: `${new TimeoutError(timeoutMs).message}: ${method} ${url}`,
           code: 408,
           errorCode: REQUEST_TIMEOUT_ERROR_CODE,
         });

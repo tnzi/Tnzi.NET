@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 辩论节点 — 多 Agent 讨论，复用 GroupChatOrchestrator 核心逻辑

@@ -456,7 +456,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersDiscord()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/ChannelsModule.cs");
+        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("DiscordChannelAdapter");
         source.ShouldContain("options.Discord.Enabled");
     }

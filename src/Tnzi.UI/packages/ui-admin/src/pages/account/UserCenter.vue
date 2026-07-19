@@ -378,11 +378,14 @@
       </template>
     </TDetailHost>
 
-    <!-- Change email / phone (two-step verify) -->
-    <NModal v-model:show="changeModal.show" preset="card" size="small" class="w-480px">
-      <template #header>
-        <span>{{ changeModalTitle }}</span>
-      </template>
+    <!-- Change email / phone (two-step verify). TModalShell = the shared modal
+         chrome (width cap + auto-fullscreen on phones + no-autofocus on phones),
+         so this dialog is mobile-adapted for free. -->
+    <TModalShell
+      v-model:show="changeModal.show"
+      :title="changeModalTitle"
+      :width="480"
+    >
       <NForm label-placement="top" size="small" :show-feedback="false">
         <NFormItem :label="t(changeModal.kind === 'email' ? 'changeModal.newEmail' : 'changeModal.newPhone')" required>
           <NInput
@@ -397,29 +400,27 @@
         <p class="t-user-center__hint">{{ t('changeModal.hint') }}</p>
       </NForm>
       <template #footer>
-        <div class="flex justify-end gap-8px">
-          <NButton @click="changeModal.show = false">{{ t('changeModal.cancel') }}</NButton>
-          <NButton
-            v-if="changeModal.step === 'send'"
-            type="primary"
-            :loading="changeModal.sending"
-            :disabled="!changeModal.target.trim()"
-            @click="sendChangeCode"
-          >
-            {{ t('changeModal.sendCode') }}
-          </NButton>
-          <NButton
-            v-else
-            type="primary"
-            :loading="changeModal.confirming"
-            :disabled="!changeModal.code.trim()"
-            @click="confirmChange"
-          >
-            {{ t('changeModal.confirm') }}
-          </NButton>
-        </div>
+        <NButton @click="changeModal.show = false">{{ t('changeModal.cancel') }}</NButton>
+        <NButton
+          v-if="changeModal.step === 'send'"
+          type="primary"
+          :loading="changeModal.sending"
+          :disabled="!changeModal.target.trim()"
+          @click="sendChangeCode"
+        >
+          {{ t('changeModal.sendCode') }}
+        </NButton>
+        <NButton
+          v-else
+          type="primary"
+          :loading="changeModal.confirming"
+          :disabled="!changeModal.code.trim()"
+          @click="confirmChange"
+        >
+          {{ t('changeModal.confirm') }}
+        </NButton>
       </template>
-    </NModal>
+    </TModalShell>
   </div>
 </template>
 
@@ -436,7 +437,6 @@ import {
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NPopconfirm,
   NSelect,
   NSpace,
@@ -445,9 +445,10 @@ import {
 } from 'naive-ui'
 import { TSvgIcon, TImageUpload, TAvatar } from '@tnzi/ui'
 import { vModule } from '../../directives/vModule'
-import { formatDateTime } from '@tnzi/core'
+import { downloadBlob, formatDateTime } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import TModalShell from '../../components/overlay/TModalShell.vue'
 import { useDetail, type DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { deviceIconColor, parseDeviceInfo } from '../_shared/device-info'
@@ -1043,12 +1044,7 @@ async function exportData(): Promise<void> {
   try {
     const data = await bridge.me.exportPersonalData()
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `personal-data-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(blob, `personal-data-${new Date().toISOString().slice(0, 10)}.json`)
     message.success(t('danger.export.success'))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))

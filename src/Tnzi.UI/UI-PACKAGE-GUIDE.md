@@ -960,7 +960,7 @@ pnpm typecheck
 | --- | --- | --- |
 | `TForm` | 通用表单 | `FormController` |
 | `TSearchForm` | 搜索表单 | `FormController` |
-| `TDynamicForm` | 动态表单 | `FormController` + Schema |
+| `TSchemaForm` | 声明式 schema 表单 | `FormSchemaItem[]` |
 
 ### Phase 4 — 扩展 (Extension)
 

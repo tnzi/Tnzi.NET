@@ -130,7 +130,7 @@ public class ThreadTitleGenerationHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_WhenExceptionThrown_DoesNotRethrow()
+    public async Task HandleAsync_WhenExceptionThrown_Propagates()
     {
         var threadId = Guid.NewGuid();
 
@@ -149,8 +149,9 @@ public class ThreadTitleGenerationHandlerTests
             AssistantReply = "Hi"
         };
 
-        // Should not throw
+        // 标题生成落库是持久化副作用：异常必须冒泡给事件总线（隔离/重试/DLQ），不再吞。
         var ex = await Record.ExceptionAsync(() => handler.HandleAsync(@event));
-        ex.ShouldBeNull();
+        ex.ShouldNotBeNull();
+        ex.ShouldBeOfType<InvalidOperationException>();
     }
 }

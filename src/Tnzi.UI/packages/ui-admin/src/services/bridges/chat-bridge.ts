@@ -20,7 +20,7 @@ import {
   type PresenceOverviewQueryDto,
   type BroadcastLogDto,
 } from '@tnzi/core/services/chat'
-import { unwrapResult as unwrap, mapQueryToListRequest } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest } from '../_mappers'
 import type { CrudPageQuery, CrudPageResult } from '../types'
 
 type HttpClient = Parameters<typeof useChatBroadcastApi>[0]
@@ -84,12 +84,15 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
         ? async (id, params) => unwrap(await adminApi.getConversationMessages(id, params))
         : noClient('conversations.messages'),
       delete: adminApi
-        ? async (ids) => { await Promise.all(ids.map((id) => adminApi.deleteConversation(id))) }
+        ? async (ids) => {
+            const results = await Promise.all(ids.map((id) => adminApi.deleteConversation(id)))
+            results.forEach((res) => ensureOk(res))
+          }
         : noClient('conversations.delete'),
     },
 
     deleteMessage: adminApi
-      ? async (messageId) => { await adminApi.deleteMessage(messageId) }
+      ? async (messageId) => { ensureOk(await adminApi.deleteMessage(messageId)) }
       : noClient('deleteMessage'),
 
     presence: adminApi

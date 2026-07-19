@@ -723,7 +723,7 @@ export default defineConfig({
 | `TDataTable` | 数据表格 | `data`, `columns`, `pagination`, `selectable`, `actions` |
 | `TDataList` | 数据列表 | `data`, `itemKey`, `loading` |
 | `TForm` | 通用表单 | `model`, `rules`, `labelPlacement` |
-| `TDynamicForm` | 动态表单 | `model`, `fields`, `inline` |
+| `TSchemaForm` | 声明式 schema 表单 | `schema`, `model`, `columns`, `readonly` |
 | `TSearchForm` | 搜索表单 | `modelValue`, `placeholder`, `showReset` |
 | `TStatCard` | 统计卡片 | `title`, `value`, `trend`, `color` |
 | `TUserCard` | 用户卡片 | `user`, `showActions`, `actions` |
@@ -890,28 +890,25 @@ const handleMenu = (key: string) => {
 </script>
 ```
 
-### 动态表单
+### Schema 表单
+
+`TSchemaForm` 按声明式 `FormSchemaItem[]` 渲染字段并直接写入 `model`（内置类型 text/textarea/number/switch/select/date）。它是纯渲染器，不自带提交事件——提交由调用方按需接一个按钮。
 
 ```vue
 <template>
-  <TDynamicForm
-    :model="formData"
-    :fields="fields"
-    :disabled="submitting"
-    @submit="handleSubmit"
-    @field-change="handleFieldChange"
-  />
+  <TSchemaForm :schema="schema" :model="formData" :columns="2" />
+  <n-button type="primary" @click="handleSubmit(formData)">Submit</n-button>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive } from 'vue'
+import type { FormSchemaItem } from '@tnzi/ui'
 
-const formData = reactive({ name: '', email: '', role: '', bio: '' })
-const submitting = ref(false)
+const formData = reactive<Record<string, unknown>>({ name: '', email: '', role: '', bio: '' })
 
-const fields = [
+const schema: FormSchemaItem[] = [
   { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Enter name' },
-  { key: 'email', label: 'Email', type: 'email', required: true },
+  { key: 'email', label: 'Email', type: 'text', required: true },
   { key: 'role', label: 'Role', type: 'select', options: [
     { label: 'Admin', value: 'admin' },
     { label: 'Editor', value: 'editor' },
@@ -919,6 +916,10 @@ const fields = [
   ]},
   { key: 'bio', label: 'Bio', type: 'textarea' },
 ]
+
+function handleSubmit(data: Record<string, unknown>) {
+  // 提交 data 到后端
+}
 </script>
 ```
 
@@ -1028,7 +1029,7 @@ defineAdminApp({ client, basePath: '/' })              // 路由表内部无前�
 | `TDataTable` | 数据表格 |
 | `TDataList` | 数据列表 |
 | `TForm` | 通用表单 |
-| `TDynamicForm` | 动态表单 |
+| `TSchemaForm` | 声明式 schema 表单 |
 | `TSearchForm` | 搜索表单 |
 | `TStatCard` | 统计卡片 |
 | `TUserCard` | 用户卡片 |
@@ -1224,7 +1225,7 @@ app.mount('#app')
 | `TLoginForm` | 登录表单 | 支持验证码、社会化登录 |
 | `TRegisterForm` | 注册表单 | 支持手机号、邮箱 |
 | `TForm` | 通用表单 | 自定义验证规则 |
-| `TDynamicForm` | 动态表单 | 从配置生成表单 |
+| `TSchemaForm` | 声明式 schema 表单 | 从 `FormSchemaItem[]` 生成表单 |
 | `TSearchForm` | 搜索表单 | 关键词搜索 |
 | `TDataTable` | 数据表格 | 移动端卡片式布局 |
 | `TDataList` | 数据列表 | **下拉刷新 + 无限滚动** |

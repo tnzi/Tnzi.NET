@@ -39,7 +39,7 @@ import {
   type UserStorageUsageDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminFileApi>[0]
 
@@ -286,7 +286,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
 
     delete: async (ids: string[]): Promise<void> => {
-      await fileApi.batchDelete(ids)
+      ensureOk(await fileApi.batchDelete(ids))
     },
 
     // Deployment-prefix-aware download URL (resolveUrl), symmetric with
@@ -306,7 +306,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         throw new Error('files.moveTo: folderApi not configured')
       }
       if (!fileIds.length) return
-      await folderApi.moveFiles({ fileIds, folderId })
+      ensureOk(await folderApi.moveFiles({ fileIds, folderId }))
     },
 
     initUpload: async (fileMeta: { name: string; size: number; chunkCount: number }): Promise<{ uploadId: string }> => {
@@ -321,7 +321,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
 
     uploadChunk: async (uploadId: string, chunkIndex: number, chunk: Blob): Promise<void> => {
-      await storageApi.uploadChunk(uploadId, chunkIndex, chunk as File)
+      ensureOk(await storageApi.uploadChunk(uploadId, chunkIndex, chunk as File))
     },
 
     completeUpload: async (uploadId: string): Promise<{ url: string }> => {
@@ -410,7 +410,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       // (DefaultStorageController.RestoreVersion). The audit controller could
       // proxy it, but keeping a single source of truth for restore semantics
       // matters more than ducking through `/admin`.
-      await deps.client.post(`/files/${encodeURIComponent(fileId)}/versions/${version}/restore`)
+      ensureOk(await deps.client.post(`/files/${encodeURIComponent(fileId)}/versions/${version}/restore`))
     },
   }
 
@@ -427,10 +427,10 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         update: async (id: string, data: UpdateFileFolderDto) =>
           unwrap<FileFolderDto>(await folderApi.update(id, data)),
         delete: async (id: string) => {
-          await folderApi.delete(id)
+          ensureOk(await folderApi.delete(id))
         },
         move: async (id: string, newParentId: string | null) => {
-          await folderApi.move(id, newParentId)
+          ensureOk(await folderApi.move(id, newParentId))
         },
       }
     : {

@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Templates;
+namespace Tnzi.AI.Workflow.Templates;
 
 /// <summary>
 /// Review-Rework 循环模板。

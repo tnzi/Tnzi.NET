@@ -132,7 +132,7 @@
       <NDropdown
         v-if="showLangSwitch"
         :options="langOptions"
-        trigger="hover"
+        trigger="click"
         @select="onLangSelect"
       >
         <button
@@ -470,6 +470,23 @@ defineExpose({ setLocale })
   display: flex;
   align-items: center;
   padding-left: 8px;
+}
+/* Phone: reclaim horizontal room so the right cluster (overflow ··· + language
+   + chat + bell + avatar) doesn't overflow and get clipped by the shell's
+   `overflow:hidden` on narrow screens (≤360px). Tighter side gutter + no
+   per-item left padding; the coarse-pointer rule keeps each target ≥44px. */
+@media (max-width: 767px) {
+  .t-admin-header {
+    padding: 0 8px;
+  }
+  .t-admin-header__right {
+    gap: 0;
+  }
+  .t-admin-header__chat,
+  .t-admin-header__notification,
+  .t-admin-header__user {
+    padding-left: 0;
+  }
 }
 @media (max-width: 640px) {
   .t-admin-header__breadcrumb {

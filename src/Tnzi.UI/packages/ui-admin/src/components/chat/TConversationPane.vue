@@ -56,6 +56,7 @@
             :my-avatar-file-id="myAvatarFileId"
             :is-group="conversation.type === ConversationType.Group"
             :is-system="conversation.type === ConversationType.System"
+            @retry="emit('retry', $event)"
           />
         </div>
 
@@ -92,16 +93,17 @@
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ConversationType } from '@tnzi/core/services/chat'
-import type { ConversationListItemDto, ChatMessageDto } from '@tnzi/core/services/chat'
+import type { ConversationListItemDto } from '@tnzi/core/services/chat'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import { translatePageKey } from '../../pages/_shared/translate'
+import type { ChatMessageView } from '../../stores/useChatStore'
 import TMessageList from './TMessageList.vue'
 import TMessageComposer from './TMessageComposer.vue'
 import TConversationInfoPanel from './TConversationInfoPanel.vue'
 
 const props = defineProps<{
   conversation: ConversationListItemDto | null
-  messages: ChatMessageDto[]
+  messages: ChatMessageView[]
   myId?: string
   myName?: string
   myAvatarFileId?: string | null
@@ -123,6 +125,7 @@ const emit = defineEmits<{
   'panel-changed': []
   'open-conversation': [id: string]
   'drag-start': [e: MouseEvent]
+  retry: [message: ChatMessageView]
   back: []
 }>()
 
@@ -279,6 +282,18 @@ const showInfoToggle = computed(
 .t-conv-pane__empty-text {
   font-size: 13.5px;
   color: var(--chat-text-3, #aeaeae);
+}
+
+/* Touch: enlarge the header icon buttons (back / info gear) to a ≥40px tap
+   target — the visible glyphs stay their small size, the hit area grows around
+   them. Placed after the base rules so it overrides the 30px / 22px defaults.
+   Coarse-pointer only, so desktop keeps the compact 30px / 22px chrome. */
+@media (pointer: coarse) {
+  .t-conv-pane__icon-btn,
+  .t-conv-pane__info-toggle {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* Phone: the window is one column, so an open panel would crush the message

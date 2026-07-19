@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Engine.Workflow.Nodes;
+namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
 /// 转换节点 — 纯代码数据转换（不使用 LLM），如 JSON 提取、文本分割、合并等

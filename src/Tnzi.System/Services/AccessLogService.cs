@@ -288,10 +288,10 @@ public class AccessLogService : ApplicationService, IAccessLogService
 
     private static int GetIsoWeekNumber(DateTime date)
     {
-        var day = global::System.Globalization.CultureInfo.InvariantCulture.Calendar.GetDayOfWeek(date);
+        var day = CultureInfo.InvariantCulture.Calendar.GetDayOfWeek(date);
         if (day >= DayOfWeek.Monday && day <= DayOfWeek.Wednesday)
             date = date.AddDays(3);
-        return global::System.Globalization.CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(
-            date, global::System.Globalization.CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+        return CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(
+            date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
     }
 }

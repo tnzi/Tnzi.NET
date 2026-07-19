@@ -4,8 +4,9 @@ namespace Tnzi.System.Configuration;
 /// 把 Setting 表（Global 作用域）暴露成 ASP.NET Core IConfiguration source，
 /// 配合 IOptionsMonitor 让业务模块的 Options 在运行时随 Setting 表更新自动 reload。
 ///
-/// 注册时机：在 <c>WebApplication.CreateBuilder</c> 之后、<c>builder.Build()</c> 之前调用
-/// <c>builder.Configuration.AddTnziSettings()</c>。 此时 DI 尚未 ready，Provider 的 Load() 留空。
+/// 注册时机：host build 之前（DI 尚未 ready，Provider 的 Load() 留空）。SystemModule 在
+/// PreConfigureServicesAsync 中自动注册（宿主配置为 ConfigurationManager 时）；也可在
+/// <c>builder.Build()</c> 之前手调 <c>builder.Configuration.AddTnziSettings()</c>（幂等）。
 /// 等 SystemModule.OnApplicationInitializationAsync 拿到 IServiceProvider 后再首次填充并允许 reload。
 ///
 /// 同一进程仅有一个 Source 实例（singleton），Module 通过 DI 拿到同一引用以触发 reload。

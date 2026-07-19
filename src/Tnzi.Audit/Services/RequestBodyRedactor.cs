@@ -7,7 +7,11 @@ namespace Tnzi.Audit.Services;
 /// </summary>
 public class RequestBodyRedactor
 {
-    private const string RedactedValue = "***REDACTED***";
+    /// <summary>
+    /// 敏感值统一掩码。请求体脱敏与实体级审计的属性值脱敏
+    /// （EntityAuditSaveChangesInterceptor）共用，保证审计数据脱敏语义一致。
+    /// </summary>
+    public const string RedactedValue = "***REDACTED***";
 
     /// <summary>
     /// Redact sensitive field values in a JSON string.

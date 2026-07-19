@@ -15,7 +15,7 @@ import {
   type CultureMissingCountDto,
   type MissingTranslationSummaryDto,
 } from '@tnzi/core/services/localization'
-import { unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminLocalizationApi>[0]
 
@@ -59,7 +59,7 @@ export function createLocalizationBridge(deps: LocalizationBridgeDeps = {}): Loc
     exportMissing: async (culture?: string) =>
       unwrap<Record<string, Record<string, string>>>(await api.exportMissing(culture)) ?? {},
     clearMissing: async () => {
-      await api.clearMissing()
+      ensureOk(await api.clearMissing())
     },
   }
 }

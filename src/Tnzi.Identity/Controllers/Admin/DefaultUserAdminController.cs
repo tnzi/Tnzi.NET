@@ -295,14 +295,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     public virtual async Task<IActionResult> ExportCsv([FromBody] UserListQueryDto? query = null)
     {
         var result = await UserService.ExportUsersCsvAsync(query);
-        if (!result.Succeeded)
-        {
-            return new BadRequestObjectResult(result.Message);
-        }
-
-        var bytes = Encoding.UTF8.GetBytes(result.Data!);
-        var fileName = $"users_export_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
-        return File(bytes, "text/csv", fileName);
+        return CsvFile(result, "users_export");
     }
 
     /// <summary>
