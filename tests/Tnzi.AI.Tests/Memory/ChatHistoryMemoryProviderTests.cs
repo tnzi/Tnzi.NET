@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// ChatHistoryMemoryProvider 单元测试 — BeforeAIInvoke/OnDemand 模式 + filter
+/// ChatHistoryMemoryProvider 单元测试 - BeforeAIInvoke/OnDemand 模式 + filter
 /// </summary>
 public class ChatHistoryMemoryProviderTests
 {

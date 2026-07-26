@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
- * TWorkflowCanvas — @vue-flow canvas wrapper
+ * TWorkflowCanvas - @vue-flow canvas wrapper
  */
 
+import { computed, useSlots } from 'vue';
 import { VueFlow, type Node, type Edge } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import '@vue-flow/core/dist/style.css';
@@ -21,6 +22,16 @@ defineEmits<{
   'edge-click': [event: unknown];
   connect: [connection: unknown];
 }>();
+
+const slots = useSlots();
+
+/* `default` is forwarded explicitly below, next to <Background>. Including it
+   in the dynamic forwarding loop would make Vue's generated createSlots()
+   overwrite the whole default slot with the forwarding function, silently
+   dropping <Background> from the canvas. */
+const forwardedSlotNames = computed(() =>
+  Object.keys(slots).filter((name) => name !== 'default'),
+);
 </script>
 
 <template>
@@ -46,9 +57,9 @@ defineEmits<{
         Forward every named slot to VueFlow so consumers can override built-in
         node/edge types (`#node-default`, `#node-input`, `#edge-default`, …) or
         inject controls/minimap from outside the wrapper without having to
-        fork the component.
+        fork the component. `default` is excluded on purpose (see script).
       -->
-      <template v-for="(_, name) in $slots" #[name]="scope">
+      <template v-for="name in forwardedSlotNames" #[name]="scope">
         <slot :name="name" v-bind="scope" />
       </template>
     </VueFlow>

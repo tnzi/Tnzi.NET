@@ -1,5 +1,5 @@
 /**
- * Channels + Gateway admin API wrappers — `/admin/channels/*` + `/admin/gateway/*`
+ * Channels + Gateway admin API wrappers - `/admin/channels/*` + `/admin/gateway/*`
  * exposed by `Tnzi.AI.Channels`.
  *
  * `Tnzi.AI.Channels` is an optional sub-module of `Tnzi.AI`; when not loaded the

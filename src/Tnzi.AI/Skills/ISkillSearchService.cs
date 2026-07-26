@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能搜索服务 — 关键词搜索 + 语义降级
+/// 技能搜索服务 - 关键词搜索 + 语义降级
 /// </summary>
 public interface ISkillSearchService
 {

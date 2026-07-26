@@ -2,7 +2,7 @@
 // Remaining pages (authorization/system/...) are rewritten incrementally in Phase 3.
 export { default as Users } from './identity/Users.vue'
 
-// Translation helpers — host apps build their own `t()` against the same
+// Translation helpers - host apps build their own `t()` against the same
 // resolver the framework's pages use. Picks up consumer-supplied messages
 // registered via `useAdminAppStore.extendLocaleMessages`.
 export {
@@ -12,7 +12,7 @@ export {
   maybeTranslate,
 } from './_shared/translate'
 
-// Admin form-schema renderer — `TSchemaForm` (from `@tnzi/ui`) wrapped with the
+// Admin form-schema renderer - `TSchemaForm` (from `@tnzi/ui`) wrapped with the
 // admin field renderers (icon/json/password) + the shared `selectRenderer`
 // factory for dynamic / parent-dependent select options. Exported so consumer
 // pages compose the same schema-driven form (with dynamic selects) instead of

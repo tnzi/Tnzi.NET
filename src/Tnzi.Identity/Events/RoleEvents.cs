@@ -16,7 +16,7 @@ public class RoleCreatedEvent : EventBase
 /// </summary>
 /// <remarks>
 /// <see cref="PreviousName"/> is non-null only when the role was renamed
-/// in this update — lets audit / authorization consumers detect renames
+/// in this update - lets audit / authorization consumers detect renames
 /// without a separate <c>RoleRenamedEvent</c>. Name comparison is
 /// case-insensitive (consistent with the rest of the framework's role
 /// matching), so changing case only does NOT set PreviousName.

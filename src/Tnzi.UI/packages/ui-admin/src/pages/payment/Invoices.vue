@@ -1,9 +1,9 @@
 <template>
   <!--
-    Invoices — list view backed by /admin/invoices (TListShell + TTableRenderer,
+    Invoices - list view backed by /admin/invoices (TListShell + TTableRenderer,
     useCrudPage fetch-only). Read-mostly: list + lifecycle actions
     (send / mark-paid / cancel). Mark-paid and cancel route through
-    useDetail(modal) + TDetailHost (§5.5.2 — no hand-rolled NModal); send is a
+    useDetail(modal) + TDetailHost (§5.5.2 - no hand-rolled NModal); send is a
     direct call gated by a RowAction confirm. Manual invoice creation lives
     outside this page (line-items editing is rich-form territory).
 
@@ -33,7 +33,7 @@
     </template>
   </TListShell>
 
-  <!-- Mark-paid overlay — paidAmount defaults to the outstanding due amount. -->
+  <!-- Mark-paid overlay - paidAmount defaults to the outstanding due amount. -->
   <TDetailHost :state="markPaidDetail" :title="t('modal.markPaid')" :width="480" :translate="t">
     <template #default>
       <NForm label-placement="top" :show-feedback="false">
@@ -58,7 +58,7 @@
     </template>
   </TDetailHost>
 
-  <!-- Cancel overlay — reason required. -->
+  <!-- Cancel overlay - reason required. -->
   <TDetailHost :state="cancelDetail" :title="t('modal.cancel')" :width="460" :translate="t">
     <template #default>
       <NForm label-placement="top" :show-feedback="false">
@@ -77,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h, reactive, ref, watch } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, useMessage } from 'naive-ui'
 import { formatCurrency, formatDateOnly as formatDate } from '@tnzi/core'
@@ -132,9 +133,9 @@ const INVOICE_STATUS_MAP: Record<string, { type: StatusType; labelKey: string }>
   Cancelled: { type: 'default', labelKey: 'status.cancelled' },
 }
 
-// Terminal states — mark-paid / cancel no longer apply.
+// Terminal states - mark-paid / cancel no longer apply.
 const TERMINAL = new Set(['Paid', 'Cancelled'])
-// Sendable states — draft / pending / sent may (re)send the invoice.
+// Sendable states - draft / pending / sent may (re)send the invoice.
 const SENDABLE = new Set(['Draft', 'Pending', 'Sent'])
 
 function money(n: number, currency: string): string {
@@ -154,7 +155,7 @@ const tableColumns: ColumnDef[] = [
       return h(TStatusBadge, {
         value: v,
         type: meta?.type ?? 'default',
-        label: meta ? t(meta.labelKey) : v || '—',
+        label: meta ? t(meta.labelKey) : v || EMPTY_DASH,
       })
     },
   },

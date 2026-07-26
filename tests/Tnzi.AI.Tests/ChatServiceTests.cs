@@ -152,7 +152,7 @@ public class ChatServiceTests
     [Fact]
     public async Task ChatStreamingAsync_TerminalEvent_CarriesPersistedMessageIds()
     {
-        // HistoryMiddleware stamps persisted message ids directly onto the terminal chunk —
+        // HistoryMiddleware stamps persisted message ids directly onto the terminal chunk -
         // ChatService must lift those IDs onto the StreamEvent so the client can call
         // message-scoped APIs (e.g. feedback) without an extra round-trip. AsyncLocal cannot
         // back-propagate writes across async iterator yield boundaries, hence the chunk-borne

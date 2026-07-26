@@ -6,7 +6,7 @@ using Tnzi.AspNetCore.Mvc;
 namespace Tnzi.AI.Channels.Controllers;
 
 /// <summary>
-/// 入站 Webhook 控制器 — 接收 Slack / Discord / DingTalk / Feishu 的外部回调，
+/// 入站 Webhook 控制器 - 接收 Slack / Discord / DingTalk / Feishu 的外部回调，
 /// 在分发到对应适配器之前强制按平台规范验签（防伪造/重放），并处理各平台的握手挑战。
 /// </summary>
 /// <remarks>

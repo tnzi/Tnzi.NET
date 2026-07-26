@@ -15,6 +15,7 @@ global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.Caching;
 global using Tnzi.EventBus;
+global using Tnzi.HealthChecks.Checks;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.HealthChecks.Options;

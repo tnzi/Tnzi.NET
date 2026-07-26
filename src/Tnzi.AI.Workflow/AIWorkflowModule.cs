@@ -1,9 +1,7 @@
-using Tnzi.AI.Workflow.Options;
-
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
-/// AI 工作流模块 — 提供 DAG 工作流引擎、节点类型、工作流服务和检查点管理
+/// AI 工作流模块 - 提供 DAG 工作流引擎、节点类型、工作流服务和检查点管理
 /// </summary>
 [DependsOn(typeof(AIModule))]
 public class AIWorkflowModule : TnziApplicationModule
@@ -51,7 +49,7 @@ public class AIWorkflowModule : TnziApplicationModule
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
 
-        // 注册 Watchdog（Scoped — 每次扫描由宿主调度器在其自己的 scope 内解析）
+        // 注册 Watchdog（Scoped - 每次扫描由宿主调度器在其自己的 scope 内解析）
         services.AddScoped<WorkflowWatchdogService>();
 
         // 注册工作流节点

@@ -1,5 +1,5 @@
 /**
- * Template bridge — full implementation (Phase 3 Task 3.35).
+ * Template bridge - full implementation (Phase 3 Task 3.35).
  *
  * Adapts the template backend API to BridgeCrudContract shapes used by
  * TCrudPage-based template pages.
@@ -20,7 +20,7 @@
  *     bridge fetches template by ID then calls POST /admin/templates/preview.
  *   templates.clone newName: backend clone requires newName param; bridge auto-generates
  *     "{templateName}-copy" since the UI does not prompt for a name.
- *   layouts.clone newName: same — bridge auto-generates "{layoutName}-copy".
+ *   layouts.clone newName: same - bridge auto-generates "{layoutName}-copy".
  */
 import {
   useAdminTemplateApi,
@@ -73,7 +73,7 @@ export interface TemplateBridge {
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
-  Promise.reject(new Error(`template-bridge: ${name} — backend gap, no endpoint available`))
+  Promise.reject(new Error(`template-bridge: ${name} - backend gap, no endpoint available`))
 
 export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBridge {
   const templateApi = deps.adminTemplateApi ?? (deps.client ? useAdminTemplateApi(deps.client) : null)
@@ -122,7 +122,7 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
   const templates: TemplateBridgeTemplateContract = {
     fetch: fetchTemplates,
     /**
-     * Hydrate a list row to its full TemplateEntityDto — surfaces the
+     * Hydrate a list row to its full TemplateEntityDto - surfaces the
      * heavy `subjectTemplate` / `contentTemplate` / `metadata` fields the
      * paged list endpoint strips. Pages use this on open-for-view/edit so
      * the form modal renders real template body, not just the metadata

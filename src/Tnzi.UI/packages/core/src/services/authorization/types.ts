@@ -189,7 +189,7 @@ export interface CloneRolePermissionsRequest {
 
 // ─── EntityInfo (data-auth entity registry) ───────────────────────────────────
 
-/** Data-auth EntityInfo — describes a backend entity type that supports row-level authorization. */
+/** Data-auth EntityInfo - describes a backend entity type that supports row-level authorization. */
 export interface EntityInfoDto {
   id: string
   name: string

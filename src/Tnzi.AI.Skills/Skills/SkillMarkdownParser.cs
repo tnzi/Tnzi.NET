@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// SKILL.md 文件解析器 — 将 Markdown 内容解析为 <see cref="SkillDefinition"/>。
+/// SKILL.md 文件解析器 - 将 Markdown 内容解析为 <see cref="SkillDefinition"/>。
 /// </summary>
 /// <remarks>
 /// 支持 YAML frontmatter 格式（--- 分隔的 key: value 块），后跟 Markdown 正文。
@@ -10,7 +10,7 @@ namespace Tnzi.AI.Skills;
 /// </remarks>
 public static partial class SkillMarkdownParser
 {
-    // 正则表达式 — all use [GeneratedRegex] for source-generated performance
+    // 正则表达式 - all use [GeneratedRegex] for source-generated performance
 
     [GeneratedRegex(@"^##\s+(.+)$", RegexOptions.Multiline)]
     private static partial Regex SectionRegex();

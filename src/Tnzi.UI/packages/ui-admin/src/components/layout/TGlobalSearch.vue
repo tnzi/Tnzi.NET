@@ -4,7 +4,7 @@
        the modal if naive injected unset insets, but the modal already
        teleports to body with its own mask, so we just constrain width
        via inline style). `card-style` is unreliable across Naive UI
-       versions — `style` on NModal is applied to the inner content
+       versions - `style` on NModal is applied to the inner content
        container (which IS the NCard when preset='card'). -->
   <NModal
     :show="show"
@@ -181,7 +181,7 @@ watch(
       query.value = ''
       highlighted.value = 0
       await nextTick()
-      // Desktop: focus immediately (Ctrl/Cmd+K power-user flow — start typing
+      // Desktop: focus immediately (Ctrl/Cmd+K power-user flow - start typing
       // right away). Phone: skip auto-focus so the soft keyboard doesn't
       // instantly cover the menu list the user opened to browse.
       if (!bp.isSm.value) inputRef.value?.focus?.()
@@ -231,7 +231,7 @@ defineExpose({ highlighted })
 }
 
 /* Phase H4 I6: active item gets solid primary fill + white text
-   (mirrors soybean search-result.vue:38-42 — much higher contrast
+   (mirrors soybean search-result.vue:38-42 - much higher contrast
    than the previous 12%-tint version). */
 .t-global-search__item--active {
   background-color: var(--tnzi-primary, #646cff);

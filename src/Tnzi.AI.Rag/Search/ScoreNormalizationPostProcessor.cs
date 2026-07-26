@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// Score normalization post-processor — normalizes search result scores to [0, 1] range.
+/// Score normalization post-processor - normalizes search result scores to [0, 1] range.
 /// <para>
 /// Uses min-max normalization across the result set. If all scores are equal,
 /// they are normalized to 1.0. Also filters out results below a minimum score threshold.
@@ -39,7 +39,7 @@ public class ScoreNormalizationPostProcessor : ISearchPostProcessor
         var maxScore = results.Max(r => r.Score);
         var range = maxScore - minScore;
 
-        // Normalize scores to [0, 1] — 创建新实例，不修改入参对象
+        // Normalize scores to [0, 1] - 创建新实例，不修改入参对象
         // （immutable pattern，与 WeightedDiminishingReranker 一致）
         var normalized = results
             .Select(r => CloneWithScore(r, range > 0

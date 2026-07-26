@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.BackgroundJobs;
 
 /// <summary>
-/// 文档摄取后台任务 — 异步执行文档提取、切块、嵌入、存储流程
+/// 文档摄取后台任务 - 异步执行文档提取、切块、嵌入、存储流程
 /// </summary>
 /// <remarks>
 /// <para>
@@ -49,7 +49,7 @@ public class DocumentIngestionBackgroundJob : TenantAwareBackgroundJob<DocumentI
             "Starting background ingestion for document {DocumentId} in knowledge base {KbId}",
             args.DocumentId, args.KnowledgeBaseId);
 
-        var doc = await _docRepository.GetAsync(args.DocumentId);
+        var doc = await _docRepository.GetAsync(args.DocumentId, cancellationToken);
         if (doc == null)
         {
             _logger.LogWarning("Document {DocumentId} not found, skipping ingestion", args.DocumentId);

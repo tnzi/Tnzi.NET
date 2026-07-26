@@ -181,8 +181,8 @@ describe('useAdminKnowledgeBaseApi', () => {
     const api = useAdminKnowledgeBaseApi(client);
     const file = new File(['test content'], 'test.txt');
     await api.uploadDocument('kb1', file);
-    // Must use client.upload (multipart) — NOT client.post, which would
-    // JSON.stringify the file away — and hit the backend POST {id}/upload route.
+    // Must use client.upload (multipart) - NOT client.post, which would
+    // JSON.stringify the file away - and hit the backend POST {id}/upload route.
     expect(client.upload).toHaveBeenCalledWith('/admin/knowledge-bases/kb1/upload', file);
     expect(client.post).not.toHaveBeenCalled();
   });

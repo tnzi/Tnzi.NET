@@ -1,5 +1,5 @@
 /**
- * Localization bridge — delegates to `useAdminLocalizationApi`
+ * Localization bridge - delegates to `useAdminLocalizationApi`
  * (from `@tnzi/core/services/localization`) so admin pages get the standard
  * dependency-injection + single-mock-seam pattern other bridges use.
  *

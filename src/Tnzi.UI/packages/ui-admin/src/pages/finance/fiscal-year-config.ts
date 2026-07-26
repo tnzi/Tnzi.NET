@@ -1,8 +1,9 @@
+import { fmtDate } from './money'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { formatDateOnly, formatDateTime } from '@tnzi/core'
+import { formatDateTime } from '@tnzi/core'
 
 /** All-optional row shape (house pattern). */
 export interface FiscalYearRow {
@@ -17,8 +18,8 @@ export interface FiscalYearRow {
 export function buildFiscalYearColumns(t: (key: string) => string): ColumnDef<FiscalYearRow>[] {
   return [
     { key: 'name', title: 'columns.name', minWidth: 140, primary: true },
-    { key: 'startDate', title: 'columns.startDate', width: 130, render: (row) => formatDateOnly(row.startDate, { utc: true }) },
-    { key: 'endDate', title: 'columns.endDate', width: 130, render: (row) => formatDateOnly(row.endDate, { utc: true }) },
+    { key: 'startDate', title: 'columns.startDate', width: 130, render: (row) => fmtDate(row.startDate) },
+    { key: 'endDate', title: 'columns.endDate', width: 130, render: (row) => fmtDate(row.endDate) },
     {
       key: 'isClosed',
       title: 'columns.isClosed',

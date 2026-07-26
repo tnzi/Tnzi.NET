@@ -2,7 +2,7 @@
 namespace Tnzi.Identity.Tests;
 
 /// <summary>
-/// 全局会话分页列表测试（GetSessionsAsync）— 无 userId 的全量列表、
+/// 全局会话分页列表测试（GetSessionsAsync）- 无 userId 的全量列表、
 /// includeRevoked 语义、按 userId 过滤、分页、UserName 关联填充。
 /// </summary>
 public class SessionListTests
@@ -163,7 +163,7 @@ public class SessionListTests
         var result = await service.GetSessionsAsync(new SessionQueryDto { PageIndex = 1, PageSize = 10 });
 
         result.Succeeded.ShouldBeTrue();
-        result.Data!.Items[0].UserName.ShouldBe("alice"); // userA — most recent activity
+        result.Data!.Items[0].UserName.ShouldBe("alice"); // userA - most recent activity
         result.Data.Items[1].UserName.ShouldBe("bob");
     }
 

@@ -1,13 +1,14 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// RAG 检索器 — 封装查询改写 → 嵌入生成 → 向量搜索 → 图谱搜索 → 后处理的共享检索管线
+/// RAG 检索器 - 封装查询改写 → 嵌入生成 → 向量搜索 → 图谱搜索 → 后处理的共享检索管线
 /// <para>
 /// 被 RagQueryEngine（单轮）和 RagChatEngine（多轮）共享使用，
 /// 避免两个引擎各自重复实现检索逻辑。
 /// </para>
 /// <para>
-/// 当 <see cref="IGraphSearchService"/> 可用时，图谱搜索与向量搜索并行执行，
+/// 当 <see cref="IGraphSearchService"/> 可用时，先做向量搜索、再做图谱搜索（两者都经同一个
+/// scoped DbContext 查库，不能并行，见 <c>RetrieveAsync</c> 内注释），
 /// 图谱搜索结果作为附加上下文片段追加到向量检索结果之后（不参与向量结果的排序）。
 /// </para>
 /// </summary>
@@ -76,14 +77,12 @@ public class RagRetriever : ApplicationService, IRagRetriever
                 }
             }
 
-            // 2+3. 向量搜索（含 per-KB 对齐的查询向量生成，支持多知识库）+ 图谱搜索并行
-            var vectorTask = SearchVectorAsync(searchQuery, options, ct);
-            var graphTask = SearchGraphAsync(searchQuery, options, ct);
-
-            await Task.WhenAll(vectorTask, graphTask);
-
-            var allResults = await vectorTask;
-            var graphResults = await graphTask;
+            // 2+3. 向量搜索（含 per-KB 对齐的查询向量生成，支持多知识库）→ 图谱搜索。
+            // 必须顺序执行：两者都经本 scope 的 RagDbContext 查库（向量路径读 KnowledgeBase 取
+            // per-KB 嵌入配置，图谱路径读 KnowledgeGraphNode/Edge），并发使用同一 DbContext 会触发
+            // "A second operation was started on this context" 并被下方 catch 吞成空结果。
+            var allResults = await SearchVectorAsync(searchQuery, options, ct);
+            var graphResults = await SearchGraphAsync(searchQuery, options, ct);
 
             // 4. 重排序
             allResults = await _reranker.RerankAsync(query, allResults, options.TopK, ct);
@@ -306,12 +305,14 @@ public class RagRetriever : ApplicationService, IRagRetriever
         {
             var graphOptions = new GraphSearchOptions(MaxResults: 3);
 
-            var tasks = options.KnowledgeBaseIds.Select(kbId =>
-                _graphSearchService.SearchAsync(query, kbId, graphOptions, ct));
-            var resultSets = await Task.WhenAll(tasks);
+            // 逐库顺序检索：GraphSearchService 走 EF 仓储，多 KB 并行会并发使用同一 scoped DbContext。
+            var merged = new List<GraphSearchResult>();
+            foreach (var kbId in options.KnowledgeBaseIds)
+            {
+                merged.AddRange(await _graphSearchService.SearchAsync(query, kbId, graphOptions, ct));
+            }
 
-            return resultSets
-                .SelectMany(r => r)
+            return merged
                 .OrderByDescending(r => r.Score)
                 .Take(graphOptions.MaxResults)
                 .ToList();

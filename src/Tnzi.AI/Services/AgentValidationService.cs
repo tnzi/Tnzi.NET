@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// Agent 验证服务 — 检查 Agent 配置的完整性和有效性
+/// Agent 验证服务 - 检查 Agent 配置的完整性和有效性
 /// </summary>
 public class AgentValidationService : ApplicationService, IAgentValidationService
 {
@@ -47,9 +47,18 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         };
 
         var enabledAgents = agents.Where(a => a.IsEnabled).ToList();
+
+        // 批量取本次要校验的全部 Agent 授权（三表各一次 IN 查询），
+        // 避免逐 Agent 调 GetGrantsAsync 的 N+1。
+        var grantsByAgent = enabledAgents.Count > 0
+            ? await _grantService.GetGrantsAsync(enabledAgents.Select(a => a.Id).ToList())
+            : null;
+
         foreach (var agent in enabledAgents)
         {
-            var validationResult = await ValidateCoreAsync(agent);
+            var validationResult = await ValidateCoreAsync(
+                agent,
+                grantsByAgent != null && grantsByAgent.TryGetValue(agent.Id, out var g) ? g : null);
             if (validationResult.IsValid)
             {
                 summary.HealthyAgents++;
@@ -64,7 +73,8 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         return Ok(summary);
     }
 
-    private async Task<AgentValidationResultDto> ValidateCoreAsync(Agent agent)
+    // prefetchedGrants: 已批量取好的授权投影（批量校验路径传入以避免 N+1）；为 null 时按需单查。
+    private async Task<AgentValidationResultDto> ValidateCoreAsync(Agent agent, AgentGrantsProjection? prefetchedGrants = null)
     {
         var checks = new List<ValidationCheckDto>();
 
@@ -75,7 +85,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         checks.Add(ValidateModel(agent));
 
         // Check 3: Tool groups registered (sourced from the authoritative grant junction)
-        var grants = await _grantService.GetGrantsAsync(agent.Id);
+        var grants = prefetchedGrants ?? await _grantService.GetGrantsAsync(agent.Id);
         checks.Add(ValidateToolGroups(grants.ToolGroups));
 
         // Check 4: Handoff targets exist (for Handoff/AgentAsTools modes)
@@ -115,7 +125,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
     {
         if (string.IsNullOrWhiteSpace(agent.Model))
         {
-            // No model specified — will use default, which is fine
+            // No model specified - will use default, which is fine
             var defaultModel = _chatClientFactory.GetDefaultModel(agent.Provider);
             return new ValidationCheckDto
             {
@@ -127,7 +137,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
             };
         }
 
-        // Model is specified — we can't fully validate it without calling the API,
+        // Model is specified - we can't fully validate it without calling the API,
         // but we can check it's not empty
         return new ValidationCheckDto
         {

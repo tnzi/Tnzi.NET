@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.FileExtractors;
 
 /// <summary>
-/// 图片内容提取器 — 使用 LLM 视觉能力描述图片内容，生成可检索文本。
+/// 图片内容提取器 - 使用 LLM 视觉能力描述图片内容，生成可检索文本。
 /// 支持 PNG, JPG, JPEG, GIF, WebP, SVG 格式。
 /// </summary>
 public class ImageContentExtractor : IFileExtractorService

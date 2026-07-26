@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Infrastructure;
 
 /// <summary>
-/// 工作流 Watchdog 服务 — 扫描长时间停留在 Running/等待状态的执行实例并将其标记为超时失败
+/// 工作流 Watchdog 服务 - 扫描长时间停留在 Running/等待状态的执行实例并将其标记为超时失败
 /// </summary>
 /// <remarks>
 /// 宿主可通过 IHostedService / Hangfire / 定时器等方式按需调用 <see cref="ScanAsync"/>。

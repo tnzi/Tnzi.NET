@@ -3,7 +3,7 @@ using Tnzi.AI.Rag.FileExtractors;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// TableContentExtractor 单元测试 — 验证 CSV/TSV 文件解析和结构化文本输出
+/// TableContentExtractor 单元测试 - 验证 CSV/TSV 文件解析和结构化文本输出
 /// </summary>
 public class TableContentExtractorTests
 {

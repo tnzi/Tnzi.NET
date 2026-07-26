@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetOpsSnapshot` — ops-data rollup tile for the Workbench.
+ * `TWidgetOpsSnapshot` - ops-data rollup tile for the Workbench.
  *
  * Aggregates five live signals into one card so admins see the platform
  * pulse without context-switching:
@@ -10,10 +10,11 @@
  *   • AI.Channels module enabled / adapter count via /admin/channels/status
  *   • Login failure rate (last 24 h)           via /admin/login-security/overview
  *
- * Every probe is independent — failures (404 / 401 / module not loaded)
- * surface as "—" on the corresponding row so a single missing endpoint
+ * Every probe is independent - failures (404 / 401 / module not loaded)
+ * surface as "-" on the corresponding row so a single missing endpoint
  * never blanks out the whole widget.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -72,11 +73,11 @@ async function safeFetch<T>(p: Promise<T>): Promise<T | null> {
   }
 }
 
-// Per-probe module gate — this rollup widget mixes always-present surfaces
+// Per-probe module gate - this rollup widget mixes always-present surfaces
 // (diagnostics / performance / SignalR ship with the AspNetCore host layer)
 // with probes owned by OPTIONAL business modules: channels → Tnzi.AI.Channels,
 // login security → Tnzi.Identity. Those two skip their fetch entirely when
-// the host didn't load the module (the row then renders its "—" empty state),
+// the host didn't load the module (the row then renders its "-" empty state),
 // instead of firing a request that can only 404.
 const moduleAvailability = useModuleAvailability()
 
@@ -116,16 +117,16 @@ function failureTone(rate: number | null): 'success' | 'warning' | 'error' | 'de
   return 'success'
 }
 function formatMs(v: number | null): string {
-  if (v == null) return '—'
+  if (v == null) return EMPTY_DASH
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
   return `${v.toFixed(0)} ms`
 }
 function formatPercent(n: number | null): string {
-  if (n == null) return '—'
+  if (n == null) return EMPTY_DASH
   return `${n.toFixed(1)}%`
 }
 function formatNumber(n: number | null): string {
-  if (n == null) return '—'
+  if (n == null) return EMPTY_DASH
   return n.toLocaleString()
 }
 function formatAdapters(n: number | null): string {
@@ -170,7 +171,7 @@ function t(key: string, fallback: string): string {
         {{ t('admin.widgets.opsHealth.channels', 'Channels') }}
       </span>
       <span class="t-widget-ops__value">
-        <NTag v-if="data.channelsEnabled === null" size="tiny" :bordered="false">—</NTag>
+        <NTag v-if="data.channelsEnabled === null" size="tiny" :bordered="false">{{ EMPTY_DASH }}</NTag>
         <NTag v-else :type="data.channelsEnabled ? 'success' : 'default'" size="tiny" :bordered="false">
           {{ data.channelsEnabled ? formatAdapters(data.adapterCount) : t('admin.widgets.opsHealth.disabled', 'disabled') }}
         </NTag>

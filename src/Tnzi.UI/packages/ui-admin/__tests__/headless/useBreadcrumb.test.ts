@@ -91,7 +91,7 @@ describe('useBreadcrumbTrail', () => {
 
   it('no-ops without a router / pinia (bare unit mount)', () => {
     const Host = defineComponent({ setup() { useBreadcrumbTrail(() => [{ label: 'x' }]); return () => h('div') } })
-    // No router/pinia plugins — the composable swallows and renders cleanly.
+    // No router/pinia plugins - the composable swallows and renders cleanly.
     expect(() => mount(Host)).not.toThrow()
   })
 })

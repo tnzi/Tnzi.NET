@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * `BindWechat` — WeChat account binding placeholder (Phase I.7.1 skeleton).
+ * `BindWechat` - WeChat account binding placeholder (Phase I.7.1 skeleton).
  *
- * Soybean reference: `src/views/_builtin/login/modules/bind-wechat.vue` (11 lines —
+ * Soybean reference: `src/views/_builtin/login/modules/bind-wechat.vue` (11 lines -
  * literally `<div></div>` upstream). WeChat OAuth binding is an ecosystem-optional
  * flow; this module stays a placeholder unless a consumer overrides it.
  */
@@ -16,7 +16,7 @@ const { translate } = useLoginContext()
 <template>
   <div class="t-login-module t-login-module--bind-wechat">
     <p class="t-login-module__placeholder">
-      {{ translate('admin.login.placeholder.bindWechat', 'WeChat binding — override this module to integrate') }}
+      {{ translate('admin.login.placeholder.bindWechat', 'WeChat binding - override this module to integrate') }}
     </p>
   </div>
 </template>

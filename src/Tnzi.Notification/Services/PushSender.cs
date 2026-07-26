@@ -52,10 +52,10 @@ public class PushSender : IPushSender
     private async Task<SendResult> SendViaFcmAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
     {
         if (_options.PushSender == null)
-            throw new Tnzi.Exceptions.ConfigurationException("Notification:PushSender", "Push sender options not configured.");
+            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
 
         if (string.IsNullOrWhiteSpace(_options.PushSender.FirebaseProjectId))
-            throw new Tnzi.Exceptions.ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
+            throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
 
         var projectId = _options.PushSender.FirebaseProjectId!;
 

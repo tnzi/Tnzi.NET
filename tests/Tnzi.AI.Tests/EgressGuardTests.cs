@@ -3,12 +3,12 @@ using Tnzi.AI.Infrastructure.Network;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// EgressGuard 单元测试 — 验证 SSRF 防护逻辑覆盖 IPv4/IPv6/mapped 地址
+/// EgressGuard 单元测试 - 验证 SSRF 防护逻辑覆盖 IPv4/IPv6/mapped 地址
 /// </summary>
 public class EgressGuardTests
 {
     // ------------------------------------------------------------------
-    // CheckAsync — scheme validation (synchronous path, no DNS needed)
+    // CheckAsync - scheme validation (synchronous path, no DNS needed)
     // ------------------------------------------------------------------
 
     [Theory]
@@ -37,12 +37,12 @@ public class EgressGuardTests
     }
 
     // ------------------------------------------------------------------
-    // CheckAsync — loopback and link-local addresses (resolvable without real DNS)
+    // CheckAsync - loopback and link-local addresses (resolvable without real DNS)
     // ------------------------------------------------------------------
 
     [Theory]
-    [InlineData("http://127.0.0.1/path")]     // IPv4 loopback — always resolves
-    [InlineData("http://[::1]/path")]          // IPv6 loopback — always resolves
+    [InlineData("http://127.0.0.1/path")]     // IPv4 loopback - always resolves
+    [InlineData("http://[::1]/path")]          // IPv6 loopback - always resolves
     public async Task CheckAsync_LoopbackAddress_ReturnsError(string url)
     {
         var error = await EgressGuard.CheckAsync(url);
@@ -50,7 +50,7 @@ public class EgressGuardTests
     }
 
     // ------------------------------------------------------------------
-    // CheckAsync — IPv4 literal private addresses
+    // CheckAsync - IPv4 literal private addresses
     // These are IP literals in the URL so no DNS lookup is needed.
     // ------------------------------------------------------------------
 
@@ -69,7 +69,7 @@ public class EgressGuardTests
     }
 
     // ------------------------------------------------------------------
-    // CheckAsync — public addresses should NOT be blocked at the scheme-check stage
+    // CheckAsync - public addresses should NOT be blocked at the scheme-check stage
     // (We do NOT assert null here since DNS might fail in CI; we only assert
     //  the scheme was accepted by checking the error doesn't mention the scheme.)
     // ------------------------------------------------------------------
@@ -88,7 +88,7 @@ public class EgressGuardTests
     }
 
     // ------------------------------------------------------------------
-    // FIX 2 (a): hostname that DNS-resolves to a private IP — DNS path
+    // FIX 2 (a): hostname that DNS-resolves to a private IP - DNS path
     // "localhost" is guaranteed to resolve to 127.0.0.1 or ::1 on every OS.
     // This proves the DNS-resolution code path, not just literal-IP checks.
     // ------------------------------------------------------------------
@@ -96,13 +96,13 @@ public class EgressGuardTests
     [Fact]
     public async Task CheckAsync_HostnameThatResolvesToLoopback_ReturnsError()
     {
-        // "localhost" resolves to 127.0.0.1 and/or ::1 — both are loopback
+        // "localhost" resolves to 127.0.0.1 and/or ::1 - both are loopback
         var error = await EgressGuard.CheckAsync("http://localhost/path");
         error.ShouldNotBeNull("localhost must be blocked because it resolves to a loopback address");
     }
 
     // ------------------------------------------------------------------
-    // FIX 2 (b): IPv4-mapped IPv6 literals in URLs — e.g. [::ffff:127.0.0.1]
+    // FIX 2 (b): IPv4-mapped IPv6 literals in URLs - e.g. [::ffff:127.0.0.1]
     // Proves the IsIPv4MappedToIPv6 → MapToIPv4 → IsBlockedAddress recursion
     // through the public CheckAsync API.
     // ------------------------------------------------------------------

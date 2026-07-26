@@ -1,8 +1,8 @@
 /**
- * Localization Module API — admin access to the missing-translation tracker.
+ * Localization Module API - admin access to the missing-translation tracker.
  *
  * Mirrors `Tnzi.Localization/Controllers/Admin/DefaultLocalizationAdminController`
- * — list missing keys, aggregate summary, export stubs, and clear the tracker
+ * - list missing keys, aggregate summary, export stubs, and clear the tracker
  * under `/admin/localization/missing*`.
  */
 
@@ -15,7 +15,7 @@ import type {
 const ADMIN_LOCALIZATION_BASE = '/admin/localization';
 
 /**
- * Admin Localization API — missing-translation tracking.
+ * Admin Localization API - missing-translation tracking.
  *
  * Example:
  * ```ts

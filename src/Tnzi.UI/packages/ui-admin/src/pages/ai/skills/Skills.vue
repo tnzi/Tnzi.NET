@@ -1,6 +1,6 @@
 <template>
   <!--
-    Skills — production-grade card page.
+    Skills - production-grade card page.
 
     Layout: TCardPage (mode=page) with the usage-stats KPI strip rendered
     between the page header and the card grid via the #kpis slot (content-page
@@ -25,7 +25,7 @@
       :detail-title="(d: SkillSummaryDto) => d.name"
       :translate="t"
     >
-      <!-- KPI strip — getUsageStats; between the page header and the grid. -->
+      <!-- KPI strip - getUsageStats; between the page header and the grid. -->
       <template #kpis>
         <TKpiRow class="ai-skills-kpis">
           <TKpiCard
@@ -168,7 +168,7 @@
           />
         </template>
 
-        <!-- Read-only detail — full SKILL.md content (lazy-loaded by slug via
+        <!-- Read-only detail - full SKILL.md content (lazy-loaded by slug via
              `onView`). Same `view` open-state as the form, deep-linkable. -->
         <template #detail>
           <NSpin v-if="viewed" :show="detailLoading" size="small">
@@ -239,9 +239,9 @@
       @change="onFileSelected"
     />
 
-    <!-- Popular ranking drawer — a singleton (non-record) overlay driven by the
+    <!-- Popular ranking drawer - a singleton (non-record) overlay driven by the
          detail engine so it is deep-linkable (`?popular=view:ranking`),
-         refresh-survivable and Back-closeable. `:footer="false"` — it is a
+         refresh-survivable and Back-closeable. `:footer="false"` - it is a
          read-only panel; the X closes it. -->
     <TDetailHost
       :state="popularDetail"
@@ -462,7 +462,7 @@ async function loadSkillContent(row: SkillSummaryDto): Promise<void> {
 // A singleton (non-record) ranking overlay driven by the detail engine so it is
 // deep-linkable (`?popular=view:ranking`), refresh-survivable and Back-closeable
 // like every other overlay. The ranking list body is page-local, (re)loaded
-// whenever the drawer opens — covers an in-session open AND a cold-load deep
+// whenever the drawer opens - covers an in-session open AND a cold-load deep
 // link (both flip `visible`).
 const popularDetail = useDetail<{ id: string }>({
   mode: 'drawer',

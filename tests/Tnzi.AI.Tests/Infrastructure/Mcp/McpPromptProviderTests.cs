@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests.Infrastructure.Mcp;
 
 /// <summary>
-/// McpPromptProvider 单元测试 — Prompt 模板发现与获取
+/// McpPromptProvider 单元测试 - Prompt 模板发现与获取
 /// </summary>
 public class McpPromptProviderTests
 {

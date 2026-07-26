@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// File system skill store — scans SKILL.md files and delegates parsing to <see cref="SkillMarkdownParser"/>.
+/// File system skill store - scans SKILL.md files and delegates parsing to <see cref="SkillMarkdownParser"/>.
 /// </summary>
 /// <remarks>
 /// Singleton lifetime with TTL caching (SemaphoreSlim double-checked locking).
@@ -24,7 +24,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     // 项目目录路径（来自 ContentRoot/Skills 等），用于标记 SkillSource.Project
     private readonly HashSet<string> _projectPaths = new(StringComparer.OrdinalIgnoreCase);
 
-    // OptionsMonitor 订阅 — SkillsOptions 变化时立即失效缓存
+    // OptionsMonitor 订阅 - SkillsOptions 变化时立即失效缓存
     private readonly IDisposable? _optionsChangeListener;
 
     private SkillsOptions SkillOptions => _options.CurrentValue.ContextProviders.Skills;
@@ -81,7 +81,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     }
 
     /// <summary>
-    /// Invalidates cache — next GetAllAsync call will reload from disk.
+    /// Invalidates cache - next GetAllAsync call will reload from disk.
     /// </summary>
     public void InvalidateCache()
     {
@@ -102,7 +102,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
         // 0. Load built-in skills from EmbeddedResource (lowest priority, overridden by file system)
         var builtInCount = SkillOptions.LoadBuiltIn ? LoadBuiltInSkills(skills) : 0;
 
-        // 1. DataPath — tenant/user installed skills ({DataPath}/skills/{tenantId}/{userId}/)
+        // 1. DataPath - tenant/user installed skills ({DataPath}/skills/{tenantId}/{userId}/)
         var dataPathCount = await LoadFromDataPathAsync(skills, scannedPaths, ct);
 
         // 2. Auto-discover module assembly Skills/ directories
@@ -139,11 +139,11 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
             }
         }
 
-        // 4. Plugin paths — third-party plugin skills (SkillSource.Plugin)
+        // 4. Plugin paths - third-party plugin skills (SkillSource.Plugin)
         var pluginCount = await LoadSourcedPathsAsync(
             SkillOptions.PluginPaths, SkillSource.Plugin, skills, scannedPaths, scannedSkillFiles, ct);
 
-        // 5. Managed paths — platform-managed skills (SkillSource.Managed)
+        // 5. Managed paths - platform-managed skills (SkillSource.Managed)
         var managedCount = await LoadSourcedPathsAsync(
             SkillOptions.ManagedPaths, SkillSource.Managed, skills, scannedPaths, scannedSkillFiles, ct);
 
@@ -486,7 +486,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
 
     /// <summary>
     /// 从程序集嵌入资源加载内置技能（SKILL.md + 附属资源）。返回加载数量。
-    /// 内置技能优先级最低 — 文件系统中同 slug 的技能会在后续合并时覆盖。
+    /// 内置技能优先级最低 - 文件系统中同 slug 的技能会在后续合并时覆盖。
     /// </summary>
     /// <remarks>
     /// LogicalName 格式：<c>BuiltInSkill:{slug}/{relativePath}</c>，例如：
@@ -593,6 +593,8 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
                     var relPath = Path.GetRelativePath(skillDir, resourceFile).Replace('\\', '/');
                     skill.Resources[relPath] = await File.ReadAllTextAsync(resourceFile, ct);
                 }
+                // 取消必须冒泡（否则整个技能扫描会忽略调用方的取消请求）
+                catch (OperationCanceledException) { throw; }
                 catch (Exception) { /* skip unreadable files */ }
             }
         }

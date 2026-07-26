@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 综合节点 — 收集所有上游输出 → LLM 汇总 → 返回综合结果
+/// 综合节点 - 收集所有上游输出 → LLM 汇总 → 返回综合结果
 /// </summary>
 /// <remarks>
 /// 配置项：

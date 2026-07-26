@@ -65,7 +65,7 @@ public interface IKnowledgeBaseService
     /// </summary>
     /// <remarks>
     /// 同步前台批量执行：分批读取所有块、调用 IEmbeddingService 批量嵌入、回写 Embedding 字段。
-    /// 设计为幂等操作 — 多次执行结果一致。
+    /// 设计为幂等操作 - 多次执行结果一致。
     /// </remarks>
     Task<Result<ReindexResultDto>> ReindexAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default);
 }

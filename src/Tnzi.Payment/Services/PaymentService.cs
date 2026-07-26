@@ -354,8 +354,11 @@ public class PaymentService : ApplicationService, IPaymentService
         if (!result.Succeeded)
             return Fail(result.Message ?? ErrorCodes.PaymentCreationFailed);
 
-        // 更新本地状态
-        payment.Status = result.Data?.Status ?? payment.Status;
+        // 更新本地状态。终态防回退（见 IsTerminalStatus）：已成功/已退款/已关闭的支付
+        // 不再被渠道同步改写状态，否则 Refunded 会被同步回 Succeeded 从而放开二次退款。
+        if (!IsTerminalStatus(payment.Status))
+            payment.Status = result.Data?.Status ?? payment.Status;
+
         if (!string.IsNullOrEmpty(result.Data?.ExternalTradeNo))
             payment.ExternalTradeNo = result.Data.ExternalTradeNo;
 

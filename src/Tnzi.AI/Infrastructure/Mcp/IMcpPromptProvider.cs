@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP Prompt 模板发现与获取 — 从已配置的 MCP 服务器获取 Prompt 模板。
+/// MCP Prompt 模板发现与获取 - 从已配置的 MCP 服务器获取 Prompt 模板。
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 public interface IMcpPromptProvider

@@ -25,7 +25,7 @@ export default defineConfig({
   ],
 
   shortcuts: {
-    // Layout — matches soybean's source 1:1
+    // Layout - matches soybean's source 1:1
     'flex-center': 'flex items-center justify-center',
     'flex-y-center': 'flex items-center',
     'flex-x-center': 'flex justify-center',
@@ -52,8 +52,8 @@ export default defineConfig({
   safelist: [],
 
   // presetWind4 mis-compiles `font-[family-name:var(--tnzi-font-mono)]` into an
-  // invalid `font-family:family-name:var(...)` — it does NOT strip Tailwind's
-  // `family-name:` data-type hint — which corrupts the whole compiled
+  // invalid `font-family:family-name:var(...)` - it does NOT strip Tailwind's
+  // `family-name:` data-type hint - which corrupts the whole compiled
   // dist/style.css under a strict postcss parser (consumer dev server
   // white-screens on the very first transform). Pages use the plain `tnzi-mono`
   // class instead; provide it as raw CSS here so the token semantics survive.

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Chunking;
 
 /// <summary>
-/// 层级切块策略 — 创建父子块关系，父块为大段落（按标题/分隔符分割），子块为固定大小的小块
+/// 层级切块策略 - 创建父子块关系，父块为大段落（按标题/分隔符分割），子块为固定大小的小块
 /// </summary>
 /// <remarks>
 /// <para>
@@ -56,7 +56,7 @@ public partial class HierarchicalChunkingStrategy : IChunkingStrategy
     }
 
     /// <summary>
-    /// 层级切块 — 返回父块和子块的映射关系
+    /// 层级切块 - 返回父块和子块的映射关系
     /// </summary>
     /// <param name="text">待切块的文本</param>
     /// <param name="chunkSize">子块的最大字符数</param>
@@ -172,7 +172,7 @@ public partial class HierarchicalChunkingStrategy : IChunkingStrategy
 }
 
 /// <summary>
-/// 层级切块结果 — 包含父块列表和子块列表，通过 ParentIndex 关联
+/// 层级切块结果 - 包含父块列表和子块列表，通过 ParentIndex 关联
 /// </summary>
 [ExperimentalApi(Reason = "Hierarchical chunking is in preview")]
 public class HierarchicalChunkResult
@@ -199,7 +199,7 @@ public class HierarchicalChunkResult
 }
 
 /// <summary>
-/// 层级块 — 可以是父块或子块
+/// 层级块 - 可以是父块或子块
 /// </summary>
 [ExperimentalApi(Reason = "Hierarchical chunking is in preview")]
 public class HierarchicalChunk

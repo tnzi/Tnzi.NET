@@ -1,0 +1,247 @@
+/*
+ * Shared (global, unscoped) styles for the User Center section components.
+ * Extracted from the former monolithic UserCenter.vue scoped block so every
+ * self-contained section renders with identical chrome. Imported once per
+ * section via `<style src="./user-center-sections.css">` - Vite dedupes the
+ * repeated import to a single stylesheet.
+ *
+ * All classes are prefixed `t-uc-` and are intentionally global (a section body
+ * is slotted through the shell, so scoping per-file would break the cascade).
+ */
+
+/* A section = a fixed header bar + a body that claims the residual height. */
+.t-uc-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Fixed header bar: title (left) + section actions (right). Stays pinned
+   while the body scrolls underneath. */
+.t-uc-section__bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tnzi-border);
+}
+.t-uc-section__title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+/* Mirror the left nav item's icon before the title (muted so the label leads). */
+.t-uc-section__title-icon {
+  flex-shrink: 0;
+  color: var(--tnzi-base-text-muted, #888);
+}
+
+/* Body: fills the remaining height. Forms / lists scroll here; table sections
+   add `--fill` so the flex-height NDataTable owns the scroll instead. */
+.t-uc-section__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.t-uc-section__body--fill {
+  overflow: hidden;
+}
+.t-uc-table {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* In-body sub-heading (password / 2FA blocks within the Security section). */
+.t-uc-sub-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+
+/* A sub-group within a section (e.g. Password / Two-factor inside Security).
+   When a section holds MULTIPLE sub-groups, each is titled with an uppercase,
+   letter-spaced, muted group header (settings-panel convention). */
+.t-uc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.t-uc-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+.t-uc-group-title__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tnzi-base-text-muted, #888);
+}
+
+/* Compact three-across password grid (current / new / confirm on one row). */
+.t-uc-pw-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px 16px;
+  margin-bottom: 4px;
+}
+@media (max-width: 720px) {
+  .t-uc-pw-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.t-uc-pw-grid .n-form-item {
+  margin-bottom: 0;
+}
+/* Right-aligned action row (button on its own second row, form's right edge). */
+.t-uc-actions--end {
+  justify-content: flex-end;
+}
+.t-uc-hint {
+  color: var(--tnzi-base-text-muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+/* Two-column responsive form grid. */
+.t-uc-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-bottom: 12px;
+}
+@media (max-width: 640px) {
+  .t-uc-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.t-uc-section .n-form-item {
+  margin-bottom: 12px;
+}
+.t-uc-section .n-form-item .n-form-item-label {
+  padding-bottom: 4px;
+}
+.t-uc-form-grid .n-form-item {
+  margin-bottom: 0;
+}
+
+.t-uc-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Form-end action bar (Save / Reset) - right-aligned within the capped content
+   column so the buttons line up with the form's right edge. */
+.t-uc-save-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--tnzi-border);
+}
+
+.t-uc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--tnzi-border);
+}
+.t-uc-row:last-child {
+  border-bottom: none;
+}
+/* Sub-item shown but not usable (e.g. 2FA master switch off): dim it so the row
+   reads as "available but currently unavailable" while its controls stay disabled. */
+.t-uc-row--disabled {
+  opacity: 0.55;
+}
+.t-uc-row-label {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* Profile-section avatar uploader: the circular picker + a label/hint column. */
+.t-uc-avatar-field {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.t-uc-avatar-field-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.t-uc-avatar-field-label {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--tnzi-base-text);
+}
+
+/* Linked-accounts list. */
+.t-uc-linked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.t-uc-linked-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px dashed var(--tnzi-border);
+}
+.t-uc-linked-item:last-child {
+  border-bottom: none;
+}
+.t-uc-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--tnzi-base-text-muted);
+  font-size: 13px;
+}
+
+/* Provider chips for "link a new account". */
+.t-uc-link-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* TOTP setup dialog: secret + QR. */
+.t-uc-totp-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--tnzi-font-mono, monospace);
+  font-size: 13px;
+  padding: 8px 12px;
+  background: var(--tnzi-layout-bg);
+  border-radius: var(--tnzi-admin-radius-sm, 3px);
+  word-break: break-all;
+}

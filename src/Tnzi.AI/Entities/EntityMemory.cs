@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 实体记忆 — 存储跨会话识别的命名实体（人物、组织、地点、概念）
+/// 实体记忆 - 存储跨会话识别的命名实体（人物、组织、地点、概念）
 /// </summary>
 /// <remarks>
 /// 删除语义与 <see cref="MemoryEntry"/> 对齐为<b>硬删除</b>（<see cref="CreationAuditedEntity{TKey}"/> +

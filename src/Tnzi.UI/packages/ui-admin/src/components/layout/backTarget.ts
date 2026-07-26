@@ -8,7 +8,7 @@ import type { Router } from 'vue-router'
  *               deep-link (no history entry).
  *  - `string` → `router.push(path)` (a static parent). Refresh-safe, but cannot
  *               carry the origin's sub-state (e.g. a `?section=files` tab).
- *  - object   → SMART back: use in-app history when it exists (best of both —
+ *  - object   → SMART back: use in-app history when it exists (best of both -
  *               restores the origin WITH its `?section=…` deep-link on normal
  *               in-app navigation), otherwise fall back to `fallback`. This is
  *               the recommended form for a drilled-into detail page.

@@ -10,7 +10,7 @@ namespace Tnzi.AI.Dtos;
 public abstract class ContentPartDto
 {
     // Type discriminator is handled automatically by [JsonPolymorphic] attribute.
-    // Do NOT add a "Type" property here — it conflicts with the JSON metadata property.
+    // Do NOT add a "Type" property here - it conflicts with the JSON metadata property.
 }
 
 /// <summary>

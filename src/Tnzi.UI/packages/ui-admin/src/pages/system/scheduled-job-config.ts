@@ -1,15 +1,16 @@
 /**
- * Scheduled Job config — wired to Tnzi.Hangfire admin API (2026-04-14).
+ * Scheduled Job config - wired to Tnzi.Hangfire admin API (2026-04-14).
  *
  * Backend: DefaultScheduledJobAdminController at /admin/scheduled-jobs.
  * Shape mirrors Tnzi.Hangfire.Dtos.ScheduledJobDto (Hangfire recurring job
- * projection). Columns below match those real fields — the previous Phase 3
+ * projection). Columns below match those real fields - the previous Phase 3
  * stub used speculative field names (name/lastRun/nextRun/enabled) that do
  * not exist on Hangfire recurring jobs.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
@@ -46,7 +47,7 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
       h(
         'code',
         { style: 'font-family: monospace; font-size: 12px; padding: 2px 6px; background: var(--tnzi-layout-bg); border-radius: 3px' },
-        row.cron ?? '—',
+        row.cron ?? EMPTY_DASH,
       ),
   },
   { key: 'queue', title: 'columns.queue', minWidth: 100 },
@@ -61,7 +62,7 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
             type: stateType(row.lastJobState),
             label: row.lastJobState,
           })
-        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
+        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, EMPTY_DASH),
   },
   {
     key: 'lastExecution',
@@ -95,13 +96,19 @@ export const scheduledJobColumns: ColumnDef<ScheduledJobRow>[] = [
  * supported by the Hangfire admin surface (recurring jobs are registered in
  * code via IBackgroundJobManager.CreateRecurring, not via admin UI).
  */
+/** Two blocks: how it is scheduled, and what happened on the last run. */
+export const scheduledJobFormSections: FormSchemaSection[] = [
+  { key: 'schedule', labelKey: 'admin.shared.formSections.schedule', label: 'Schedule', icon: 'mdi:calendar-clock' },
+  { key: 'lastRun', labelKey: 'admin.shared.formSections.lastRun', label: 'Last run', icon: 'mdi:history' },
+]
+
 export const scheduledJobFormSchema: FormSchemaItem[] = [
-  { key: 'id',            labelKey: 'form.id', label: 'Job ID',      type: 'text' },
-  { key: 'cron',          labelKey: 'form.cron', label: 'Cron',        type: 'text' },
-  { key: 'queue',         labelKey: 'form.queue', label: 'Queue',       type: 'text' },
-  { key: 'lastExecution', labelKey: 'form.lastExecution', label: 'Last Run',    type: 'text' },
-  { key: 'nextExecution', labelKey: 'form.nextExecution', label: 'Next Run',    type: 'text' },
-  { key: 'lastJobId',     labelKey: 'form.lastJobId', label: 'Last Job ID', type: 'text' },
-  { key: 'lastJobState',  labelKey: 'form.lastJobState', label: 'Last State',  type: 'text' },
-  { key: 'error',         labelKey: 'form.error', label: 'Error',       type: 'textarea' },
+  { key: 'id',            labelKey: 'form.id', label: 'Job ID',      type: 'text', section: 'schedule' },
+  { key: 'cron',          labelKey: 'form.cron', label: 'Cron',        type: 'text', section: 'schedule' },
+  { key: 'queue',         labelKey: 'form.queue', label: 'Queue',       type: 'text', section: 'schedule' },
+  { key: 'nextExecution', labelKey: 'form.nextExecution', label: 'Next Run',    type: 'text', section: 'schedule' },
+  { key: 'lastExecution', labelKey: 'form.lastExecution', label: 'Last Run',    type: 'text', section: 'lastRun' },
+  { key: 'lastJobId',     labelKey: 'form.lastJobId', label: 'Last Job ID', type: 'text', section: 'lastRun' },
+  { key: 'lastJobState',  labelKey: 'form.lastJobState', label: 'Last State',  type: 'text', section: 'lastRun' },
+  { key: 'error',         labelKey: 'form.error', label: 'Error',       type: 'textarea', section: 'lastRun' },
 ]

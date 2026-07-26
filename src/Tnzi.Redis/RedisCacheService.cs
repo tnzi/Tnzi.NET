@@ -657,8 +657,8 @@ public class RedisCacheService : ICache, IPatternCache
     }
 
     /// <summary>
-    /// 按前缀删除缓存（比 RemoveByPatternAsync 更高效）
-    /// 使用前缀索引，时间复杂度接近 O(n)，n 为匹配的键数
+    /// 按前缀删除缓存。与 <see cref="RemoveByPatternAsync"/> 同一机制（各节点 SCAN 一遍键空间），
+    /// 只是把前缀补上 <c>*</c> 组成模式；键很多时代价与库内键总数成正比，不是前缀索引查找。
     /// </summary>
     /// <param name="prefix">缓存键前缀，如 "user:" 将匹配所有以 "user:" 开头的键</param>
     /// <param name="cancellationToken">取消令牌</param>

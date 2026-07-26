@@ -3,7 +3,7 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Engine;
 
 /// <summary>
-/// ToolInterruptBehavior 测试 — 验证 Cancel 和 GracefulShutdown 的取消传播行为
+/// ToolInterruptBehavior 测试 - 验证 Cancel 和 GracefulShutdown 的取消传播行为
 /// </summary>
 public class ToolInterruptBehaviorTests
 {
@@ -26,7 +26,7 @@ public class ToolInterruptBehaviorTests
             {
                 // 取消后，检查是否还有宽限期（GracefulShutdown 应在取消后再给 5s）
                 // 创建一个短延迟来验证 token 还没被取消（宽限期内）
-                // 此处不应该立即抛出 — 宽限期应该还在
+                // 此处不应该立即抛出 - 宽限期应该还在
                 gracePeriodObserved = !ct.IsCancellationRequested || true;
                 // 实际上 GracefulShutdown 会在外部CT取消后延迟取消 linked token,
                 // 所以当 linked token 取消时（进入这个 catch），说明宽限期已到。
@@ -73,7 +73,7 @@ public class ToolInterruptBehaviorTests
         var cts = new CancellationTokenSource();
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
 
-        // Act: 短暂延迟后取消 — 工具应获得宽限期
+        // Act: 短暂延迟后取消 - 工具应获得宽限期
         var executeTask = executor.ExecuteAsync(messages, cts.Token);
         await Task.Delay(100); // 等待工具开始执行
         cts.Cancel(); // 触发取消

@@ -31,6 +31,10 @@ import {
   provideAdminThemeConfig,
   type AdminThemeConfig,
 } from './themeConfig'
+import {
+  provideAdminUserCenterConfig,
+  type AdminUserCenterConfig,
+} from './userCenterConfig'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -64,11 +68,11 @@ export interface TnziUiAdminOptions {
    * change the admin default primary color away from `#646cff`.
    *
    * When the consumer has already installed `@tnzi/ui`, this option is
-   * **ignored** — the consumer's theme wins. Pass to `createTnziUi` instead.
+   * **ignored** - the consumer's theme wins. Pass to `createTnziUi` instead.
    */
   themeOverride?: Partial<ThemeColors>
   /**
-   * Phase I.7+ — configuration for the built-in `/login/:module(…)?` route.
+   * Phase I.7+ - configuration for the built-in `/login/:module(…)?` route.
    * Pass `brand` + `callbacks.pwdLogin` to get a working login page out of
    * the box; pass `demoAccounts` to render quick-fill buttons.
    *
@@ -77,7 +81,7 @@ export interface TnziUiAdminOptions {
    */
   login?: AdminLoginConfig
   /**
-   * Phase J / 0.2.71+ — configuration for the built-in Dashboard page.
+   * Phase J / 0.2.71+ - configuration for the built-in Dashboard page.
    * When omitted, the page falls back to `defaultWorkbenchWidgets()`
    * (HeaderBanner + KPIs + business stats + activity timeline + tips).
    * Pass `widgets` to fully control the dashboard, `layout: 'draggable'`
@@ -102,6 +106,14 @@ export interface TnziUiAdminOptions {
    * `presets` replaces the built-in color-scheme palette.
    */
   theme?: AdminThemeConfig
+  /**
+   * Configuration for the built-in User Center page (`/admin/user-center`).
+   * Hide / regroup / reorder / override built-in sections and append custom
+   * ones (`hideSections` / `sectionGroups` / `overrides` / `sections`), plus
+   * field-level Profile control (`profile.hideFields`). When omitted the page
+   * renders the six built-in sections.
+   */
+  userCenter?: AdminUserCenterConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -117,28 +129,28 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
     app.provide(TNZI_ADMIN_CLIENT_KEY, options.client)
   }
 
-  // Phase I.7.2+ — install the login config so the built-in `/login/:module(…)?`
+  // Phase I.7.2+ - install the login config so the built-in `/login/:module(…)?`
   // route can pull consumer-supplied auth callbacks + brand + demo accounts
   // without each consumer needing to override the route component itself.
   // Always provide (even when undefined) so `useAdminLoginConfig()` always
   // resolves to a stable object.
   provideAdminLoginConfig(app, options.login ?? {})
 
-  // Phase J — install the dashboard config so the bundled dashboard page
+  // Phase J - install the dashboard config so the bundled dashboard page
   // can pull consumer-supplied widget descriptors. Provide null when no
   // config supplied so the page falls back to the bundled default deck.
   if (options.dashboard) {
     provideAdminDashboardConfig(app, options.dashboard)
   }
 
-  // Settings Center — install the consumer-supplied section registry so the
+  // Settings Center - install the consumer-supplied section registry so the
   // built-in Settings page can surface app-specific sections alongside the
   // framework schema groups. Only provided when the consumer opts in.
   if (options.settings) {
     provideAdminSettingsConfig(app, options.settings)
   }
 
-  // Chat config — provide so AdminShellRoot can read enabled/disabled state.
+  // Chat config - provide so AdminShellRoot can read enabled/disabled state.
   // Always provide (even when undefined) with a stable empty object so
   // useAdminChatConfig() returns a consistent value.
   provideAdminChatConfig(app, options.chat ?? {})
@@ -147,6 +159,14 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // theme sync + the preset color schemes. Stable empty object = defaults
   // (global sync on, built-in palette).
   provideAdminThemeConfig(app, options.theme ?? {})
+
+  // User Center - install the consumer-supplied section registry so the built-in
+  // personal-center page can hide / regroup / override / append sections. Only
+  // provided when the consumer opts in (useAdminUserCenterConfig() falls back to
+  // a frozen empty object otherwise).
+  if (options.userCenter) {
+    provideAdminUserCenterConfig(app, options.userCenter)
+  }
 
   // Install global directives (v-permission, etc).
   installDirectives(app)
@@ -163,7 +183,7 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // (a) installing `createTnziUi()` first with their own colors, or
   // (b) passing `themeOverride: { primary: '...' }`.
   //
-  // Detection uses `app._context.provides` — an internal-but-stable accessor.
+  // Detection uses `app._context.provides` - an internal-but-stable accessor.
   // The cast to `Record<symbol, unknown>` matches Vue 3.5's own internal type.
   const provides = (app as unknown as {
     _context: { provides: Record<symbol, unknown> }
@@ -243,6 +263,28 @@ export {
   type AdminThemeConfig,
   type ThemeColorPreset,
 } from './themeConfig'
+export {
+  BUILTIN_APPEARANCE_PRESETS,
+  applyAppearancePreset,
+  type AdminThemePreset,
+} from '../theme/appearancePresets'
+export {
+  surfaceTone,
+  isDarkSurface,
+  relativeLuminance,
+  perceivedBrightness,
+  type SurfaceTone,
+} from '../theme/surfaceTone'
+export {
+  ADMIN_USER_CENTER_CONFIG_KEY,
+  provideAdminUserCenterConfig,
+  useAdminUserCenterConfig,
+  type AdminUserCenterConfig,
+  type AdminUserCenterSection,
+  type AdminUserCenterProfileConfig,
+  type UserCenterBuiltInSectionKey,
+  type UserCenterProfileField,
+} from './userCenterConfig'
 export {
   fetchAdminManifest,
   type AdminManifest,

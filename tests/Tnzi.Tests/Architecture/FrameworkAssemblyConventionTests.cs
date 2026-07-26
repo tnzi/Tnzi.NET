@@ -10,7 +10,7 @@ namespace Tnzi.Tests.Architecture;
 /// in <c>ConfigureServicesAsync</c> per CLAUDE.md rule #1. Marker interfaces
 /// (<see cref="ISingletonDependency"/>, <see cref="IScopedDependency"/>,
 /// <see cref="ITransientDependency"/>) are reserved for application-layer auto-registration
-/// and may NOT appear on types in framework assemblies — they are silently skipped at
+/// and may NOT appear on types in framework assemblies - they are silently skipped at
 /// runtime by <c>DependencyRegistrationService</c>, leading to "type works in tests but
 /// fails at runtime" surprises that the team has hit twice in the audit window
 /// (Tnzi.Export, Tnzi.AI.Office, Tools/Sql/*, Tools/Approval/Sse/*).
@@ -75,7 +75,7 @@ public class FrameworkAssemblyConventionTests
             // still tells us about marker-interface usage on the types that DID load. Surface the
             // failure to the test output so a real misconfiguration isn't silently masked.
             Console.Error.WriteLine(
-                $"[FrameworkAssemblyConventionTests] {a.GetName().Name}: ReflectionTypeLoadException — {ex.Message}");
+                $"[FrameworkAssemblyConventionTests] {a.GetName().Name}: ReflectionTypeLoadException - {ex.Message}");
             return ex.Types.Where(t => t is not null)!;
         }
     }

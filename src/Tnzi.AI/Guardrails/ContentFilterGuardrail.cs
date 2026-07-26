@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// 输出内容过滤 Guardrail — 检测 AI 响应中的敏感内容
+/// 输出内容过滤 Guardrail - 检测 AI 响应中的敏感内容
 /// </summary>
 /// <remarks>
 /// 支持通过配置自定义关键词列表。默认包含基本的安全检查。

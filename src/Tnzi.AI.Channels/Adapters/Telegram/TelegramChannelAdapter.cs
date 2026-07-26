@@ -6,7 +6,7 @@ using Telegram.Bot.Types.Enums;
 namespace Tnzi.AI.Channels.Adapters.Telegram;
 
 /// <summary>
-/// Telegram Bot 适配器 — 使用长轮询接收消息，通过 IChannelMessageBus 路由。
+/// Telegram Bot 适配器 - 使用长轮询接收消息，通过 IChannelMessageBus 路由。
 /// 支持文本消息、命令、照片和文档。
 /// </summary>
 public class TelegramChannelAdapter : IChannelAdapter

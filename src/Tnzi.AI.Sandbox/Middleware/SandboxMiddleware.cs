@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure;
 namespace Tnzi.AI.Sandbox.Middleware;
 
 /// <summary>
-/// 沙箱生命周期中间件 — 为每次 Agent 运行创建/释放沙箱实例。
+/// 沙箱生命周期中间件 - 为每次 Agent 运行创建/释放沙箱实例。
 /// </summary>
 /// <remarks>
 /// 沙箱通过 <see cref="IAgentExecutionContextAccessor"/>（AsyncLocal 通道）以
@@ -114,7 +114,7 @@ public class SandboxMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// next() 结束后移除环境条目 — 沙箱即将被释放，绝不允许悬挂引用存活。
+    /// next() 结束后移除环境条目 - 沙箱即将被释放，绝不允许悬挂引用存活。
     /// </summary>
     private void RemoveToolEnvironment()
     {

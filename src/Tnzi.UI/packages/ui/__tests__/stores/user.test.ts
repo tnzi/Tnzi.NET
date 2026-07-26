@@ -95,7 +95,7 @@ describe('stores/user', () => {
     resetUserRuntime()
   })
 
-  describe('useUserStore — reactive state proxies', () => {
+  describe('useUserStore - reactive state proxies', () => {
     it('exposes currentUser/isLoading/error through the manager', () => {
       managerInstance.currentUser = { id: 'u1', userName: 'alice' }
       managerInstance.isLoading = true
@@ -117,7 +117,7 @@ describe('stores/user', () => {
     })
   })
 
-  describe('useUserStore — getters', () => {
+  describe('useUserStore - getters', () => {
     it('proxies isLoaded/isAuthenticated/userName/avatar/email/roles/theme/language/counts', () => {
       managerInstance.isLoaded = true
       managerInstance.isAuthenticated = true
@@ -155,7 +155,7 @@ describe('stores/user', () => {
     })
   })
 
-  describe('useUserStore — profile actions', () => {
+  describe('useUserStore - profile actions', () => {
     it('fetchCurrentUser delegates to manager', async () => {
       const s = useUserStore()
       await s.fetchCurrentUser()
@@ -170,7 +170,7 @@ describe('stores/user', () => {
     })
   })
 
-  describe('useUserStore — preferences actions', () => {
+  describe('useUserStore - preferences actions', () => {
     it('updatePreferences delegates', async () => {
       const s = useUserStore()
       await s.updatePreferences({ theme: 'dark' as any })
@@ -196,7 +196,7 @@ describe('stores/user', () => {
     })
   })
 
-  describe('useUserStore — recent items + favorites actions', () => {
+  describe('useUserStore - recent items + favorites actions', () => {
     it('addRecentItem/removeRecentItem/clearRecentItems delegate', () => {
       const s = useUserStore()
       const item = { id: '1', title: 'A', type: 'page', url: '/a' } as any
@@ -220,7 +220,7 @@ describe('stores/user', () => {
     })
   })
 
-  describe('useUserStore — persistence actions', () => {
+  describe('useUserStore - persistence actions', () => {
     it('loadPersistedData/persistData delegate', async () => {
       const s = useUserStore()
       await s.loadPersistedData()

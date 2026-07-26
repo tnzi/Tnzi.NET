@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TScrollButton — Scroll to bottom button
+ * TScrollButton - Scroll to bottom button
  *
  * Floating button that appears when user scrolls up in a chat container.
  * Fades in/out with a smooth transition.

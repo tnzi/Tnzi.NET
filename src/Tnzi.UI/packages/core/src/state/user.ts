@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/state/user
  *
- * User preferences state manager — pure logic layer.
+ * User preferences state manager - pure logic layer.
  */
 
 import { reactive } from '@vue/reactivity';

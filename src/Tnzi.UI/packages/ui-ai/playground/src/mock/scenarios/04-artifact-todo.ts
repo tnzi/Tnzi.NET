@@ -58,7 +58,7 @@ const scenario: MockScenario = {
       },
     },
     { at: 1800, type: 'assistant-delta', text: '\nThe component tracks a list of todos with id/text/done, supports adding on Enter, ' },
-    { at: 2100, type: 'assistant-delta', text: 'and toggles completion on click. Styles are omitted — add a `.done { text-decoration: line-through }` rule to show completion visually.' },
+    { at: 2100, type: 'assistant-delta', text: 'and toggles completion on click. Styles are omitted - add a `.done { text-decoration: line-through }` rule to show completion visually.' },
     { at: 2400, type: 'assistant-end', usage: { promptTokens: 22, completionTokens: 210, totalTokens: 232 } },
   ],
 }

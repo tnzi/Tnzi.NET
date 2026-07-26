@@ -6,6 +6,8 @@ global using Microsoft.Extensions.Options;
 global using Serilog;
 global using Serilog.Events;
 global using Tnzi.Logging.Options;
+global using Tnzi.Logging.Services;
+global using Tnzi.Logging.Services.Interfaces;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Utilities;

@@ -1,13 +1,50 @@
 <template>
-  <TCrudPage
+  <TItemPage
     :state="crud"
-    :all-columns="columns"
     :title="title"
+    :search-fields="searchFields"
     :row-actions="rowActions"
     :translate="t"
     :detail-width="720"
-    :detail-title="detailTitle"
+:detail-title="detailTitle"
+    show-batch
   >
+    <!-- One row per document: party leads, status + number are chips beside it,
+         dates underneath, money (and what is still open) right-aligned. -->
+    <template #item="{ item, selected, selectable, toggleSelect }">
+      <TDocumentCard
+        :row="item"
+        party-key="customerName"
+        icon="mdi:file-undo-outline"
+        :t="t"
+        :selectable="selectable"
+        :checked="selected"
+        @update:checked="toggleSelect"
+        @open="crud.openView(item)"
+      >
+        <template #actions>
+          <TRowActions :row="item" :actions="rowActions" :translate="t" />
+        </template>
+      </TDocumentCard>
+    </template>    <!-- 批量过账（标准 1）：只处理选中的草稿，串行执行，部分失败逐条报出。 -->
+    <template #batchActions="{ selectedIds }">
+      <NPopconfirm @positive-click="() => batch.postMany(selectedIds)">
+        <template #trigger>
+          <NButton
+            v-if="selectedIds.length > 0 && can('finance.document.update')"
+            size="small"
+            type="primary"
+            ghost
+            :loading="batch.running.value"
+            :disabled="batch.countFor(selectedIds) === 0"
+          >
+            {{ td('batch.postAction', { n: batch.countFor(selectedIds), total: selectedIds.length }) }}
+          </NButton>
+        </template>
+        {{ td('batch.confirmPost', { n: batch.countFor(selectedIds) }) }}
+      </NPopconfirm>
+    </template>
+
     <template #primary>
       <NButton v-if="can('finance.document.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
@@ -22,11 +59,11 @@
       <template v-if="viewed">
         <NDescriptions :column="2" size="small" bordered class="fin-doc-detail__meta">
           <NDescriptionsItem :label="t('columns.status')">{{ statusLabel(viewed.status) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="t('columns.docDate')">{{ formatDateOnly(viewed.docDate, { utc: true }) }}</NDescriptionsItem>
+          <NDescriptionsItem :label="t('columns.docDate')">{{ fmtDate(viewed.docDate) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.currency')">{{ viewed.currency }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.total')">{{ fmtAmount(viewed.total) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.applied')">{{ fmtAmount(viewed.appliedTotal) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="td('editor.memo')" :span="2">{{ viewed.memo ?? '—' }}</NDescriptionsItem>
+          <NDescriptionsItem :label="td('editor.memo')" :span="2">{{ viewed.memo ?? EMPTY_DASH }}</NDescriptionsItem>
         </NDescriptions>
         <TResponsiveTable
           :columns="lineColumns"
@@ -36,9 +73,11 @@
           mobile="scroll"
           :pagination="false"
         />
+
+        <DocumentCollaborationPanel v-if="viewed.id" :doc-type="FinanceDocToken.CreditMemo" :doc-id="String(viewed.id)" />
       </template>
     </template>
-  </TCrudPage>
+  </TItemPage>
 
   <!-- Line editor (create / edit draft) - useDetail + TDetailHost (?entry=new / edit:<id>). -->
   <TDetailHost :state="entryDetail" :title="editorTitle" :width="920" :footer="false" :translate="t">
@@ -65,25 +104,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { NButton, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
+import { EMPTY_DASH } from '../../utils/placeholders'
+import { computed, h, ref, watch } from 'vue'
+import { NButton, NPopconfirm, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
-import TCrudPage from '../../components/crud/TCrudPage.vue'
+
+import TItemPage from '../../components/crud/TItemPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
+import TDocumentCard from '../../components/finance/TDocumentCard.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import SettlementApplyPanel, { type SettlementApplySource } from './components/SettlementApplyPanel.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDocumentBatch } from './useDocumentBatch'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import type { RowAction } from '../../headless/rowActions'
+import TPartySelect from '../../components/finance/TPartySelect.vue'
 import { createFinanceBridge, FinanceDocumentStatus, FinancePartyType, SettlementDocType, type CreditMemoDto, type CreateCreditMemoDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import DocumentCollaborationPanel from './components/DocumentCollaborationPanel.vue'
+import { FinanceDocToken } from './source-type'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { buildDocumentColumns, DOC_STATUS_META, type FinanceDocRow } from './document-config'
+import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount } from './money'
+import { amountCell, fmtAmount, fmtDate } from './money'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './components/DocumentEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -95,6 +141,19 @@ const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'customerName', { showApplied: true, showDueDate: false })
+
+// 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
+// TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
+const searchFields = buildDocumentSearchFields(td, {
+  renderParty: (model) =>
+    h(TPartySelect, {
+      modelValue: (model.partyId as string) ?? null,
+      bridge,
+      kind: 'customer',
+      size: 'small',
+      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
+    }),
+})
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.creditMemos',
@@ -129,7 +188,7 @@ async function loadViewed(row: FinanceDocRow) {
 
 const lineColumns: DataTableColumns<CreditMemoDto['lines'][number]> = [
   { key: 'lineNumber', title: '#', width: 48 },
-  { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? '—' },
+  { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? EMPTY_DASH },
   { key: 'quantity', title: td('editor.qty'), width: 90, render: (row) => amountCell(fmtAmount(row.quantity)) },
   { key: 'unitPrice', title: td('editor.price'), width: 110, render: (row) => amountCell(fmtAmount(row.unitPrice)) },
   { key: 'amount', title: td('editor.amount'), width: 130, render: (row) => amountCell(fmtAmount(row.amount)) },
@@ -216,6 +275,16 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
 }
 
 // ── Lifecycle actions ───────────────────────────────────────────
+// 批量过账：只处理草稿、串行、部分失败逐条报出（见 useDocumentBatch）。
+const batch = useDocumentBatch({
+  items: crud.items,
+  post: (id) => bridge.creditMemos.post(id),
+  translate: td,
+  message,
+  refresh: () => crud.refresh(),
+  clearSelection: () => crud.batchActions.clear(),
+})
+
 async function run(action: () => Promise<unknown>, successKey: string) {
   try {
     await action()
@@ -258,7 +327,7 @@ const canApply = (row: FinanceDocRow) =>
   isVoidable(row) && (row.total ?? 0) - (row.appliedTotal ?? 0) > 0
 
 const rowActions: RowAction<FinanceDocRow>[] = [
-  viewAction(crud),
+  // No View action: the row card itself opens the read-only detail.
   { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.creditMemos.post(String(row.id ?? '')), 'postSuccess') },
   { key: 'apply', label: 'actions.apply', type: 'info', show: (row) => can('finance.document.update') && canApply(row), onClick: (row) => void applyDetail.open('edit', String(row.id ?? '')) },

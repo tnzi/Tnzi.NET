@@ -1,11 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createApp, defineComponent, h, ref } from 'vue'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createApp, defineComponent, h, ref, nextTick } from 'vue'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
 import TExceptionPage from '../../../src/components/pages/TExceptionPage.vue'
 import TLoginPage from '../../../src/components/pages/TLoginPage.vue'
 import TDashboardPage from '../../../src/components/pages/TDashboardPage.vue'
 import PwdLogin from '../../../src/pages/login/modules/PwdLogin.vue'
+import Register from '../../../src/pages/login/modules/Register.vue'
 import { reactive } from 'vue'
 import {
   LOGIN_CONTEXT_KEY,
@@ -110,7 +111,7 @@ describe('TLoginPage', () => {
       global: { provide: themeProvide() },
     })
     await wrapper.setProps({ module: 'code-login' })
-    // Transition is async — flush via nextTick.
+    // Transition is async - flush via nextTick.
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.code-stub').exists()).toBe(true)
   })
@@ -223,7 +224,13 @@ describe('TLoginPage', () => {
       thirdParty: [],
       scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
       pendingTwoFactor: ref(null),
-      helpers: { setTwoFactorRequired: () => undefined, clearTwoFactor: () => undefined },
+      pendingCaptcha: ref(null),
+      helpers: {
+        setTwoFactorRequired: () => undefined,
+        clearTwoFactor: () => undefined,
+        setCaptchaRequired: () => undefined,
+        clearCaptcha: () => undefined,
+      },
       features: DEFAULT_LOGIN_FEATURES,
       ...overrides,
     }
@@ -298,6 +305,47 @@ describe('TLoginPage', () => {
     expect(labels).not.toContain('Code login')
     expect(labels).not.toContain('Register')
     expect(labels).not.toContain('Forgot password?')
+  })
+
+  it('PwdLogin reveals the captcha field only when the backend demands one', async () => {
+    const ctx = makeLoginContext({
+      callbacks: { pwdLogin: vi.fn(), getCaptcha: vi.fn(async () => ({ captchaId: 'c', imageBase64: 'IMG' })) },
+    })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    // Adaptive: hidden until the backend pushes a captcha.
+    expect(wrapper.find('.t-login-captcha').exists()).toBe(false)
+    ctx.pendingCaptcha.value = { captchaId: 'c', imageBase64: 'IMG' }
+    await nextTick()
+    const field = wrapper.find('.t-login-captcha')
+    expect(field.exists()).toBe(true)
+    expect(field.find('img').attributes('src')).toContain('IMG')
+  })
+
+  it('Register shows the captcha up-front when enabled + fetchable', async () => {
+    const getCaptcha = vi.fn(async () => ({ captchaId: 'c', imageBase64: 'REGIMG' }))
+    const ctx = makeLoginContext({
+      callbacks: { sendCode: vi.fn(), register: vi.fn(), getCaptcha },
+      features: { ...DEFAULT_LOGIN_FEATURES, captchaOnRegister: true },
+    })
+    const wrapper = mount(Register, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    await flushPromises() // the immediate watch fetches on mount
+    expect(getCaptcha).toHaveBeenCalledWith('register')
+    expect(wrapper.find('.t-login-captcha').exists()).toBe(true)
+  })
+
+  it('Register hides the captcha when the register captcha is off', () => {
+    const ctx = makeLoginContext({
+      callbacks: { sendCode: vi.fn(), register: vi.fn(), getCaptcha: vi.fn() },
+      features: { ...DEFAULT_LOGIN_FEATURES, captchaOnRegister: false },
+    })
+    const wrapper = mount(Register, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    expect(wrapper.find('.t-login-captcha').exists()).toBe(false)
   })
 })
 

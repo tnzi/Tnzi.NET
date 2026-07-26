@@ -59,7 +59,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var key = generator.Generate("products", "page1");
 
-        // Assert — 格式：t:{tenantId:N}:products:page1
+        // Assert - 格式：t:{tenantId:N}:products:page1
         Assert.Equal($"t:{tenantId:N}:products:page1", key);
     }
 
@@ -72,7 +72,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var key = generator.Generate("products", "page1");
 
-        // Assert — 不含租户前缀
+        // Assert - 不含租户前缀
         Assert.DoesNotContain("t:", key);
         Assert.Equal("products:page1", key);
     }
@@ -89,7 +89,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var key = generator.GenerateWithSeparator(":", "orders", "2026");
 
-        // Assert — 格式：t:{tenantId:N}:orders:2026
+        // Assert - 格式：t:{tenantId:N}:orders:2026
         Assert.StartsWith($"t:{tenantId:N}:", key);
         Assert.Contains("orders", key);
         Assert.Contains("2026", key);
@@ -152,7 +152,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var key = generator.GenerateForQuery<string>("x => x.IsActive == true");
 
-        // Assert — 格式：t:{tenantId:N}:cache:query:{typeName}:{hash}
+        // Assert - 格式：t:{tenantId:N}:cache:query:{typeName}:{hash}
         Assert.StartsWith($"t:{tenantId:N}:", key);
         Assert.Contains("cache:query:", key);
     }
@@ -166,7 +166,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var key = generator.GenerateForQuery<string>("x => x.IsActive == true");
 
-        // Assert — 格式：cache:query:{typeName}:{hash}
+        // Assert - 格式：cache:query:{typeName}:{hash}
         Assert.StartsWith("cache:query:", key);
         Assert.DoesNotContain("t:", key);
     }
@@ -186,7 +186,7 @@ public class CacheKeyGeneratorTenantTests
         var keyA = generatorA.Generate("products");
         var keyB = generatorB.Generate("products");
 
-        // Assert — 相同输入，不同租户 → 不同键
+        // Assert - 相同输入，不同租户 → 不同键
         Assert.NotEqual(keyA, keyB);
     }
 
@@ -220,7 +220,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var result = CacheKeys.WithTenant(originalKey, tenantId);
 
-        // Assert — 格式：t:{tenantId:N}:{originalKey}
+        // Assert - 格式：t:{tenantId:N}:{originalKey}
         Assert.Equal($"t:{tenantId:N}:{originalKey}", result);
     }
 
@@ -233,7 +233,7 @@ public class CacheKeyGeneratorTenantTests
         // Act
         var result = CacheKeys.WithTenant(originalKey, null);
 
-        // Assert — 无租户 ID 时原样返回
+        // Assert - 无租户 ID 时原样返回
         Assert.Equal(originalKey, result);
     }
 }

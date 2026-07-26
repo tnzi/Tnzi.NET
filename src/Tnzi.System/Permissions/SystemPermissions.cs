@@ -23,7 +23,6 @@ public class SystemPermissions : IPermissionDefinitionProvider
         // business administration.
         context.AddGroup("system", "System", defaultCategory: PermissionCategory.Technical);
         context.AddPermission("system.view", "View System", parentName: "system");
-        context.AddCrudPermissions("system.menu", "Menus", parentName: "system");
         context.AddCrudPermissions("system.parameter", "Parameters", parentName: "system");
         // Global admin theme: an opaque JSON snapshot edited through the admin
         // theme drawer; applies to every signed-in user. Deny-by-default keeps

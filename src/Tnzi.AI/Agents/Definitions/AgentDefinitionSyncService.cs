@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Agents.Definitions;
 
 /// <summary>
-/// Agent 定义同步后台服务 — 启动时从 YAML 文件同步到数据库
+/// Agent 定义同步后台服务 - 启动时从 YAML 文件同步到数据库
 /// </summary>
 /// <remarks>
 /// 仅同步 Source="yaml" 的 Agent。Source="database"（通过 API 创建）的 Agent 不受影响。
@@ -130,7 +130,7 @@ public class AgentDefinitionSyncService : IHostedService
     /// <summary>
     /// 把 YAML 定义里的资源（当前仅 ToolGroups，AgentDefinitionDto 不含 Skill/Knowledge）落实到
     /// junction grant —— grant 是工具组的唯一权威来源（Agent 已无 ToolGroups 列）。
-    /// Reconciles the YAML definition's resources (only ToolGroups today — the YAML DTO carries no
+    /// Reconciles the YAML definition's resources (only ToolGroups today - the YAML DTO carries no
     /// Skill/Knowledge resources) into the junction grants, the sole source of truth.
     /// </summary>
     private static async Task ReconcileGrantsAsync(IAgentGrantService grantService, Guid agentId, AgentDefinitionDto definition, CancellationToken ct)
@@ -150,7 +150,7 @@ public class AgentDefinitionSyncService : IHostedService
         agent.Instructions = definition.Instructions;
         agent.Provider = definition.Provider ?? string.Empty;
         agent.Model = definition.Model;
-        // ToolGroups are reconciled into the grant junction by ReconcileGrantsAsync — the entity no
+        // ToolGroups are reconciled into the grant junction by ReconcileGrantsAsync - the entity no
         // longer carries a ToolGroups column.
         agent.Temperature = definition.Temperature;
         agent.MaxTokens = definition.MaxTokens;

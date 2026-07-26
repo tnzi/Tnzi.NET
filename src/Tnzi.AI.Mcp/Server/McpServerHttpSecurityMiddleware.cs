@@ -46,7 +46,7 @@ public class McpServerHttpSecurityMiddleware
         }
 
         // Store the hashed caller segment so downstream audit logging can record
-        // which (hashed) key made the call — enables UniqueCallers statistics.
+        // which (hashed) key made the call - enables UniqueCallers statistics.
         // The hash is already embedded in clientKey as "{tenant}:{hash16}"; extract it.
         var colonIndex = clientKey.IndexOf(':');
         if (colonIndex >= 0 && colonIndex < clientKey.Length - 1)

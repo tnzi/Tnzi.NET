@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * `TWidgetNotificationStats` — notification volume snapshot.
+ * `TWidgetNotificationStats` - notification volume snapshot.
  *
  * Pulls `notification-bridge.messages.fetch({pageSize:1})` to get the
  * total notification count (totalCount header), plus the count of
  * failed messages via a quick filter pass. Backend gap: there's no
  * dedicated `/stats` endpoint, so the failed count uses a status
  * filter that may or may not be honoured by the API; an unfetchable
- * count renders as 0 (count semantics — an em dash read as a broken
+ * count renders as 0 (count semantics - an em dash read as a broken
  * widget).
  */
 import { ref } from 'vue'

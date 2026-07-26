@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import UnoCSS from 'unocss/vite';
 import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -15,6 +16,7 @@ const externalPackages = new Set([
 
 export default defineConfig({
   plugins: [
+    UnoCSS(),
     vue(),
     // .d.ts emitted by `vue-tsc -p tsconfig.build.json` in the build script.
   ],
@@ -25,6 +27,11 @@ export default defineConfig({
         'components/index': resolve(__dirname, 'src/components/index.ts'),
         'stores/index': resolve(__dirname, 'src/stores/index.ts'),
         'headless/index': resolve(__dirname, 'src/headless/index.ts'),
+        // Declared as an entry so the barrel survives: a pure re-export module
+        // that is not an entry gets folded into the importer and the
+        // `./composables` subpath export would resolve to a missing file.
+        'composables/index': resolve(__dirname, 'src/composables/index.ts'),
+        'adapters/index': resolve(__dirname, 'src/adapters/index.ts'),
       },
       name: 'TnziMobile',
       formats: ['es'],

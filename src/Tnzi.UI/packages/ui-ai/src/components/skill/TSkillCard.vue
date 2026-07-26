@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TSkillCard — Skill card with icon, description, and activate button
+ * TSkillCard - Skill card with icon, description, and activate button
  */
 
 import { NCard, NButton } from 'naive-ui';

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// 图片查看工具 — 提供图片文件读取和验证功能，供 AI Agent 查看图片内容。
+/// 图片查看工具 - 提供图片文件读取和验证功能，供 AI Agent 查看图片内容。
 /// </summary>
 public static class ViewImageTool
 {

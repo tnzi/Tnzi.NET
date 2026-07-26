@@ -1,5 +1,5 @@
 /**
- * Performance bridge — delegates to `useAdminPerformanceApi`
+ * Performance bridge - delegates to `useAdminPerformanceApi`
  * (from `@tnzi/core/services/performance`) so admin pages get the standard
  * dependency-injection + single-mock-seam pattern other bridges use.
  *

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills.Events.Handlers;
 
 /// <summary>
-/// Handles SkillActivatedEvent — updates activation count and last activated time for database-stored skills.
+/// Handles SkillActivatedEvent - updates activation count and last activated time for database-stored skills.
 /// </summary>
 public class SkillActivatedEventHandler : IEventHandler<SkillActivatedEvent>
 {

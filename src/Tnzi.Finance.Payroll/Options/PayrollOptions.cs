@@ -5,8 +5,7 @@ namespace Tnzi.Finance.Payroll.Options;
 /// </summary>
 /// <remarks>
 /// 消费方一律经 <c>IOptionsSnapshot&lt;PayrollOptions&gt;</c> 按请求热读。
-/// <c>MaxEmployeesPerRun</c> / <c>YtdBasis</c> / <c>ExternalAutoPost</c> 由 P4c 的
-/// pay run 服务消费；在 P4c 接线宿主之前本模块不会被任何应用加载，配置中心不会提前暴露它们。
+/// <c>MaxEmployeesPerRun</c> / <c>YtdBasis</c> / <c>ExternalAutoPost</c> 由 pay run 服务消费。
 /// 编号数字部分补零位数沿用 <see cref="Tnzi.Finance.Options.FinanceOptions.JournalNumberPadding"/>。
 /// </remarks>
 [ConfigSection("Finance:Payroll")]

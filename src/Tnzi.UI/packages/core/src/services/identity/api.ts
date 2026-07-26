@@ -35,6 +35,7 @@ import type {
   VerifyTwoFactorDto,
   EnableTwoFactorDto,
   TwoFactorStatusDto,
+  TwoFactorMethodRequestDto,
   TotpSetupDto,
   EnableTotpDto,
   // User
@@ -119,7 +120,7 @@ export function useAuthApi(client: HttpClient) {
   return {
     /**
      * Get public auth config (which login methods / register / recovery /
-     * third-party providers are enabled). Anonymous — used by the login page
+     * third-party providers are enabled). Anonymous - used by the login page
      * to render itself per backend deployment config.
      */
     getConfig: () =>
@@ -279,7 +280,7 @@ export function useProfileApi(client: HttpClient) {
 
     /** Unlink an OAuth account */
     unlinkAccount: (provider: string) =>
-      client.delete<void>(`${PROFILE_BASE}/linked-accounts/${provider}`),
+      client.delete<void>(`${PROFILE_BASE}/linked-accounts/${encodeURIComponent(provider)}`),
 
     // -- Two-Factor Auth --
 
@@ -291,9 +292,20 @@ export function useProfileApi(client: HttpClient) {
     enableTwoFactor: (data: EnableTwoFactorDto) =>
       client.post<string>(`${PROFILE_BASE}/two-factor/enable`, data),
 
-    /** Disable 2FA */
+    /** Disable 2FA (destructive: resets the TOTP key + clears every method). */
     disableTwoFactor: () =>
       client.post<void>(`${PROFILE_BASE}/two-factor/disable`),
+
+    /** Suspend 2FA - turn the master switch off but KEEP the configured methods
+     *  (TOTP key + per-method flags + preferred). Login stops challenging; call
+     *  `resumeTwoFactor` to restore the exact same setup without reconfiguring. */
+    suspendTwoFactor: () =>
+      client.post<void>(`${PROFILE_BASE}/two-factor/suspend`),
+
+    /** Resume a suspended 2FA - turn the master switch back on; the previously
+     *  configured methods take effect again immediately. */
+    resumeTwoFactor: () =>
+      client.post<void>(`${PROFILE_BASE}/two-factor/resume`),
 
     /** Get TOTP setup info */
     getTotpSetup: () =>
@@ -306,6 +318,14 @@ export function useProfileApi(client: HttpClient) {
     /** Disable TOTP */
     disableTotp: () =>
       client.post<void>(`${PROFILE_BASE}/two-factor/totp/disable`),
+
+    /** Disable a single 2FA method (SMS / email / TOTP); other methods stay on. */
+    disableTwoFactorMethod: (data: TwoFactorMethodRequestDto) =>
+      client.post<void>(`${PROFILE_BASE}/two-factor/method/disable`, data),
+
+    /** Set the preferred 2FA method (must be an enabled method). */
+    setPreferredTwoFactor: (data: TwoFactorMethodRequestDto) =>
+      client.post<void>(`${PROFILE_BASE}/two-factor/preferred`, data),
 
     // -- Login History --
 
@@ -471,9 +491,9 @@ export function useAdminRoleApi(client: HttpClient) {
     getById: (id: string) =>
       client.get<RoleDto>(`${ADMIN_ROLE_BASE}/${id}`),
 
-    /** Get role by name */
+    /** Get role by name. Role names are free text - encode before interpolating. */
     getByName: (name: string) =>
-      client.get<RoleDto>(`${ADMIN_ROLE_BASE}/by-name/${name}`),
+      client.get<RoleDto>(`${ADMIN_ROLE_BASE}/by-name/${encodeURIComponent(name)}`),
 
     /** Create role */
     create: (data: CreateRoleDto) =>
@@ -493,7 +513,7 @@ export function useAdminRoleApi(client: HttpClient) {
 
     /** Check if role exists by name */
     exists: (name: string) =>
-      client.get<boolean>(`${ADMIN_ROLE_BASE}/exists/${name}`),
+      client.get<boolean>(`${ADMIN_ROLE_BASE}/exists/${encodeURIComponent(name)}`),
 
     /** Get users in role (paged) */
     getUsersInRole: (id: string, params?: { pageIndex?: number; pageSize?: number }) =>
@@ -602,7 +622,7 @@ export function useAdminOrganizationApi(client: HttpClient) {
 export function useAdminSessionApi(client: HttpClient) {
   return {
     /**
-     * Paged session list — `userId` optional; omitted returns the global
+     * Paged session list - `userId` optional; omitted returns the global
      * list across all users (sorted by last activity desc) with `userName`
      * populated on every item.
      */
@@ -741,9 +761,9 @@ export function useAdminTenantApi(client: HttpClient) {
     getById: (id: string) =>
       client.get<TenantDto>(`${ADMIN_TENANT_BASE}/${id}`),
 
-    /** Get tenant by code */
+    /** Get tenant by code. Tenant codes are free text - encode before interpolating. */
     getByCode: (code: string) =>
-      client.get<TenantDto>(`${ADMIN_TENANT_BASE}/by-code/${code}`),
+      client.get<TenantDto>(`${ADMIN_TENANT_BASE}/by-code/${encodeURIComponent(code)}`),
 
     /** Create tenant */
     create: (data: CreateTenantDto) =>

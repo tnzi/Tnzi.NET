@@ -84,7 +84,7 @@ async function startEdit() {
 function save() {
   const next = draft.value.trim()
   editing.value = false
-  // Only emit when the value actually changed — a blur right after Enter (or an
+  // Only emit when the value actually changed - a blur right after Enter (or an
   // unchanged textarea) is then a harmless no-op instead of a duplicate request.
   if (next !== (props.value ?? '')) emit('save', next)
 }

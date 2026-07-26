@@ -68,7 +68,7 @@ public class SubModuleNoOpOverrideTests
         var aiModule = new AIModule();
         aiModule.ConfigureServicesAsync(context).GetAwaiter().GetResult();
 
-        // 模拟子模块（或应用插件模块）在 Configure 阶段以 TryAdd 注册真实实现 — 历史上被 NoOp 抢占的形态
+        // 模拟子模块（或应用插件模块）在 Configure 阶段以 TryAdd 注册真实实现 - 历史上被 NoOp 抢占的形态
         services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
 
         aiModule.PostConfigureServicesAsync(context).GetAwaiter().GetResult();
@@ -79,7 +79,7 @@ public class SubModuleNoOpOverrideTests
     }
 
     /// <summary>
-    /// 纯契约组合（仅 AIModule，无任何子模块）下，每个可选子模块接口都必须有 NoOp 回退注册 —
+    /// 纯契约组合（仅 AIModule，无任何子模块）下，每个可选子模块接口都必须有 NoOp 回退注册 -
     /// 守卫回退集合没有在 PostConfigure 迁移中丢失。
     /// </summary>
     [Theory]
@@ -108,7 +108,7 @@ public class SubModuleNoOpOverrideTests
 
     /// <summary>
     /// 子模块加载后，目标接口在容器中：(1) 有且仅有子模块的那一条注册（PostConfigure 的 TryAdd 已跳过），
-    /// (2) 没有任何 NoOp 类型的描述符。对工厂注册同样有效 — 不再有「工厂描述符跳过断言」的盲区。
+    /// (2) 没有任何 NoOp 类型的描述符。对工厂注册同样有效 - 不再有「工厂描述符跳过断言」的盲区。
     /// </summary>
     private static void AssertRealImplementationWins(IServiceCollection services, Type serviceType)
     {
@@ -116,7 +116,7 @@ public class SubModuleNoOpOverrideTests
 
         descriptors.ShouldNotBeEmpty($"{serviceType.Name} should be registered");
         descriptors.Count.ShouldBe(1,
-            $"{serviceType.Name} should have exactly the sub-module's registration — a second descriptor means " +
+            $"{serviceType.Name} should have exactly the sub-module's registration - a second descriptor means " +
             "AIModule's NoOp fallback was registered despite the sub-module being loaded (fallbacks must stay in " +
             "PostConfigureServicesAsync so their TryAdd skips)");
 

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Revaluations page — read-only history of revaluation summary vouchers
+ * Revaluations page - read-only history of revaluation summary vouchers
  * (journal entries with sourceType=Revaluation) + a Run modal that previews
  * per-account increments before posting.
  */

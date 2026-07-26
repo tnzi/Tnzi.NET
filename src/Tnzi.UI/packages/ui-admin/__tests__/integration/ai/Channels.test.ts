@@ -3,11 +3,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Channels integration test — TContentPage (card=false) with a four-tile KPI
+ * Channels integration test - TContentPage (card=false) with a four-tile KPI
  * strip + three tabs:
- *   • Adapters    — registered channel adapters (name + streaming badge)
- *   • Connections — IGateway live WebSocket connections
- *   • Bindings    — ISessionBinder session-binding rules
+ *   • Adapters - registered channel adapters (name + streaming badge)
+ *   • Connections - IGateway live WebSocket connections
+ *   • Bindings - ISessionBinder session-binding rules
  *
  * The admin client + the channels bridge are mocked so the page mounts without
  * a backend. The bridge exposes `channels.getStatus/getAdapters` and

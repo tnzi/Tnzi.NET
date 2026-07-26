@@ -1,13 +1,55 @@
 <template>
-  <TCrudPage
+  <TItemPage
     :state="crud"
-    :all-columns="columns"
     :title="title"
+    :search-fields="searchFields"
     :row-actions="rowActions"
     :translate="t"
     :detail-width="720"
-    :detail-title="detailTitle"
+:detail-title="detailTitle"
+    show-batch
   >
+    <!-- One row per document: party leads, status + number are chips beside it,
+         dates underneath, money (and what is still open) right-aligned. -->
+    <template #item="{ item, selected, selectable, toggleSelect }">
+      <TDocumentCard
+        :row="item"
+        party-key="vendorName"
+        icon="mdi:file-document-outline"
+        :t="t"
+        :selectable="selectable"
+        :checked="selected"
+        @update:checked="toggleSelect"
+        @open="crud.openView(item)"
+      >
+        <template #actions>
+          <TRowActions :row="item" :actions="rowActions" :translate="t" />
+        </template>
+      </TDocumentCard>
+    </template>    <!-- 概览区（标准 2）：这一页的钱现在是什么状态，四个数字都可下钻到账龄报表。 -->
+    <template #kpis>
+      <DocumentKpiStrip :bridge="bridge" kind="ap" :translate="td" />
+    </template>
+
+    <!-- 批量过账（标准 1）：只处理选中的草稿，串行执行，部分失败逐条报出。 -->
+    <template #batchActions="{ selectedIds }">
+      <NPopconfirm @positive-click="() => batch.postMany(selectedIds)">
+        <template #trigger>
+          <NButton
+            v-if="selectedIds.length > 0 && can('finance.document.update')"
+            size="small"
+            type="primary"
+            ghost
+            :loading="batch.running.value"
+            :disabled="batch.countFor(selectedIds) === 0"
+          >
+            {{ td('batch.postAction', { n: batch.countFor(selectedIds), total: selectedIds.length }) }}
+          </NButton>
+        </template>
+        {{ td('batch.confirmPost', { n: batch.countFor(selectedIds) }) }}
+      </NPopconfirm>
+    </template>
+
     <template #primary>
       <NButton v-if="can('finance.document.create')" type="primary" tertiary size="small" @click="openCreate">
         <template #icon>
@@ -28,11 +70,11 @@
       <template v-if="viewed">
         <NDescriptions :column="2" size="small" bordered class="fin-doc-detail__meta">
           <NDescriptionsItem :label="t('columns.status')">{{ statusLabel(viewed.status) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="t('columns.docDate')">{{ formatDateOnly(viewed.docDate, { utc: true }) }}</NDescriptionsItem>
+          <NDescriptionsItem :label="t('columns.docDate')">{{ fmtDate(viewed.docDate) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.currency')">{{ viewed.currency }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.total')">{{ fmtAmount(viewed.total) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.applied')">{{ fmtAmount(viewed.appliedTotal) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="td('editor.memo')" :span="2">{{ viewed.memo ?? '—' }}</NDescriptionsItem>
+          <NDescriptionsItem :label="td('editor.memo')" :span="2">{{ viewed.memo ?? EMPTY_DASH }}</NDescriptionsItem>
         </NDescriptions>
         <TResponsiveTable
           :columns="lineColumns"
@@ -42,9 +84,11 @@
           mobile="scroll"
           :pagination="false"
         />
+
+        <DocumentCollaborationPanel v-if="viewed.id" :doc-type="FinanceDocToken.Bill" :doc-id="String(viewed.id)" />
       </template>
     </template>
-  </TCrudPage>
+  </TItemPage>
 
   <!-- Line editor (create / edit draft) - useDetail + TDetailHost (?entry=new / edit:<id>). -->
   <TDetailHost :state="entryDetail" :title="editorTitle" :width="920" :footer="false" :translate="t">
@@ -101,8 +145,8 @@
         </div>
         <div v-for="bill in openBills" :key="bill.id" class="fin-pay-run__row">
           <span class="fin-pay-run__cell" :data-label="t('pay.bill')">{{ bill.number ?? bill.id }}</span>
-          <span class="fin-pay-run__cell" :data-label="t('pay.vendor')">{{ bill.vendorName ?? '—' }}</span>
-          <span class="fin-pay-run__cell" :data-label="t('pay.dueDate')">{{ formatDateOnly(bill.dueDate, { utc: true, fallback: '—' }) }}</span>
+          <span class="fin-pay-run__cell" :data-label="t('pay.vendor')">{{ bill.vendorName ?? EMPTY_DASH }}</span>
+          <span class="fin-pay-run__cell" :data-label="t('pay.dueDate')">{{ fmtDate(bill.dueDate, { fallback: EMPTY_DASH }) }}</span>
           <span class="fin-pay-run__cell fin-pay-run__num" :data-label="t('pay.outstanding')">{{ fmtAmount(bill.outstanding) }} {{ bill.currency }}</span>
           <NInputNumber v-model:value="payAllocations[bill.id]" size="small" :min="0" :max="bill.outstanding" :show-button="false" placeholder="0.00" />
         </div>
@@ -121,27 +165,38 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import { NButton, NDatePicker, NDescriptions, NDescriptionsItem, NInput, NInputNumber, NSelect, type DataTableColumns } from 'naive-ui'
+import { EMPTY_DASH } from '../../utils/placeholders'
+import { computed, h, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { NButton, NPopconfirm, NDatePicker, NDescriptions, NDescriptionsItem, NInput, NInputNumber, NSelect, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
-import TCrudPage from '../../components/crud/TCrudPage.vue'
+
+import TItemPage from '../../components/crud/TItemPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
+import TDocumentCard from '../../components/finance/TDocumentCard.vue'
+import DocumentKpiStrip from './components/DocumentKpiStrip.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDocumentBatch } from './useDocumentBatch'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import type { RowAction } from '../../headless/rowActions'
+import TPartySelect from '../../components/finance/TPartySelect.vue'
 import { createFinanceBridge, FinanceDocumentStatus, PAYMENT_METHODS, SettlementDocType, type BillDto, type CreateBillDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import DocumentCollaborationPanel from './components/DocumentCollaborationPanel.vue'
+import { FinanceDocToken } from './source-type'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { buildDocumentColumns, DOC_STATUS_META, type FinanceDocRow } from './document-config'
+import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount, tsToIsoDate } from './money'
+import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './components/DocumentEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
+const route = useRoute()
+const router = useRouter()
 const t = makePageTranslator('finance.bills')
 // Shared document namespace for the read-only line-table headers + memo label.
 const td = makePageTranslator('finance.docs')
@@ -150,6 +205,19 @@ const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'vendorName', { showApplied: true, showDueDate: true })
+
+// 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
+// TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
+const searchFields = buildDocumentSearchFields(td, {
+  renderParty: (model) =>
+    h(TPartySelect, {
+      modelValue: (model.partyId as string) ?? null,
+      bridge,
+      kind: 'vendor',
+      size: 'small',
+      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
+    }),
+})
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.bills',
@@ -184,7 +252,7 @@ async function loadViewed(row: FinanceDocRow) {
 
 const lineColumns: DataTableColumns<BillDto['lines'][number]> = [
   { key: 'lineNumber', title: '#', width: 48 },
-  { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? '—' },
+  { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? EMPTY_DASH },
   { key: 'quantity', title: td('editor.qty'), width: 90, render: (row) => amountCell(fmtAmount(row.quantity)) },
   { key: 'unitPrice', title: td('editor.price'), width: 110, render: (row) => amountCell(fmtAmount(row.unitPrice)) },
   { key: 'amount', title: td('editor.amount'), width: 130, render: (row) => amountCell(fmtAmount(row.amount)) },
@@ -197,9 +265,15 @@ const entryDetail = useDetail<BillDto>({
   loadData: (id) => bridge.bills.getById(String(id)),
 })
 
+// `?party=<id>` hands the editor its party - a customer/vendor page's "new
+// document" action already knows who, and making the operator pick again is
+// how a context action degrades into a plain menu link.
+const seedPartyId = computed(() => (typeof route.query.party === 'string' ? route.query.party : null))
+const isEditing = computed(() => Boolean(entryDetail.data.value?.id))
+
 const editingEntry = computed<EditableDocument | null>(() => {
   const d = entryDetail.data.value
-  if (!d?.id) return null
+  if (!d?.id) return seedPartyId.value ? { partyId: seedPartyId.value } : null
   return {
     id: d.id,
     partyId: d.vendorId,
@@ -211,7 +285,7 @@ const editingEntry = computed<EditableDocument | null>(() => {
     lines: d.lines,
   }
 })
-const editorTitle = computed(() => (editingEntry.value ? t('editor.editTitle') : t('editor.createTitle')))
+const editorTitle = computed(() => (isEditing.value ? t('editor.editTitle') : t('editor.createTitle')))
 
 const editorSeq = ref(0)
 watch(
@@ -228,8 +302,16 @@ watch(
   { immediate: true },
 )
 
-function openCreate() {
-  void entryDetail.open('create')
+async function openCreate() {
+  // Drop a consumed hand-off so the NEXT blank create is actually blank - a
+  // `?party=` left in the URL would silently pre-fill every later document.
+  // Awaited: `open()` writes its own `?entry=` off the current query, and would
+  // otherwise carry the party straight back in.
+  if (seedPartyId.value) {
+    const { party: _party, ...rest } = route.query
+    await router.replace({ query: rest })
+  }
+  await entryDetail.open('create')
 }
 
 function openEdit(row: FinanceDocRow) {
@@ -253,7 +335,7 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
     })),
   }
 
-  const wasCreate = !editingEntry.value?.id
+  const wasCreate = !isEditing.value
   const saved = editingEntry.value?.id
     ? await bridge.bills.updateDraft(editingEntry.value.id, data)
     : await bridge.bills.createDraft(data)
@@ -282,6 +364,14 @@ interface OpenBillRow {
 }
 
 const payDetail = useDetail<Record<string, never>>({ mode: 'modal', url: 'pay' })
+
+/**
+ * 行内「付款」发起时记住是哪一张账单——模态加载完未清列表后把它预先分配满额。
+ *
+ * 不预置的话，从某一行点「付款」跟从工具栏点「Pay Bills」没有区别：操作员还得
+ * 在一屏未清账单里把刚才那张再找一遍，行内动作就白做了。
+ */
+const payFocusBillId = ref<string | null>(null)
 const openBills = ref<OpenBillRow[]>([])
 const payAllocations = reactive<Record<string, number | null>>({})
 const paying = ref(false)
@@ -324,6 +414,14 @@ watch(
         }))
         .filter((b) => b.outstanding > 0)
         .sort((a, b) => ((a.dueDate ?? '9999') < (b.dueDate ?? '9999') ? -1 : 1))
+
+      // 从某一行发起的付款：把那张账单预先分配满额，其余留空。
+      const focus = payFocusBillId.value
+      if (focus) {
+        const target = openBills.value.find((b) => b.id === focus)
+        if (target) payAllocations[focus] = target.outstanding
+        payFocusBillId.value = null
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error))
     }
@@ -364,6 +462,16 @@ async function submitPay() {
 }
 
 // ── Lifecycle actions ───────────────────────────────────────────
+// 批量过账：只处理草稿、串行、部分失败逐条报出（见 useDocumentBatch）。
+const batch = useDocumentBatch({
+  items: crud.items,
+  post: (id) => bridge.bills.post(id),
+  translate: td,
+  message,
+  refresh: () => crud.refresh(),
+  clearSelection: () => crud.batchActions.clear(),
+})
+
 async function run(action: () => Promise<unknown>, successKey: string) {
   try {
     await action()
@@ -377,10 +485,23 @@ async function run(action: () => Promise<unknown>, successKey: string) {
 const isDraft = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Draft
 const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Posted || row.status === FinanceDocumentStatus.PartiallyPaid
 
+/** 未清 = 已过账且还有余额没付出去。 */
+const isOpen = (row: FinanceDocRow) =>
+  (row.status === FinanceDocumentStatus.Posted || row.status === FinanceDocumentStatus.PartiallyPaid)
+  && (row.total ?? 0) - (row.appliedTotal ?? 0) > 0
+
+/** 行内下游动作（标准 1）：这张账单直接去付，模态里它已被选中并填好金额。 */
+function payBill(row: FinanceDocRow) {
+  payFocusBillId.value = String(row.id ?? '')
+  void payDetail.open('create')
+}
+
 const rowActions: RowAction<FinanceDocRow>[] = [
-  viewAction(crud),
+  // No View action: the row card itself opens the read-only detail.
   { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.bills.post(String(row.id ?? '')), 'postSuccess') },
+  // 下游动作：未清账单 → 直接付款（模态里这张已预选并填满）。
+  { key: 'pay', label: 'actions.payBill', show: (row) => can('finance.document.create') && isOpen(row), onClick: payBill },
   { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.bills.voidDoc(String(row.id ?? '')), 'voidSuccess') },
   { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.bills.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]

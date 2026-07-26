@@ -1,13 +1,17 @@
 <template>
-  <NDrawer
-    :show="show"
-    :width="effectiveWidth"
-    :height="effectiveHeight"
-    :placement="effectivePlacement"
-    :auto-focus="autoFocus"
-    class="t-drawer-shell"
-    @update:show="(v: boolean) => emit('update:show', v)"
-  >
+  <!-- Reset the naive theme to the GLOBAL mode (see TModalShell / useOverlayTheme):
+       an overlay opened from a dark-card page must not inherit the content area's
+       inner dark theme through the Teleport. `abstract` = renderless. -->
+  <NConfigProvider abstract :theme="overlayTheme" :theme-overrides="overlayOverrides">
+    <NDrawer
+      :show="show"
+      :width="effectiveWidth"
+      :height="effectiveHeight"
+      :placement="effectivePlacement"
+      :auto-focus="autoFocus"
+      class="t-drawer-shell"
+      @update:show="(v: boolean) => emit('update:show', v)"
+    >
     <NDrawerContent :title="title" :closable="closable">
       <!-- Rich header (title + tag / info popover): a `#header` slot overrides the
            plain `title` prop for callers that need more than a string. Omit it and
@@ -24,13 +28,15 @@
         </div>
       </template>
     </NDrawerContent>
-  </NDrawer>
+    </NDrawer>
+  </NConfigProvider>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NDrawer, NDrawerContent } from 'naive-ui'
+import { NConfigProvider, NDrawer, NDrawerContent } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { useOverlayTheme, useOverlayThemeOverrides } from '../../headless/useOverlayTheme'
 
 interface Props {
   /** Open state (controlled). */
@@ -64,11 +70,13 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const bp = useBreakpoint()
+const overlayTheme = useOverlayTheme()
+const overlayOverrides = useOverlayThemeOverrides()
 
 // naive's NDrawer does NOT clamp width to the viewport, so a fixed 560/640/…/
 // 1080px right drawer overflows a 375px phone and pushes ~40% of its content off
-// the left edge (clipped). On phones go full-screen (100vw) — or a bottom sheet
-// when opted in — mirroring TModalShell's auto-fullscreen. Desktop keeps the
+// the left edge (clipped). On phones go full-screen (100vw) - or a bottom sheet
+// when opted in - mirroring TModalShell's auto-fullscreen. Desktop keeps the
 // configured pixel width.
 const effectivePlacement = computed<Props['placement']>(() =>
   bp.isSm.value && props.mobileBottomSheet ? 'bottom' : props.placement,

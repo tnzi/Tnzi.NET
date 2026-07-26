@@ -1,11 +1,11 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 服务器目录 — MCP 客户端运行时的唯一服务器枚举入口。
+/// MCP 服务器目录 - MCP 客户端运行时的唯一服务器枚举入口。
 /// 把两个配置来源合并为有效服务器列表：
 /// <list type="bullet">
-/// <item>部署配置 <c>AI:Mcp:Servers</c>（<c>McpOptions.Servers</c>）— 运维可控，允许 stdio；</item>
-/// <item>数据库注册表 <c>McpServerRegistration</c>（admin 运行时录入）— 仅允许 HTTP 系 transport。</item>
+/// <item>部署配置 <c>AI:Mcp:Servers</c>（<c>McpOptions.Servers</c>）- 运维可控，允许 stdio；</item>
+/// <item>数据库注册表 <c>McpServerRegistration</c>（admin 运行时录入）- 仅允许 HTTP 系 transport。</item>
 /// </list>
 /// 同名条目 DB 优先（admin 运行时配置覆盖部署配置）。
 /// <c>AI:Mcp:Enabled</c> 是整个 MCP 客户端子系统的总开关：关闭时两个来源均不生效。

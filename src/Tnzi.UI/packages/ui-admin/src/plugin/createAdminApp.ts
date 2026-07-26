@@ -1,5 +1,5 @@
 /**
- * `createAdminApp()` — full one-call bootstrap for a Tnzi admin app.
+ * `createAdminApp()` - full one-call bootstrap for a Tnzi admin app.
  *
  * `defineAdminApp()` returns `{ routes, install, … }` and leaves the consumer
  * to repeat the SAME ~15-line ceremony in every `main.ts`: assemble the root
@@ -45,7 +45,7 @@ import {
 
 export interface CreateAdminAppOptions extends DefineAdminAppOptions {
   /**
-   * Root component to mount — usually your `App.vue`. Because the consumer's
+   * Root component to mount - usually your `App.vue`. Because the consumer's
    * SFC is typed against ITS `@vue/runtime-core` and this factory calls
    * `createApp` with the framework's, pass it with a single `as never` cast at
    * the workspace typedef boundary (runtime is a single Vue). This replaces
@@ -55,14 +55,14 @@ export interface CreateAdminAppOptions extends DefineAdminAppOptions {
 
   /**
    * vue-router history base. Pass `import.meta.env.BASE_URL` for
-   * deployment-prefix independence (the recommended shape — Vite `base` is the
+   * deployment-prefix independence (the recommended shape - Vite `base` is the
    * single source of truth for the deployment prefix). Omit for the domain
    * root (`createWebHistory()`).
    */
   historyBase?: string
 
   /**
-   * Extra ROOT-level routes (siblings of `/admin`, not under it) — e.g. public
+   * Extra ROOT-level routes (siblings of `/admin`, not under it) - e.g. public
    * standalone pages with no admin shell / auth. The root redirect and the 404
    * catch-all are added automatically after these.
    */

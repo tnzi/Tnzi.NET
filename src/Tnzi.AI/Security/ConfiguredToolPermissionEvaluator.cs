@@ -24,7 +24,14 @@ public sealed class ConfiguredToolPermissionEvaluator : IToolPermissionEvaluator
         _currentEvaluator = CreateEvaluator(optionsMonitor.CurrentValue);
         _changeSubscription = optionsMonitor.OnChange(options =>
         {
-            Volatile.Write(ref _currentEvaluator, CreateEvaluator(options));
+            var replacement = CreateEvaluator(options);
+            // 配置热更新不得丢弃会话级规则：Deny 类会话规则一旦丢失就是 fail-open
+            //（被显式拒绝过的工具在下一次 appsettings 变更后重新可用）。
+            foreach (var sessionRule in Volatile.Read(ref _currentEvaluator).GetSessionRules())
+            {
+                replacement.AddSessionRule(sessionRule);
+            }
+            Volatile.Write(ref _currentEvaluator, replacement);
         });
 
         // 异步初始加载 DB 规则（fire-and-forget）

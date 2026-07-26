@@ -12,7 +12,7 @@ namespace Tnzi.AI.Sandbox.Services;
 /// Replaces the previous behaviour (every thread re-extracts all built-in
 /// skills into its private <c>{ThreadDir}/skills/</c>). For an app running
 /// 100 threads with the 19 built-in skills, the duplicated bytes added up
-/// to GB-scale waste — closed by this single-extraction-plus-symlink design.
+/// to GB-scale waste - closed by this single-extraction-plus-symlink design.
 /// </para>
 /// <para>
 /// Extracted files are marked read-only (`FileAttributes.ReadOnly` /
@@ -34,7 +34,7 @@ public static class SharedSkillExtractor
 
     /// <summary>
     /// Extracts all skill resources into <c>{dataRoot}/_skills/</c>. Idempotent
-    /// via the <c>.extracted</c> marker file — running twice is a no-op.
+    /// via the <c>.extracted</c> marker file - running twice is a no-op.
     /// </summary>
     public static async Task ExtractAsync(
         ISkillStore skillStore,

@@ -1,7 +1,7 @@
 namespace Tnzi.Modules;
 
 /// <summary>
-/// 模块架构清单 — 描述一个模块所导出的内容
+/// 模块架构清单 - 描述一个模块所导出的内容
 /// </summary>
 public record ModuleManifest
 {

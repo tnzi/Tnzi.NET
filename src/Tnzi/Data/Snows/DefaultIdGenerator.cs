@@ -21,7 +21,10 @@ public class DefaultIdGenerator : IIdGenerator
             throw new InfrastructureException("IdGenerator", "options error.");
         }
 
-        if (options.BaseTime < DateTime.Now.AddYears(-50) || options.BaseTime > DateTime.Now)
+        // BaseTime 的契约是 UTC（见 IdGeneratorOptions.BaseTime），必须与 UtcNow 比较：
+        // 与本地时间 DateTime.Now 比较会带上时区偏移，在 UTC 负偏移时区把接近"现在"的合法 BaseTime 误判为超前
+        var utcNow = DateTime.UtcNow;
+        if (options.BaseTime < utcNow.AddYears(-50) || options.BaseTime > utcNow)
         {
             throw new InfrastructureException("IdGenerator", "BaseTime error.");
         }

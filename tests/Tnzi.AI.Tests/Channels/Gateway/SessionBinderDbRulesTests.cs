@@ -6,7 +6,7 @@ using Tnzi.AI.Channels.Options;
 namespace Tnzi.AI.Tests.Channels.Gateway;
 
 /// <summary>
-/// PD-14 — DefaultSessionBinder must ALSO honor enabled DB SessionBindingRule rows
+/// PD-14 - DefaultSessionBinder must ALSO honor enabled DB SessionBindingRule rows
 /// (in addition to config rules), loaded once and cached (no per-Resolve DB hit).
 /// </summary>
 public class SessionBinderDbRulesTests
@@ -42,7 +42,7 @@ public class SessionBinderDbRulesTests
     [Fact]
     public void Resolve_EnabledDbRule_IsHonored()
     {
-        // Arrange — one enabled DB rule for telegram → DbAgentId
+        // Arrange - one enabled DB rule for telegram → DbAgentId
         var dbRules = new List<SessionBindingRule>
         {
             new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
@@ -55,7 +55,7 @@ public class SessionBinderDbRulesTests
         // Act
         var binding = binder.Resolve(Ctx());
 
-        // Assert — DB rule honored, not the default agent
+        // Assert - DB rule honored, not the default agent
         binding.AgentId.ShouldBe(DbAgentId);
     }
 
@@ -79,7 +79,7 @@ public class SessionBinderDbRulesTests
     [Fact]
     public void Resolve_ConfigRuleWins_OnEqualPriority()
     {
-        // Arrange — config + DB rule both match telegram at priority 10. Config must win.
+        // Arrange - config + DB rule both match telegram at priority 10. Config must win.
         var configRules = new List<SessionBindingRule>
         {
             new() { Channel = "telegram", AgentId = ConfigAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
@@ -112,13 +112,13 @@ public class SessionBinderDbRulesTests
         // Long TTL so no refresh happens between resolves.
         var binder = new DefaultSessionBinder([], options, scopeFactory.Object, cacheTtl: TimeSpan.FromHours(1));
 
-        // Act — many resolves
+        // Act - many resolves
         for (var i = 0; i < 25; i++)
         {
             binder.Resolve(Ctx(userId: $"u{i}"));
         }
 
-        // Assert — the DB was queried at most once (cached), NOT per-resolve.
+        // Assert - the DB was queried at most once (cached), NOT per-resolve.
         scopeFactory.Verify(f => f.CreateScope(), Times.AtMostOnce);
         repo.Verify(r => r.ToListAsync(
             It.IsAny<System.Linq.Expressions.Expression<Func<SessionBindingRule, bool>>?>(),
@@ -128,7 +128,7 @@ public class SessionBinderDbRulesTests
     [Fact]
     public void Resolve_NoScopeFactory_FallsBackToConfigOnly()
     {
-        // Arrange — no scope factory (DB rules unavailable); config rule still works.
+        // Arrange - no scope factory (DB rules unavailable); config rule still works.
         var configRules = new List<SessionBindingRule>
         {
             new() { Channel = "telegram", AgentId = ConfigAgentId, Scope = SessionScope.PerPeer, Priority = 5, IsEnabled = true }

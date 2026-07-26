@@ -4,7 +4,7 @@ using DuckDuckGoSearchProvider = Tnzi.AI.Infrastructure.WebSearch.DuckDuckGoSear
 namespace Tnzi.AI.Tests.Infrastructure.WebSearch;
 
 /// <summary>
-/// DuckDuckGoSearchProvider 单元测试 — Mock HttpClient 验证请求构造和 HTML 解析
+/// DuckDuckGoSearchProvider 单元测试 - Mock HttpClient 验证请求构造和 HTML 解析
 /// </summary>
 public class DuckDuckGoSearchProviderTests
 {

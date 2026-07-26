@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowToolbar — Node action toolbar
+ * TWorkflowToolbar - Node action toolbar
  */
 
 import { NButton, NTooltip } from 'naive-ui';

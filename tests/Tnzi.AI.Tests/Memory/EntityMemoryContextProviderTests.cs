@@ -3,11 +3,11 @@ using Tnzi.AI.Infrastructure.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// EntityMemoryContextProvider 单元测试 — 实体记忆上下文提供器
+/// EntityMemoryContextProvider 单元测试 - 实体记忆上下文提供器
 /// </summary>
 public class EntityMemoryContextProviderTests
 {
-    #region OnCompletedAsync — entity extraction from User+Assistant
+    #region OnCompletedAsync - entity extraction from User+Assistant
 
     [Fact]
     public async Task OnCompletedAsync_ExtractsFromBothUserAndAssistant()
@@ -145,7 +145,7 @@ public class EntityMemoryContextProviderTests
 
         var messages = new List<ChatMessage>
         {
-            // System message only — no user or assistant text
+            // System message only - no user or assistant text
             new(ChatRole.System, "You are helpful")
         };
 

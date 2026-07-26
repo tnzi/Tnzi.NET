@@ -40,7 +40,7 @@ public class AgentService : ApplicationService, IAgentService
         // Global UoW is OFF by default, so without this an exception after the entity insert leaves the
         // entity persisted without its grants. The insert's SaveChanges inside the txn assigns entity.Id
         // before the reconciles read it. (Mapster does not map ToolGroups/SkillSlugs/KnowledgeBaseIds onto
-        // the entity — those columns no longer exist; grants are the sole source of truth.)
+        // the entity - those columns no longer exist; grants are the sole source of truth.)
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
             await _repository.InsertAsync(entity, ct);
@@ -79,12 +79,11 @@ public class AgentService : ApplicationService, IAgentService
         if (input.LatencyTier.HasValue) entity.LatencyTier = input.LatencyTier.Value;
         if (input.CostTier.HasValue) entity.CostTier = input.CostTier.Value;
         // Resource assignments (ToolGroups/SkillSlugs/KnowledgeBaseIds) are written ONLY to the grant
-        // junctions below — the entity no longer carries those columns.
-        // PersonaId — accept Guid.Empty as the "unlink persona" sentinel so the
-        // PATCH-style update can both set and clear the link.
-        if (input.PersonaId.HasValue)
+        // junctions below - the entity no longer carries those columns.
+        // Persona - tri-state: null = no change, empty string = clear, non-empty = set.
+        if (input.Persona != null)
         {
-            entity.PersonaId = input.PersonaId.Value == Guid.Empty ? null : input.PersonaId.Value;
+            entity.Persona = input.Persona.Length == 0 ? null : input.Persona;
         }
         var executionModeChanged = input.ExecutionMode.HasValue && input.ExecutionMode.Value != entity.ExecutionMode;
         if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
@@ -142,14 +141,14 @@ public class AgentService : ApplicationService, IAgentService
             QualityTier = source.QualityTier,
             LatencyTier = source.LatencyTier,
             CostTier = source.CostTier,
-            // Carry the persona link to the clone — the soul/role template
-            // is a meaningful part of the agent's identity, not transient state.
-            PersonaId = source.PersonaId,
+            // Carry the persona (soul) content to the clone - it is a meaningful
+            // part of the agent's identity, not transient state.
+            Persona = source.Persona,
             // Resource assignments (tool groups / skills / knowledge) are carried via the grant
-            // reconcile from sourceGrants below — the entity no longer holds those columns.
+            // reconcile from sourceGrants below - the entity no longer holds those columns.
         };
 
-        // Read the source's authoritative grants (a read of a DIFFERENT agent — safe outside the txn).
+        // Read the source's authoritative grants (a read of a DIFFERENT agent - safe outside the txn).
         var sourceGrants = await _grantService.GetGrantsAsync(source.Id);
 
         // Atomic write: the clone insert + the three grant reconciles commit/roll back as a unit (see CreateAsync).
@@ -232,9 +231,9 @@ public class AgentService : ApplicationService, IAgentService
         agent.QualityTier = snapshot.QualityTier;
         agent.LatencyTier = snapshot.LatencyTier;
         agent.CostTier = snapshot.CostTier;
-        agent.PersonaId = snapshot.PersonaId;
+        agent.Persona = snapshot.Persona;
         // ToolGroups/SkillSlugs/KnowledgeBaseIds are restored ONLY into the grant junctions below
-        // (the snapshot still carries them) — the entity no longer holds those columns.
+        // (the snapshot still carries them) - the entity no longer holds those columns.
 
         // Atomic write: entity update + grant reconciles commit/roll back as a unit (see CreateAsync).
         // Snapshot of the pre-rollback state was already captured ABOVE (outside the txn).
@@ -291,9 +290,16 @@ public class AgentService : ApplicationService, IAgentService
             .Skip((query.PageIndex - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToList();
+        // 与上面的非 JSON 过滤分支一致：先整页映射，再用批量授权投影覆盖资源列表，
+        // 避免逐条 MapToDtoAsync 触发「每 Agent 三次 grant 查询」的 N+1。
         var pagedItems = new List<AgentDto>(pagedEntities.Count);
         foreach (var entity in pagedEntities)
-            pagedItems.Add(await MapToDtoAsync(entity));
+        {
+            var dto = entity.MapTo<AgentDto>();
+            dto.ExecutionConfig = AgentExecutionConfigDto.Deserialize(entity.Configuration);
+            pagedItems.Add(dto);
+        }
+        await ApplyGrantsToPageAsync(pagedItems);
 
         return Ok<IPagedList<AgentDto>>(new PagedList<AgentDto>(pagedItems, query.PageIndex, query.PageSize, totalCount));
     }
@@ -533,7 +539,7 @@ public class AgentService : ApplicationService, IAgentService
 
             var snapshot = entity.MapTo<AgentConfigSnapshot>();
 
-            // Resources (ToolGroups/SkillSlugs/KnowledgeBaseIds) no longer live on the entity — they are
+            // Resources (ToolGroups/SkillSlugs/KnowledgeBaseIds) no longer live on the entity - they are
             // owned by the grant junctions. Capture them from the authoritative grant projection so version
             // history (and the rollback that restores grants from these lists) stays intact.
             var grants = await _grantService.GetGrantsAsync(entity.Id);
@@ -561,7 +567,7 @@ public class AgentService : ApplicationService, IAgentService
 
     /// <summary>
     /// Maps an Agent entity to its DTO. The resource lists (ToolGroups/SkillSlugs/KnowledgeBaseIds)
-    /// are projected SOLELY from the junction grants — the entity no longer carries those columns,
+    /// are projected SOLELY from the junction grants - the entity no longer carries those columns,
     /// so the wire-shape lists on the DTO are filled exclusively from the grant projection.
     /// </summary>
     private async Task<AgentDto> MapToDtoAsync(Agent entity)
@@ -575,7 +581,7 @@ public class AgentService : ApplicationService, IAgentService
     /// <summary>
     /// Set a DTO's resource lists from the authoritative grant projection (in place).
     /// Grants are the sole source of truth: an empty projection collapses to null (preserving the
-    /// downstream null-when-empty semantics — no per-agent whitelist vs. a whitelist of nothing).
+    /// downstream null-when-empty semantics - no per-agent whitelist vs. a whitelist of nothing).
     /// </summary>
     private async Task OverrideDtoGrantsAsync(AgentDto dto)
     {
@@ -608,8 +614,8 @@ internal class AgentConfigSnapshot
     public int QualityTier { get; set; }
     public int LatencyTier { get; set; }
     public int CostTier { get; set; }
-    /// <summary>Persona FK at snapshot time so rollback restores the soul link.</summary>
-    public Guid? PersonaId { get; set; }
+    /// <summary>Persona (soul) content at snapshot time so rollback restores it.</summary>
+    public string? Persona { get; set; }
     /// <summary>Knowledge base assignments at snapshot time.</summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }
     /// <summary>Skill assignments at snapshot time.</summary>

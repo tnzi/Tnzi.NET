@@ -24,12 +24,29 @@ public class FinancePermissions : IPermissionDefinitionProvider
         // Rates are date-keyed upserts (manual + provider refresh) = create.
         context.AddCrudPermissions("finance.rate", "Exchange Rates", parentName: "finance", actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
         context.AddCrudPermissions("finance.fiscalYear", "Fiscal Years", parentName: "finance");
+        // 封账日与会计年度是两把正交的锁，各自独立授权：能开关年度的人不一定该能
+        // 推动滚动封账线（后者直接决定"报出去的数字还能不能被改"）。
+        context.AddPermission("finance.ledgerLock.view", "View Closing Date", parentName: "finance");
+        context.AddPermission("finance.ledgerLock.update", "Change Closing Date", parentName: "finance");
         context.AddPermission("finance.report.view", "View Financial Reports", parentName: "finance");
         context.AddCrudPermissions("finance.customer", "Customers", parentName: "finance");
         context.AddCrudPermissions("finance.vendor", "Vendors", parentName: "finance");
         context.AddCrudPermissions("finance.item", "Items", parentName: "finance");
         context.AddCrudPermissions("finance.tax", "Taxes", parentName: "finance");
         context.AddCrudPermissions("finance.document", "Finance Documents", parentName: "finance");
+        // 对账单与催收：看得到账龄不等于该能把对账单寄出去/下载出去。
+        context.AddPermission("finance.statement.view", "Customer Statements", parentName: "finance");
+        // 附件与讨论各自成套：能看单据不等于该看得到内部讨论（那里常写着不适合
+        // 外传的判断），也不等于该能把别人挂的凭据摘下来。
+        context.AddCrudPermissions("finance.attachment", "Document Attachments", parentName: "finance",
+            actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
+        context.AddCrudPermissions("finance.comment", "Document Comments", parentName: "finance",
+            actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
+        // 报价单与采购订单是**成为会计事实之前**的单据：报价的销售、下单的采购，
+        // 都不该因此拿到发票/账单的过账权限，所以自带一套码而不是复用 finance.document.*。
+        // 转换动作（转发票/转账单）叠加目标单据的 .create，见控制器。
+        context.AddCrudPermissions("finance.estimate", "Estimates", parentName: "finance");
+        context.AddCrudPermissions("finance.purchaseOrder", "Purchase Orders", parentName: "finance");
         // Complete（锁定对账）走 .update（生命周期状态变更），与单据 post/void 一致。
         context.AddCrudPermissions("finance.reconciliation", "Bank Reconciliations", parentName: "finance");
         // 期末汇兑重估：非 CRUD 套装（view 只读预览 + execute 过账）。
@@ -39,15 +56,5 @@ public class FinancePermissions : IPermissionDefinitionProvider
         context.AddPermission("finance.balanceSummary.view", "Balance Summary", parentName: "finance");
         context.AddPermission("finance.balanceSummary.execute", "Rebuild Balance Summary", parentName: "finance");
 
-        // P3「输出与摄取」的 6 个 admin 面（一次性声明全套 23 码）。
-        context.AddCrudPermissions("finance.bankAccount", "Bank Accounts", parentName: "finance");
-        context.AddCrudPermissions("finance.bankFeed", "Bank Feed", parentName: "finance");
-        // 支票：占号留痕，无删除端点。
-        context.AddCrudPermissions("finance.check", "Checks", parentName: "finance", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
-        context.AddCrudPermissions("finance.receipt", "Receipts", parentName: "finance");
-        context.AddCrudPermissions("finance.partyBank", "Party Bank Accounts", parentName: "finance");
-        // EFT：写三件套 + 独立 download（导出文件含全量明文账号，与 view 分离）。
-        context.AddCrudPermissions("finance.eft", "EFT Batches", parentName: "finance", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
-        context.AddPermission("finance.eft.download", "Download EFT Files", parentName: "finance");
     }
 }

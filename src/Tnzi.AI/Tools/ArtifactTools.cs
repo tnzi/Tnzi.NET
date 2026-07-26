@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// 产出物管理工具 — AI Agent 用于标记和呈现文件产物
+/// 产出物管理工具 - AI Agent 用于标记和呈现文件产物
 /// </summary>
 [AIToolGroup("artifact")]
 public class ArtifactTools

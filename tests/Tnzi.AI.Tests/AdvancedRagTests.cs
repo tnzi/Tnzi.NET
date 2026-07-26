@@ -3,7 +3,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// 高级 RAG 模式单元测试 — 查询改写 + 相关性评分
+/// 高级 RAG 模式单元测试 - 查询改写 + 相关性评分
 /// </summary>
 public class AdvancedRagTests
 {
@@ -142,7 +142,7 @@ public class AdvancedRagTests
         // Act
         var result = await rewriter.RewriteAsync("original query");
 
-        // Assert — fail-open: 返回原始查询
+        // Assert - fail-open: 返回原始查询
         result.ShouldBe("original query");
     }
 
@@ -171,7 +171,7 @@ public class AdvancedRagTests
         // Act
         var result = await rewriter.RewriteAsync("test query");
 
-        // Assert — 空响应回退到原始查询
+        // Assert - 空响应回退到原始查询
         result.ShouldBe("test query");
     }
 
@@ -272,7 +272,7 @@ public class AdvancedRagTests
         // Act
         var graded = await grader.GradeAsync("test query", results);
 
-        // Assert — fail-open: 错误时标记为相关
+        // Assert - fail-open: 错误时标记为相关
         graded.Count.ShouldBe(1);
         graded[0].IsRelevant.ShouldBeTrue();
         graded[0].RelevanceScore.ShouldBe(0.8);

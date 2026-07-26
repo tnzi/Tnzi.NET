@@ -598,12 +598,23 @@ public class NotificationService : ApplicationService, INotificationService
             return (request.Subject, request.Content, request.Category ?? "General");
         }
 
+        // Framework notification templates ship organized by channel
+        // (Templates/Notification/{Email|Sms}/{Name}.cshtml), so for these the
+        // template Category IS the channel name. When the caller does not set a
+        // Category, default the template-lookup category to the channel (from
+        // Type) so the shipped templates resolve instead of missing and falling
+        // back to an empty body. An explicit Category (a custom grouping) is
+        // always honoured. The message's own Category is unaffected (below).
+        var templateCategory = string.IsNullOrWhiteSpace(request.Category)
+            ? request.Type.ToString()
+            : request.Category;
+
         // 使用 ITemplateRenderService 一站式渲染
         var renderResult = await _templateRenderService.RenderByNameAsync(
             request.TemplateName,
             "Notification",
             request.TemplateVariables,
-            request.Category,
+            templateCategory,
             request.LayoutName,
             cancellationToken);
 

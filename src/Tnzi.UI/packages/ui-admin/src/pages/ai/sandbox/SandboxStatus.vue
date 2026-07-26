@@ -1,12 +1,12 @@
 <template>
   <!--
-    SandboxStatus — surfaces /admin/sandbox/status exposed by
+    SandboxStatus - surfaces /admin/sandbox/status exposed by
     `Tnzi.AI.Sandbox`. A read-only operations view: an at-a-glance status
     overview (enabled / provider / data root + the three denylist counts)
     followed by the three denylists (commands / file patterns / environment
     variables) the local provider applies to every sandbox-bound tool call.
     Each denylist has its own keyword filter so long lists stay scannable.
-    The backend exposes status only — there is no denylist CRUD here.
+    The backend exposes status only - there is no denylist CRUD here.
   -->
   <TContentPage :title="t('title')" :translate="t" scroll="fill">
     <template #actions>
@@ -32,7 +32,7 @@
       <!-- Flex column that fills the TContentPage fill-mode body so the
            denylist row below can claim the residual viewport height. -->
       <div v-else-if="status" class="t-sandbox-page">
-        <!-- Disabled banner — sandbox loaded but Enabled=false -->
+        <!-- Disabled banner - sandbox loaded but Enabled=false -->
         <NAlert
           v-if="!status.enabled"
           class="t-sandbox-page__alert"
@@ -67,7 +67,7 @@
                 {{ t('fields.provider') }}
               </span>
               <NTag :type="status.enabled ? 'info' : 'default'" size="small" :bordered="false">
-                {{ status.provider || '—' }}
+                {{ status.provider || EMPTY_DASH }}
               </NTag>
             </div>
 
@@ -76,7 +76,7 @@
                 <TSvgIcon icon="mdi:folder-outline" :size="14" />
                 {{ t('fields.dataRoot') }}
               </span>
-              <code class="t-sandbox-page__path" :title="status.dataRoot">{{ status.dataRoot || '—' }}</code>
+              <code class="t-sandbox-page__path" :title="status.dataRoot">{{ status.dataRoot || EMPTY_DASH }}</code>
             </div>
 
             <div
@@ -151,6 +151,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { TagProps } from 'naive-ui'
 import { NAlert, NButton, NCard, NEmpty, NInput, NTag } from 'naive-ui'
@@ -226,7 +227,7 @@ defineExpose({ refresh, status, loading, queries, denylists })
 .t-sandbox-page__not-loaded {
   padding: 48px 0;
 }
-/* Fill chain — TContentPage scroll="fill" gives the body a bounded height;
+/* Fill chain - TContentPage scroll="fill" gives the body a bounded height;
    this column fills it, the alert/overview keep natural height, and the
    denylist row claims the residual viewport height (C8 fill-height rule). */
 .t-sandbox-page {
@@ -303,7 +304,7 @@ defineExpose({ refresh, status, loading, queries, denylists })
 @media (max-width: 900px) {
   .t-sandbox-page__overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Stacked cards keep their natural height and the section itself scrolls
-     within the fill body — three viewport-split cards would be unusably
+     within the fill body - three viewport-split cards would be unusably
      squashed on a phone. Chips fall back to a capped internal scroller. */
   .t-sandbox-page__denylists {
     grid-template-columns: 1fr;

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Providers integration test — card grid (TCardPage) with create/edit modal +
+ * Providers integration test - card grid (TCardPage) with create/edit modal +
  * per-card connection test. The bridge's providers sub-contract is mocked:
  * fetch returns 2 rows, test resolves { ok:true, latency:42 }.
  */

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// AgentRuntime — core executor + helpers
+/// AgentRuntime - core executor + helpers
 /// </summary>
 public partial class AgentRuntime
 {
@@ -17,9 +17,10 @@ public partial class AgentRuntime
     /// <summary>
     /// Shared prelude for both RunAsync and RunStreamingAsync:
     /// resolve thinking model → resolve agent → get/create run → publish started event → build context.
-    /// Returns null if Agent resolution fails (caller decides how to surface the error).
+    /// On resolution failure the returned result carries the failed <see cref="AgentResolution"/> with
+    /// no Run and no Context; callers MUST check <c>Resolution.IsSuccess</c> before touching Context.
     /// </summary>
-    private async Task<RunSetupResult?> SetupContextAndResolveAsync(
+    private async Task<RunSetupResult> SetupContextAndResolveAsync(
         AgentRunRequest request,
         bool isStreaming,
         CancellationToken ct)
@@ -56,7 +57,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// Core executor (non-streaming) — innermost pipeline layer, delegates to execution strategy.
+    /// Core executor (non-streaming) - innermost pipeline layer, delegates to execution strategy.
     /// </summary>
     private async Task<AgentRunResult> ExecuteCoreAsync(AiMiddlewareContext context, CancellationToken ct)
     {
@@ -78,6 +79,9 @@ public partial class AgentRuntime
         agent = MergeAdditionalTools(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
+        // 逐次创建的策略（AgentAsTools 持有 SemaphoreSlim）必须随本次运行释放；
+        // 无状态的 SingleAgentStrategy.Instance 不实现 IDisposable，as 转换为 null → using 空操作。
+        using var strategyLifetime = strategy as IDisposable;
         var strategyContext = new ExecutionStrategyContext
         {
             AgentFactory = _agentFactory,
@@ -112,7 +116,7 @@ public partial class AgentRuntime
     }
 
     /// <summary>
-    /// Core executor (streaming) — innermost pipeline layer, delegates to execution strategy.
+    /// Core executor (streaming) - innermost pipeline layer, delegates to execution strategy.
     /// </summary>
     private async IAsyncEnumerable<AgentStreamChunk> ExecuteCoreStreamingAsync(
         AiMiddlewareContext context,
@@ -136,6 +140,8 @@ public partial class AgentRuntime
         agent = MergeAdditionalTools(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
+        // 同 ExecuteCoreAsync：per-run 策略随枚举结束释放，单例策略 as 转换为 null。
+        using var strategyLifetime = strategy as IDisposable;
         var pendingEvents = new ConcurrentQueue<AgentStreamChunk>();
         var strategyContext = new ExecutionStrategyContext
         {
@@ -165,7 +171,7 @@ public partial class AgentRuntime
     /// <summary>
     /// Apply EffectiveModel/Provider override set by SkillConstraintMiddleware.
     /// Rebuilds the executor if Model or Provider changed; returns original otherwise.
-    /// Operates entirely on <see cref="IAgentExecutor"/> — custom resolver/factory
+    /// Operates entirely on <see cref="IAgentExecutor"/> - custom resolver/factory
     /// implementations returning their own executors flow through without casts.
     /// </summary>
     private async Task<IAgentExecutor> ApplyModelOverrideAsync(AgentResolution resolution, AiMiddlewareContext context, CancellationToken ct)

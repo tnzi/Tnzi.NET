@@ -1,7 +1,7 @@
 namespace Tnzi.Settings;
 
 /// <summary>
-/// 配置组保存钩子（可选）。承接保存前校验与保存后副作用 —
+/// 配置组保存钩子（可选）。承接保存前校验与保存后副作用 -
 /// 典型场景：cron 字段保存时重注册 Hangfire 任务。
 /// 与 ISettingDefinitionProvider 一样按 DI 注册，按 GroupKey 匹配。
 /// </summary>

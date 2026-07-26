@@ -1,14 +1,14 @@
 <template>
   <!--
-    ToolPermissions — wraps /admin/permissions/* for Tnzi.AI tool guardrails.
+    ToolPermissions - wraps /admin/permissions/* for Tnzi.AI tool guardrails.
     Three tabs:
-      • Persisted Rules — full CRUD on ToolPermissionRuleEntity (DB-backed,
+      • Persisted Rules - full CRUD on ToolPermissionRuleEntity (DB-backed,
         survives restarts) via the standard TCrudPage (declarative row actions +
         schema-driven create/edit form). Backed by the permission admin
         controller's GET/POST/PUT/DELETE persisted-rules endpoints.
-      • Session Rules — read-only view of session-scope rules currently
+      • Session Rules - read-only view of session-scope rules currently
         installed in IToolPermissionEvaluator (added by AddSessionRule).
-      • Evaluate — debug/dry-run a context against the merged rule set.
+      • Evaluate - debug/dry-run a context against the merged rule set.
 
     Conflict resolution order (shown to the user): Priority desc → Scope weight
     desc (Session=4 > User=3 > Project=2 > System=1) → Behavior weight desc
@@ -118,7 +118,7 @@
         </NCard>
 
         <NCard v-if="evalResult" :title="t('eval.result')" size="small" :bordered="false" class="t-perm-page__eval-result t-tab-card">
-          <!-- Big, colour-coded decision badge — the headline verdict. -->
+          <!-- Big, colour-coded decision badge - the headline verdict. -->
           <div class="t-perm-page__decision" :class="`t-perm-page__decision--${behaviorTone(evalResult.behavior)}`">
             <TSvgIcon :icon="behaviorIcon(evalResult.behavior)" :size="22" />
             <span class="t-perm-page__decision-text">{{ behaviorLabel(evalResult.behavior).toUpperCase() }}</span>
@@ -130,7 +130,7 @@
             <NTag v-if="evalResult.scope != null" size="small" :bordered="false" type="info">
               {{ scopeLabel(evalResult.scope) }} · {{ t('scope.weight', { n: scopeWeight(evalResult.scope) }) }}
             </NTag>
-            <span v-else>—</span>
+            <span v-else>{{ EMPTY_DASH }}</span>
           </div>
           <div class="t-perm-page__eval-row">
             <span class="t-perm-page__eval-label">{{ t('eval.behavior') }}:</span>
@@ -140,7 +140,7 @@
           </div>
           <div class="t-perm-page__eval-row">
             <span class="t-perm-page__eval-label">{{ t('eval.matchedPattern') }}:</span>
-            <code>{{ evalResult.matchedRulePattern ?? '—' }}</code>
+            <code>{{ evalResult.matchedRulePattern ?? EMPTY_DASH }}</code>
           </div>
           <div v-if="evalResult.matchedToolGroup" class="t-perm-page__eval-row">
             <span class="t-perm-page__eval-label">{{ t('cols.toolGroup') }}:</span>
@@ -155,7 +155,7 @@
             <span>{{ evalResult.reason }}</span>
           </div>
 
-          <!-- Decision chain — explains the 3-stage conflict resolution so
+          <!-- Decision chain - explains the 3-stage conflict resolution so
                reviewers can reason about why this verdict won. -->
           <NDivider class="t-perm-page__decision-divider" />
           <div class="t-perm-page__chain-title">{{ t('decisionChain.title') }}</div>
@@ -177,6 +177,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   NButton,
@@ -250,7 +251,7 @@ const sessionRules = ref<PermissionRuleItemDto[]>([])
 const persistedColumns = buildPersistedColumns(t)
 // The schema-form `required` flag is visual only (TSchemaForm generates no
 // validation rule and useCrudPage.submit never calls validate), so guard the
-// tool pattern here — a blank pattern would match far too broadly. The thrown
+// tool pattern here - a blank pattern would match far too broadly. The thrown
 // error is surfaced as a toast by runWithErrorHandling, which re-throws and so
 // keeps the modal open for correction (mirrors the old save-button disable).
 function ensureToolPattern(data: Partial<PersistedPermissionRuleDto>): void {
@@ -268,7 +269,7 @@ const crud = useCrudPage<PersistedPermissionRuleDto>({
     const items = [...(await bridge.getPersistedRules())].sort(
       (a, b) => b.priority - a.priority || scopeWeight(b.scope) - scopeWeight(a.scope),
     )
-    // All rules come back in one shot (no server paging) — return a complete
+    // All rules come back in one shot (no server paging) - return a complete
     // single-page PagedList so the CrudPageResult contract is satisfied.
     return {
       items,
@@ -295,7 +296,7 @@ const persistedCount = computed(() => crud.total.value)
 const rowActions: RowAction<PersistedPermissionRuleDto>[] = [editAction(crud), deleteAction(crud)]
 
 // Seed create defaults when the modal opens (behavior=Allow, scope=System,
-// priority=100, isEnabled=true) — useCrudPage opens create with an empty {}.
+// priority=100, isEnabled=true) - useCrudPage opens create with an empty {}.
 watch(crud.formModal.visible, (open) => {
   if (!open || crud.formModal.mode.value !== 'create') return
   const m = crud.formModal.formData.value as Record<string, unknown> | null
@@ -332,8 +333,8 @@ const sessionColumns: DataTableColumns<PermissionRuleItemDto> = [
     key: 'toolPattern',
     render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.toolPattern),
   },
-  { title: () => t('cols.toolGroup'), key: 'toolGroup', width: 120, render: (r) => r.toolGroup ?? '—' },
-  { title: () => t('cols.reason'), key: 'reason', ellipsis: { tooltip: true }, render: (r) => r.reason ?? '—' },
+  { title: () => t('cols.toolGroup'), key: 'toolGroup', width: 120, render: (r) => r.toolGroup ?? EMPTY_DASH },
+  { title: () => t('cols.reason'), key: 'reason', ellipsis: { tooltip: true }, render: (r) => r.reason ?? EMPTY_DASH },
 ]
 
 // ── Evaluate tab ──────────────────────────────────────────────────
@@ -399,7 +400,7 @@ onMounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 400px) 1fr;
   gap: 12px;
-  /* Form content in the Evaluate tab — let the pane scroll if the
+  /* Form content in the Evaluate tab - let the pane scroll if the
      result card grows past the visible tab area. */
   flex: 1 1 auto;
   min-height: 0;

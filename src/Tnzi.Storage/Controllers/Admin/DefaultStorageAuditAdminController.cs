@@ -2,7 +2,7 @@ namespace Tnzi.Storage.Controllers.Admin;
 
 /// <summary>
 /// Admin audit endpoints that expose cross-file reads over FileChunk and
-/// FileVersion — the data the Phase 3 StorageChunk.vue and StorageVersion.vue
+/// FileVersion - the data the Phase 3 StorageChunk.vue and StorageVersion.vue
 /// admin pages need. These are intentionally NOT layered through
 /// IFileChunkUploadService / IFileVersionService because:
 /// 1. Those services model user-facing workflows (initiate / upload / complete)
@@ -12,7 +12,7 @@ namespace Tnzi.Storage.Controllers.Admin;
 ///    existing mock in tests.
 ///
 /// If more admin audit surface emerges later, the right move is to extract
-/// a dedicated IStorageAuditService — but until then, direct repository access
+/// a dedicated IStorageAuditService - but until then, direct repository access
 /// at the admin-controller boundary is a pragmatic fit.
 /// </summary>
 [DefaultController]

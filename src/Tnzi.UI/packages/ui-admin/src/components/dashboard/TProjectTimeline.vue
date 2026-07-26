@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * `TProjectTimeline` — naive-ui-NTimeline wrapper for activity feeds:
+ * `TProjectTimeline` - naive-ui-NTimeline wrapper for activity feeds:
  * project news, recent operations, audit summaries. Each item resolves
  * a colored icon dot, title, optional subtitle/description, and timestamp.
  *
- * Items are presentational only — no fetching, no infinite scroll. Drop
+ * Items are presentational only - no fetching, no infinite scroll. Drop
  * into TDashboardPage's default slot or anywhere a feed makes sense.
  */
 import { NTimeline, NTimelineItem } from 'naive-ui'
@@ -23,7 +23,7 @@ export interface TimelineItem {
   time?: string
   /** Iconify icon name. */
   icon?: string
-  /** Coloring tone — drives the timeline dot color. */
+  /** Coloring tone - drives the timeline dot color. */
   tone?: TimelineTone
 }
 

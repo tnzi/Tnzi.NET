@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 图片查看中间件 — Before only: 将已查看的图片注入为多模态消息内容。
+/// 图片查看中间件 - Before only: 将已查看的图片注入为多模态消息内容。
 /// </summary>
 /// <remarks>
 /// 在 ViewImageTool 将图片存入 context.Properties["ViewedImages"] 后，

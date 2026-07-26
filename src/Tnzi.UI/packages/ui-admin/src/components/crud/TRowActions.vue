@@ -68,7 +68,7 @@ export interface TRowActionsProps<T> {
   actions?: RowAction<T>[]
   /** Max inline slots before the tail collapses into More▾ (default 2). */
   maxInline?: number
-  /** Disable collapsing — render every action inline (default false → collapse on). */
+  /** Disable collapsing - render every action inline (default false → collapse on). */
   collapse?: boolean
   /** Override the More▾ button label. */
   moreLabel?: string

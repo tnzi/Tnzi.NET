@@ -52,7 +52,7 @@ public class FileConfigChangeDetector : IConfigChangeDetector
 
                 if (currentMtime > entry.LastMtime)
                 {
-                    // 更新 mtime（不可变 — 替换条目）
+                    // 更新 mtime（不可变 - 替换条目）
                     _watches[path] = entry with { LastMtime = currentMtime };
                     _logger.LogDebug("Config change detected: {Path} (mtime: {Old} -> {New})", path, entry.LastMtime, currentMtime);
                     await entry.OnChanged();

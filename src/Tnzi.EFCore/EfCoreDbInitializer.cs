@@ -15,10 +15,10 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
         IEnumerable<IDataSeeder> seeders,
         ILogger<EFCoreDbInitializer<TDbContext>> logger)
     {
-        _dbContext = dbContext;
-        _serviceProvider = serviceProvider;
-        _seeders = seeders;
-        _logger = logger;
+        _dbContext = Check.NotNull(dbContext);
+        _serviceProvider = Check.NotNull(serviceProvider);
+        _seeders = Check.NotNull(seeders);
+        _logger = Check.NotNull(logger);
     }
 
     public async Task MigrateAsync(CancellationToken cancellationToken = default)
@@ -35,15 +35,14 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
 
         // 【性能优化】快速路径：优先检查是否有待应用的迁移（最常见情况）
         // 这个操作很快，因为只是检查迁移文件，不涉及数据库查询
-        var pendingMigrations = await _dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
-        var hasMigrations = pendingMigrations.Any();
+        var pendingMigrations = (await _dbContext.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
 
-        if (hasMigrations)
+        if (pendingMigrations.Count > 0)
         {
             // 有迁移文件，直接执行迁移（最快路径）
-            _logger.LogInformation("Found {Count} pending migration(s), applying...", pendingMigrations.Count());
+            _logger.LogInformation("Found {Count} pending migration(s), applying...", pendingMigrations.Count);
             await _dbContext.Database.MigrateAsync(cancellationToken);
-            _logger.LogInformation("Successfully applied {Count} migration(s).", pendingMigrations.Count());
+            _logger.LogInformation("Successfully applied {Count} migration(s).", pendingMigrations.Count);
             return;
         }
 

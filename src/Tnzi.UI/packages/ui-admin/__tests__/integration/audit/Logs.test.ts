@@ -32,7 +32,7 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
   }),
   // The bridge re-exports `AuditResultType` / `EntityChangeType` so pages read
   // the enum values without reaching into `@tnzi/core/services/audit`. Both are
-  // PascalCase string enums (global JsonStringEnumConverter) — mirror that here.
+  // PascalCase string enums (global JsonStringEnumConverter) - mirror that here.
   AuditResultType: {
     Success: 'Success',
     Failed: 'Failed',
@@ -53,7 +53,7 @@ describe('Logs page (Tier 2: timeline view)', () => {
   it('mounts the timeline view and fetches audit entries on load', async () => {
     const wrapper = mount(Logs)
     await nextTick()
-    // Bridge.fetch is async — wait a tick beyond the initial mount.
+    // Bridge.fetch is async - wait a tick beyond the initial mount.
     await new Promise(r => setTimeout(r, 50))
     await nextTick()
     expect(wrapper.find('.t-audit-timeline').exists()).toBe(true)
@@ -66,7 +66,7 @@ describe('Logs page (Tier 2: timeline view)', () => {
     const wrapper = mount(Logs)
     await nextTick()
     await new Promise(r => setTimeout(r, 50))
-    // The legacy CRUD container is gone — no toolbar / column-setting popover.
+    // The legacy CRUD container is gone - no toolbar / column-setting popover.
     expect(wrapper.find('.t-crud-page').exists()).toBe(false)
     expect(wrapper.find('.t-crud-toolbar').exists()).toBe(false)
   })

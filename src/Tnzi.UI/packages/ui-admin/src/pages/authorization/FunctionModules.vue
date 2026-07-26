@@ -34,12 +34,13 @@
   </TCrudPage>
 
   <!--
-    Cascade-disable confirmation modal — opened by the row More menu's
+    Cascade-disable confirmation modal - opened by the row More menu's
     "Disable" entry. The bridge computes the impact (descendant module
     count + total affected functions) so the admin sees the blast radius
     before clicking through. Permission cascade is enforced server-side;
     this is purely a UX guardrail to prevent surprise outages.
   -->
+  <TOverlayTheme>
   <NModal
     v-model:show="cascadeModal.show"
     :title="t('cascade.title')"
@@ -101,9 +102,11 @@
       </div>
     </template>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, reactive, ref, onMounted } from 'vue'
 import {
   NAlert,
@@ -115,6 +118,7 @@ import {
 } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import { TOverlayTheme } from '../../components/overlay'
 import { TSvgIcon } from '@tnzi/ui'
 import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -156,7 +160,7 @@ async function loadModuleOptions(): Promise<void> {
 }
 
 // Columns defined here (not in config.ts) so the parentName cell can resolve
-// the parent module via the in-memory lookup — backend's GetModulesAsync
+// the parent module via the in-memory lookup - backend's GetModulesAsync
 // doesn't .Include(Parent), so a plain `row.parentName` field would always
 // be empty. Render functions close over the `moduleById` ref, so the cell
 // re-renders when the modules list refreshes.
@@ -190,7 +194,7 @@ const columns: ColumnDef<Row>[] = [
     title: 'columns.parentName',
     minWidth: 140,
     render: (row) => {
-      if (!row.parentId) return h('span', { class: 'text-muted' }, '—')
+      if (!row.parentId) return h('span', { class: 'text-muted' }, EMPTY_DASH)
       const p = moduleById.value.get(row.parentId)
       return p?.name ?? row.parentId
     },
@@ -239,7 +243,7 @@ const editingId = computed(() => (crud.formModal.formData.value as Row | null)?.
 const parentOptions = computed(() => {
   /**
    * Walk the parent chain, counting hops. Uses a `visited` set so a cyclic
-   * chain (corrupted data) terminates instead of looping forever — depth
+   * chain (corrupted data) terminates instead of looping forever - depth
    * cap alone wouldn't catch a 3-node cycle that re-hits the same nodes.
    */
   const depthOf = (id: string | undefined): number => {
@@ -301,7 +305,7 @@ const fieldRenderers = {
 
 // Row actions: Enable/Disable via the backend's dedicated cascading endpoints.
 // Enable is purely additive (no cascade modal needed); Disable opens the
-// cascade-confirmation modal — that modal IS the confirmation, so neither
+// cascade-confirmation modal - that modal IS the confirmation, so neither
 // action carries an inline confirm. Delete stays appended at the end.
 async function withRefresh(action: () => Promise<void>, successKey: string): Promise<void> {
   try {
@@ -340,7 +344,7 @@ const rowActions: RowAction<Row>[] = [
 // ─── Cascade-disable modal ─────────────────────────────────────────────────
 // Disabling a parent module flips every descendant module + all their
 // functions off in one transaction. The bridge's `previewCascade` walks
-// the cached module tree and returns the impact counts — we render them
+// the cached module tree and returns the impact counts - we render them
 // in a confirmation modal so the admin can see what they're about to do.
 const cascadeModal = reactive({
   show: false,

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// Guardrail 单元测试 — 验证输入/输出 Guardrails 和 GuardrailRunner
+/// Guardrail 单元测试 - 验证输入/输出 Guardrails 和 GuardrailRunner
 /// </summary>
 public class GuardrailTests
 {

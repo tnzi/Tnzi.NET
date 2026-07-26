@@ -1,7 +1,7 @@
 namespace Tnzi.Threading;
 
 /// <summary>
-/// 按键异步锁 — 支持 per-key 排他锁，自动引用计数释放
+/// 按键异步锁 - 支持 per-key 排他锁，自动引用计数释放
 /// 用于缓存防击穿、防重复提交、ID 生成协调等场景
 /// </summary>
 /// <remarks>

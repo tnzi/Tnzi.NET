@@ -1,5 +1,5 @@
 /**
- * Channels bridge — wraps `/admin/channels/*` + `/admin/gateway/*` exposed by
+ * Channels bridge - wraps `/admin/channels/*` + `/admin/gateway/*` exposed by
  * `Tnzi.AI.Channels`. The module is an optional sub-module of Tnzi.AI; when
  * not loaded the backend returns 404 and the bridge surfaces empty values
  * so the page renders an "unavailable" state.

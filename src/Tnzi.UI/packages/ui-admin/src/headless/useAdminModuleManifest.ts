@@ -1,15 +1,15 @@
 /**
- * `useAdminModuleManifest()` — composable for loading the backend admin
+ * `useAdminModuleManifest()` - composable for loading the backend admin
  * manifest (`GET admin/diagnostics/admin-manifest`) and projecting it onto
  * the frontend menu tree.
  *
  * Powers Phase B of the `@tnzi/ui-admin` overhaul: instead of hard-coding
  * which modules to surface, the menu is derived from whichever business
- * modules the backend has loaded — so the same admin app installed against
+ * modules the backend has loaded - so the same admin app installed against
  * different backends shows different menus automatically.
  *
  * This is an OPT-IN consumer composable (exported from the headless barrel);
- * `defineAdminApp` does not call it — the built-in sidebar derives from the
+ * `defineAdminApp` does not call it - the built-in sidebar derives from the
  * static route table. Pass `basePath` matching your `defineAdminApp` config
  * so generated menu paths line up with the rewritten route table.
  */
@@ -34,7 +34,7 @@ export interface AdminMenuNode {
   i18nKey?: string
   /** Original entity object when this is a leaf. */
   entity?: AdminManifestEntity
-  /** Children — modules with multiple entities expose them as children. */
+  /** Children - modules with multiple entities expose them as children. */
   children?: AdminMenuNode[]
 }
 
@@ -43,7 +43,7 @@ export interface UseAdminModuleManifestOptions {
   client: HttpClient
   /** Module short names to hide (e.g. `['Payment', 'Audit']`). Case-insensitive. */
   hideModules?: string[]
-  /** Module short names to show — when set, anything not listed is hidden. */
+  /** Module short names to show - when set, anything not listed is hidden. */
   showOnlyModules?: string[]
   /**
    * Skip fetching and use this pre-built manifest. Useful for tests and SSR.
@@ -53,7 +53,7 @@ export interface UseAdminModuleManifestOptions {
    * Route-table prefix the generated menu paths sit under. MUST match the
    * `basePath` passed to `defineAdminApp` (default `'/admin'`); pass `'/'`
    * for a prefix-free route table (the recommended sub-path deployment
-   * shape). Never hardcode a deployment prefix into entity routes — this is
+   * shape). Never hardcode a deployment prefix into entity routes - this is
    * the single knob.
    */
   basePath?: string
@@ -115,7 +115,7 @@ export function useAdminModuleManifest(
 
   async function refresh(): Promise<void> {
     if (options.manifest) {
-      // Static manifest mode — nothing to fetch.
+      // Static manifest mode - nothing to fetch.
       manifest.value = options.manifest
       return
     }

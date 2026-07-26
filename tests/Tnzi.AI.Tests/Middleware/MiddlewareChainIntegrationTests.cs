@@ -4,7 +4,7 @@ using Tnzi.AI.Sandbox.Middleware;
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// 中间件链路完整性测试 — 验证所有中间件 Order 值正确、ShouldSkip 行为一致
+/// 中间件链路完整性测试 - 验证所有中间件 Order 值正确、ShouldSkip 行为一致
 /// </summary>
 public class MiddlewareChainIntegrationTests
 {
@@ -55,7 +55,7 @@ public class MiddlewareChainIntegrationTests
 
     #endregion
 
-    #region 中间件管道 — 端到端执行
+    #region 中间件管道 - 端到端执行
 
     [Fact]
     public async Task Pipeline_EmptyPipeline_ExecutesCoreDirectly()

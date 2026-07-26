@@ -12,7 +12,7 @@ public sealed class SubAgentRunCancellationRegistry : ISubAgentRunCancellationRe
     public void Register(Guid runId, CancellationTokenSource cts)
     {
         Check.NotNull(cts);
-        // TryAdd — silently ignore if already registered (edge-case: duplicate runId).
+        // TryAdd - silently ignore if already registered (edge-case: duplicate runId).
         _registry.TryAdd(runId, cts);
     }
 
@@ -36,7 +36,7 @@ public sealed class SubAgentRunCancellationRegistry : ISubAgentRunCancellationRe
         }
         catch (ObjectDisposedException)
         {
-            // CTS was already disposed — remove stale entry
+            // CTS was already disposed - remove stale entry
             _registry.TryRemove(runId, out _);
             return false;
         }

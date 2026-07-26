@@ -74,6 +74,22 @@ export enum FinanceDocumentStatus {
   Voided = 'Voided',
 }
 
+/**
+ * Lifecycle of a NON-POSTING document (estimate / purchase order).
+ *
+ * Deliberately separate from `FinanceDocumentStatus`: every value there
+ * describes a document's relationship to the general ledger, and these two
+ * never touch it. Sharing one enum would make "a posted estimate" expressible.
+ */
+export enum FinanceOfferStatus {
+  Draft = 'Draft',
+  Sent = 'Sent',
+  Accepted = 'Accepted',
+  Declined = 'Declined',
+  Converted = 'Converted',
+  Closed = 'Closed',
+}
+
 /** Payment direction */
 export enum PaymentDirection {
   Inbound = 'Inbound',
@@ -253,7 +269,7 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number] | (string & {});
  * as literals so renaming a framework entity cannot silently change what lands in
  * the database or what a resolver has to match on. Consuming apps that post
  * programmatically may write their own tokens, so treat this as the framework's
- * set rather than a closed enum — always fall back to the raw token when labelling.
+ * set rather than a closed enum - always fall back to the raw token when labelling.
  */
 export const FINANCE_SOURCE_TYPES = [
   'Invoice',
@@ -267,3 +283,40 @@ export const FINANCE_SOURCE_TYPES = [
 ] as const;
 
 export type FinanceSourceType = (typeof FINANCE_SOURCE_TYPES)[number] | (string & {});
+
+/** Bank-rule condition field. */
+export enum BankRuleField {
+  Description = 'Description',
+  Payee = 'Payee',
+  Reference = 'Reference',
+  Amount = 'Amount',
+}
+
+/** Bank-rule condition operator. */
+export enum BankRuleOperator {
+  Contains = 'Contains',
+  NotContains = 'NotContains',
+  Equals = 'Equals',
+  StartsWith = 'StartsWith',
+  EndsWith = 'EndsWith',
+  GreaterThan = 'GreaterThan',
+  LessThan = 'LessThan',
+}
+
+/** How a rule's conditions combine. */
+export enum BankRuleMatchMode {
+  All = 'All',
+  Any = 'Any',
+}
+
+/**
+ * Which direction of money a rule applies to.
+ *
+ * Separate from the amount condition on purpose: a "Starbucks -> Meals" rule
+ * should not book a refund that comes back in as a meal expense.
+ */
+export enum BankRuleDirection {
+  Any = 'Any',
+  MoneyIn = 'MoneyIn',
+  MoneyOut = 'MoneyOut',
+}

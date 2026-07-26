@@ -26,6 +26,8 @@ export function mapAuthConfig(c: AuthConfigDto): LoginFeatures {
       phone: c.allowSmsLogin,
     },
     codeChannels: { sms: c.codeLoginViaSms, email: c.codeLoginViaEmail },
+    captchaOnLogin: c.enableCaptchaOnLogin,
+    captchaOnRegister: c.enableCaptchaOnRegister,
   }
 }
 
@@ -42,13 +44,15 @@ export function mergeFeatures(base: LoginFeatures, override?: PartialLoginFeatur
     passwordRecovery: override?.passwordRecovery ?? base.passwordRecovery,
     identifiers: { ...base.identifiers, ...override?.identifiers },
     codeChannels: { ...base.codeChannels, ...override?.codeChannels },
+    captchaOnLogin: override?.captchaOnLogin ?? base.captchaOnLogin,
+    captchaOnRegister: override?.captchaOnRegister ?? base.captchaOnRegister,
   }
 }
 
 /**
  * Whether a login module is reachable. For the feature-gated secondary modules
  * (code-login / register / reset-pwd) this is **backend-enabled AND the
- * consumer wired the matching callback** — so a deployment that enables a
+ * consumer wired the matching callback** - so a deployment that enables a
  * method the consumer never implemented won't show a dead entry that errors on
  * submit. `pwd-login` is the default entry and is gated only by
  * `passwordLogin` (it shows a "not configured" hint if its callback is
@@ -75,7 +79,7 @@ export function isModuleAvailable(
 }
 
 /**
- * First reachable module — used to redirect away from a disabled module that
+ * First reachable module - used to redirect away from a disabled module that
  * was reached by direct URL. Falls back to `pwd-login`.
  */
 export function firstReachableModule(features: LoginFeatures, callbacks: LoginCallbacks): LoginModule {

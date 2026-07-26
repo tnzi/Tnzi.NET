@@ -1,7 +1,7 @@
 namespace Tnzi.Audit.Tests;
 
 /// <summary>
-/// AuditOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
+/// AuditOptions 配置中心特性测试 - 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class AuditSettingDefinitionProviderTests
 {

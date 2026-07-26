@@ -54,7 +54,7 @@ public class JwtTokenServiceTests
         var service = CreateService();
         var user = CreateUser();
 
-        // Attempt to inject a privileged role via extraClaims — must be ignored.
+        // Attempt to inject a privileged role via extraClaims - must be ignored.
         var token = service.GenerateToken(user, new[] { "user" },
             new[] { new Claim(ClaimTypes.Role, "superadmin") });
 
@@ -77,7 +77,7 @@ public class JwtTokenServiceTests
         var user = CreateUser();
         var injected = Guid.NewGuid().ToString();
 
-        // JWT short-name forms of reserved claims must be filtered too — otherwise
+        // JWT short-name forms of reserved claims must be filtered too - otherwise
         // a caller injects `role=superadmin` / `nameid=<victim>` via extraClaims and
         // the validating side (MapInboundClaims) maps them back to ClaimTypes.* →
         // privilege escalation / identity spoofing.
@@ -101,5 +101,51 @@ public class JwtTokenServiceTests
             new[] { new Claim("ai_roles", "admin") });
 
         Decode(result.AccessToken).ShouldContain(c => c.Type == "ai_roles" && c.Value == "admin");
+    }
+
+    [Fact]
+    public void GenerateToken_WithSessionId_IncludesSessionIdClaim()
+    {
+        var service = CreateService();
+        var user = CreateUser();
+        var sessionId = Guid.NewGuid();
+
+        var token = service.GenerateToken(user, new[] { "user" }, sessionId: sessionId);
+
+        Decode(token).ShouldContain(c =>
+            c.Type == IdentityConstants.ClaimTypeNames.SessionId && c.Value == sessionId.ToString());
+    }
+
+    [Fact]
+    public void GenerateToken_WithEmptySessionId_HasNoSessionIdClaim()
+    {
+        var service = CreateService();
+        var user = CreateUser();
+
+        var token = service.GenerateToken(user, new[] { "user" }, sessionId: Guid.Empty);
+
+        Decode(token).ShouldNotContain(c => c.Type == IdentityConstants.ClaimTypeNames.SessionId);
+    }
+
+    [Fact]
+    public void GenerateToken_ExtraClaims_CannotForgeSessionId()
+    {
+        var service = CreateService();
+        var user = CreateUser();
+        var realSession = Guid.NewGuid();
+        var forgedSession = Guid.NewGuid().ToString();
+
+        // A caller must not be able to bind the token to an arbitrary session via
+        // extraClaims - session_id is a reserved, framework-set claim.
+        var token = service.GenerateToken(user, new[] { "user" },
+            new[] { new Claim(IdentityConstants.ClaimTypeNames.SessionId, forgedSession) },
+            sessionId: realSession);
+
+        var sessionValues = Decode(token)
+            .Where(c => c.Type == IdentityConstants.ClaimTypeNames.SessionId)
+            .Select(c => c.Value)
+            .ToList();
+        sessionValues.ShouldContain(realSession.ToString());
+        sessionValues.ShouldNotContain(forgedSession);
     }
 }

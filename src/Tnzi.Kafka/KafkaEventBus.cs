@@ -126,8 +126,9 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
 
             // 启动后台任务消费消息，并跟踪任务以支持优雅关闭
             var cts = new CancellationTokenSource();
-            // 使用 LongRunning 创建专用线程，避免阻塞线程池
-            // Confluent.Kafka 的 Consume() 是阻塞 API，会永久占用线程
+            // LongRunning 提示调度器不要占用线程池线程跑这个长驻循环
+            // （委托是 async 的，第一次 await 之后的续体仍回到线程池；
+            // Confluent.Kafka 的 Consume() 是阻塞 API，故循环体带 1 秒超时轮询）
             var consumerTask = Task.Factory.StartNew(async () =>
             {
                 var currentConsumer = consumer;
@@ -137,14 +138,17 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
                 {
                     try
                     {
-                        // 重连成功后重置计数器
-                        reconnectAttempts = 0;
-
                         while (!cts.Token.IsCancellationRequested)
                         {
                             try
                             {
                                 var result = currentConsumer.Consume(TimeSpan.FromSeconds(1));
+
+                                // 一次成功的拉取即证明连接健康，此时才重置重连计数。
+                                // 放在外层循环开头无条件清零会让 MaxReconnectAttempts
+                                // 永远无法耗尽（每次失败都从 0 重新计数 → 无限重连）。
+                                reconnectAttempts = 0;
+
                                 if (result == null || result.Message == null)
                                 {
                                     await Task.Delay(100, cts.Token);

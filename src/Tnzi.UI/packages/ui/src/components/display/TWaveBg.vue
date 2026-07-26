@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { getPaletteColorByNumber } from '../../theme/palette'
 
 /**
- * `TWaveBg` — soybean-parity decorative background.
+ * `TWaveBg` - soybean-parity decorative background.
  *
  * Renders two large organic SVG blobs (top-right + bottom-left), each filled
  * with a `light → dark` linearGradient computed from the theme primary. The
@@ -11,7 +11,7 @@ import { getPaletteColorByNumber } from '../../theme/palette'
  * abstract waves washing into the page corners.
  *
  * Source-fidelity port of `soybean-admin-example/src/components/custom/wave-bg.vue`
- * — same SVG path data, same offsets, same gradient stops.
+ * - same SVG path data, same offsets, same gradient stops.
  */
 interface Props {
   /** Theme primary color. Defaults to `var(--tnzi-primary)`. */

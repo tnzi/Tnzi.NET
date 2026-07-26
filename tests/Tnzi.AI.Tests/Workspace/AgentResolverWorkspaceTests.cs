@@ -169,16 +169,14 @@ public class AgentResolverWorkspaceTests
     }
 
     /// <summary>
-    /// DB Agent 解析必须把 Agent.PersonaId 透传到 AgentResolution.PersonaId。
-    /// 这是 Persona 注入链路的关键一环 — 历史 bug：AgentService 把 PersonaId 写到
-    /// entity.PersonaId 独立列，但 AgentResolver 只把 entity.Configuration JSON 传递出去，
-    /// 导致 ContextInjectionMiddleware 永远拿不到 PersonaId，&lt;soul&gt; 块永不注入。
+    /// DB Agent 解析必须把 Agent.Persona（内联 soul 内容）透传到 AgentResolution.PersonaContent。
+    /// 内容随 Agent 一起解析，ContextInjectionMiddleware 直接注入 &lt;soul&gt; 块，无 DB 二次查询。
     /// </summary>
     [Fact]
-    public async Task ResolveAgentAsync_DbAgentWithPersonaId_PropagatesPersonaIdToResolution()
+    public async Task ResolveAgentAsync_DbAgentWithPersona_PropagatesPersonaContentToResolution()
     {
         var agentId = Guid.NewGuid();
-        var personaId = Guid.NewGuid();
+        var persona = "You are a Zen master.";
         var entity = new Agent
         {
             Id = agentId,
@@ -187,7 +185,7 @@ public class AgentResolverWorkspaceTests
             Model = "gpt-4o",
             IsEnabled = true,
             ExecutionMode = AgentExecutionMode.Single,
-            PersonaId = personaId
+            Persona = persona
         };
 
         _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
@@ -209,8 +207,7 @@ public class AgentResolverWorkspaceTests
         var result = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
 
         result.IsSuccess.ShouldBeTrue();
-        result.PersonaId.ShouldBe(personaId);
-        result.PersonaContent.ShouldBeNull();
+        result.PersonaContent.ShouldBe(persona);
     }
 
     /// <summary>
@@ -339,7 +336,7 @@ public class AgentResolverWorkspaceTests
 
     /// <summary>
     /// CRITICAL (A/B routing honors versioned grants): when the version router A/B-routes to a
-    /// variant, the variant's resource grants come from the route result's SnapshotGrants — NOT the
+    /// variant, the variant's resource grants come from the route result's SnapshotGrants - NOT the
     /// agent's CURRENT live grants. Seed DIFFERENT live grants to prove the SNAPSHOT wins: the
     /// resolution's KnowledgeBaseIds/SkillSlugs and the factory's toolGroups/toolNames must reflect
     /// the snapshot, and GetGrantsAsync must NOT be consulted for the resource lists.
@@ -381,7 +378,7 @@ public class AgentResolverWorkspaceTests
                 }
             });
 
-        // LIVE grants are DIFFERENT — if the resolver wrongly reads live, the asserts below fail.
+        // LIVE grants are DIFFERENT - if the resolver wrongly reads live, the asserts below fail.
         _grantService.Setup(s => s.GetGrantsAsync(agentId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentGrantsProjection
             {
@@ -520,6 +517,5 @@ public class AgentResolverWorkspaceTests
 
         result.IsSuccess.ShouldBeTrue();
         result.PersonaContent.ShouldBe(personaBody);
-        result.PersonaId.ShouldBeNull();
     }
 }

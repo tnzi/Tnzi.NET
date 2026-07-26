@@ -5,7 +5,7 @@ using Tnzi.AspNetCore.Mvc;
 namespace Tnzi.AI.Sandbox.Controllers.Admin;
 
 /// <summary>
-/// Sandbox 管理控制器 — 查询沙箱配置和 Provider 状态
+/// Sandbox 管理控制器 - 查询沙箱配置和 Provider 状态
 /// </summary>
 [DefaultController]
 [Route("admin/sandbox")]

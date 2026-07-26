@@ -138,4 +138,65 @@ public class CsvBuilderTests
     {
         Assert.ThrowsAny<ArgumentException>(() => new CsvBuilder(" "));
     }
+
+    [Theory]
+    [InlineData(1.5, "1.50")]          // 补零：自然标度会写成 "1.5",金额列必须对齐
+    [InlineData(1234.5, "1234.50")]
+    [InlineData(0, "0.00")]
+    [InlineData(-1234.5, "-1234.50")]  // 负号保留,不得被公式注入防护加引号
+    [InlineData(2.345, "2.35")]        // 中值远离零
+    [InlineData(-2.345, "-2.35")]
+    [InlineData(2.344, "2.34")]
+    [InlineData(1.005, "1.01")]
+    public void Money_NormalisesToFixedScale(decimal input, string expected)
+    {
+        Assert.Equal(expected, CsvBuilder.Money(input)!.Value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void Money_Null_StaysNull_AndRendersAsEmptyCell()
+    {
+        Assert.Null(CsvBuilder.Money(null));
+
+        var csv = new CsvBuilder();
+        csv.AppendRow("x", CsvBuilder.Money(null), CsvBuilder.Money(-12.5m));
+        Assert.Equal("x,,-12.50", csv.ToString().TrimEnd('\r', '\n'));
+    }
+
+    [Theory]
+    [InlineData(0, 1234.5, "1235")]
+    [InlineData(1, 1234.55, "1234.6")]
+    [InlineData(4, 1.5, "1.5000")]
+    public void Money_HonoursRequestedDecimals(int decimals, decimal input, string expected)
+    {
+        Assert.Equal(expected, CsvBuilder.Money(input, decimals)!.Value.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void Money_MatchesTheStringRoundTripItReplaced()
+    {
+        // The callers this method absorbed used decimal.Parse(v.ToString("0.00")). Financial exports
+        // are reconciled against, so the replacement must agree digit for digit.
+        decimal[] samples =
+        [
+            0m, 0.001m, 0.005m, 0.014m, 0.015m, 1.5m, 2.345m, 1234.567m, 99999.994m, 99999.995m,
+            -0.005m, -1.5m, -2.345m, -1234.567m, 1m, -1m, 0.1m, 1000000.129m,
+        ];
+
+        foreach (var v in samples)
+        {
+            var legacy = decimal.Parse(v.ToString("0.00", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+            Assert.Equal(
+                legacy.ToString(CultureInfo.InvariantCulture),
+                CsvBuilder.Money(v)!.Value.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(29)]
+    public void Money_RejectsOutOfRangeDecimals(int decimals)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => CsvBuilder.Money(1m, decimals));
+    }
 }

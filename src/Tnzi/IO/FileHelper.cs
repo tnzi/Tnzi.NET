@@ -393,7 +393,7 @@ public static class FileHelper
     /// 获取目录名
     /// </summary>
     /// <param name="filePath">文件路径</param>
-    /// <returns>目录名，如果路径为空则返回空字符串</returns>
+    /// <returns>目录名；路径为空、或路径本身就是根目录时返回 null</returns>
     public static string? GetDirectoryName(string filePath)
     {
         if (string.IsNullOrEmpty(filePath))

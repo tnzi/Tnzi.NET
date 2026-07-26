@@ -37,7 +37,7 @@ public class ChatContactService : ApplicationService, IChatContactService
         var kw = keyword?.Trim().ToLower();
 
         // Super admins are system-maintenance/operations accounts that don't take part in
-        // business activity — they must never surface in the business-facing contact
+        // business activity - they must never surface in the business-facing contact
         // directory. Strip them from the candidate set (empty when Authorization isn't
         // loaded, i.e. no super-admin concept → nothing hidden).
         var hiddenIds = _functionAuthorization == null
@@ -96,7 +96,7 @@ public class ChatContactService : ApplicationService, IChatContactService
             UserId = userId,
             Name = ResolveDisplayName(user, detail),
             AvatarFileId = detail?.AvatarId?.ToString(),
-            // Email/Phone live on the Identity User; Bio on UserDetail. All optional —
+            // Email/Phone live on the Identity User; Bio on UserDetail. All optional -
             // the profile card only renders the rows that carry a value.
             Email = user.Email,
             Phone = user.PhoneNumber,

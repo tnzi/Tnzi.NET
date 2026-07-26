@@ -6,7 +6,7 @@ import { nextTick } from 'vue'
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 
 // Templates.vue calls `useMessage()` directly (like GdprRequests /
-// WorkflowEditor) — it requires NMessageProvider in the tree, so stub it.
+// WorkflowEditor) - it requires NMessageProvider in the tree, so stub it.
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('naive-ui')
   return {
@@ -42,7 +42,7 @@ vi.mock('../../../src/services/bridges/notification-bridge', () => ({
 const stubs = {
   DataTable: { props: ['data'], template: '<div class="dt" :data-rows="data.length" />' },
   // inheritAttrs:false so TCrudPage's `prefix` render-fn (and other NPagination
-  // props) don't fall through onto the bare <div> — `Element.prefix` is a
+  // props) don't fall through onto the bare <div> - `Element.prefix` is a
   // read-only DOM property and assigning a function to it throws.
   Pagination: { inheritAttrs: false, template: '<div />' },
   Input: { props: ['value'], template: '<input />' },

@@ -4,6 +4,8 @@
  * Logger adapter for consistent logging across core.
  */
 
+import { createAdapterSingleton } from './singleton';
+
 export interface LoggerAdapter {
   debug(message: string, ...args: unknown[]): void;
   info(message: string, ...args: unknown[]): void;
@@ -18,17 +20,16 @@ class ConsoleLoggerAdapter implements LoggerAdapter {
   error(message: string, ...args: unknown[]): void { console.error(message, ...args); }
 }
 
-const _fallback = new ConsoleLoggerAdapter();
-let _active: LoggerAdapter | null = null;
+const _slot = createAdapterSingleton<LoggerAdapter>('logger', () => new ConsoleLoggerAdapter());
 
 export function setLoggerAdapter(adapter: LoggerAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useLogger(): LoggerAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetLoggerAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

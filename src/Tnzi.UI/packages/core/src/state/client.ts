@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/state/client
  *
- * `createTnziClient()` — one call that wires the standard Tnzi front-end
+ * `createTnziClient()` - one call that wires the standard Tnzi front-end
  * runtime: an {@link HttpClient} with the framework's canonical auto-refresh +
  * unauthorized behaviour, an {@link AuthStateManager} bound to it, and the auth
  * API factory. Every consumer app used to hand-roll this identical singleton
@@ -13,7 +13,7 @@
  * const { http, auth, authApi } = createTnziClient({ baseUrl: '/api' })
  * ```
  *
- * The returned pieces are plain framework objects — attach any additional
+ * The returned pieces are plain framework objects - attach any additional
  * per-service factories the app needs (`useChatApi(http)`, …) alongside them.
  */
 
@@ -28,7 +28,7 @@ export interface CreateTnziClientOptions {
    * REST base URL for every request the client makes. Defaults to `'/api'`,
    * matching the Vite dev proxy / production reverse-proxy convention. Also
    * the base the SignalR hub URLs derive from on the admin side
-   * (`defineAdminApp({ apiBase })`) — keep the two in sync.
+   * (`defineAdminApp({ apiBase })`) - keep the two in sync.
    */
   baseUrl?: string;
   /**
@@ -45,7 +45,7 @@ export interface CreateTnziClientOptions {
   storagePrefix?: string;
   /**
    * Request timeout in ms forwarded to the {@link HttpClient} (default 30000;
-   * `0` disables). Rarely needed — the framework default is sensible.
+   * `0` disables). Rarely needed - the framework default is sensible.
    */
   timeout?: number;
 }
@@ -97,7 +97,7 @@ export function createTnziClient(options: CreateTnziClientOptions = {}): TnziCli
       return next;
     },
     onUnauthorized: () => {
-      // Refresh path failed (or no refresh token) — clear core auth state.
+      // Refresh path failed (or no refresh token) - clear core auth state.
       // Navigation is app-level: `@tnzi/ui-admin`'s built-in session-expired
       // listener (registered via defineAdminApp install) redirects the admin
       // app to the login route; other surfaces rely on their route guards.

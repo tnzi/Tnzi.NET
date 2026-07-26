@@ -49,6 +49,11 @@ public class AdminWriteEndpointPermissionConventionTests
         //    SettingsCenterService 按组强制（超管 bypass）。见控制器类注释。 ──
         "Tnzi.System.Controllers.Admin.DefaultSettingsCenterAdminController.SaveGroup:PUT",
         "Tnzi.System.Controllers.Admin.DefaultSettingsCenterAdminController.ResetGroup:DELETE",
+        //    单据讨论删除：作者删自己那条无需任何权限码（谁都可能写错一句），删他人
+        //    的才要 finance.comment.delete。静态方法级门会把作者本人也一并挡掉，
+        //    所以判定放在 DocumentCommentService 里（Authorization 未加载时按"没有
+        //    该权限"处理，只减权不增权）。
+        "Tnzi.Finance.Controllers.Admin.DefaultFinanceDocumentCollaborationAdminController.DeleteComment:DELETE",
 
         // ── (1) 真正的写操作缺码：已于 2026-07-07 补齐方法级操作码
         //    (system.diagnostics.execute / system.signalr.execute)，本区清空 ──
@@ -60,11 +65,22 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceRevaluationAdminController.Preview:POST",
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceBalanceSummaryAdminController.Verify:POST",
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceAccountAdminController.GetBalances:POST",
+        // 支票 preview:零副作用预览(与 print 同一套校验,但不分配号、不写登记簿、不动账;
+        // 票号是 NextCheckNumber 的 peek 而非 consume)。POST 仅因入参是一组付款单 id。
+        // 真正开票的 print/register/reprint/render 均带 finance.check.create 写码。
+        "Tnzi.Finance.Banking.Controllers.Admin.DefaultFinanceCheckAdminController.Preview:POST",
+        // 周期性单据 PreviewSchedule:排期推演纯计算,不落库也不造单据(真正生成的
+        // run/run-due 带 finance.recurring.execute)。POST 仅因入参是整个模板草案
+        // ——锚点 31 号 x 每季度这类规则在脑子里算不清楚,让人先看见日期再保存。
+        "Tnzi.Finance.Recurring.Controllers.Admin.DefaultFinanceRecurringAdminController.PreviewSchedule:POST",
+        // 银行规则 test:试跑，经求值器对未对账流水求值后返回命中样本。求值契约明确
+        // 要求无副作用（试跑功能正建立在这一点上），不写库、不建单、不改流水状态。
+        // POST 仅因入参是一组筛选条件（账户 + 样本数）。
+        "Tnzi.Finance.Banking.Controllers.Admin.DefaultFinanceBankRuleAdminController.Test:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.GetVersions:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentAdminController.Validate:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentMemoryAdminController.GetList:POST",
-        "Tnzi.AI.Controllers.Admin.DefaultAgentPersonaAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentRunAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultAgentRunAdminController.Wait:POST",
         "Tnzi.AI.Controllers.Admin.DefaultEvaluationAdminController.GetList:POST",

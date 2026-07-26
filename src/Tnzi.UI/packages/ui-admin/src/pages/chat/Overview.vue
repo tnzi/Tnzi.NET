@@ -1,6 +1,6 @@
 <template>
   <!--
-    Chat Overview — system-level IM dashboard (TContentPage, no back). Merges
+    Chat Overview - system-level IM dashboard (TContentPage, no back). Merges
     statistics with the presence monitor so the page is information-dense:
     · conversation breakdown KPIs (total / direct / group / system)
     · activity KPIs (total messages / today / active members / online users)

@@ -1,12 +1,12 @@
 /**
- * `useAdminShellLayout` — derived layout state for {@link TAdminShell}.
+ * `useAdminShellLayout` - derived layout state for {@link TAdminShell}.
  *
  * Sunk out of `TAdminShell.vue` in 0.2.72+ (B5). Bundles the 16 read-only
  * computed properties that decide which surface (top menu / primary
  * sider / sub-sider / header / footer / tabs) renders in each of the
  * 4 layout modes, plus their widths, transition, and mobile drawer
  * shape. Pure derivations on top of the admin app + theme stores +
- * `useBreakpoint()` — no DOM, no lifecycle hooks, no event handlers.
+ * `useBreakpoint()` - no DOM, no lifecycle hooks, no event handlers.
  *
  * What stays in `TAdminShell.vue`:
  *  - `vertical-mix` interactive state (drawerVisible + mouseleave handler)
@@ -24,6 +24,7 @@ import {
   useAdminThemeStore,
   type AdminLayoutMode,
 } from '../stores/useAdminThemeStore'
+import type { SurfaceTone } from '../theme/surfaceTone'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useBreakpoint } from './useBreakpoint'
 import type { AdminMenuItem } from '../stores/useAdminRouteStore'
@@ -42,7 +43,7 @@ export const SIDER_HOSTED_MODES: AdminLayoutMode[] = [
   'top-hybrid-header-first',
 ]
 
-/** Modes where `invertSider` actually flips the sider — soybean parity:
+/** Modes where `invertSider` actually flips the sider - soybean parity:
  *  `darkMenu = !darkMode && layout.includes('vertical')`. */
 export const VERTICAL_INVERT_MODES: AdminLayoutMode[] = [
   'vertical',
@@ -94,13 +95,13 @@ export interface UseAdminShellLayoutOptions {
   mode: Ref<AdminLayoutMode | undefined>
   /** Sider prop bag (`width` / `subWidth` / `collapsedWidth` / `visible`). */
   sider: Ref<SiderConfig>
-  /** Header prop bag (`visible` only — the rest are passed through to TAdminHeader). */
+  /** Header prop bag (`visible` only - the rest are passed through to TAdminHeader). */
   header: Ref<HeaderConfig>
-  /** Tabs prop bag (`visible` only — the rest are passed through to TAdminTabs). */
+  /** Tabs prop bag (`visible` only - the rest are passed through to TAdminTabs). */
   tabs: Ref<TabsConfig>
   /** Footer prop bag (`visible` only). */
   footer: Ref<FooterConfig>
-  /** Content prop bag (`transition` — overrides the theme store's default). */
+  /** Content prop bag (`transition` - overrides the theme store's default). */
   content: Ref<ContentConfig>
   /** Whether the @tnzi/ui theme reports dark mode (drives invertSider gating). */
   isDark: Ref<boolean>
@@ -108,13 +109,31 @@ export interface UseAdminShellLayoutOptions {
   menuCtx: AdminMenuContext
 }
 
+/**
+ * Surface variant a chrome region renders as:
+ *   - `undefined` → follow the global light/dark mode (no override)
+ *   - `'dark'`    → dark surface + light foreground (inverted)
+ *   - `'light'`   → light surface + dark foreground (only emitted when the
+ *                   global mode is dark, so a light custom surface stays readable)
+ */
+export type AdminSurfaceVariant = 'dark' | 'light' | undefined
+
 export interface UseAdminShellLayoutReturn {
   /** Resolved layout mode (prop wins, else theme store). On mobile,
-   *  always `vertical` — mobile uses a drawer regardless of preference. */
+   *  always `vertical` - mobile uses a drawer regardless of preference. */
   effectiveMode: ComputedRef<AdminLayoutMode>
-  /** Whether the sider should render with inverted (dark) tones. */
+  /** Whether the sider should render with inverted (dark) tones. A custom
+   *  `siderBg` override wins over the `invertSider` shorthand. */
   siderInverted: ComputedRef<boolean>
-  /** Variant of the top menu — null when hidden, `'full'` for horizontal,
+  /** Whether the sider needs the forced-light-surface treatment (a light
+   *  custom sider color while the global mode is dark). */
+  siderLightSurface: ComputedRef<boolean>
+  /** Tone variant for the header / tab / footer / content surfaces. */
+  headerSurface: ComputedRef<AdminSurfaceVariant>
+  tabSurface: ComputedRef<AdminSurfaceVariant>
+  footerSurface: ComputedRef<AdminSurfaceVariant>
+  contentSurface: ComputedRef<AdminSurfaceVariant>
+  /** Variant of the top menu - null when hidden, `'full'` for horizontal,
    *  `'first-level'` for hybrid modes that show only top-level items. */
   topMenuVariant: ComputedRef<'full' | 'first-level' | null>
   /** Whether the primary sider should render at all. */
@@ -141,7 +160,7 @@ export interface UseAdminShellLayoutReturn {
   /** Whether the footer should render. */
   footerVisible: ComputedRef<boolean>
   /** Whether the header should render. (Always `true` in horizontal/hybrid
-   *  modes regardless of consumer / theme preferences — those modes
+   *  modes regardless of consumer / theme preferences - those modes
    *  rely on the header for navigation.) */
   headerVisible: ComputedRef<boolean>
   /** Resolved content transition (forced to `'none'` when pageAnimate is off). */
@@ -166,12 +185,33 @@ export function useAdminShellLayout(
     return appStore.isMobile ? 'vertical' : requested
   })
 
-  const siderInverted = computed(
-    () =>
+  // Sider tone. An explicit `siderBg` override drives the tone directly; only
+  // when there is no override does the `invertSider` shorthand (light-mode +
+  // vertical-family layouts, soybean parity) pick the built-in dark sider.
+  const siderInverted = computed<boolean>(() => {
+    if (themeStore.siderTone) return themeStore.siderTone === 'dark'
+    return (
       themeStore.invertSider &&
       !isDark.value &&
-      VERTICAL_INVERT_MODES.includes(effectiveMode.value),
+      VERTICAL_INVERT_MODES.includes(effectiveMode.value)
+    )
+  })
+  const siderLightSurface = computed<boolean>(
+    () => themeStore.siderTone === 'light' && isDark.value,
   )
+
+  // Header / tab / footer / content: a custom background drives the surface
+  // variant. `'light'` is only emitted under the dark global mode - in light
+  // mode a light custom surface already reads correctly with the default text.
+  function resolveSurface(tone: SurfaceTone | null): AdminSurfaceVariant {
+    if (!tone) return undefined
+    if (tone === 'dark') return 'dark'
+    return isDark.value ? 'light' : undefined
+  }
+  const headerSurface = computed<AdminSurfaceVariant>(() => resolveSurface(themeStore.headerTone))
+  const tabSurface = computed<AdminSurfaceVariant>(() => resolveSurface(themeStore.tabTone))
+  const footerSurface = computed<AdminSurfaceVariant>(() => resolveSurface(themeStore.footerTone))
+  const contentSurface = computed<AdminSurfaceVariant>(() => resolveSurface(themeStore.contentTone))
 
   const topMenuVariant = computed<'full' | 'first-level' | null>(() => {
     if (!HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) return null
@@ -262,7 +302,7 @@ export function useAdminShellLayout(
   const tabsVisible = computed<boolean>(
     // Multi-tab is a desktop affordance; on phones it's an anti-pattern that
     // eats ~14% of the scarce vertical space (a 40px bar under a 52px header).
-    // Hide it below md so the content area gets that height back — the tab
+    // Hide it below md so the content area gets that height back - the tab
     // state itself is untouched, it's just not rendered on phones.
     () => tabs.value.visible !== false && themeStore.tabVisible && !appStore.isMobile,
   )
@@ -272,7 +312,7 @@ export function useAdminShellLayout(
   )
 
   const headerVisible = computed<boolean>(() => {
-    // In horizontal/hybrid layouts the header hosts the menu — hiding
+    // In horizontal/hybrid layouts the header hosts the menu - hiding
     // it strands the user with no way to navigate. Force visible.
     if (HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) return true
     return header.value.visible !== false && themeStore.headerVisible
@@ -301,6 +341,11 @@ export function useAdminShellLayout(
   return {
     effectiveMode,
     siderInverted,
+    siderLightSurface,
+    headerSurface,
+    tabSurface,
+    footerSurface,
+    contentSurface,
     topMenuVariant,
     showMainSider,
     siderItems,

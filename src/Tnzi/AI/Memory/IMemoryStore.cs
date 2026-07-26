@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// 记忆范围 — 支持多层级隔离（User/Agent/Session）
+/// 记忆范围 - 支持多层级隔离（User/Agent/Session）
 /// </summary>
 /// <remarks>
 /// <para>对齐 Mem0/OpenAI 的分层记忆架构：Name 对应记忆类别，UserId 实现用户隔离，AgentId 实现 Agent 隔离。</para>
@@ -11,7 +11,7 @@ namespace Tnzi.AI.Memory;
 public record MemoryScope(string Name, Guid? UserId = null, Guid? AgentId = null, string? SessionId = null)
 {
     /// <summary>
-    /// Agent-bound 标志 — 标识这是绑定到某个 Agent 的记忆范围。
+    /// Agent-bound 标志 - 标识这是绑定到某个 Agent 的记忆范围。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -56,7 +56,7 @@ public record MemoryScope(string Name, Guid? UserId = null, Guid? AgentId = null
     }
 
     /// <summary>
-    /// 构建一个 Agent-bound 记忆范围 — 记忆绑定到指定 Agent，
+    /// 构建一个 Agent-bound 记忆范围 - 记忆绑定到指定 Agent，
     /// 通过结构化 <c>AgentId</c> 列检索，与当前用户无关（headless-safe）。
     /// </summary>
     /// <param name="agentId">目标 Agent ID</param>
@@ -71,7 +71,7 @@ public record MemoryScope(string Name, Guid? UserId = null, Guid? AgentId = null
 }
 
 /// <summary>
-/// 记忆存储抽象 — 持久化 Agent 记忆
+/// 记忆存储抽象 - 持久化 Agent 记忆
 /// </summary>
 /// <remarks>
 /// 默认实现为 DatabaseMemoryStore（使用 EF Core，由 Tnzi.AI 模块提供）。

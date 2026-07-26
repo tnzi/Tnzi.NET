@@ -30,6 +30,14 @@ public class FileRecord : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMult
     // 是否为临时文件
     public bool IsTemporary { get; set; }
 
+    /// <summary>
+    /// 是否公开可读。true 时任何人(含未认证请求)都能读取该文件,用于头像、站点素材这类
+    /// **有意**公开的资源。默认 false:文件只有创建者与持 `storage.file.view` 的管理员可读。
+    ///
+    /// 公开只影响读取,不影响变更——否则任何人都能删掉站点的共享素材。
+    /// </summary>
+    public bool IsPublic { get; set; }
+
     // 图片缩略图路径
     public string? ThumbnailPath { get; set; }
 

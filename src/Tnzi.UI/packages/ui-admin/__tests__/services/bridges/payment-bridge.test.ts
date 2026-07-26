@@ -168,7 +168,7 @@ describe('payment-bridge', () => {
     expect(stats.totalTransactions).toBe(50)
   })
 
-  // orders/subscriptions/refunds are read-only ledgers — the contracts expose
+  // orders/subscriptions/refunds are read-only ledgers - the contracts expose
   // ONLY fetch + real lifecycle endpoints (no create/update/delete stubs).
 
   // ---- subscriptions sub-contract ----

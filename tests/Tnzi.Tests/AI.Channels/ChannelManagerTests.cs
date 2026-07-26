@@ -44,7 +44,7 @@ public class ChannelManagerTests
             scopeFactory,
             options);
 
-        // Act — process a single message
+        // Act - process a single message
         var inbound = new InboundMessage("telegram", "123", "user1", "Hello AI");
         await bus.PublishInboundAsync(inbound);
 
@@ -171,7 +171,7 @@ public class ChannelManagerTests
         await Task.Delay(500);
         await manager.StopAsync(CancellationToken.None);
 
-        // Assert — error reply should be sent
+        // Assert - error reply should be sent
         Assert.NotNull(capturedOutbound);
         Assert.Contains("error occurred", capturedOutbound!.Text, StringComparison.OrdinalIgnoreCase);
     }
@@ -234,7 +234,7 @@ public class ChannelManagerTests
         await Task.Delay(500);
         await manager.StopAsync(CancellationToken.None);
 
-        // Assert — 应该保存新线程映射
+        // Assert - 应该保存新线程映射
         threadStore.Verify(s => s.SetThreadIdAsync("telegram", "456", newThreadId, null, "user2"), Times.Once);
     }
 

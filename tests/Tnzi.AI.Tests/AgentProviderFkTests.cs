@@ -107,7 +107,7 @@ public class AgentProviderFkTests : IDisposable
     [Fact]
     public async Task DeletingProvider_SetsAgentProviderIdToNull()
     {
-        // Arrange: 验证 OnDelete(SetNull) 行为 — 删除 Provider 不级联删除 Agent
+        // Arrange: 验证 OnDelete(SetNull) 行为 - 删除 Provider 不级联删除 Agent
         var provider = new Provider
         {
             Name = "to-delete",
@@ -139,7 +139,7 @@ public class AgentProviderFkTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 仅注册 FK 测试所需的 Agent + Provider 实体集。
+/// 测试专用 DbContext - 仅注册 FK 测试所需的 Agent + Provider 实体集。
 /// </summary>
 internal sealed class AgentProviderFkDbContext : TnziDbContext<AgentProviderFkDbContext>
 {

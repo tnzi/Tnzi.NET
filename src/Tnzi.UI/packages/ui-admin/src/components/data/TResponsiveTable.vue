@@ -110,7 +110,7 @@ export interface TResponsiveTableProps<T = unknown> {
   /**
    * Declarative row actions. When supplied, a right-fixed operation column is
    * synthesised (rendering {@link TRowActions} with confirm/collapse/auto-width)
-   * and folded into the mobile card footer automatically — so pages stop
+   * and folded into the mobile card footer automatically - so pages stop
    * hand-writing an `h(NButton)+NPopconfirm` action column. Pair with the
    * `editAction`/`viewAction`/`deleteAction` factories.
    */
@@ -122,7 +122,7 @@ export interface TResponsiveTableProps<T = unknown> {
   /**
    * naive `row-props` equivalent. Desktop: forwarded to `NDataTable` verbatim.
    * Mobile cards: the returned attrs/handlers are applied to each card so row
-   * click-through (drill-in) keeps working — a result carrying `onClick` also
+   * click-through (drill-in) keeps working - a result carrying `onClick` also
    * gives the card pointer/hover affordance.
    */
   rowProps?: (row: T, index: number) => Record<string, unknown>
@@ -140,7 +140,7 @@ export interface TResponsiveTableProps<T = unknown> {
 const forwardedSlots = useSlots() as Record<string, ((props: Record<string, unknown>) => unknown) | undefined>
 
 type Row = Record<string, unknown>
-/** A loose superset of naive's column shape — we only read a handful of
+/** A loose superset of naive's column shape - we only read a handful of
  *  fields when deriving the mobile cards. */
 interface LooseColumn {
   key?: string | number
@@ -174,7 +174,7 @@ const useCards = computed(() => props.mobile === 'cards' && bp.isSm.value)
 
 const rows = computed<Row[]>(() => (props.data ?? []) as unknown as Row[])
 
-// Casts for the desktop NDataTable pass-through — the public props are typed
+// Casts for the desktop NDataTable pass-through - the public props are typed
 // to the consumer's row type `T`; naive's NDataTable wants its own RowData.
 const ndtData = computed(() => props.data as unknown as Row[])
 const ndtRowKey = computed(
@@ -186,7 +186,7 @@ const ndtSummary = computed(() => props.summary as unknown as DataTableCreateSum
 // Column list, plus a synthesised right-fixed operation column when
 // `rowActions` is supplied. Everything downstream (desktop table, mobile card
 // footer, horizontal-scroll width) derives from this so the action column is
-// handled uniformly — its `__row_actions__` key is a member of the default
+// handled uniformly - its `__row_actions__` key is a member of the default
 // `actionKeys`, so `isActionCol` folds it into the card footer automatically.
 const looseColumns = computed<LooseColumn[]>(() => {
   const base = (props.columns ?? []) as unknown as LooseColumn[]
@@ -266,13 +266,13 @@ const ActionCell = defineComponent({
   },
 })
 
-/** Mobile card counterpart of `rowProps` — same function, Row-typed. */
+/** Mobile card counterpart of `rowProps` - same function, Row-typed. */
 const cardProps = computed(
   () => props.rowProps as unknown as ((row: Row, index: number) => Record<string, unknown>) | undefined,
 )
 
 /** Resolve the naive summary contract into per-column value maps for the
- *  totals card (colSpan/rowSpan have no card equivalent — dropped). */
+ *  totals card (colSpan/rowSpan have no card equivalent - dropped). */
 const cardSummaryRows = computed<Record<string, VNodeChild>[]>(() => {
   const create = props.summary as unknown as
     | ((pageData: Row[]) => TResponsiveSummaryRow | TResponsiveSummaryRow[])
@@ -293,7 +293,7 @@ const cardSummaryRows = computed<Record<string, VNodeChild>[]>(() => {
 
 // Only surface a mobile pager for *controlled remote* pagination (has an
 // item count + a page handler). Client-side `{ pageSize }`-only configs are
-// dropped on mobile — the card list just shows every row and scrolls.
+// dropped on mobile - the card list just shows every row and scrolls.
 const paginationConfig = computed<TResponsivePagination | null>(() => {
   const p = props.pagination
   if (!p || typeof p !== 'object') return null

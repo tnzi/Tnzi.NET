@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// 配置变更检测器 — 基于文件 mtime 追踪，触发缓存失效
+/// 配置变更检测器 - 基于文件 mtime 追踪，触发缓存失效
 /// </summary>
 public interface IConfigChangeDetector : IDisposable
 {

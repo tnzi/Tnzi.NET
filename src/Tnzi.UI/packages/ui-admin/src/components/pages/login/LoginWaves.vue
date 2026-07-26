@@ -1,15 +1,15 @@
 <script setup lang="ts">
 /**
- * `LoginWaves` — animated dual-layer bottom waves for the `wave` login layout
+ * `LoginWaves` - animated dual-layer bottom waves for the `wave` login layout
  * (2026-06-11 redesign, 方案 A). Two seamless SVG strips scroll horizontally
  * at different speeds so the waves appear to drift. Each strip is 200% wide
  * (the same path repeated twice) translating from 0 to -50% in a loop.
  *
- * Purely decorative — `aria-hidden` + `pointer-events: none`; animation is
+ * Purely decorative - `aria-hidden` + `pointer-events: none`; animation is
  * disabled under `prefers-reduced-motion`.
  */
 interface Props {
-  /** Wave fill color — typically the theme primary (or a dark palette step). */
+  /** Wave fill color - typically the theme primary (or a dark palette step). */
   color: string
   /** Overall opacity of the wave block (dark mode dims it). */
   opacity?: number

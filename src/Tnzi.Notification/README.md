@@ -75,134 +75,88 @@ Tnzi.Notification/
 ├── Entities/
 │   ├── Message.cs                     # 消息实体
 │   ├── Recipient.cs                   # 接收者实体
-│   ├── Attachment.cs                  # 附件实体
-│   ├── Template.cs                    # 消息模板实体
-│   ├── Layout.cs                      # 消息布局实体
+│   ├── Attachment.cs                  # 附件实体（[FileField] FileId）
+│   ├── NotificationPreference.cs      # 通知偏好实体
 │   └── Configs/                       # 实体配置
-├── Data/
-│   └── NotificationDbContext.cs       # DbContext基类
-├── Dtos/
-│   ├── NotificationDtos.cs            # 通知DTOs
-│   ├── EmailDtos.cs                   # 邮件DTOs
-│   └── SendResult.cs                  # 发送结果
+├── Dtos/                              # 通知 / 邮件 / 偏好 / 统计 / 发送结果 DTOs
 ├── Services/
-│   ├── IMessageService.cs             # 消息服务接口
-│   ├── MessageService.cs               # 消息服务实现
-│   ├── ITemplateService.cs            # 模板服务接口
-│   ├── TemplateService.cs             # 模板服务实现
-│   ├── ILayoutService.cs              # 布局服务接口
-│   ├── LayoutService.cs               # 布局服务实现
-│   ├── IEmailSender.cs                # 邮件发送接口
-│   ├── MailKitEmailSender.cs          # 邮件发送实现（MailKit）
-│   ├── ISmsSender.cs                  # 短信发送接口
-│   ├── HttpSmsSender.cs               # 短信发送实现（HTTP REST API）
-│   ├── IPushSender.cs                 # 推送发送接口
-│   ├── PushSender.cs                  # 推送通知实现
-│   ├── IQueueService.cs               # 队列服务接口
-│   ├── HangfireQueueService.cs        # Hangfire队列实现
-│   ├── InMemoryQueueService.cs        # 内存队列实现
-│   └── Null*Sender.cs                 # 空实现（用于测试）
+│   ├── Interfaces/                     # INotificationService / *QueryService / *RetryService /
+│   │                                   #   IUserNotificationService / *PreferenceService / *QueueService /
+│   │                                   #   IEmailSender / ISmsSender / IPushSender
+│   ├── NotificationService.cs         # 通知创建/发送编排
+│   ├── NotificationQueryService.cs    # 管理端查询 + 统计
+│   ├── NotificationRetryService.cs    # 失败重试（指数退避）
+│   ├── UserNotificationService.cs     # 用户收件箱
+│   ├── NotificationPreferenceService.cs # 通知偏好
+│   ├── ChannelQueueService.cs         # 后台队列（System.Threading.Channels）
+│   ├── MailKitEmailSender.cs          # 邮件发送（MailKit）
+│   ├── HttpSmsSender.cs               # 短信发送（HTTP REST：Twilio/Plivo）
+│   ├── PushSender.cs                  # 推送（Firebase）
+│   └── Null*Sender.cs                 # 空实现（未配置渠道时降级）
 ├── Options/
-│   ├── NotificationOptions.cs        # 配置选项
-│   ├── TemplateOptions.cs           # 模板配置选项
-│   └── DefaultMessageTemplates.cs   # 默认消息模板
-├── TnziNotificationModule.cs       # 模块配置
-└── GlobalUsings.cs                   # 全局引用
+│   └── NotificationOptions.cs         # 配置选项（模板配置归 Tnzi.Template）
+├── NotificationModule.cs              # 模块配置
+└── GlobalUsings.cs                    # 全局引用
 ```
 
-## 文件系统模板（优先级最高）
+## 模板（由 Tnzi.Template 模块提供）
 
-- 目录结构：
+Notification **不自带模板子系统**。消息模板通过可选依赖 `Tnzi.Template` 的
+`ITemplateRenderService` 渲染（未加载 Template 模块时，直接使用 `request.Content`）。
+模板存储、CRUD、布局均归 `Tnzi.Template`（`Template_Template` / `Template_Layout`
+表 + 文件系统），相关配置在 `Template:*` 配置节（`TemplateRootPath` 默认 `Templates`、
+`EnableFileSystemTemplates` 默认 `true`、`TemplateExtension` 默认 `.cshtml`）。
 
-    ```
-    Templates/
-      ├── Notification/
-      │   ├── Email/
-      │   │   └── UserWelcome.cshtml
-      │   ├── SMS/
-      │   │   └── VerificationCode.cshtml
-      │   └── Push/
-      │       └── OrderStatus.cshtml
-      └── Layouts/
-          ├── Email/
-          │   └── _Default.cshtml
-          └── SMS/
-              └── _Default.cshtml
-    ```
+### 路径约定（关键）
 
-- 模板文件（YAML front matter + Razor）：
+模板文件路径为 `Templates/{Module}/{Category}/{TemplateName}.cshtml`。对通知模板，
+**Module = `Notification`，Category = 渠道名**（`Email` / `Sms` / `Push`，即
+`NotificationType.ToString()`）：
 
-    ```cshtml
-    ---
-    Subject: Welcome to @Model.SiteName!
-    Layout: EmailDefault
-    Description: Welcome email
-    Type: Email
-    ---
-    @model UserWelcomeModel
+```
+Templates/
+  └── Notification/
+      ├── Email/
+      │   ├── TwoFactorCode.cshtml
+      │   ├── PasswordReset.cshtml
+      │   └── WelcomeEmail.cshtml
+      └── Sms/
+          └── TwoFactorCode.cshtml
+```
 
-    <h2>Welcome @Model.UserName!</h2>
-    <p>Thanks for joining @Model.SiteName.</p>
-    ```
+> ⚠️ 子目录名必须与渠道名**逐字一致**：是 `Sms`（不是 `SMS`）、`Email`、`Push`——
+> 对应 `NotificationType.Sms/Email/Push` 的 `ToString()`。在大小写敏感的文件系统
+> （Linux）上，`SMS/` 会导致模板查找失败、正文为空。
 
-- 布局文件：
-    ```cshtml
-    ---
-    Type: Email
-    IsDefault: true
-    Description: Default email layout
-    ---
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>@Model.Subject</title>
-    </head>
-    <body>
-        <div>@Model.Content</div>
-    </body>
-    </html>
-    ```
+发送时 `CreateNotificationRequest` 通常只设置 `Type` + `TemplateName`（不设 `Category`）。
+`NotificationService` 会在未显式指定 `Category` 时，**自动以渠道名作为模板查找的
+Category**，从而命中上述按渠道组织的模板。若显式设置了 `Category`（自定义分组），
+则以显式值为准。
+
+框架在 `Tnzi.Hosting` 内自带了 `Notification/{Email,Sms}/` 下的默认模板
+（`TwoFactorCode` / `PasswordReset` / `WelcomeEmail` / `EmailConfirmation`），
+经 `CopyToOutputDirectory` 复制到消费方输出目录，开箱即用。
+
+### 模板文件格式（YAML front matter + Razor）
+
+```cshtml
+---
+Subject: Welcome to @Model.AppName!
+Layout: EmailDefault
+Description: Welcome email
+---
+<h2>Welcome @Model.UserName!</h2>
+<p>Thanks for joining @Model.AppName.</p>
+```
 
 ### 模板查找优先级
 
-1. 文件系统（Templates/...）
-2. 数据库（Template、Layout 实体）
-3. 配置 `Notification:Templates`
-4. （无代码内置默认值）
+1. 数据库（`Template_Template`，可经 Template 管理端编辑/覆盖，命中即用）
+2. 文件系统（`Templates/{Module}/{Category}/*.cshtml`，由 `Template:EnableFileSystemTemplates` 控制，默认开启）
 
-### 配置兜底示例（最小模板/布局）
-
-在应用层的 `appsettings.json` 中提供最小兜底（英文），避免文件缺失时无法发送：
-
-```json
-{
-    "Notification": {
-        "Templates": {
-            "DefaultTemplates": {
-                "UserWelcome": {
-                    "TemplateName": "UserWelcome",
-                    "TemplateType": "Email",
-                    "SubjectTemplate": "Welcome to @Model.SiteName!",
-                    "ContentTemplate": "<h2>Welcome @Model.UserName!</h2><p>Thanks for joining @Model.SiteName.</p>",
-                    "DefaultLayoutName": "EmailDefault",
-                    "Description": "Fallback welcome email"
-                }
-            },
-            "DefaultLayouts": {
-                "EmailDefault": {
-                    "LayoutName": "EmailDefault",
-                    "LayoutType": "Email",
-                    "LayoutContent": "<html><body>@Model.Content</body></html>",
-                    "IsDefault": true,
-                    "Description": "Fallback email layout"
-                }
-            }
-        }
-    }
-}
-```
-
-> 提示：仓库 `docs/NOTIFICATION_TEMPLATES_SAMPLE.json` 提供同样示例，可复制到应用配置。
+命中不到时 `NotificationService` 回退到 `request.Content`（未提供则为空）。
+若要在管理端覆盖框架自带模板，请以相同的 **渠道 Category**（`Email` / `Sms`）新建
+DB 模板，使其优先于文件系统版本。
 
 ### 确保发布可找到模板文件
 
@@ -252,29 +206,13 @@ Tnzi.Notification/
         "Retry": {
             "RetryDelaySeconds": 60,
             "EnableExponentialBackoff": true
-        },
-        "Templates": {
-            "DefaultTemplates": {
-                "UserWelcome": {
-                    "TemplateName": "UserWelcome",
-                    "TemplateType": 1,
-                    "SubjectTemplate": "欢迎来到 @Model.SiteName!",
-                    "ContentTemplate": "<h2>欢迎 @Model.UserName!</h2>",
-                    "DefaultLayoutName": "EmailDefault"
-                }
-            },
-            "DefaultLayouts": {
-                "EmailDefault": {
-                    "LayoutName": "EmailDefault",
-                    "LayoutType": 1,
-                    "LayoutContent": "<html><body>@Model.Content</body></html>",
-                    "IsDefault": true
-                }
-            }
         }
     }
 }
 ```
+
+> 模板不在 `Notification` 配置节下。模板文件路径 / 开关等由 `Tnzi.Template` 的
+> `Template:*` 配置节控制（见上「模板」一节）。
 
 ### 2. 使用主 DbContext（自动注册）
 

@@ -10,7 +10,7 @@ export interface SettingsChangeSignal {
 /**
  * Module-level mirror of the latest `Settings.Changed` broadcast. The Settings
  * Center page watches it for concurrent-edit awareness (another session saved
- * a group this page is showing) without owning its own hub connection — the
+ * a group this page is showing) without owning its own hub connection - the
  * shell's single subscription feeds it.
  */
 export const lastSettingsChange = ref<SettingsChangeSignal | null>(null)
@@ -30,7 +30,7 @@ export interface UseSettingsRealtimeOptions {
 
 /**
  * Subscribes to the `/hubs/settings` realtime channel so an already-open admin
- * session live-refreshes deployment config the super admin changes — no manual
+ * session live-refreshes deployment config the super admin changes - no manual
  * page reload. Mirrors {@link useChatRealtime}: the backend broadcasts only the
  * changed key, the client decides what to re-fetch.
  */

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// Tripwire 异常 — 任何 guardrail 抛出此异常将立即中止所有并行执行的 guardrail
+/// Tripwire 异常 - 任何 guardrail 抛出此异常将立即中止所有并行执行的 guardrail
 /// </summary>
 [ExperimentalApi(Reason = "Tripwire guardrails are in preview")]
 public class TripwireGuardrailException : TnziException

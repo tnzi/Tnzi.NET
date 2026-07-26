@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP Provider 共享基类 — 封装按名查找服务器、单服务器操作和遍历所有服务器的通用模式。
+/// MCP Provider 共享基类 - 封装按名查找服务器、单服务器操作和遍历所有服务器的通用模式。
 /// 服务器枚举走 <see cref="IMcpServerCatalog"/>（部署配置 + DB 注册表合并）。
 /// 子类只需实现具体的 SDK 调用。
 /// </summary>

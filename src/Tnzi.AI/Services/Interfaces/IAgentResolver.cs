@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// Agent 解析器 — 根据 agentId / provider / model / toolGroups 解析 AgentExecutor，
+/// Agent 解析器 - 根据 agentId / provider / model / toolGroups 解析 AgentExecutor，
 /// 以及从请求内容构建 ChatMessage
 /// </summary>
 public interface IAgentResolver

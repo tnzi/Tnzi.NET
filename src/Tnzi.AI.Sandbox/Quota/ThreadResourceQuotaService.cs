@@ -5,7 +5,7 @@ namespace Tnzi.AI.Sandbox.Quota;
 /// <summary>
 /// Default <see cref="IThreadResourceQuota"/> implementation backed by three
 /// independent <see cref="ICache"/> atomic counters per thread. Failure to
-/// read or write the cache is logged but never thrown — observability for
+/// read or write the cache is logged but never thrown - observability for
 /// quotas must never interrupt the agent.
 /// </summary>
 public sealed class ThreadResourceQuotaService : IThreadResourceQuota
@@ -30,7 +30,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
         if (!quota.Enabled)
             return ThreadQuotaCheckResult.Allow(long.MaxValue, long.MaxValue, long.MaxValue);
 
-        // Duration / output are soft (approximate) caps — enforced from the
+        // Duration / output are soft (approximate) caps - enforced from the
         // previously-recorded usage, which can momentarily lag a parallel command.
         var usage = await GetUsageAsync(threadId, ct);
 
@@ -60,7 +60,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
             }
             catch (Exception ex)
             {
-                // Cache failure must never block the agent — fall through to allow.
+                // Cache failure must never block the agent - fall through to allow.
                 _logger.LogWarning(ex, "Failed to reserve thread command quota for thread {ThreadId}", threadId);
                 return ThreadQuotaCheckResult.Allow(long.MaxValue,
                     remainingDurationMs: quota.MaxTotalDurationMs > 0 ? quota.MaxTotalDurationMs - usage.TotalDurationMs : long.MaxValue,
@@ -69,7 +69,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
 
             if (reserved > quota.MaxCommandCount)
             {
-                // Over the cap — give the reserved slot back so a later window
+                // Over the cap - give the reserved slot back so a later window
                 // reset / different thread is not penalised, then deny.
                 try { await _cache.IncrementAsync(KeyCommandCount(threadId), -1, quota.WindowDuration, ct); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to roll back thread command quota for thread {ThreadId}", threadId); }
@@ -100,7 +100,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
         try
         {
             // Command count is already reserved up-front in CheckAsync (hard cap),
-            // so it is intentionally NOT incremented here — doing so would
+            // so it is intentionally NOT incremented here - doing so would
             // double-count. Duration and output bytes are soft caps recorded
             // after the fact.
             if (durationMs > 0)
@@ -111,7 +111,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
         }
         catch (Exception ex)
         {
-            // Silent catch — quota accounting must not break the agent flow.
+            // Silent catch - quota accounting must not break the agent flow.
             _logger.LogWarning(ex, "Failed to record thread quota usage for thread {ThreadId}", threadId);
         }
     }
@@ -153,7 +153,7 @@ public sealed class ThreadResourceQuotaService : IThreadResourceQuota
         }
     }
 
-    // Cache key layout — three independent atomic counters per thread.
+    // Cache key layout - three independent atomic counters per thread.
     // Using a stable string prefix lets ICache.RemoveByPrefixAsync wipe an
     // entire thread cleanly if needed (operations dashboards, tests).
     private static string KeyCommandCount(Guid t) => $"sandbox:thread-quota:{t:N}:cmd";

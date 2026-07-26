@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// SummarizationMiddleware 增强功能测试 — MicroCompact + 9节摘要
+/// SummarizationMiddleware 增强功能测试 - MicroCompact + 9节摘要
 /// </summary>
 public class SummarizationMiddlewareEnhancedTests
 {

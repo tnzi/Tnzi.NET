@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.Tools;
 
 /// <summary>
-/// 工具解析器接口 — 解析 C# 工具 + OpenAPI 工具 + MCP 工具并合并
+/// 工具解析器接口 - 解析 C# 工具 + OpenAPI 工具 + MCP 工具并合并
 /// </summary>
 public interface IToolResolver
 {
@@ -18,7 +18,7 @@ public interface IToolResolver
 }
 
 /// <summary>
-/// 工具解析器 — 解析 C# 工具、OpenAPI 工具、MCP 工具并合并
+/// 工具解析器 - 解析 C# 工具、OpenAPI 工具、MCP 工具并合并
 /// </summary>
 public class ToolResolver : IToolResolver, IDisposable
 {

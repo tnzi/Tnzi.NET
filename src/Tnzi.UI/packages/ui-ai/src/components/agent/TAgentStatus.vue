@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TAgentStatus — Agent run status indicator
+ * TAgentStatus - Agent run status indicator
  */
 
 import { computed } from 'vue';

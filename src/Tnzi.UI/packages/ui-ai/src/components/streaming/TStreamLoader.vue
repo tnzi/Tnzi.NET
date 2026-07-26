@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TStreamLoader — 10-ray fan spinner
+ * TStreamLoader - 10-ray fan spinner
  *
  * Accessible loading indicator with graduated opacity rays.
  * Matches DeerFlow's fan design pattern.

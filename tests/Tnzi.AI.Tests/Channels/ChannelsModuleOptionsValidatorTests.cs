@@ -55,7 +55,7 @@ public class ChannelsModuleOptionsValidatorTests
     [Fact]
     public void Validate_SlackDisabled_NoSigningSecret_Passes()
     {
-        // Disabled adapter — no webhook traffic, so no requirement.
+        // Disabled adapter - no webhook traffic, so no requirement.
         var result = Validate(new ChannelsModuleOptions
         {
             Enabled = true,
@@ -110,7 +110,7 @@ public class ChannelsModuleOptionsValidatorTests
     [Fact]
     public void Validate_FeishuDisabled_NoEncryptKey_Passes()
     {
-        // Disabled adapter — no webhook traffic, so no requirement.
+        // Disabled adapter - no webhook traffic, so no requirement.
         var result = Validate(new ChannelsModuleOptions
         {
             Enabled = true,
@@ -165,7 +165,7 @@ public class ChannelsModuleOptionsValidatorTests
     [Fact]
     public void Validate_DiscordDisabled_NoPublicKey_Passes()
     {
-        // Disabled adapter — no webhook traffic, so no requirement.
+        // Disabled adapter - no webhook traffic, so no requirement.
         var result = Validate(new ChannelsModuleOptions
         {
             Enabled = true,
@@ -196,7 +196,7 @@ public class ChannelsModuleOptionsValidatorTests
     [Fact]
     public void Validate_FileThreadStore_MultiTenancyEnabled_Fails()
     {
-        // FileChannelThreadStore has no TenantId in its key — reject under multi-tenancy.
+        // FileChannelThreadStore has no TenantId in its key - reject under multi-tenancy.
         var result = Validate(new ChannelsModuleOptions
         {
             Enabled = true,
@@ -247,7 +247,7 @@ public class ChannelsModuleOptionsValidatorTests
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
         result.ChallengeResponse.ShouldNotBeNull();
 
-        // Must deserialize cleanly — string-interpolation bug would throw here.
+        // Must deserialize cleanly - string-interpolation bug would throw here.
         using var doc = JsonDocument.Parse(result.ChallengeResponse);
         var roundTripped = doc.RootElement.GetProperty("challenge").GetString();
         roundTripped.ShouldBe(tricky);

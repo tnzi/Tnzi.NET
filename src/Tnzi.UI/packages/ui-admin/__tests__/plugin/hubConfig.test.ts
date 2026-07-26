@@ -31,7 +31,7 @@ describe('resolveHubConfigs', () => {
 
   it('does NOT enable chat when the consumer did not opt in', () => {
     const r = resolveHubConfigs('/api', undefined, undefined)
-    expect(r.chat).toBeUndefined() // a bare { hubUrl } would enable chat — must stay undefined
+    expect(r.chat).toBeUndefined() // a bare { hubUrl } would enable chat - must stay undefined
     expect(r.settings).toEqual({ hubUrl: '/api/hubs/settings' }) // settings hub runs regardless
   })
 })

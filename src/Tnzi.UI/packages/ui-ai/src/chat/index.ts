@@ -1,7 +1,7 @@
 /**
- * AI Chat — full chat interface components.
+ * AI Chat - full chat interface components.
  *
- * Primary entry point: `TChatApp` — production-grade chat application
+ * Primary entry point: `TChatApp` - production-grade chat application
  * shell with Manus-inspired design. Compose data via props/events and
  * override visuals via slots. See `TChatApp.vue` JSDoc for the API.
  *

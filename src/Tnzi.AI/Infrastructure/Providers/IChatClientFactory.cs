@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// ChatClient 工厂接口 — 返回 MEAI 抽象类型
+/// ChatClient 工厂接口 - 返回 MEAI 抽象类型
 /// </summary>
 /// <remarks>
 /// 接口只暴露 MEAI 抽象方法（IChatClient / IEmbeddingGenerator）。

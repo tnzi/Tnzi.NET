@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TPromoCard — Sidebar / footer promo block.
+ * TPromoCard - Sidebar / footer promo block.
  *
  * Compact card with title + subtitle + trailing arrow, used in the
  * footer of expanded sidebars to surface things like

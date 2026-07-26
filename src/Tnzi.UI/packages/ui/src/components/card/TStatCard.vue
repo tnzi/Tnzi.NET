@@ -79,7 +79,7 @@ const borderColorValue = computed(() => colorMap[props.color] ?? colorMap.blue)
 </script>
 
 <style scoped>
-/* CSS variable border — cannot be expressed as utility */
+/* CSS variable border - cannot be expressed as utility */
 .t-stat-card {
   border-left: 3px solid var(--t-stat-border-color, #2080f0);
 }

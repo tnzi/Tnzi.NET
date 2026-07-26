@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Options;
 
 /// <summary>
-/// 工具结果预算配置 — 截断超限的工具结果，防止上下文膨胀
+/// 工具结果预算配置 - 截断超限的工具结果，防止上下文膨胀
 /// </summary>
 [ConfigSection("AI:ToolResultBudget")]
 [RuntimeSettingGroup(Key = "ai-tools", Module = "AI", DisplayName = "Tools",

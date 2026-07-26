@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { HttpClient } from '@tnzi/core/http'
 import { buildOAuthProviders } from '../../src/headless/oauthProviders'
 
-// Minimal HttpClient stub — only `resolveUrl` is used by oauthLoginUrl.
+// Minimal HttpClient stub - only `resolveUrl` is used by oauthLoginUrl.
 function stubClient(): HttpClient {
   return {
     resolveUrl: (url: string, params?: Record<string, unknown> | object) =>

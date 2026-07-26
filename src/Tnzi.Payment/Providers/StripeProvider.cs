@@ -48,7 +48,7 @@ public class StripeProvider : IPaymentProvider
 
             var options = new PaymentIntentCreateOptions
             {
-                Amount = (long)(input.Amount * 100), // Stripe uses cents
+                Amount = ToMinorUnits(input.Amount),
                 Currency = input.Currency.ToLower(),
                 Metadata = new Dictionary<string, string>
                 {
@@ -131,7 +131,7 @@ public class StripeProvider : IPaymentProvider
             var refundOptions = new RefundCreateOptions
             {
                 PaymentIntent = input.ExternalTradeNo ?? input.TradeNo,
-                Amount = (long)(input.RefundAmount * 100),
+                Amount = ToMinorUnits(input.RefundAmount),
                 Reason = RefundReasons.RequestedByCustomer
             };
 
@@ -330,7 +330,7 @@ public class StripeProvider : IPaymentProvider
 
             var options = new PaymentIntentCreateOptions
             {
-                Amount = (long)(input.Amount * 100), // Stripe uses cents
+                Amount = ToMinorUnits(input.Amount),
                 Currency = input.Currency.ToLower(),
                 Customer = input.ProviderCustomerId,
                 PaymentMethod = input.PaymentMethodToken,
@@ -375,6 +375,14 @@ public class StripeProvider : IPaymentProvider
     /// 获取 Stripe 客户端（供模块内部使用）
     /// </summary>
     internal StripeClient GetStripeClient() => GetClient();
+
+    /// <summary>
+    /// 金额转 Stripe 的最小货币单位（分）。
+    /// 金额列精度是 19,4，直接 (long) 强转会把不足一分的部分截掉（少收/少退），故先四舍五入。
+    /// 注意：此处按"两位小数货币"换算，零小数货币（如 JPY）需要按币种指数换算，尚未支持。
+    /// </summary>
+    private static long ToMinorUnits(decimal amount)
+        => (long)Math.Round(amount * 100, MidpointRounding.AwayFromZero);
 
     private static PaymentStatus MapStripeStatus(string? status)
     {

@@ -32,7 +32,7 @@ const scenario: MockScenario = {
     {
       at: 3000,
       type: 'user-message',
-      content: "Here's the Q4 deck — pull out the three highest-risk items.",
+      content: "Here's the Q4 deck - pull out the three highest-risk items.",
       attachments: [
         {
           id: 'a2',
@@ -44,9 +44,9 @@ const scenario: MockScenario = {
     },
     { at: 3500, type: 'assistant-start' },
     { at: 3800, type: 'assistant-delta', text: 'Top three risks flagged in the deck:\n\n' },
-    { at: 4100, type: 'assistant-delta', text: '1. **Key account concentration** — top 3 customers = 47% of ARR\n' },
-    { at: 4400, type: 'assistant-delta', text: '2. **Hiring gap in engineering** — 6 open senior roles against Q4 commitments\n' },
-    { at: 4700, type: 'assistant-delta', text: '3. **Vendor migration dependency** — two critical services sunsetting before March' },
+    { at: 4100, type: 'assistant-delta', text: '1. **Key account concentration** - top 3 customers = 47% of ARR\n' },
+    { at: 4400, type: 'assistant-delta', text: '2. **Hiring gap in engineering** - 6 open senior roles against Q4 commitments\n' },
+    { at: 4700, type: 'assistant-delta', text: '3. **Vendor migration dependency** - two critical services sunsetting before March' },
     { at: 5000, type: 'assistant-end', usage: { promptTokens: 120, completionTokens: 95, totalTokens: 215 } },
   ],
 }

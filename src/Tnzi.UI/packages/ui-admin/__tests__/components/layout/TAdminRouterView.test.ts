@@ -11,7 +11,7 @@ let mountCounter = 0
 let activateCounter = 0
 let detailMountCounter = 0
 
-// Detail page rendering its route id — same route name across A/B, only params
+// Detail page rendering its route id - same route name across A/B, only params
 // differ. Counts mounts so the test can prove A and B get SEPARATE instances.
 const DetailPage = defineComponent({
   name: 'DetailPage',
@@ -114,7 +114,7 @@ describe('TAdminRouterView', () => {
     await router.push('/a')
     await flushPromises()
     expect(wrapper.find('.page-a').exists()).toBe(true)
-    // PageA was activated at least once after re-entry — KeepAlive working.
+    // PageA was activated at least once after re-entry - KeepAlive working.
     expect(activateCounter).toBeGreaterThanOrEqual(1)
     wrapper.unmount()
   })

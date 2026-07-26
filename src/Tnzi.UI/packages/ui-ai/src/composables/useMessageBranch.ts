@@ -1,5 +1,5 @@
 /**
- * useMessageBranch — Branch navigation for message variants
+ * useMessageBranch - Branch navigation for message variants
  *
  * Manages multiple response branches (e.g., after regeneration) with
  * circular navigation. Useful for showing "1/3" style branch selectors.

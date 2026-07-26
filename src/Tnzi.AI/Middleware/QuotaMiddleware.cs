@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 配额中间件 — Before: 预留配额，After: 结算实际用量
+/// 配额中间件 - Before: 预留配额，After: 结算实际用量
 /// </summary>
 public class QuotaMiddleware : IAiMiddleware
 {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// 默认会话绑定解析器 — 优先级匹配规则，无匹配时使用 GatewayOptions 默认值。
+/// 默认会话绑定解析器 - 优先级匹配规则，无匹配时使用 GatewayOptions 默认值。
 /// 规则来源：配置（GatewayOptions.BindingRules，启动时冻结）+ 数据库（启用的 SessionBindingRule 行，
 /// 带缓存按 TTL 刷新；绝不在每次 Resolve 时查库）。同优先级下配置规则胜出。
 /// </summary>
@@ -36,7 +36,7 @@ public class DefaultSessionBinder : ISessionBinder
         _configRules = rules;
         _options = options;
         _scopeFactory = scopeFactory;
-        // 默认 5 分钟 TTL — 避免每次 Resolve 查库，同时让 admin 写入后较快生效。
+        // 默认 5 分钟 TTL - 避免每次 Resolve 查库，同时让 admin 写入后较快生效。
         _cacheTtl = cacheTtl ?? TimeSpan.FromMinutes(5);
     }
 
@@ -65,7 +65,7 @@ public class DefaultSessionBinder : ISessionBinder
             }
         }
 
-        // 无匹配 — 使用默认配置
+        // 无匹配 - 使用默认配置
         var defaultAgentId = options.DefaultAgentId ?? Guid.Empty;
         return BuildBinding(defaultAgentId, options.DefaultScope, context);
     }
@@ -139,7 +139,7 @@ public class DefaultSessionBinder : ISessionBinder
         }
         catch
         {
-            // 数据库不可用/仓储未注册 — 降级为仅配置规则。
+            // 数据库不可用/仓储未注册 - 降级为仅配置规则。
             return [];
         }
     }

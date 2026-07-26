@@ -6,9 +6,9 @@ namespace Tnzi.AI.Controllers.Admin;
 /// <remarks>
 /// 提供两类端点：
 /// <list type="bullet">
-///   <item><c>GET /</c> 与 <c>GET /{providerName}/default-model</c> — 配置驱动的只读端点
+///   <item><c>GET /</c> 与 <c>GET /{providerName}/default-model</c> - 配置驱动的只读端点
 ///         （向后兼容；底层走 IChatClientFactory，读取 appsettings 的 ProviderOptions）。</item>
-///   <item><c>POST /query</c> 等 <c>entities/*</c> 子路由 — 实体驱动 CRUD（Phase 5 backend prereq），
+///   <item><c>POST /query</c> 等 <c>entities/*</c> 子路由 - 实体驱动 CRUD（Phase 5 backend prereq），
 ///         写入数据库并对 API Key 进行加密存储。</item>
 /// </list>
 /// 两类端点目前并存：未来若 IChatClientFactory 接入 Provider 实体表，配置驱动端点会自动

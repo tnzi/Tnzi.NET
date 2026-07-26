@@ -11,7 +11,20 @@ import { HttpError, getApiResultErrorMessage } from '../errors/api-error';
  * The backend serializes with `JsonNamingPolicy.CamelCase`. This function also
  * handles PascalCase keys for backward compatibility with older endpoints.
  */
-export function normalizeApiResult<T>(raw: Record<string, unknown>): ApiResult<T> {
+export function normalizeApiResult<T>(raw: Record<string, unknown> | null | undefined): ApiResult<T> {
+  // A body that is not an object is not an envelope: `null`, a bare scalar, a
+  // raw string. That is still perfectly valid JSON, so reporting it as a parse
+  // failure (what dereferencing `raw.code` used to produce) is wrong - carry
+  // the body through as the payload instead.
+  if (raw === null || raw === undefined || typeof raw !== 'object') {
+    return {
+      succeeded: true,
+      success: true,
+      code: 200,
+      data: (raw ?? undefined) as T,
+    };
+  }
+
   const code = (raw.code ?? raw.Code ?? 200) as number;
   const succeededRaw = (raw.succeeded ?? raw.Succeeded) as boolean | undefined;
   const success = (raw.success ?? raw.Success ?? (code >= 200 && code < 300)) as boolean;
@@ -30,8 +43,15 @@ export function normalizeApiResult<T>(raw: Record<string, unknown>): ApiResult<T
 /**
  * Check if HTTP result is successful.
  * Handles null/undefined safely.
+ *
+ * Type predicate: on the true branch `data` is proven present, so
+ * `if (isSuccess(res)) { res.data.foo }` type-checks while the same access
+ * outside the guard does not. That is the whole point - `data` is optional
+ * precisely because a failed envelope carries none.
  */
-export function isSuccess<T>(result: ApiResult<T> | null | undefined): boolean {
+export function isSuccess<T>(
+  result: ApiResult<T> | null | undefined
+): result is ApiResult<T> & { data: T } {
   if (!result) return false;
   return result.succeeded === true;
 }
@@ -62,7 +82,7 @@ export function getErrorCode<T>(result: ApiResult<T>): string | undefined {
  * Unwrap data from a successful result.
  * Throws HttpError if the result represents a failure or if data is null/undefined.
  *
- * Note: The `as T` cast in normalizeApiResult is intentional — callers should validate
+ * Note: The `as T` cast in normalizeApiResult is intentional - callers should validate
  * via schema middleware or use this function which guards against null data.
  */
 export function unwrapData<T>(result: ApiResult<T>): T {
@@ -79,14 +99,14 @@ export function unwrapData<T>(result: ApiResult<T>): T {
  * Assert an `ApiResult` envelope reports success; throw otherwise. No-op for
  * non-envelope values.
  *
- * `HttpClient` never rejects on a business failure — it RESOLVES an
+ * `HttpClient` never rejects on a business failure - it RESOLVES an
  * `ApiResult { succeeded: false, message }`. A call site that bare-awaits a
  * void endpoint (`await client.delete(...)`) therefore swallows the refusal.
  * Wrap every discarded-result write with this helper so business refusals
  * (403, 409 delete vetoes, validation failures) surface as thrown errors.
  *
  * Unlike {@link unwrapData}, this tolerates a legitimately empty `data`
- * payload on success (void endpoints return no body) — it only reads the
+ * payload on success (void endpoints return no body) - it only reads the
  * success flag. Non-envelope values (already-unwrapped `T`, `undefined`) pass
  * through silently.
  */
@@ -108,7 +128,7 @@ export function ensureOk(result: unknown, fallbackMessage = 'Request failed'): v
  * `result` through unchanged.
  *
  * Complements the strict {@link unwrapData} (which throws on failure / null
- * data): use `unwrapResult` when the value may already be unwrapped `T` — e.g.
+ * data): use `unwrapResult` when the value may already be unwrapped `T` - e.g.
  * behind `useXxxApi` methods that are inconsistent about returning the full
  * envelope vs. the bare payload. Does NOT assert success; pair with
  * {@link ensureOk} when a failure must throw.

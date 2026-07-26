@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers;
 
 /// <summary>
-/// 用户端配额控制器 — 已认证用户查看自己的 AI 使用配额。
+/// 用户端配额控制器 - 已认证用户查看自己的 AI 使用配额。
 /// </summary>
 [DefaultController]
 [Route("quotas")]

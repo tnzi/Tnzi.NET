@@ -623,7 +623,7 @@ public class FeatureServiceTests
         var definitions = new List<FeatureDefinition>
         {
             new() { Id = def1Id, Name = "Feature.Toggle", ValueType = FeatureValueType.Boolean, IsEnabled = true }
-            // def2Id not in definitions — will fail
+            // def2Id not in definitions - will fail
         };
 
         SetupDefinitionQueryable(definitions);
@@ -667,7 +667,7 @@ public class FeatureServiceTests
         var values = new List<FeatureValue>
         {
             new() { Id = Guid.NewGuid(), FeatureDefinitionId = def1Id, ProviderName = "Tenant", ProviderKey = "tenant-1", Value = "true" }
-            // No value for def2 — should use default
+            // No value for def2 - should use default
         };
 
         SetupDefinitionQueryable(definitions);

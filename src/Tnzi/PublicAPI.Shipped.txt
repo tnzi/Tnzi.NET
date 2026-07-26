@@ -2107,7 +2107,6 @@ const Tnzi.Exceptions.ErrorCodes.RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND" -> st
 const Tnzi.Exceptions.ErrorCodes.SERVICE_TIMEOUT = "SERVICE_TIMEOUT" -> string!
 const Tnzi.Exceptions.ErrorCodes.SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE" -> string!
 const Tnzi.Exceptions.ErrorCodes.SYSTEM_ERROR = "SYSTEM_ERROR" -> string!
-const Tnzi.Exceptions.ErrorCodes.SYSTEM_MENU_HAS_CHILDREN = "SYSTEM_MENU_HAS_CHILDREN" -> string!
 const Tnzi.Exceptions.ErrorCodes.TEMPLATE_COMPILATION_ERROR = "TEMPLATE_COMPILATION_ERROR" -> string!
 const Tnzi.Exceptions.ErrorCodes.TEMPLATE_ERROR = "TEMPLATE_ERROR" -> string!
 const Tnzi.Exceptions.ErrorCodes.TEMPLATE_NOT_FOUND = "TEMPLATE_NOT_FOUND" -> string!

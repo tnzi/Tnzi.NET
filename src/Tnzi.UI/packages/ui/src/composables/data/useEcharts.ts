@@ -21,7 +21,7 @@ import { useTheme } from '../theme/useTheme'
 import type { EChartsOption } from 'echarts'
 
 // Idempotent registration: `echarts.use([...])` may be called any number of
-// times — the registry is global and duplicate registrations are no-ops.
+// times - the registry is global and duplicate registrations are no-ops.
 // Wrapping in a one-shot guard avoids the work, but the real reason it
 // lives here (not at module top-level) is bundle-size: a top-level call
 // is a *module side-effect*, which Rollup's tree-shaker can't drop even
@@ -56,17 +56,17 @@ export interface UseEchartsOptions {
    */
   optionFactory: (mode: 'light' | 'dark') => EChartsOption
   /**
-   * Renderer — `'canvas'` (default, faster for dynamic data) or `'svg'`
+   * Renderer - `'canvas'` (default, faster for dynamic data) or `'svg'`
    * (better for static charts that need to scale or be exported).
    */
   renderer?: 'canvas' | 'svg'
-  /** ECharts initialization theme name — typically not needed since we
+  /** ECharts initialization theme name - typically not needed since we
    *  rebuild the option on mode change. */
   themeName?: string
   /**
    * Explicit reactive theme mode source. When omitted the composable
    * pulls from `@tnzi/ui`'s `useTheme()` ThemeContext; when that throws
-   * (no provider installed — e.g. a standalone consumer outside the
+   * (no provider installed - e.g. a standalone consumer outside the
    * `createTnziUi` plugin shell) the composable falls back to a constant
    * `'light'` ref, which means dark-mode toggling on the consumer's side
    * will NOT propagate to the chart. Pass `mode` explicitly to wire up
@@ -76,7 +76,7 @@ export interface UseEchartsOptions {
 }
 
 export interface UseEchartsReturn {
-  /** Container ref — bind to a div with explicit height. */
+  /** Container ref - bind to a div with explicit height. */
   containerRef: Ref<HTMLDivElement | null>
   /** Reactive chart instance ref (null until mounted). */
   chart: Ref<echarts.ECharts | null>
@@ -84,7 +84,7 @@ export interface UseEchartsReturn {
   setOption: (notMerge?: boolean) => void
   /** Force the chart to resize against its container's current size. */
   resize: () => void
-  /** Tear down — automatically called by `onBeforeUnmount`. */
+  /** Tear down - automatically called by `onBeforeUnmount`. */
   dispose: () => void
 }
 
@@ -95,7 +95,7 @@ export interface UseEchartsReturn {
  *   3. A constant `ref('light')` fallback (charts stuck in light mode).
  *
  * The try/catch around `useTheme()` is what enables standalone usage
- * outside the @tnzi/ui plugin shell, but the fallback is NON-reactive —
+ * outside the @tnzi/ui plugin shell, but the fallback is NON-reactive -
  * standalone consumers who want dark-mode reactivity MUST supply
  * `opts.mode` explicitly.
  */
@@ -135,12 +135,12 @@ function resolveThemeRef(opts: UseEchartsOptions): Ref<'light' | 'dark'> {
  * useEcharts({ optionFactory, mode: myDarkMode })
  * ```
  *
- * Sunk from `@tnzi/ui-admin` in 0.2.x. `echarts` is a peer dependency —
+ * Sunk from `@tnzi/ui-admin` in 0.2.x. `echarts` is a peer dependency -
  * consumers install it themselves (admin / dashboard apps usually do
  * anyway).
  */
 export function useEcharts(opts: UseEchartsOptions): UseEchartsReturn {
-  // Lazy module registration — runs at first call, idempotent. This is
+  // Lazy module registration - runs at first call, idempotent. This is
   // what lets consumers who never call useEcharts() avoid pulling echarts
   // chart/component code into their bundle.
   ensureEchartsModulesRegistered()
@@ -169,7 +169,7 @@ export function useEcharts(opts: UseEchartsOptions): UseEchartsReturn {
     if (!containerRef.value) return
     // Wrap init: jsdom (used by vitest integration tests) has no canvas
     // backend, and echarts.init throws synchronously. Letting it bubble
-    // crashes the consumer's mount cycle, so we degrade gracefully —
+    // crashes the consumer's mount cycle, so we degrade gracefully -
     // chart stays null, setOption / resize / dispose become no-ops.
     try {
       chart.value = echarts.init(containerRef.value, opts.themeName, {
@@ -181,7 +181,7 @@ export function useEcharts(opts: UseEchartsOptions): UseEchartsReturn {
     }
   })
 
-  // Theme reactivity — rebuild option when the resolved mode toggles light/dark.
+  // Theme reactivity - rebuild option when the resolved mode toggles light/dark.
   watch(modeRef, () => setOption(true))
 
   // Auto-resize when the container resizes.

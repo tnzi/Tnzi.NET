@@ -3,7 +3,7 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// MemoryContextProvider 单元测试 — 上下文注入 + 自动沉淀 + 合并
+/// MemoryContextProvider 单元测试 - 上下文注入 + 自动沉淀 + 合并
 /// </summary>
 public class MemoryContextProviderTests
 {
@@ -122,7 +122,7 @@ public class MemoryContextProviderTests
 
     #endregion
 
-    #region OnCompletedAsync — AutoPersist disabled
+    #region OnCompletedAsync - AutoPersist disabled
 
     [Fact]
     public async Task OnCompletedAsync_AutoPersistDisabled_DoesNothing()
@@ -144,7 +144,7 @@ public class MemoryContextProviderTests
 
     #endregion
 
-    #region OnCompletedAsync — AutoPersist enabled
+    #region OnCompletedAsync - AutoPersist enabled
 
     [Fact]
     public async Task OnCompletedAsync_AutoPersistEnabled_ExtractsAndAppends()
@@ -289,7 +289,7 @@ public class MemoryContextProviderTests
 
     #endregion
 
-    #region OnCompletedAsync — AutoConsolidate
+    #region OnCompletedAsync - AutoConsolidate
 
     [Fact]
     public async Task OnCompletedAsync_ConsolidateTriggered_WritesConsolidated()
@@ -420,7 +420,7 @@ public class MemoryContextProviderTests
         mockStore.Setup(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
 
-        // SearchAsync returns empty — no existing memory
+        // SearchAsync returns empty - no existing memory
         mockStore.Setup(s => s.SearchAsync(It.IsAny<MemoryScope>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IReadOnlyList<MemorySearchResult>)[]);
 

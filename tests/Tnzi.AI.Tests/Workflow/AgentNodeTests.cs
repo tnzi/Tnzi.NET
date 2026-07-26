@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// AgentNode 单元测试 — 覆盖 NodeType、基本执行、步骤级指令覆盖、步骤级 Provider/Model 覆盖
+/// AgentNode 单元测试 - 覆盖 NodeType、基本执行、步骤级指令覆盖、步骤级 Provider/Model 覆盖
 /// </summary>
 public class AgentNodeTests
 {

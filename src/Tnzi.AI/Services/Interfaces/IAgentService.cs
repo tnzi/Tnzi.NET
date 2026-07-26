@@ -41,7 +41,7 @@ public interface IAgentService
     Task<Result<AgentResponseDto>> RunAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default);
 
     /// <summary>
-    /// 流式运行 Agent（delta 模型 — 每个事件只包含增量内容）
+    /// 流式运行 Agent（delta 模型 - 每个事件只包含增量内容）
     /// </summary>
     IAsyncEnumerable<StreamEvent> RunStreamingAsync(Guid agentId, string? message, List<ContentPartDto>? content = null, Guid? threadId = null, Guid? userId = null, CancellationToken ct = default);
 

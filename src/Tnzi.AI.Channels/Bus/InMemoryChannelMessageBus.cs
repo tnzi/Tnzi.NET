@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Bus;
 
 /// <summary>
-/// 进程内消息总线 — 使用 System.Threading.Channels 实现 FIFO 队列
+/// 进程内消息总线 - 使用 System.Threading.Channels 实现 FIFO 队列
 /// </summary>
 public class InMemoryChannelMessageBus : IChannelMessageBus
 {

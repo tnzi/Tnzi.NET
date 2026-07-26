@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Vendors page — standard TCrudPage over the finance bridge.
+ * Vendors page - standard TCrudPage over the finance bridge.
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),

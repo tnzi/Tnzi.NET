@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TTaskDoneRow — Manus-style task-completed row with inline rating.
+ * TTaskDoneRow - Manus-style task-completed row with inline rating.
  *
  * A thin top-bordered row that reads as part of the thread flow: left
  * side has a green check + completion label, right side has an optional
@@ -89,7 +89,7 @@ function setRating(n: number): void {
   color: var(--tnzi-ai-text, #1a1a1a);
 }
 .t-task-done-row__check {
-  color: #2b9c5f;
+  color: var(--tnzi-ai-success);
   font-size: 15px;
 }
 .t-task-done-row__rating {
@@ -119,6 +119,6 @@ function setRating(n: number): void {
   transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .t-task-done-row__star:hover { transform: scale(1.1); }
-.t-task-done-row__star.is-on { color: #f0b429; }
+.t-task-done-row__star.is-on { color: var(--tnzi-ai-warning); }
 .t-task-done-row__star.is-on :deep(svg) { fill: currentColor; }
 </style>

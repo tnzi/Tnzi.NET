@@ -2,13 +2,13 @@ import type { RouteRecordRaw } from 'vue-router'
 import AdminShellRoot from './AdminShellRoot.vue'
 
 /**
- * Default admin routes — Phase 3.38: all 28 module pages registered.
+ * Default admin routes - Phase 3.38: all 28 module pages registered.
  *
  * A placeholder component is kept for login only. The 403 / 404 / 500 routes
  * render the soybean-styled {@link ExceptionView} (a router + i18n wrapper
  * around `TExceptionPage`) instead of the old bare `h('div', '403 Forbidden')`.
  * All admin pages use vue-router's async component syntax (`() => import(...)`)
- * for code splitting — vue-router handles the async loading + internal Suspense
+ * for code splitting - vue-router handles the async loading + internal Suspense
  * boundary itself; wrapping in `defineAsyncComponent` triggers a warning and
  * conflicts with router-level Suspense (see Phase H3 regression).
  * The `/admin` parent renders {@link AdminShellRoot} so every child page
@@ -19,7 +19,7 @@ import AdminShellRoot from './AdminShellRoot.vue'
  * When `defineAdminApp({ moduleGating })` is on (the default), the shell fetches
  * `GET /admin/shell/modules` (which framework `TnziApplicationModule`s the host
  * actually loaded) and HIDES + makes UNREACHABLE any gated node whose module the
- * backend didn't load — so an unloaded module (Finance / Payment / AI …) never
+ * backend didn't load - so an unloaded module (Finance / Payment / AI …) never
  * surfaces a dead menu that 404s on click. This is orthogonal to permissions, so
  * it holds for super-admins too. `moduleGate: true` uses the node's own `name`
  * as the module key; a consumer module registered via `addModules` can opt in
@@ -30,7 +30,7 @@ import AdminShellRoot from './AdminShellRoot.vue'
  * is unavailable the shell shows everything (fail-open).
  */
 
-// Single wired exception page (403 / 404 / 500) — reads `meta.exceptionType`.
+// Single wired exception page (403 / 404 / 500) - reads `meta.exceptionType`.
 // Lazy so the exception bundle isn't pulled into the initial chunk.
 const ExceptionView = () => import('../pages/exception/ExceptionView.vue')
 
@@ -39,13 +39,13 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     // Soybean parity: `/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?`.
     // The module param defaults to `pwd-login` inside the page component; the
     // regex constraint rejects unknown values and routes them to a 404. Order
-    // matters — the path-param route must come before the bare `/login` redirect.
+    // matters - the path-param route must come before the bare `/login` redirect.
     path: '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
     name: 'login',
     component: () => import('../pages/login/index.vue'),
     meta: { requiresAuth: false, title: 'Login' },
   },
-  // Exception pages — top-level (so `applyBasePath` prefixes them uniformly with
+  // Exception pages - top-level (so `applyBasePath` prefixes them uniformly with
   // every other route) and `requiresAuth: false` so the permission / module
   // guards can redirect INTO them without the auth guard bouncing back. Each
   // carries `meta.exceptionType`, which ExceptionView reads to pick the preset.
@@ -82,7 +82,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       // room for consumer-injected entries). Dashboard sits at 0 so it
       // always lands first; consumer modules registered via `addModules`
       // with `meta.order` in 1..99 slot between Dashboard and Identity,
-      // and 200+ for after the last framework module — no consumer
+      // and 200+ for after the last framework module - no consumer
       // mutation required. Override per-route via
       // `defineAdminApp({ routeOrders: { 'dashboard': 5 } })`.
       {
@@ -102,7 +102,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       },
 
       // ── User Center (self-service profile) ───────────────────
-      // No permission needed — any authenticated user can manage their
+      // No permission needed - any authenticated user can manage their
       // own profile. Hidden from sidebar menus (not in module catalogue)
       // and reached via the avatar dropdown's "User Center" item.
       {
@@ -129,6 +129,21 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.identity.users.title',
               permission: 'user.view',
               keepAlive: true,
+            },
+          },
+          {
+            // One user's page: profile, roles, direct grants, sessions and
+            // sign-in history as sections of a single record rather than four
+            // overlays stacked on the list.
+            path: 'users/:id',
+            name: 'identity.users.detail',
+            component: () => import('../pages/identity/UserDetail.vue'),
+            props: true,
+            meta: {
+              title: 'tnzi.admin.modules.identity.users.detail.title',
+              permission: 'user.view',
+              hideInMenu: true,
+              activeMenu: 'identity.users',
             },
           },
           {
@@ -254,16 +269,6 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
         meta: { title: 'tnzi.admin.modules.system.label', permission: 'system.view', order: 120, moduleGate: true },
         children: [
           {
-            path: 'menus',
-            name: 'system.menus',
-            component: () => import('../pages/system/Menus.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.system.menus.title',
-              permission: 'system.menu.view',
-              keepAlive: true,
-            },
-          },
-          {
             path: 'dictionaries',
             name: 'system.dictionaries',
             component: () => import('../pages/system/Dictionaries.vue'),
@@ -305,6 +310,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.system.features.title',
               permission: 'feature.view',
               keepAlive: true,
+              moduleGate: 'feature',
             },
           },
           {
@@ -374,7 +380,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       // Reached via the sidebar bottom icon (Task 14); not in the menu tree.
       // Module-gated on 'system': the page's backbone (settings-center
       // definitions / save / reset + the Advanced parameters table) lives in
-      // the System module backend — a host without it gets a broken page, so
+      // the System module backend - a host without it gets a broken page, so
       // the route (and the sidebar gear, which checks this route's
       // availability) hides instead.
       {
@@ -666,6 +672,28 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 },
               },
               {
+                path: 'customers/:id',
+                name: 'finance.customers.detail',
+                component: () => import('../pages/finance/CustomerDetail.vue'),
+                props: true,
+                meta: {
+                  title: 'tnzi.admin.modules.finance.party.customerTitle',
+                  permission: 'finance.customer.view',
+                  hideInMenu: true,
+                  activeMenu: 'finance.customers',
+                },
+              },
+              {
+                path: 'estimates',
+                name: 'finance.estimates',
+                component: () => import('../pages/finance/Estimates.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.estimates.title',
+                  permission: 'finance.estimate.view',
+                  keepAlive: true,
+                },
+              },
+              {
                 path: 'invoices',
                 name: 'finance.invoices',
                 component: () => import('../pages/finance/Invoices.vue'),
@@ -704,6 +732,28 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 },
               },
               {
+                path: 'vendors/:id',
+                name: 'finance.vendors.detail',
+                component: () => import('../pages/finance/VendorDetail.vue'),
+                props: true,
+                meta: {
+                  title: 'tnzi.admin.modules.finance.party.vendorTitle',
+                  permission: 'finance.vendor.view',
+                  hideInMenu: true,
+                  activeMenu: 'finance.vendors',
+                },
+              },
+              {
+                path: 'purchase-orders',
+                name: 'finance.purchaseOrders',
+                component: () => import('../pages/finance/PurchaseOrders.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.purchaseOrders.title',
+                  permission: 'finance.purchaseOrder.view',
+                  keepAlive: true,
+                },
+              },
+              {
                 path: 'bills',
                 name: 'finance.bills',
                 component: () => import('../pages/finance/Bills.vue'),
@@ -728,6 +778,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.receipts',
                 component: () => import('../pages/finance/Receipts.vue'),
                 meta: {
+                  // 银行域自 2026-07-25 起是独立模块：宿主没加载它时这些页面必须消失，
+                  // 而不是渲染出一堆 404 的死链（moduleGate 与权限正交，对超管同样生效）。
+                  moduleGate: 'finance-banking',
                   title: 'tnzi.admin.modules.finance.receipts.title',
                   permission: 'finance.receipt.view',
                   keepAlive: true,
@@ -746,6 +799,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.bankAccounts',
                 component: () => import('../pages/finance/BankAccounts.vue'),
                 meta: {
+                  // 银行域自 2026-07-25 起是独立模块：宿主没加载它时这些页面必须消失，
+                  // 而不是渲染出一堆 404 的死链（moduleGate 与权限正交，对超管同样生效）。
+                  moduleGate: 'finance-banking',
                   title: 'tnzi.admin.modules.finance.bankAccounts.title',
                   permission: 'finance.bankAccount.view',
                   keepAlive: true,
@@ -782,10 +838,24 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 },
               },
               {
+                path: 'bank-rules',
+                name: 'finance.bankRules',
+                component: () => import('../pages/finance/BankRules.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.bankRules.title',
+                  permission: 'finance.bankRule.view',
+                  moduleGate: 'finance-banking',
+                  keepAlive: true,
+                },
+              },
+              {
                 path: 'bank-feed',
                 name: 'finance.bankFeed',
                 component: () => import('../pages/finance/BankFeed.vue'),
                 meta: {
+                  // 银行域自 2026-07-25 起是独立模块：宿主没加载它时这些页面必须消失，
+                  // 而不是渲染出一堆 404 的死链（moduleGate 与权限正交，对超管同样生效）。
+                  moduleGate: 'finance-banking',
                   title: 'tnzi.admin.modules.finance.bankFeed.title',
                   permission: 'finance.bankFeed.view',
                   keepAlive: true,
@@ -796,6 +866,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.checks',
                 component: () => import('../pages/finance/Checks.vue'),
                 meta: {
+                  // 银行域自 2026-07-25 起是独立模块：宿主没加载它时这些页面必须消失，
+                  // 而不是渲染出一堆 404 的死链（moduleGate 与权限正交，对超管同样生效）。
+                  moduleGate: 'finance-banking',
                   title: 'tnzi.admin.modules.finance.checks.title',
                   permission: 'finance.check.view',
                   keepAlive: true,
@@ -806,6 +879,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.eftBatches',
                 component: () => import('../pages/finance/EftBatches.vue'),
                 meta: {
+                  // 银行域自 2026-07-25 起是独立模块：宿主没加载它时这些页面必须消失，
+                  // 而不是渲染出一堆 404 的死链（moduleGate 与权限正交，对超管同样生效）。
+                  moduleGate: 'finance-banking',
                   title: 'tnzi.admin.modules.finance.eftBatches.title',
                   permission: 'finance.eft.view',
                   keepAlive: true,
@@ -901,6 +977,39 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
           },
           // ── Reports (direct leaf, single page) ──
           {
+            path: 'statements',
+            name: 'finance.statements',
+            component: () => import('../pages/finance/Statements.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.statements.title',
+              permission: 'finance.statement.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'recurring',
+            name: 'finance.recurring',
+            component: () => import('../pages/finance/Recurring.vue'),
+            meta: {
+              // 周期性单据是独立子模块（2026-07-25）：宿主没加载它时这页必须消失，
+              // 而不是渲染出一堆 404 的死链。
+              moduleGate: 'finance-recurring',
+              title: 'tnzi.admin.modules.finance.recurring.title',
+              permission: 'finance.recurring.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'tax-returns',
+            name: 'finance.taxReturns',
+            component: () => import('../pages/finance/TaxReturns.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.finance.taxReturns.title',
+              permission: 'finance.report.view',
+              keepAlive: true,
+            },
+          },
+          {
             path: 'reports',
             name: 'finance.reports',
             component: () => import('../pages/finance/Reports.vue'),
@@ -956,7 +1065,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
       },
 
       // ── AI ────────────────────────────────────────────────────
-      // Menu order (array order = display order — children aren't
+      // Menu order (array order = display order - children aren't
       //   sorted by meta.order in useAdminRouteStore.menus):
       //   1. Configuration  : agents / personas / skills / knowledge
       //   2. Execution      : workflows / workflowRuns / threads
@@ -1007,16 +1116,6 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
-            path: 'personas',
-            name: 'ai.personas',
-            component: () => import('../pages/ai/personas/Personas.vue'),
-            meta: {
-              title: 'tnzi.admin.modules.ai.personas.title',
-              permission: 'ai.persona.view',
-              keepAlive: true,
-            },
-          },
-          {
             path: 'skills',
             name: 'ai.skills',
             component: () => import('../pages/ai/skills/Skills.vue'),
@@ -1024,6 +1123,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.skills.title',
               permission: 'ai.skill.view',
               keepAlive: true,
+              moduleGate: 'AI.Skills',
             },
           },
           {
@@ -1034,6 +1134,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.knowledge.title',
               permission: 'ai.knowledge.view',
               keepAlive: true,
+              moduleGate: 'AI.Rag',
             },
           },
 
@@ -1046,6 +1147,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.workflows.title',
               permission: 'ai.workflow.view',
               keepAlive: true,
+              moduleGate: 'AI.Workflow',
             },
           },
           {
@@ -1098,8 +1200,13 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             component: () => import('../pages/ai/mcp/McpServers.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.mcp.title',
-              permission: 'ai.mcp.view',
+              // Unified MCP control surface: External Servers tab = client
+              // registry (ai.mcp.*), This Server + Tool Analytics tabs = self-
+              // hosted server (ai.mcpServer.*). Reachable by either view code
+              // (OR), each tab's actions gated by its own code.
+              permissions: ['ai.mcp.view', 'ai.mcpServer.view'],
               keepAlive: true,
+              moduleGate: 'AI.Mcp',
             },
           },
           {
@@ -1120,6 +1227,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.channels.title',
               permission: 'ai.channels.view',
               keepAlive: true,
+              moduleGate: 'AI.Channels',
             },
           },
           {
@@ -1130,6 +1238,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.sandbox.title',
               permission: 'ai.sandbox.view',
               keepAlive: true,
+              moduleGate: 'AI.Sandbox',
             },
           },
 

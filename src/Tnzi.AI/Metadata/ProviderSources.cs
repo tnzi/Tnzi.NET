@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Metadata;
 
 /// <summary>
-/// Provider 来源常量 — <see cref="ProviderDto.Source"/> 的取值
+/// Provider 来源常量 - <see cref="ProviderDto.Source"/> 的取值
 /// </summary>
 public static class ProviderSources
 {

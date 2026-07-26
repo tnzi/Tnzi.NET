@@ -1,13 +1,13 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// IMcpServerCatalog 默认实现 — 合并部署配置（AI:Mcp:Servers）与数据库注册表
+/// IMcpServerCatalog 默认实现 - 合并部署配置（AI:Mcp:Servers）与数据库注册表
 /// （McpServerRegistration，仅 IsEnabled 条目）为有效服务器列表。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 合并语义：DB 条目优先（admin 运行时配置覆盖部署配置）。最终顺序 =
-/// DB 条目（按 Priority 降序）在前 + 未被同名覆盖的部署配置条目（保持原顺序）在后 —
+/// DB 条目（按 Priority 降序）在前 + 未被同名覆盖的部署配置条目（保持原顺序）在后 -
 /// McpToolProvider 的同名工具去重保留先出现者，因此该顺序使 DB 高优先级服务器的工具胜出。
 /// </para>
 /// <para>
@@ -160,7 +160,7 @@ public class McpServerCatalog : IMcpServerCatalog
 
             if (!McpServerRegistrationMapper.IsAllowedTransport(registration.Transport))
             {
-                // legacy stdio 行（schema 收紧前创建）或脏数据 — 跳过并告警
+                // legacy stdio 行（schema 收紧前创建）或脏数据 - 跳过并告警
                 _logger.LogWarning(
                     "MCP server registration '{ServerName}' has unsupported transport '{Transport}' and is skipped. " +
                     "Only sse / streamable-http / http registrations are materialized at runtime",

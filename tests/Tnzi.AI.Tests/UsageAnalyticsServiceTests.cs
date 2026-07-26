@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// UsageAnalyticsService 集成测试 — 趋势统计和按 Agent 分组统计
+/// UsageAnalyticsService 集成测试 - 趋势统计和按 Agent 分组统计
 /// 使用 SQLite 内存数据库以支持 EF Core 异步查询 (ToListAsync)
 /// </summary>
 public class UsageAnalyticsServiceTests : AIAnalyticsTestBase

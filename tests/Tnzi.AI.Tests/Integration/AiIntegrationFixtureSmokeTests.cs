@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// 集成测试 Fixture 冒烟测试 — 验证 MockChatClientProvider、AiIntegrationTestBase、StreamingTestHelper 基本工作
+/// 集成测试 Fixture 冒烟测试 - 验证 MockChatClientProvider、AiIntegrationTestBase、StreamingTestHelper 基本工作
 /// </summary>
 public class AiIntegrationFixtureSmokeTests : AiIntegrationTestBase
 {

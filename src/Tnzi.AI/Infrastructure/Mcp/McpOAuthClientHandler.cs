@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 客户端 OAuth 认证处理器 — 通过 client_credentials 流获取访问令牌，
+/// MCP 客户端 OAuth 认证处理器 - 通过 client_credentials 流获取访问令牌，
 /// 支持令牌缓存、自动刷新和过期重新获取。
 /// </summary>
 /// <remarks>

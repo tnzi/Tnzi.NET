@@ -6,7 +6,7 @@ public class TextSearchProviderTests
     public async Task GetContextAsync_BeforeAIInvoke_InjectsSystemMessage()
     {
         var mockSearch = new Mock<ITextSearchService>();
-        // TextSearchProvider.GetContextAsync calls the 4-arg (filter) overload — mock that one,
+        // TextSearchProvider.GetContextAsync calls the 4-arg (filter) overload - mock that one,
         // not the 3-arg overload (Moq proxies override the default interface method, so only the
         // actually-invoked overload's setup is consulted).
         mockSearch.Setup(s => s.SearchAsync(

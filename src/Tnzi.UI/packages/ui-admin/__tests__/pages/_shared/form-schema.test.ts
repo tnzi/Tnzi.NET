@@ -49,21 +49,66 @@ describe('TFormSchemaRenderer', () => {
     expect(wrapper.find('.sw').attributes('data-value')).toBe('true')
   })
 
-  it('readonly=true makes text/number inputs non-editable (readonly, not disabled)', () => {
-    // View-mode design: text-style fields (text / textarea / number) use the
-    // native `readonly` attribute (keeps normal text colour, stays readable
-    // for long content) rather than `disabled`. Non-text widgets
-    // (switch / select / date) use `disabled` since they lack `readonly`.
+  it('readonly=true renders the record as description rows, not switched-off inputs', () => {
+    // View-mode design: a "view" action shows a RECORD, so the default readonly
+    // layout is a `label: value` description list. A column of greyed-out
+    // controls reads as a database row editor someone disabled, which is
+    // exactly the impression the admin pages are meant to avoid.
     const schema: FormSchemaItem[] = [
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'age',  label: 'Age',  type: 'number' },
     ]
     const wrapper = mount(TFormSchemaRenderer, {
-      props: { schema, model: {}, readonly: true },
+      props: { schema, model: { name: 'Ada', age: 36 }, readonly: true },
+      global: { stubs },
+    })
+    // No editors at all in the default readonly layout.
+    expect(wrapper.find('.ipt').exists()).toBe(false)
+    expect(wrapper.find('.ipt-num').exists()).toBe(false)
+    expect(wrapper.findAll('.t-desc__row')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Name')
+    expect(wrapper.text()).toContain('Ada')
+    expect(wrapper.text()).toContain('36')
+  })
+
+  it('readonly + readonlyLayout="inputs" keeps text/number editors non-editable', () => {
+    // Opt-out shape for pages whose view mode is really "edit, temporarily
+    // locked": text-style fields (text / textarea / number) use the native
+    // `readonly` attribute (keeps normal text colour, stays readable for long
+    // content) rather than `disabled`. Non-text widgets (switch / select /
+    // date) use `disabled` since they lack `readonly`.
+    const schema: FormSchemaItem[] = [
+      { key: 'name', label: 'Name', type: 'text' },
+      { key: 'age',  label: 'Age',  type: 'number' },
+    ]
+    const wrapper = mount(TFormSchemaRenderer, {
+      props: { schema, model: {}, readonly: true, readonlyLayout: 'inputs' },
       global: { stubs },
     })
     expect((wrapper.find('.ipt').element as HTMLInputElement).readOnly).toBe(true)
     expect((wrapper.find('.ipt-num').element as HTMLInputElement).readOnly).toBe(true)
+  })
+
+  it('shows a readonly select as its option LABEL and a blank field as the dash', () => {
+    const schema: FormSchemaItem[] = [
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        options: [
+          { label: 'Active', value: 'A' },
+          { label: 'Closed', value: 'C' },
+        ],
+      },
+      { key: 'note', label: 'Note', type: 'text' },
+    ]
+    const wrapper = mount(TFormSchemaRenderer, {
+      props: { schema, model: { status: 'C', note: '' }, readonly: true },
+      global: { stubs },
+    })
+    expect(wrapper.text()).toContain('Closed')
+    // "no value" renders the one shared placeholder, never an empty cell.
+    expect(wrapper.text()).toContain('-')
   })
 
   it('skips items where `visible(model)` returns false', () => {

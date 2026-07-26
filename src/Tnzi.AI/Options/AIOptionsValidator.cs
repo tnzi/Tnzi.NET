@@ -27,18 +27,21 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             }
         }
 
-        // MCP：Enabled 时允许 Servers 为空 — 服务器也可由数据库注册表（McpServerRegistration，
-        // admin 运行时录入，经 IMcpServerCatalog 物化）提供；下方仅校验已声明的部署配置服务器。
         ValidatePermissionRules(options.Permissions, errors);
         ValidateMemoryOptions(options.ContextProviders?.Memory, errors);
 
+        // ToolCacheSeconds 与部署配置的服务器清单无关（它是 [RuntimeSetting]，服务器只经数据库
+        // 注册表提供时依然生效），因此不能锁在 Servers != null 分支里。
+        if (options.Mcp is { Enabled: true }
+            && (options.Mcp.ToolCacheSeconds < 0 || options.Mcp.ToolCacheSeconds > 3600))
+        {
+            errors.Add("MCP ToolCacheSeconds must be between 0 and 3600.");
+        }
+
+        // MCP：Enabled 时允许 Servers 为空，服务器也可由数据库注册表（McpServerRegistration，
+        // admin 运行时录入，经 IMcpServerCatalog 物化）提供；下方仅校验已声明的部署配置服务器。
         if (options.Mcp != null && options.Mcp.Enabled && options.Mcp.Servers != null)
         {
-            if (options.Mcp.ToolCacheSeconds < 0 || options.Mcp.ToolCacheSeconds > 3600)
-            {
-                errors.Add("MCP ToolCacheSeconds must be between 0 and 3600.");
-            }
-
             var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var server in options.Mcp.Servers)
             {
@@ -218,7 +221,7 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
     private static void ValidateOpenAIApiKey(string apiKey, List<string> errors)
     {
         // OpenAI API Key 格式: sk-... 或 sk-proj-...
-        if (!apiKey.StartsWith("sk-"))
+        if (!apiKey.StartsWith("sk-", StringComparison.Ordinal))
         {
             errors.Add(
                 "OpenAI API Key must start with 'sk-'. " +

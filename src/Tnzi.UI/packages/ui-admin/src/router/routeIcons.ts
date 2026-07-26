@@ -3,7 +3,7 @@
  *
  * The map is keyed by route `name` (the same identifier used by vue-router and
  * by `useAdminRouteStore.menus`). `useAdminRouteStore` consults this map as
- * the fallback when `route.meta.icon` isn't set — so consumers don't have to
+ * the fallback when `route.meta.icon` isn't set - so consumers don't have to
  * sprinkle `icon: '...'` on every route in their `defaultAdminRoutes` override
  * but can still take over per-route by setting `meta.icon` themselves.
  *
@@ -44,7 +44,6 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'authorization.entityRoles': 'mdi:account-group-outline',
 
   // ── System sub-routes ───────────────────────────────────────────
-  'system.menus': 'mdi:menu',
   'system.dictionaries': 'mdi:book-alphabet',
   'system.accessLogs': 'mdi:eye-outline',
   'system.scheduledJobs': 'mdi:clock-outline',
@@ -101,14 +100,20 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'finance.vendors': 'mdi:truck-outline',
   'finance.items': 'mdi:tag-multiple-outline',
   'finance.taxes': 'mdi:cash-multiple',
+  'finance.estimates': 'mdi:file-document-edit-outline',
   'finance.invoices': 'mdi:receipt-text-outline',
+  'finance.purchaseOrders': 'mdi:clipboard-list-outline',
   'finance.bills': 'mdi:invoice-text-outline',
   'finance.expenses': 'mdi:cash-minus',
   'finance.creditMemos': 'mdi:receipt-text-minus-outline',
   'finance.payments': 'mdi:cash-check',
   'finance.transfers': 'mdi:bank-transfer',
   'finance.reconciliations': 'mdi:scale-balance',
+  'finance.statements': 'mdi:file-document-multiple-outline',
+  'finance.recurring': 'mdi:calendar-sync-outline',
+  'finance.taxReturns': 'mdi:file-percent-outline',
   'finance.bankAccounts': 'mdi:bank-outline',
+  'finance.bankRules': 'mdi:filter-cog-outline',
   'finance.bankFeed': 'mdi:bank-transfer-in',
   'finance.checks': 'mdi:checkbook',
   'finance.eftBatches': 'mdi:bank-transfer-out',
@@ -131,7 +136,6 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'ai.knowledge': 'mdi:book-open-page-variant-outline',
   'ai.mcp': 'mdi:server-network-outline',
   'ai.quota': 'mdi:speedometer',
-  'ai.personas': 'mdi:account-tie-outline',
   'ai.evaluations': 'mdi:test-tube',
   'ai.threads': 'mdi:chat-processing-outline',
   'ai.workspaceAgents': 'mdi:folder-account-outline',

@@ -49,7 +49,7 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
         // DeepSeek: always-on reasoning, no body injection needed.
         // BUT multi-turn tool calls require all assistant messages to carry reasoning_content.
         // MEAI doesn't serialize reasoning content into outgoing messages, so we patch it here.
-        // Detect via explicit provider name OR by request URL — the latter handles always-on
+        // Detect via explicit provider name OR by request URL - the latter handles always-on
         // reasoning models (e.g., deepseek-reasoner) selected via think-model routing where
         // no explicit ThinkingOptions are configured and RequestContext may be null.
         if (IsDeepSeekProvider(providerName) || IsDeepSeekEndpoint(message.Request?.Uri))

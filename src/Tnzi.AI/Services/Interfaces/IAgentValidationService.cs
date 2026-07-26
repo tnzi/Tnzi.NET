@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// Agent 验证服务 — 检查 Agent 配置的完整性和有效性
+/// Agent 验证服务 - 检查 Agent 配置的完整性和有效性
 /// </summary>
 public interface IAgentValidationService
 {

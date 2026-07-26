@@ -4,7 +4,7 @@ using Tnzi.EventBus;
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// 默认在线状态追踪器 — ConcurrentDictionary 实现，线程安全
+/// 默认在线状态追踪器 - ConcurrentDictionary 实现，线程安全
 /// </summary>
 public class DefaultPresenceTracker : IPresenceTracker
 {

@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.ChatHistory;
 
 /// <summary>
-/// Token 估算器接口 — 用于估算文本的 Token 数量
+/// Token 估算器接口 - 用于估算文本的 Token 数量
 /// </summary>
 /// <remarks>
 /// 默认实现使用启发式算法（区分 ASCII 和 CJK 字符的 token 比率）。
@@ -20,7 +20,7 @@ public interface ITokenEstimator
 }
 
 /// <summary>
-/// 默认 Token 估算器 — 基于字符类型的启发式算法
+/// 默认 Token 估算器 - 基于字符类型的启发式算法
 /// </summary>
 /// <remarks>
 /// ASCII 字符约 4 个字符 = 1 token，CJK 字符约 1 个字符 = 2 token。

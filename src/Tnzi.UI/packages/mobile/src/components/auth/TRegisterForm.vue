@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { OAuthSocialProvider } from '@tnzi/core/types/shared-ui';
+import { useRegisterForm } from '../../headless/useRegisterForm';
 
 interface IRegisterFormProps {
   showUsername?: boolean;
@@ -24,6 +25,8 @@ interface IRegisterFormProps {
   onRefreshCaptcha?: () => void;
   captchaLabel?: string;
   captchaPlaceholder?: string;
+  /** Minimum password length enforced by the field rules (default: 6) */
+  passwordMinLength?: number;
 }
 
 interface IRegisterFormEmits {
@@ -58,47 +61,68 @@ const props = withDefaults(defineProps<IRegisterFormProps>(), {
   captchaUrl: '',
   captchaLabel: '',
   captchaPlaceholder: '',
+  passwordMinLength: 6,
 });
 
 const emit = defineEmits<IRegisterFormEmits>();
 
-const email = ref('');
-const userName = ref('');
-const phoneNumber = ref('');
-const password = ref('');
-const confirmPassword = ref('');
+// Not part of the credential payload: the captcha answer and the terms checkbox
+// are gates in front of submit, so they stay local to the component.
 const captchaCode = ref('');
 const agreedToTerms = ref(false);
 
+// Field state and validation come from the headless composable; see TLoginForm
+// for why the reactive options are declared as getters.
+const form = useRegisterForm({
+  get showUsername() {
+    return props.showUsername;
+  },
+  get showPhone() {
+    return props.showPhone;
+  },
+  onSubmit: (data) => {
+    // The terms gate is an invariant of the component, not just a disabled
+    // button: implicit form submission must not slip past it either.
+    if (!agreedToTerms.value) return;
+    emit('submit', {
+      email: data.email,
+      password: data.password,
+      userName: props.showUsername ? data.userName : undefined,
+      phoneNumber: props.showPhone ? data.phoneNumber : undefined,
+      captchaId: props.showCaptcha ? props.captchaId : undefined,
+      captchaCode: props.showCaptcha ? captchaCode.value : undefined,
+    });
+  },
+  onLogin: () => emit('login'),
+});
+
+const { email, userName, phoneNumber, password, confirmPassword } = form.fields;
+const { passwordMismatch } = form;
+
 const isDisabled = computed(() => props.disabled);
-const passwordMismatch = computed(() => confirmPassword.value !== '' && confirmPassword.value !== password.value);
+const isLoading = computed(() => props.loading || form.isSubmitting.value);
 
-const emailRules = [
-  { required: true, message: 'Email is required' },
-  { pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: 'Invalid email format' },
-];
-const passwordRules = [
-  { required: true, message: 'Password is required' },
-  { validator: (val: string) => val.length >= 6, message: 'Password must be at least 6 characters' },
-];
-const confirmPasswordRules = [
-  { required: true, message: 'Confirm password is required' },
-  { validator: (val: string) => val === password.value, message: 'Passwords do not match' },
-];
-
-const handleSubmit = () => {
-  if (passwordMismatch.value) return;
-  if (!agreedToTerms.value) return;
-
-  emit('submit', {
-    email: email.value,
-    password: password.value,
-    userName: props.showUsername ? userName.value : undefined,
-    phoneNumber: props.showPhone ? phoneNumber.value : undefined,
-    captchaId: props.showCaptcha ? props.captchaId : undefined,
-    captchaCode: props.showCaptcha ? captchaCode.value : undefined,
-  });
-};
+const emailRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: t('auth.email') }) },
+  { pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: t('form.invalidEmail') },
+]);
+const usernameRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: t('auth.username') }) },
+]);
+const phoneRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: t('auth.phone') }) },
+]);
+const passwordRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: t('auth.password') }) },
+  {
+    validator: (val: string) => val.length >= props.passwordMinLength,
+    message: t('auth.passwordMinLength', { min: props.passwordMinLength }),
+  },
+]);
+const confirmPasswordRules = computed(() => [
+  { required: true, message: t('auth.pleaseConfirm', { field: t('auth.password') }) },
+  { validator: (val: string) => val === password.value, message: t('auth.passwordMismatch') },
+]);
 
 const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProviders']>[number]) => {
   emit('socialLogin', provider);
@@ -106,8 +130,8 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
 </script>
 
 <template>
-  <div class="rounded-xl bg-white">
-    <van-form @submit="handleSubmit">
+  <div class="rounded-xl bg-van-surface">
+    <van-form @submit="form.submit">
       <van-field
         v-model="email"
         name="email"
@@ -118,14 +142,18 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
       <van-field
         v-if="props.showUsername"
         v-model="userName"
+        name="userName"
         :label="props.usernameLabel || t('auth.username')"
         :disabled="isDisabled"
+        :rules="usernameRules"
       />
       <van-field
         v-if="props.showPhone"
         v-model="phoneNumber"
+        name="phoneNumber"
         :label="props.phoneLabel || t('auth.phone')"
         :disabled="isDisabled"
+        :rules="phoneRules"
       />
       <van-field
         v-model="password"
@@ -163,12 +191,12 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
       </van-field>
 
       <div v-if="props.showLoginLink" class="px-4 pb-2 pt-1 text-center text-sm">
-        <span class="text-slate-500">{{ t('auth.hasAccount') }}</span>
+        <span class="text-van-muted">{{ t('auth.hasAccount') }}</span>
         <button
           type="button"
-          class="ml-1 border-0 bg-transparent text-[#1989fa]"
+          class="ml-1 border-0 bg-transparent text-van-primary"
           :disabled="isDisabled"
-          @click="emit('login')"
+          @click="form.login"
         >
           {{ props.loginLinkText || t('auth.loginNow') }}
         </button>
@@ -192,12 +220,19 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
 
       <div class="px-4 py-2">
         <van-checkbox v-model="agreedToTerms" :disabled="isDisabled" shape="square">
-          {{ t('auth.agreeToTerms') }}
+          {{ t('auth.agreeTerms') }}
         </van-checkbox>
       </div>
 
       <div class="px-4 pb-4">
-        <van-button round block type="primary" native-type="submit" :loading="props.loading" :disabled="isDisabled || passwordMismatch || !agreedToTerms">
+        <van-button
+          round
+          block
+          type="primary"
+          native-type="submit"
+          :loading="isLoading"
+          :disabled="isDisabled || passwordMismatch || !agreedToTerms"
+        >
           {{ props.submitLabel || t('auth.register') }}
         </van-button>
       </div>

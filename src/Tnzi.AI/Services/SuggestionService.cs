@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 后续建议生成服务 — 基于对话上下文生成语言感知的后续问题
+/// 后续建议生成服务 - 基于对话上下文生成语言感知的后续问题
 /// </summary>
 public class SuggestionService : ISuggestionService
 {
@@ -29,7 +29,7 @@ public class SuggestionService : ISuggestionService
             // 1. 加载最近消息
             // Read the message history in an isolated DI scope so the EF DbContext is never shared
             // with the originating request (or with a sibling event handler running concurrently in
-            // the same scope). Mirrors ThreadTitleGenerationHandler — see its remarks. This avoids
+            // the same scope). Mirrors ThreadTitleGenerationHandler - see its remarks. This avoids
             // "A second operation was started on this context instance" when suggestion generation
             // overlaps other DbContext work on the ambient scope.
             List<ChatMessage> messages;

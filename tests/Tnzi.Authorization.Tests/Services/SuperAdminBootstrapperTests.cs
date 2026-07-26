@@ -4,7 +4,7 @@ using Tnzi.Identity.Entities;
 namespace Tnzi.Authorization.Tests.Services;
 
 /// <summary>
-/// Unit tests for <see cref="SuperAdminBootstrapper"/> — the startup
+/// Unit tests for <see cref="SuperAdminBootstrapper"/> - the startup
 /// "first super admin" assignment. Key contract: it only acts while EVERY
 /// existing super-admin role has zero members (recovery semantics), resolves
 /// users by name case-insensitively, targets the first configured role that

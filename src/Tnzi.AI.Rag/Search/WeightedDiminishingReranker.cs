@@ -1,12 +1,12 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// 加权递减重排序后处理器 — 灵感来自 Kernel Memory v2
+/// 加权递减重排序后处理器 - 灵感来自 Kernel Memory v2
 /// <para>
 /// 三阶段处理：
-/// Phase 1: 权重应用 — weighted_score = base_relevance × source_weight
-/// Phase 2: 递减聚合 — 按 ContentHash 分组，相同内容多次出现时累加 score × diminishingFactor^i
-/// Phase 3: 排序 — 按得分降序，同分则按 ChunkIndex 升序
+/// Phase 1: 权重应用 - weighted_score = base_relevance × source_weight
+/// Phase 2: 递减聚合 - 按 ContentHash 分组，相同内容多次出现时累加 score × diminishingFactor^i
+/// Phase 3: 排序 - 按得分降序，同分则按 ChunkIndex 升序
 /// </para>
 /// </summary>
 public class WeightedDiminishingReranker : ISearchPostProcessor
@@ -40,7 +40,7 @@ public class WeightedDiminishingReranker : ISearchPostProcessor
         // Phase 2: 递减聚合（按 ContentHash 分组）
         var aggregated = DiminishingAggregate(weightedResults, options);
 
-        // Phase 3: 排序 — 按得分降序，同分按 ChunkIndex 升序
+        // Phase 3: 排序 - 按得分降序，同分按 ChunkIndex 升序
         var sorted = aggregated
             .OrderByDescending(r => r.Score)
             .ThenBy(r => r.ChunkIndex)

@@ -165,7 +165,7 @@ public sealed class CompositeContextProvider : IContextProvider
                         if (usedTokens + injectionTokens > maxBudget)
                         {
                             _logger.LogDebug(
-                                "Skipping {ProviderType} context ({InjectionTokens} tokens) — would exceed budget ({UsedTokens}+{InjectionTokens}>{MaxBudget})",
+                                "Skipping {ProviderType} context ({InjectionTokens} tokens) - would exceed budget ({UsedTokens}+{InjectionTokens}>{MaxBudget})",
                                 provider.GetType().Name, injectionTokens, usedTokens, injectionTokens, maxBudget);
                             continue;
                         }

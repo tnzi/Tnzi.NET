@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Entities;
 
 /// <summary>
-/// 工作流定义版本快照实体 — 每次工作流更新时自动创建的定义快照
+/// 工作流定义版本快照实体 - 每次工作流更新时自动创建的定义快照
 /// </summary>
 public class WorkflowDefinitionVersion : CreationAuditedEntity<Guid>, IMultiTenant
 {

@@ -9,6 +9,7 @@ export { groupMessages } from './useMessageGroup';
 export type { MessageGroupType, MessageGroup } from './useMessageGroup';
 export { useMessageBranch } from './useMessageBranch';
 export { useTokenCounter } from './useTokenCounter';
+export type { ModelPricing, UseTokenCounterOptions, UseTokenCounterReturn } from './useTokenCounter';
 export { useAgentExecution } from './useAgentExecution';
 export type { AgentToolCall, HandoffEntry, AgentExecutionEvent, UseAgentExecutionReturn } from './useAgentExecution';
 export { useWorkflowVisualization } from './useWorkflowVisualization';
@@ -32,5 +33,11 @@ export type { CodeLang, CodeTheme, UseCodeHighlightOptions, UseCodeHighlightRetu
 export { useVoiceInput } from './useVoiceInput';
 export type { UseVoiceInputOptions, UseVoiceInputReturn } from './useVoiceInput';
 export { useComposerAttachments } from './useComposerAttachments';
-export type { UseComposerAttachmentsOptions, UseComposerAttachmentsReturn } from './useComposerAttachments';
+export type {
+  UseComposerAttachmentsOptions,
+  UseComposerAttachmentsReturn,
+  RejectedAttachment,
+  AttachmentRejectionReason,
+} from './useComposerAttachments';
 export { useAutoGrowTextarea } from './useAutoGrowTextarea';
+export { useBodyScrollLock } from './useBodyScrollLock';

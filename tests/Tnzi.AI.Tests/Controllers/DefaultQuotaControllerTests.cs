@@ -8,7 +8,7 @@ using Tnzi.Exceptions;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultQuotaController 单元测试 — 覆盖用户 ID 获取、认证检查、Result → ApiResult 转换
+/// DefaultQuotaController 单元测试 - 覆盖用户 ID 获取、认证检查、Result → ApiResult 转换
 /// </summary>
 public class DefaultQuotaControllerTests
 {

@@ -4,7 +4,7 @@ using System.Net.Sockets;
 namespace Tnzi.AI.Infrastructure.Network;
 
 /// <summary>
-/// 线程安全的端口分配器 — 通过 socket 绑定验证端口可用性
+/// 线程安全的端口分配器 - 通过 socket 绑定验证端口可用性
 /// </summary>
 public class PortAllocator : IPortAllocator
 {

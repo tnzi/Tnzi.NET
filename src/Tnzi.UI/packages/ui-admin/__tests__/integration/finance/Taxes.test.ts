@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Taxes page — TContentPage with agencies/rates/codes tabs (deep-linkable).
+ * Taxes page - TContentPage with agencies/rates/codes tabs (deep-linkable).
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),

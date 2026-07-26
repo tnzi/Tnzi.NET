@@ -92,7 +92,7 @@ public class SessionBinderTests
     [Fact]
     public void Resolve_ChannelMatch_FallsThrough()
     {
-        // Arrange — rule for "slack" only, request comes from "telegram"
+        // Arrange - rule for "slack" only, request comes from "telegram"
         var rules = new List<SessionBindingRule>
         {
             new()
@@ -110,7 +110,7 @@ public class SessionBinderTests
         // Act
         var binding = binder.Resolve(context);
 
-        // Assert — falls through to default
+        // Assert - falls through to default
         binding.AgentId.ShouldBe(DefaultAgentId);
         binding.Scope.ShouldBe(SessionScope.PerPeer);
     }
@@ -136,14 +136,14 @@ public class SessionBinderTests
         // Act
         var binding = binder.Resolve(context);
 
-        // Assert — disabled rule skipped, uses default
+        // Assert - disabled rule skipped, uses default
         binding.AgentId.ShouldBe(DefaultAgentId);
     }
 
     [Fact]
     public void Resolve_WildcardChannel_MatchesAll()
     {
-        // Arrange — Channel=null matches any channel
+        // Arrange - Channel=null matches any channel
         var rules = new List<SessionBindingRule>
         {
             new()
@@ -157,17 +157,17 @@ public class SessionBinderTests
         };
         var binder = new DefaultSessionBinder(rules, CreateOptions());
 
-        // Act — request from "discord"
+        // Act - request from "discord"
         var binding = binder.Resolve(CreateContext(channel: "discord"));
 
-        // Assert — wildcard rule matches
+        // Assert - wildcard rule matches
         binding.AgentId.ShouldBe(RuleAgentId);
     }
 
     [Fact]
     public void Resolve_ExplicitAgentId_OverridesBinding()
     {
-        // Arrange — rules exist but explicit ID overrides
+        // Arrange - rules exist but explicit ID overrides
         var explicitId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
         var rules = new List<SessionBindingRule>
         {
@@ -223,7 +223,7 @@ public class SessionBinderTests
     [Fact]
     public void Resolve_PriorityOrdering()
     {
-        // Arrange — 3 rules with different priorities
+        // Arrange - 3 rules with different priorities
         var lowAgent = Guid.Parse("11111111-1111-1111-1111-111111111111");
         var midAgent = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var highAgent = Guid.Parse("33333333-3333-3333-3333-333333333333");
@@ -240,7 +240,7 @@ public class SessionBinderTests
         // Act
         var binding = binder.Resolve(context);
 
-        // Assert — highest priority (30) wins
+        // Assert - highest priority (30) wins
         binding.AgentId.ShouldBe(highAgent);
         binding.Scope.ShouldBe(SessionScope.Global);
     }

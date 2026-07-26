@@ -96,7 +96,7 @@ public class AgentArtifactServiceTests
     [Fact]
     public async Task GetByRunAsync_WithOwner_ReturnsMatchingRunArtifacts()
     {
-        // Arrange — verify that only artifacts whose RunId matches AND ThreadId is owned are returned
+        // Arrange - verify that only artifacts whose RunId matches AND ThreadId is owned are returned
         var ownerUserId = Guid.NewGuid();
         var ownedThreadId = Guid.NewGuid();
         var runId = Guid.NewGuid();
@@ -152,13 +152,13 @@ public class AgentArtifactServiceTests
     }
 
     // -------------------------------------------------------------------------
-    // GetByRunAsync owner-scoped overload (A1) — predicate-honoring mocks
+    // GetByRunAsync owner-scoped overload (A1) - predicate-honoring mocks
     // -------------------------------------------------------------------------
 
     [Fact]
     public async Task GetByRunAsync_WithOwner_ReturnsOnlyOwnerArtifacts()
     {
-        // Arrange — predicate must include RunId AND ownedThreadId; foreign thread excluded
+        // Arrange - predicate must include RunId AND ownedThreadId; foreign thread excluded
         var ownerUserId = Guid.NewGuid();
         var ownedThreadId = Guid.NewGuid();
         var foreignThreadId = Guid.NewGuid();
@@ -179,9 +179,9 @@ public class AgentArtifactServiceTests
         _artifactRepo
             .Setup(r => r.ToListAsync(
                 It.Is<Expression<Func<AgentArtifact, bool>>>(pred =>
-                    pred.Compile()(ownedArtifact) == true &&       // owner's run artifact — included
-                    pred.Compile()(foreignArtifact) == false &&    // foreign thread — excluded
-                    pred.Compile()(wrongRunArtifact) == false),    // wrong RunId — excluded
+                    pred.Compile()(ownedArtifact) == true &&       // owner's run artifact - included
+                    pred.Compile()(foreignArtifact) == false &&    // foreign thread - excluded
+                    pred.Compile()(wrongRunArtifact) == false),    // wrong RunId - excluded
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<AgentArtifact> { ownedArtifact });
 
@@ -197,7 +197,7 @@ public class AgentArtifactServiceTests
     [Fact]
     public async Task GetByRunAsync_WithOwner_OtherUserGetsEmpty()
     {
-        // Arrange — user B owns no threads; predicate must therefore exclude all artifacts
+        // Arrange - user B owns no threads; predicate must therefore exclude all artifacts
         var userBId = Guid.NewGuid();
         var runId = Guid.NewGuid();
         var someArtifact = new AgentArtifact { Id = Guid.NewGuid(), RunId = runId, ThreadId = Guid.NewGuid(), FileName = "other.txt", VirtualPath = "/mnt/other.txt" };
@@ -229,7 +229,7 @@ public class AgentArtifactServiceTests
     [Fact]
     public async Task GetByRunAsync_WithOwner_EmptyRunId_ReturnsThreadScopedArtifacts()
     {
-        // Arrange — RunId=Guid.Empty skips RunId filter; only ThreadId ownership matters
+        // Arrange - RunId=Guid.Empty skips RunId filter; only ThreadId ownership matters
         var ownerUserId = Guid.NewGuid();
         var ownedThreadId = Guid.NewGuid();
         var foreignThreadId = Guid.NewGuid();
@@ -245,12 +245,12 @@ public class AgentArtifactServiceTests
         var foreignArtifact = new AgentArtifact { Id = Guid.NewGuid(), RunId = Guid.Empty, ThreadId = foreignThreadId, FileName = "foreign.txt", VirtualPath = "/mnt/foreign.txt" };
         var runArtifact = new AgentArtifact { Id = Guid.NewGuid(), RunId = Guid.NewGuid(), ThreadId = ownedThreadId, FileName = "run.txt", VirtualPath = "/mnt/run.txt" };
 
-        // For Guid.Empty the predicate is: ownedThreadIds.Contains(e.ThreadId) — no RunId filter
+        // For Guid.Empty the predicate is: ownedThreadIds.Contains(e.ThreadId) - no RunId filter
         _artifactRepo
             .Setup(r => r.ToListAsync(
                 It.Is<Expression<Func<AgentArtifact, bool>>>(pred =>
-                    pred.Compile()(ownedArtifact) == true &&       // owned thread — included
-                    pred.Compile()(foreignArtifact) == false &&    // foreign thread — excluded
+                    pred.Compile()(ownedArtifact) == true &&       // owned thread - included
+                    pred.Compile()(foreignArtifact) == false &&    // foreign thread - excluded
                     pred.Compile()(runArtifact) == true),          // owned thread, non-empty RunId still passes (no RunId filter when empty)
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<AgentArtifact> { ownedArtifact });

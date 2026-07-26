@@ -1,14 +1,14 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// AgentExecutor 单元测试 — 验证 FindTool 搜索 context-injected 工具
+/// AgentExecutor 单元测试 - 验证 FindTool 搜索 context-injected 工具
 /// </summary>
 public class AgentExecutorTests
 {
     [Fact]
     public async Task ExecuteAsync_WithAdditionalToolFromRuntime_CanFindAndExecuteTool()
     {
-        // Arrange: 模拟 AgentRuntime.MergeAdditionalTools — context-injected 工具
+        // Arrange: 模拟 AgentRuntime.MergeAdditionalTools - context-injected 工具
         // 在新架构下由 ContextInjectionMiddleware 写入 AiMiddlewareContext.AdditionalTools，
         // 然后 AgentRuntime 通过 AgentExecutor.WithAdditionalTools 合并到 Options.Tools。
         // AgentExecutor 自身不再持有 IContextProvider 引用。
@@ -49,7 +49,7 @@ public class AgentExecutorTests
         };
 
         var executor = new AgentExecutor(mockClient.Object, options)
-            .WithAdditionalTools([contextTool]); // runtime-side merge — what AgentRuntime does
+            .WithAdditionalTools([contextTool]); // runtime-side merge - what AgentRuntime does
 
         // Act
         var messages = new List<ChatMessage> { new(ChatRole.User, "Find a skill") };
@@ -142,7 +142,7 @@ public class AgentExecutorTests
         var messages = new List<ChatMessage> { new(ChatRole.User, "Use some tool") };
         var response = await executor.ExecuteAsync(messages, CancellationToken.None);
 
-        // Assert — LLM 应该收到工具未找到的错误消息，并继续生成回复
+        // Assert - LLM 应该收到工具未找到的错误消息，并继续生成回复
         response.Text.ShouldBe("I couldn't find that tool");
         callCount.ShouldBe(2);
     }
@@ -277,7 +277,7 @@ public class AgentExecutorTests
         capturedOptions!.Instructions.ShouldBeNull();
     }
 
-    // ── C2: immutability — caller's messages list must not be mutated ─────────
+    // ── C2: immutability - caller's messages list must not be mutated ─────────
 
     [Fact]
     public async Task ExecuteAsync_DoesNotMutateCallerMessages()
@@ -311,7 +311,7 @@ public class AgentExecutorTests
         // Act
         var response = await executor.ExecuteAsync(callerMessages, CancellationToken.None);
 
-        // Assert — caller list is untouched
+        // Assert - caller list is untouched
         callerMessages.Count.ShouldBe(originalCount,
             "ExecuteAsync must not mutate the caller-supplied messages list");
         response.Text.ShouldBe("42");
@@ -353,7 +353,7 @@ public class AgentExecutorTests
         // Act
         await foreach (var _ in executor.ExecuteStreamingAsync(callerMessages, CancellationToken.None)) { }
 
-        // Assert — caller list is untouched
+        // Assert - caller list is untouched
         callerMessages.Count.ShouldBe(originalCount,
             "ExecuteStreamingAsync must not mutate the caller-supplied messages list");
     }

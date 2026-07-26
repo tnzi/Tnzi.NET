@@ -35,7 +35,7 @@ public class AttributeSettingDefinitionProviderTests
         // Without ITnziApplication, falls back to AppDomain.CurrentDomain.GetAssemblies()
         var provider = new AttributeSettingDefinitionProvider();
         var groups = provider.GetGroups();
-        // The test assembly has loaded Tnzi.System which contains ApplicationOptions — expect system-general
+        // The test assembly has loaded Tnzi.System which contains ApplicationOptions - expect system-general
         Assert.Contains(groups, g => g.Key == "system-general");
     }
 
@@ -92,9 +92,36 @@ public class AttributeSettingDefinitionProviderTests
     }
 
     [Fact]
+    public void ApplicationOptions_group_is_built_in()
+    {
+        // ApplicationOptions lives in the Tnzi core assembly → framework built-in,
+        // so the admin "Built-in menus" toggle hides it. Consumer app Options
+        // (non-Tnzi assembly) resolve to IsBuiltIn=false (see Acme SmokeTests).
+        var g = RuntimeSettingMetadataExtractor.Extract(typeof(ApplicationOptions))!;
+        Assert.True(g.IsBuiltIn);
+    }
+
+    [Fact]
+    public void MergeByGroupKey_mixed_builtin_and_consumer_is_not_builtin()
+    {
+        // A single consumer contribution keeps the merged group visible under the
+        // toggle (IsBuiltIn = All contributors built-in).
+        var rawGroups = new List<SettingDefinitionGroup>
+        {
+            new() { Key = "shared", ModuleName = "M", DisplayName = "Fw", Order = 0, IsBuiltIn = true,
+                    Fields = [new SettingFieldDefinition { Key = "A:P1", Label = "P1" }] },
+            new() { Key = "shared", ModuleName = "M", DisplayName = "App", Order = 1, IsBuiltIn = false,
+                    Fields = [new SettingFieldDefinition { Key = "B:P2", Label = "P2" }] },
+        };
+        var merged = AttributeSettingDefinitionProvider.MergeByGroupKey(rawGroups);
+        merged.Count.ShouldBe(1);
+        merged[0].IsBuiltIn.ShouldBeFalse();
+    }
+
+    [Fact]
     public void MergeByGroupKey_carries_all_contributor_options_types()
     {
-        // 回归：validator 预检要对合并组的每个贡献 Options 类型分别绑定验证 —
+        // 回归：validator 预检要对合并组的每个贡献 Options 类型分别绑定验证 -
         // 合并时丢 OptionsTypes 会让整组静默跳过预检。
         var rawGroups = new List<SettingDefinitionGroup>
         {
@@ -154,7 +181,7 @@ public class AttributeSettingDefinitionProviderTests
     public void ValidateNoConflicts_duplicate_group_key_does_not_throw()
     {
         // After MergeByGroupKey, group keys are unique by construction, but ValidateNoConflicts
-        // itself no longer checks group key uniqueness — it only checks field key uniqueness.
+        // itself no longer checks group key uniqueness - it only checks field key uniqueness.
         var field1 = new SettingFieldDefinition { Key = "A:Prop", Label = "P1" };
         var field2 = new SettingFieldDefinition { Key = "B:Prop", Label = "P2" };
         var groups = new List<SettingDefinitionGroup>
@@ -162,7 +189,7 @@ public class AttributeSettingDefinitionProviderTests
             new() { Key = "my-group", ModuleName = "A", DisplayName = "A", Fields = [field1] },
             new() { Key = "my-group", ModuleName = "B", DisplayName = "B", Fields = [field2] },
         };
-        // Should not throw — duplicate group keys are allowed here; MergeByGroupKey handles them.
+        // Should not throw - duplicate group keys are allowed here; MergeByGroupKey handles them.
         Should.NotThrow(() => AttributeSettingDefinitionProvider.ValidateNoConflicts(groups));
     }
 

@@ -1,11 +1,11 @@
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// Agent 授权治理控制器 — 在 <see cref="IAgentGrantService"/> 之上提供 additive 治理面：
+/// Agent 授权治理控制器 - 在 <see cref="IAgentGrantService"/> 之上提供 additive 治理面：
 /// 反向查询（"哪些 Agent 使用资源 X"）+ 单条授权的启用/优先级控制。
 /// 与 AgentDto 的工具组/技能/知识库 wire 契约正交：那条契约仍由 AgentService 投影/reconcile，
 /// 这里只暴露 per-binding 治理操作。
-/// Agent grant governance controller — additive surface over <see cref="IAgentGrantService"/>:
+/// Agent grant governance controller - additive surface over <see cref="IAgentGrantService"/>:
 /// reverse query ("which agents use resource X") + per-grant enable/priority.
 /// </summary>
 [DefaultController]

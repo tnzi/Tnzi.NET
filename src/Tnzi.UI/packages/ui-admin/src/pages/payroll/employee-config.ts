@@ -1,6 +1,7 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { formatDateOnly } from '@tnzi/core'
 import { TRelativeTime } from '@tnzi/ui'
@@ -24,11 +25,11 @@ export interface EmployeeRow {
 
 export function buildEmployeeColumns(t: (key: string) => string): ColumnDef<EmployeeRow>[] {
   return [
-    { key: 'code', title: 'columns.code', width: 120, render: (row) => row.code ?? '—' },
+    { key: 'code', title: 'columns.code', width: 120, render: (row) => row.code ?? EMPTY_DASH },
     { key: 'name', title: 'columns.name', minWidth: 160, primary: true },
-    { key: 'email', title: 'columns.email', minWidth: 180, mobileHidden: true, render: (row) => row.email ?? '—' },
-    { key: 'phone', title: 'columns.phone', width: 130, mobileHidden: true, render: (row) => row.phone ?? '—' },
-    { key: 'hireDate', title: 'columns.hireDate', width: 120, mobileHidden: true, render: (row) => formatDateOnly(row.hireDate, { utc: true, fallback: '—' }) },
+    { key: 'email', title: 'columns.email', minWidth: 180, mobileHidden: true, render: (row) => row.email ?? EMPTY_DASH },
+    { key: 'phone', title: 'columns.phone', width: 130, mobileHidden: true, render: (row) => row.phone ?? EMPTY_DASH },
+    { key: 'hireDate', title: 'columns.hireDate', width: 120, mobileHidden: true, render: (row) => formatDateOnly(row.hireDate, { utc: true, fallback: EMPTY_DASH }) },
     {
       key: 'vendorId',
       title: 'columns.payee',
@@ -62,18 +63,31 @@ export function buildEmployeeColumns(t: (key: string) => string): ColumnDef<Empl
   ]
 }
 
+/**
+ * Who they are, how to reach them, their employment dates, then the technical
+ * bits (linked account, free-form attributes) that only a payroll administrator
+ * touches. Putting the JSON blob next to the phone number is how a business
+ * form starts looking like a database console.
+ */
+export const employeeFormSections: FormSchemaSection[] = [
+  { key: 'basics', labelKey: 'admin.shared.formSections.basics', label: 'Basics', icon: 'mdi:card-account-details-outline' },
+  { key: 'contact', labelKey: 'admin.shared.formSections.contact', label: 'Contact', icon: 'mdi:card-account-mail-outline' },
+  { key: 'employment', labelKey: 'admin.shared.formSections.period', label: 'Employment', icon: 'mdi:calendar-account-outline' },
+  { key: 'advanced', labelKey: 'admin.shared.formSections.advanced', label: 'Advanced', icon: 'mdi:cog-outline' },
+]
+
 export const employeeFormSchema: FormSchemaItem[] = [
-  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', required: true },
-  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
-  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text' },
-  { key: 'phone', labelKey: 'form.phone', label: 'Phone', type: 'text' },
-  { key: 'hireDate', labelKey: 'form.hireDate', label: 'Hire Date', type: 'date' },
-  { key: 'terminationDate', labelKey: 'form.terminationDate', label: 'Termination Date', type: 'date' },
+  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', required: true, section: 'basics' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true, section: 'basics' },
+  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'switch', section: 'basics', visible: (m) => !!m.id },
+  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text', section: 'contact' },
+  { key: 'phone', labelKey: 'form.phone', label: 'Phone', type: 'text', section: 'contact' },
+  { key: 'hireDate', labelKey: 'form.hireDate', label: 'Hire Date', type: 'date', section: 'employment' },
+  { key: 'terminationDate', labelKey: 'form.terminationDate', label: 'Termination Date', type: 'date', section: 'employment' },
   // Linked account: pick a real user (remote-search) instead of pasting a raw GUID (Business-audience iron-law).
-  { key: 'userId', labelKey: 'form.userId', label: 'Linked User', type: 'employee-user' },
-  { key: 'attributesJson', labelKey: 'form.attributesJson', label: 'Attributes (JSON)', type: 'json' },
-  { key: 'notes', labelKey: 'form.notes', label: 'Notes', type: 'textarea' },
-  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'switch', visible: (m) => !!m.id },
+  { key: 'userId', labelKey: 'form.userId', label: 'Linked User', type: 'employee-user', section: 'advanced' },
+  { key: 'attributesJson', labelKey: 'form.attributesJson', label: 'Attributes (JSON)', type: 'json', span: 'full', section: 'advanced' },
+  { key: 'notes', labelKey: 'form.notes', label: 'Notes', type: 'textarea', section: 'advanced' },
 ]
 
 /** Assignment editor fields (add form inside the assignments drawer). */

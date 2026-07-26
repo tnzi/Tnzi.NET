@@ -2,177 +2,6 @@
 namespace Tnzi.System.Tests.Services;
 
 /// <summary>
-/// MenuService 单元测试
-/// </summary>
-public class MenuServiceTests
-{
-    private readonly Mock<IRepository<Menu, Guid>> _menuRepositoryMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
-    private readonly Mock<ICache> _cacheMock;
-    private readonly MenuService _service;
-
-    public MenuServiceTests()
-    {
-        // Initialize Mapster
-        var config = new TypeAdapterConfig();
-        var mapper = new Mapper(config);
-        MapperExtensions.SetMapper(mapper);
-
-        _menuRepositoryMock = new Mock<IRepository<Menu, Guid>>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
-        _cacheMock = new Mock<ICache>();
-
-        var loggerFactoryMock = new Mock<ILoggerFactory>();
-        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
-        _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
-
-        _service = new MenuService(
-            _serviceProviderMock.Object,
-            _menuRepositoryMock.Object,
-            _cacheMock.Object);
-    }
-
-    [Fact]
-    public async Task GetMenusAsync_Should_Return_All_Menus()
-    {
-        // Arrange
-        var menus = new List<Menu>
-        {
-            new Menu { Id = Guid.NewGuid(), Name = "Menu1", SortOrder = 1 },
-            new Menu { Id = Guid.NewGuid(), Name = "Menu2", SortOrder = 2 }
-        };
-
-        _menuRepositoryMock.Setup(r => r.ToListAsync(default))
-            .ReturnsAsync(menus);
-
-        // Act
-        var result = await _service.GetMenusAsync();
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldNotBeNull();
-        result.Data.Count().ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task GetMenuByIdAsync_Should_Return_Menu_When_Exists()
-    {
-        // Arrange
-        var menuId = Guid.NewGuid();
-        var menu = new Menu { Id = menuId, Name = "Test Menu" };
-        _menuRepositoryMock.Setup(r => r.GetAsync(menuId))
-            .ReturnsAsync(menu);
-
-        // Act
-        var result = await _service.GetMenuByIdAsync(menuId);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldNotBeNull();
-        result.Data.Id.ShouldBe(menuId);
-        result.Data.Name.ShouldBe("Test Menu");
-    }
-
-    [Fact]
-    public async Task GetMenuByIdAsync_Should_Return_Fail_When_Not_Exists()
-    {
-        // Arrange
-        var menuId = Guid.NewGuid();
-        _menuRepositoryMock.Setup(r => r.GetAsync(menuId))
-            .ReturnsAsync((Menu?)null);
-
-        // Act
-        var result = await _service.GetMenuByIdAsync(menuId);
-
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Data.ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task CreateMenuAsync_Should_Create_New_Menu()
-    {
-        // Arrange
-        var input = new CreateMenuDto
-        {
-            Name = "New Menu",
-            Path = "/test",
-            SortOrder = 1
-        };
-
-        _menuRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Menu>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _cacheMock.Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _service.CreateMenuAsync(input);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldNotBeNull();
-        result.Data.Name.ShouldBe("New Menu");
-        result.Data.Path.ShouldBe("/test");
-        _menuRepositoryMock.Verify(r => r.InsertAsync(It.Is<Menu>(m => m.Name == "New Menu"),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateMenuAsync_Should_Update_Existing_Menu()
-    {
-        // Arrange
-        var menuId = Guid.NewGuid();
-        var existingMenu = new Menu { Id = menuId, Name = "Old Name" };
-        var input = new UpdateMenuDto
-        {
-            Name = "Updated Name",
-            Path = "/updated"
-        };
-
-        _menuRepositoryMock.Setup(r => r.GetAsync(menuId))
-            .ReturnsAsync(existingMenu);
-        _menuRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Menu>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _cacheMock.Setup(x => x.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _service.UpdateMenuAsync(menuId, input);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldNotBeNull();
-        result.Data.Id.ShouldBe(menuId);
-        result.Data.Name.ShouldBe("Updated Name");
-        _menuRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Menu>(m => m.Name == "Updated Name"),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetUserMenuTreeAsync_Should_Return_Tree_Structure()
-    {
-        // Arrange
-        var rootId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
-        var menus = new List<Menu>
-        {
-            new Menu { Id = rootId, Name = "Root1", ParentId = null, SortOrder = 1, IsHidden = false },
-            new Menu { Id = childId, Name = "Child1", ParentId = rootId, SortOrder = 1, IsHidden = false }
-        };
-
-        _cacheMock.Setup(x => x.GetAsync<List<Menu>>(It.Is<string>(s => s == "System:Menus:All"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(menus);
-
-        // Act
-        var result = await _service.GetUserMenuTreeAsync(Guid.NewGuid());
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldNotBeNull();
-    }
-}
-
-/// <summary>
 /// AccessLogService 单元测试
 /// </summary>
 public class AccessLogServiceTests
@@ -298,7 +127,7 @@ public class SettingServiceTests
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe("MyApp");
 
-        // The repository must NOT be queried — the legacy App.AppName table read path is gone
+        // The repository must NOT be queried - the legacy App.AppName table read path is gone
         _settingRepositoryMock.Verify(r => r.AsQueryable(It.IsAny<bool>()), Times.Never);
     }
 
@@ -318,7 +147,7 @@ public class SettingServiceTests
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe("MySite");
 
-        // The repository must NOT be queried — the legacy App.SiteName table read path is gone
+        // The repository must NOT be queried - the legacy App.SiteName table read path is gone
         _settingRepositoryMock.Verify(r => r.AsQueryable(It.IsAny<bool>()), Times.Never);
     }
 
@@ -400,7 +229,7 @@ public class SettingServiceTests
     {
         // 仅 Global 作用域受管（Tenant/User 行不进 IConfiguration）；未受管的自定义键不受影响。
         // 哨兵异常证明「后门拦截层已通过、到达唯一性检查」（内存 IQueryable 跑不了 EF 异步算子，
-        // 无法走完完整创建路径 — 这里只锁拦截边界）。
+        // 无法走完完整创建路径 - 这里只锁拦截边界）。
         var service = CreateServiceWithManagedKeys();
         _settingRepositoryMock
             .Setup(r => r.AsQueryable(It.IsAny<bool>()))

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// PII（个人身份信息）检测 Guardrail — 基于正则匹配检测常见 PII 模式
+/// PII（个人身份信息）检测 Guardrail - 基于正则匹配检测常见 PII 模式
 /// </summary>
 /// <remarks>
 /// Detects common PII patterns (email, phone, ID card, credit card) by regex.

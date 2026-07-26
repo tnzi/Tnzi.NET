@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// 基于 LLM 的相关性评分器 — 使用 LLM 评估检索结果与查询的相关性
+/// 基于 LLM 的相关性评分器 - 使用 LLM 评估检索结果与查询的相关性
 /// </summary>
 /// <remarks>
 /// <para>

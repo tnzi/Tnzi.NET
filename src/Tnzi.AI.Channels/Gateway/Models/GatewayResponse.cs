@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// Gateway 响应 — 完整的非流式响应
+/// Gateway 响应 - 完整的非流式响应
 /// </summary>
 public class GatewayResponse
 {
@@ -28,7 +28,7 @@ public class GatewayResponse
 }
 
 /// <summary>
-/// Gateway 流式块 — 流式响应的单个数据块
+/// Gateway 流式块 - 流式响应的单个数据块
 /// </summary>
 public class GatewayStreamChunk
 {

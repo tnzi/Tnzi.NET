@@ -2,8 +2,9 @@ namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
 /// Read-only admin endpoints for workspace-discovered Agent + Persona
-/// definitions. Sits next to the editable <c>admin/ai/agents</c> CRUD —
-/// see <see cref="IWorkspaceAgentAdminService"/> for why the two are kept
+/// definitions. Sits next to the editable <c>admin/agents</c> CRUD
+/// (<see cref="DefaultAgentAdminController"/>); see
+/// <see cref="IWorkspaceAgentAdminService"/> for why the two are kept
 /// separate (different identity types, different lifecycles).
 /// </summary>
 [Route("admin/ai/workspace")]

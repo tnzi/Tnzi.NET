@@ -107,6 +107,9 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         };
 
         await _repository.InsertAsync(preference, cancellationToken);
+        // 环境事务下仓储会推迟 SaveChanges，而实体 Id 是框架在 SaveChanges 里生成的 ——
+        // 不 flush 则返回的 DTO（与下面的日志）带 Guid.Empty，调用方拿不到可用于删除的 id。
+        await _repository.SaveChangesAsync(cancellationToken);
 
         LogInformation("Created notification preference {PreferenceId} for user {UserId}, channel: {Channel}",
             preference.Id, userId, input.Channel);

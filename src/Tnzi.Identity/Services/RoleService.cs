@@ -147,7 +147,7 @@ public class RoleService : ApplicationService, IRoleService
             return Fail<RoleDto>("System role cannot be renamed", 403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
         }
 
-        // Capture rename diagnostic — populated on the published event only
+        // Capture rename diagnostic - populated on the published event only
         // when the name *actually* changed (case-insensitive). Authorization
         // subscribes to RoleUpdatedEvent and warns when a renamed role is
         // referenced by Authorization.SuperAdminRoles (config-by-name → DB

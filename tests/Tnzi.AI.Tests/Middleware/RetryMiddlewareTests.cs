@@ -3,7 +3,7 @@ using Tnzi.Exceptions;
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// RetryMiddleware 功能测试 — 重试逻辑、禁用行为
+/// RetryMiddleware 功能测试 - 重试逻辑、禁用行为
 /// </summary>
 public class RetryMiddlewareTests
 {

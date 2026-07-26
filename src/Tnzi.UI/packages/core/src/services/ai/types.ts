@@ -60,7 +60,7 @@ export enum WorkflowExecutionMode {
 /**
  * Workflow execution status.
  * Member order mirrors the backend enum
- * (`Tnzi.AI.Workflow.WorkflowExecutionStatus`) exactly — the previous numeric
+ * (`Tnzi.AI.Workflow.WorkflowExecutionStatus`) exactly - the previous numeric
  * declaration mis-mapped Paused/AwaitingApproval and omitted Cancelled /
  * AwaitingInput.
  */
@@ -103,7 +103,7 @@ export enum SkillScope {
 }
 
 /**
- * Shared-resource visibility scope (Provider / Persona).
+ * Shared-resource visibility scope (Provider).
  * System rows are shared across tenants; Tenant rows are tenant-private.
  * Mirrors the backend ResourceScope enum (serialized as PascalCase names).
  */
@@ -154,8 +154,8 @@ export interface AgentDto {
   qualityTier: number;
   latencyTier: number;
   costTier: number;
-  /** Persona FK — links the agent to an AgentPersona's soul / role template. */
-  personaId?: string | null;
+  /** Persona (soul) content injected as a &lt;soul&gt; block. Inline on the agent. */
+  persona?: string | null;
   /** Assigned knowledge base IDs (RAG). Retrieval is scoped to these at runtime. */
   knowledgeBaseIds?: string[] | null;
   /** Assigned skill slugs. Only these skills are visible to the agent at runtime. */
@@ -205,8 +205,8 @@ export interface CreateAgentDto {
   qualityTier?: number;
   latencyTier?: number;
   costTier?: number;
-  /** Persona FK (optional). */
-  personaId?: string | null;
+  /** Persona (soul) content injected as a &lt;soul&gt; block (optional). */
+  persona?: string | null;
   /** Assigned knowledge base IDs (RAG). */
   knowledgeBaseIds?: string[] | null;
   /** Assigned skill slugs. */
@@ -233,10 +233,10 @@ export interface UpdateAgentDto {
   latencyTier?: number | null;
   costTier?: number | null;
   /**
-   * Persona FK. Pass a uuid to link, pass an empty-guid string
-   * ("00000000-0000-0000-0000-000000000000") to unlink, omit to leave unchanged.
+   * Persona (soul) content. Omit to leave unchanged, pass an empty string
+   * to clear, pass content to set.
    */
-  personaId?: string | null;
+  persona?: string | null;
   /** Assigned knowledge base IDs (RAG). Pass an empty array to clear all. */
   knowledgeBaseIds?: string[] | null;
   /** Assigned skill slugs. Pass an empty array to clear all. */
@@ -431,7 +431,7 @@ export interface ComponentRefDto {
 }
 
 /**
- * Chat stream event — SSE delta model (each event contains incremental content, not cumulative).
+ * Chat stream event - SSE delta model (each event contains incremental content, not cumulative).
  * Maps to backend StreamEvent class.
  */
 export interface ChatStreamEvent {
@@ -933,29 +933,29 @@ export interface ProviderDefaultModelDto {
 }
 
 /**
- * Provider source — 'Database' (admin-entered entity, writable) or
+ * Provider source - 'Database' (admin-entered entity, writable) or
  * 'Configuration' (appsettings AI:Providers, read-only: update/delete/testConnection return 400).
  */
 export type ProviderSource = 'Database' | 'Configuration';
 
-/** Provider dropdown option (enabled providers only) — for the Agent config Provider select. */
+/** Provider dropdown option (enabled providers only) - for the Agent config Provider select. */
 export interface ProviderOptionDto {
   id: string;
   name: string;
   providerType: string;
   defaultModel?: string | null;
-  /** Source — 'Database' (entity) or 'Configuration' (appsettings AI:Providers). */
+  /** Source - 'Database' (entity) or 'Configuration' (appsettings AI:Providers). */
   source: ProviderSource;
 }
 
-/** Provider model list — live from /v1/models when available, else a static fallback. */
+/** Provider model list - live from /v1/models when available, else a static fallback. */
 export interface ProviderModelsDto {
   models: string[];
   /** "live" = fetched from the provider's /v1/models; "fallback" = static curated list. */
   source: string;
 }
 
-/** Provider entity DTO — never exposes plaintext or ciphertext API key */
+/** Provider entity DTO - never exposes plaintext or ciphertext API key */
 export interface ProviderDto {
   id: string;
   name: string;
@@ -966,17 +966,17 @@ export interface ProviderDto {
   isEnabled: boolean;
   description?: string | null;
   hasApiKey: boolean;
-  /** Visibility scope — System (shared across tenants) or Tenant (tenant-private). */
+  /** Visibility scope - System (shared across tenants) or Tenant (tenant-private). */
   scope: ResourceScope;
-  /** Owning tenant — populated when scope=Tenant. */
+  /** Owning tenant - populated when scope=Tenant. */
   tenantId?: string | null;
   /**
-   * Source — 'Database' (entity, writable) or 'Configuration' (appsettings
+   * Source - 'Database' (entity, writable) or 'Configuration' (appsettings
    * AI:Providers; synthetic stable id, pinned to the top of the list,
    * update/delete/testConnection rejected with 400, listModels works).
    */
   source: ProviderSource;
-  /** Creation time — null for Configuration-sourced entries. */
+  /** Creation time - null for Configuration-sourced entries. */
   creationTime: string | null;
   lastModificationTime?: string | null;
 }
@@ -1004,7 +1004,7 @@ export interface CreateProviderDto {
   scope?: ResourceScope | null;
 }
 
-/** Provider update request — apiKey: null = keep, '' = clear, non-empty = rotate */
+/** Provider update request - apiKey: null = keep, '' = clear, non-empty = rotate */
 export interface UpdateProviderDto {
   name?: string | null;
   providerType?: string | null;
@@ -1467,49 +1467,6 @@ export interface WorkflowStreamEventDto {
 }
 
 // ============================================
-// Persona Types
-// ============================================
-
-/** Agent persona (soul template) */
-export interface AgentPersonaDto {
-  id: string;
-  name: string;
-  slug: string;
-  content: string;
-  description?: string | null;
-  /** Visibility scope — System (shared across tenants) or Tenant (tenant-private). */
-  scope: ResourceScope;
-  /** Owning tenant — populated when scope=Tenant. */
-  tenantId?: string | null;
-  creationTime: string;
-  lastModificationTime?: string | null;
-}
-
-/** Create persona request */
-export interface CreateAgentPersonaDto {
-  name: string;
-  slug: string;
-  content: string;
-  description?: string | null;
-  /** Optional explicit scope; when omitted the server infers (tenant context -> Tenant, else System). */
-  scope?: ResourceScope | null;
-}
-
-/** Update persona request */
-export interface UpdateAgentPersonaDto {
-  name?: string | null;
-  slug?: string | null;
-  content?: string | null;
-  description?: string | null;
-}
-
-/** Persona query parameters */
-export interface AgentPersonaQueryDto extends PagedQueryDto {
-  keyword?: string | null;
-  scope?: ResourceScope | null;
-}
-
-// ============================================
 // Skill Category Types
 // ============================================
 
@@ -1624,11 +1581,11 @@ export interface McpToolExposureOptionsDto {
 // Entity-driven catalogue of EXTERNAL MCP servers Tnzi can connect to as a
 // client. Distinct from McpServerStatusDto above (which describes Tnzi's own
 // MCP-server-hosting status). Auth tokens are encrypted server-side via
-// IDataProtectionProvider; DTOs only expose a `hasAuthToken` boolean — never
+// IDataProtectionProvider; DTOs only expose a `hasAuthToken` boolean - never
 // plaintext or ciphertext. Enabled registrations are materialized into the
 // MCP client runtime (merged with deployment-configured servers; same-name DB
 // entries win). Only HTTP-family transports are allowed (sse / streamable-http
-// / http) — stdio servers must be configured via deployment configuration.
+// / http) - stdio servers must be configured via deployment configuration.
 
 /** MCP server registration entity DTO (read shape, no credential exposure) */
 export interface McpServerRegistrationDto {
@@ -1657,9 +1614,9 @@ export interface McpServerRegistrationQueryDto extends PagedQueryDto {
 export interface CreateMcpServerRegistrationDto {
   name: string;
   serverUrl: string;
-  /** Transport mode — sse / streamable-http / http (stdio is rejected by the backend) */
+  /** Transport mode - sse / streamable-http / http (stdio is rejected by the backend) */
   transport: string;
-  /** Plaintext auth token — encrypted at rest by the backend */
+  /** Plaintext auth token - encrypted at rest by the backend */
   authToken?: string | null;
   authType?: string | null;
   priority?: number;
@@ -1676,7 +1633,7 @@ export interface CreateMcpServerRegistrationDto {
 export interface UpdateMcpServerRegistrationDto {
   name?: string | null;
   serverUrl?: string | null;
-  /** Transport mode — sse / streamable-http / http (stdio is rejected by the backend) */
+  /** Transport mode - sse / streamable-http / http (stdio is rejected by the backend) */
   transport?: string | null;
   authToken?: string | null;
   authType?: string | null;
@@ -1741,16 +1698,16 @@ export interface WorkspaceAgentDto {
   roles?: string[] | null;
   qualityTier?: number | null;
   filePath: string;
-  /** Where the file was found — "Global" or "Project". */
+  /** Where the file was found - "Global" or "Project". */
   workspaceScope: string;
   hasPersona: boolean;
   /** Markdown body of AGENT.md (system instructions, after frontmatter). */
   instructions?: string | null;
   /** Markdown body of the sibling PERSONA.md (if present). */
   personaContent?: string | null;
-  /** Always "Workspace" — drives TSourceBadge. */
+  /** Always "Workspace" - drives TSourceBadge. */
   source: string;
-  /** Always true — workspace agents are file-backed and not editable. */
+  /** Always true - workspace agents are file-backed and not editable. */
   isReadOnly: boolean;
 }
 

@@ -40,7 +40,7 @@ public class RazorTemplateEngine : ITemplateEngine
 
         try
         {
-            // 生成缓存键（优化：对短模板使用简单哈希）
+            // 生成缓存键（按模板内容哈希）
             var cacheKey = GenerateCacheKey(templateContent);
 
             // 获取或编译模板
@@ -82,7 +82,7 @@ public class RazorTemplateEngine : ITemplateEngine
             {
                 // 验证绝对路径是否在模板根目录下（安全检查）
                 var normalizedPath = Path.GetFullPath(filePath);
-                if (!normalizedPath.StartsWith(_normalizedRootPath, StringComparison.OrdinalIgnoreCase))
+                if (!IsWithinTemplateRoot(normalizedPath))
                 {
                     _logger.LogWarning("Path traversal attempt detected: {FilePath}", filePath);
                     throw new TemplateSecurityException($"Access denied: Path must be within template root directory.", filePath);
@@ -488,7 +488,7 @@ public class RazorTemplateEngine : ITemplateEngine
             var normalizedPath = Path.GetFullPath(filePath);
 
             // 安全检查：确保路径在模板根目录下
-            if (!normalizedPath.StartsWith(_normalizedRootPath, StringComparison.OrdinalIgnoreCase))
+            if (!IsWithinTemplateRoot(normalizedPath))
             {
                 _logger.LogWarning("Path traversal attempt detected: {FilePath}", filePath);
                 throw new TemplateSecurityException($"Access denied: Path must be within template root directory.", filePath);
@@ -501,13 +501,27 @@ public class RazorTemplateEngine : ITemplateEngine
         var fullPath = Path.GetFullPath(Path.Combine(_normalizedRootPath, filePath));
 
         // 安全检查：确保解析后的路径仍在根目录下（防止 ../ 攻击）
-        if (!fullPath.StartsWith(_normalizedRootPath, StringComparison.OrdinalIgnoreCase))
+        if (!IsWithinTemplateRoot(fullPath))
         {
             _logger.LogWarning("Path traversal attempt detected: {FilePath}", filePath);
             throw new TemplateSecurityException($"Path traversal detected: '{filePath}'", filePath);
         }
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// 判断规范化后的绝对路径是否位于模板根目录内。
+    /// 必须带上目录分隔符再比较：裸 StartsWith 会把同级的兄弟目录
+    /// （根为 "…/Templates" 时的 "…/Templates_bak/x.cshtml"）误判为在根目录内。
+    /// </summary>
+    private bool IsWithinTemplateRoot(string normalizedPath)
+    {
+        var rootPrefix = _normalizedRootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _normalizedRootPath
+            : _normalizedRootPath + Path.DirectorySeparatorChar;
+
+        return normalizedPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

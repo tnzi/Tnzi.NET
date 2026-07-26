@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// 工具结果预算管理测试 — 验证 HistoryMiddleware.TruncateLargeToolResults
+/// 工具结果预算管理测试 - 验证 HistoryMiddleware.TruncateLargeToolResults
 /// </summary>
 public class ToolResultBudgetTests
 {

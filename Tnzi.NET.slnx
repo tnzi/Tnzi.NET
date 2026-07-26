@@ -36,7 +36,6 @@
     <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
     <Project Path="src/Tnzi.Chat/Tnzi.Chat.csproj" />
     <Project Path="src/Tnzi.Feature/Tnzi.Feature.csproj" />
-    <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
     <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
     <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
     <Project Path="src/Tnzi.Storage/Tnzi.Storage.csproj" />
@@ -55,8 +54,15 @@
   <Folder Name="/src/modules/Tnzi.Finance/">
     <Project Path="src/Tnzi.Finance/Tnzi.Finance.csproj" />
     <Project Path="src/Tnzi.Finance.Ai/Tnzi.Finance.Ai.csproj" />
+    <Project Path="src/Tnzi.Finance.Banking/Tnzi.Finance.Banking.csproj" />
     <Project Path="src/Tnzi.Finance.Documents/Tnzi.Finance.Documents.csproj" />
+    <Project Path="src/Tnzi.Finance.Recurring/Tnzi.Finance.Recurring.csproj" />
+    <Project Path="src/Tnzi.Finance.Tax.Ca/Tnzi.Finance.Tax.Ca.csproj" />
     <Project Path="src/Tnzi.Finance.Payroll/Tnzi.Finance.Payroll.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.Identity/">
+    <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
+    <Project Path="src/Tnzi.Identity.Presence/Tnzi.Identity.Presence.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Rag.Tests/Tnzi.AI.Rag.Tests.csproj" />
@@ -72,6 +78,7 @@
     <Project Path="tests/Tnzi.Hangfire.Tests/Tnzi.Hangfire.Tests.csproj" />
     <Project Path="tests/Tnzi.HealthChecks.Tests/Tnzi.HealthChecks.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
+    <Project Path="tests/Tnzi.Identity.Presence.Tests/Tnzi.Identity.Presence.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Kafka.Tests/Tnzi.Kafka.Tests.csproj" />

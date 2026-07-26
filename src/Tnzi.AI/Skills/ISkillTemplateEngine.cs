@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能模板引擎 — 解析 {{param}} 占位符、验证参数、渲染最终提示词
+/// 技能模板引擎 - 解析 {{param}} 占位符、验证参数、渲染最终提示词
 /// </summary>
 public interface ISkillTemplateEngine
 {
@@ -23,7 +23,7 @@ public interface ISkillTemplateEngine
 }
 
 /// <summary>
-/// 模板渲染上下文 — 提供内置变量（SESSION_ID, AGENT_NAME 等）
+/// 模板渲染上下文 - 提供内置变量（SESSION_ID, AGENT_NAME 等）
 /// </summary>
 public class SkillRenderContext
 {

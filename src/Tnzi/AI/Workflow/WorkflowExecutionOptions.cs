@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
-/// 工作流执行选项 — 控制检查点和断点续执行行为
+/// 工作流执行选项 - 控制检查点和断点续执行行为
 /// </summary>
 [ExperimentalApi(Reason = "Workflow execution options are in preview")]
 public class WorkflowExecutionOptions

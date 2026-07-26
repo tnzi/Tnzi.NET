@@ -3,7 +3,7 @@ import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { normalizeModuleName } from '../services/admin-shell-modules'
 
 /**
- * Module-availability guard composable — the module twin of
+ * Module-availability guard composable - the module twin of
  * `usePermissionGuard`, backed by the backend loaded-module signal
  * (`GET /admin/shell/modules` → `useAdminRouteStore.availableModules`).
  *
@@ -14,12 +14,12 @@ import { normalizeModuleName } from '../services/admin-shell-modules'
  *
  * Two families of checks with DIFFERENT in-flight semantics:
  *
- * - `has` / `hasAny` / `hasAll` — pure-visibility checks. FAIL-OPEN while the
+ * - `has` / `hasAny` / `hasAll` - pure-visibility checks. FAIL-OPEN while the
  *   signal is unavailable (`availableModules === null`): old backend, probe
  *   still in flight, or `moduleGating` disabled. Mirrors the sidebar menu
  *   filter, so a missing signal never blanks UI. Use for `v-if` on buttons,
  *   links, sections.
- * - `canActivate` — side-effect gate. ALSO false while the initial probe is
+ * - `canActivate` - side-effect gate. ALSO false while the initial probe is
  *   still in flight (`moduleSignalPending`), so components whose mount fires
  *   requests / opens sockets (chat host, data widgets, pollers) defer until
  *   the signal settles instead of racing it. Once settled it degrades to
@@ -27,10 +27,10 @@ import { normalizeModuleName } from '../services/admin-shell-modules'
  *
  * UNLIKE the permission guard there is NO super-user bypass: module
  * availability is a fact about the backend process, orthogonal to who is
- * signed in — an endpoint of an unloaded module 404s for the super admin too.
+ * signed in - an endpoint of an unloaded module 404s for the super admin too.
  *
  * Module names accept any of the forms used across the stack (`"AI.Skills"`,
- * `"ai.skills"`, `"ai-skills"`) — normalized via {@link normalizeModuleName}.
+ * `"ai.skills"`, `"ai-skills"`) - normalized via {@link normalizeModuleName}.
  */
 export interface UseModuleAvailabilityReturn {
   /** True when the module is loaded, or the signal is unavailable (fail-open). */
@@ -46,7 +46,7 @@ export interface UseModuleAvailabilityReturn {
   canActivate: (module: string) => boolean
   /** True while the initial availability probe is in flight. */
   pending: ComputedRef<boolean>
-  /** True once the signal is known (a Set arrived — even an empty one). */
+  /** True once the signal is known (a Set arrived - even an empty one). */
   known: ComputedRef<boolean>
   /**
    * The raw normalized loaded-module set (`null` = signal unavailable).

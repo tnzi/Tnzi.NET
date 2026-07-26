@@ -4,7 +4,7 @@ using Tnzi.MultiTenancy;
 namespace Tnzi.AI.Rag.Tests.TestInfrastructure;
 
 /// <summary>
-/// 测试用最小 DbContext — 仅含 <see cref="KnowledgeBase"/> 与 <see cref="KnowledgeDocument"/>。
+/// 测试用最小 DbContext - 仅含 <see cref="KnowledgeBase"/> 与 <see cref="KnowledgeDocument"/>。
 /// <para>
 /// 刻意不引入 <c>DocumentChunk</c>（其 <c>vector(N)</c> 列无法映射到 SQLite），
 /// 因为后台任务的状态回写 / KB 计数器一致性测试只需这两张表 + 真实

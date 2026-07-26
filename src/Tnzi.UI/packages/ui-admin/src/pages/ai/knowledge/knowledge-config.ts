@@ -3,7 +3,7 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
 /**
  * Knowledge page config (sibling of Knowledge.vue).
  *
- * Knowledge bases render as a `TCardPage` grid — the card + the document
+ * Knowledge bases render as a `TCardPage` grid - the card + the document
  * management drawer own all presentation, so there are no table columns, only
  * the create/edit form schema + the keyword search field.
  *
@@ -23,7 +23,7 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * The page passes the relevant schema depending on `mode` (create vs edit).
  */
 
-/** Create form — full provisioning surface (KnowledgeBaseCreateParams). */
+/** Create form - full provisioning surface (KnowledgeBaseCreateParams). */
 export const knowledgeCreateFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
@@ -57,7 +57,7 @@ export const knowledgeCreateFormSchema: FormSchemaItem[] = [
   },
 ]
 
-/** Edit form — only the mutable subset (KnowledgeBaseUpdateParams). */
+/** Edit form - only the mutable subset (KnowledgeBaseUpdateParams). */
 export const knowledgeEditFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
@@ -66,5 +66,5 @@ export const knowledgeEditFormSchema: FormSchemaItem[] = [
 
 // The keyword search lives in the page-header bar (drives `query.searchText`,
 // which the bridge forwards as the backend `keyword` param). A single-field
-// advanced-search schema wrote `filters.keyword` — a key the bridge never read —
+// advanced-search schema wrote `filters.keyword` - a key the bridge never read -
 // so it was removed; the header search already covers keyword lookup.

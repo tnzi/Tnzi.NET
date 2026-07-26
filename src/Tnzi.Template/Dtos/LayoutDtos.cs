@@ -90,7 +90,7 @@ public class LayoutInfoDto
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
 
-    /// <summary>Origin of this layout row — "Database" or "FileSystem".</summary>
+    /// <summary>Origin of this layout row - "Database" or "FileSystem".</summary>
     public string Source { get; set; } = "Database";
 
     /// <summary>True for filesystem-fallback rows (shipped with binaries, not editable).</summary>

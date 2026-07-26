@@ -66,7 +66,7 @@ describe('buildCssVars', () => {
 
   it('emits matching `-rgb` triplet variant for every color var', () => {
     const vars = buildCssVars(defaultThemeSettings.colors, 'light')
-    // RGB triplet format is "R G B" — space-separated, no rgb() wrapper.
+    // RGB triplet format is "R G B" - space-separated, no rgb() wrapper.
     expect(vars['--tnzi-primary-rgb']).toMatch(/^\d+ \d+ \d+$/)
     expect(vars['--tnzi-primary-500-rgb']).toMatch(/^\d+ \d+ \d+$/)
     // #0d9488 == rgb(13, 148, 136)

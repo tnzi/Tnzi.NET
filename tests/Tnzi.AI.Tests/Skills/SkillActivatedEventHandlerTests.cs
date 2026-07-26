@@ -61,7 +61,7 @@ public abstract class SkillHandlerTestBase : IntegratedTestBase<SkillHandlerDbCo
 }
 
 /// <summary>
-/// SkillActivatedEventHandler unit tests — verifies that activation-count updates
+/// SkillActivatedEventHandler unit tests - verifies that activation-count updates
 /// are narrowed to the exact resolved row (slug + scope + tenantId + ownerUserId)
 /// and do not bleed across tenants or users.
 /// </summary>
@@ -112,12 +112,12 @@ public class SkillActivatedEventHandlerTests
             ActivatedAt = DateTime.UtcNow
         };
 
-        // Should silently return — no repository registered
+        // Should silently return - no repository registered
         await handler.HandleAsync(@event);
     }
 
     // -------------------------------------------------------------------------
-    // Predicate narrowing: same slug, different user — only target row updated
+    // Predicate narrowing: same slug, different user - only target row updated
     // -------------------------------------------------------------------------
 
     /// <summary>
@@ -197,7 +197,7 @@ public class SkillActivatedEventHandlerTests
     }
 
     // -------------------------------------------------------------------------
-    // Predicate narrowing: same slug, different tenant — only target row updated
+    // Predicate narrowing: same slug, different tenant - only target row updated
     // -------------------------------------------------------------------------
 
     /// <summary>

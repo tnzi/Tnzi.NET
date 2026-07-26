@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 审查节点 — 注入上游输出 + 审查提示 → LLM 返回结构化 verdict（accept/rework/reject）
+/// 审查节点 - 注入上游输出 + 审查提示 → LLM 返回结构化 verdict（accept/rework/reject）
 /// </summary>
 /// <remarks>
 /// 配置项：

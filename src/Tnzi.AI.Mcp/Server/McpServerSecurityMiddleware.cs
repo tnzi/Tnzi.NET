@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Mcp.Server;
 
 /// <summary>
-/// MCP Server 安全中间件 — API Key 验证、速率限制、审计日志
+/// MCP Server 安全中间件 - API Key 验证、速率限制、审计日志
 /// </summary>
 public class McpServerSecurityMiddleware
 {
@@ -59,7 +59,20 @@ public class McpServerSecurityMiddleware
             return false;
         }
 
-        var isValid = config.AllowedApiKeys.Contains(apiKey, StringComparer.Ordinal);
+        // 固定时间比较：逐个候选 key 做等长字节比较，避免按字符提前返回的时序侧信道
+        // 泄漏 API Key 前缀。语义与原 StringComparer.Ordinal 一致（区分大小写的精确匹配）。
+        var candidateBytes = Encoding.UTF8.GetBytes(apiKey);
+        var isValid = false;
+        foreach (var allowed in config.AllowedApiKeys)
+        {
+            if (string.IsNullOrEmpty(allowed)) continue;
+            if (CryptographicOperations.FixedTimeEquals(candidateBytes, Encoding.UTF8.GetBytes(allowed)))
+            {
+                isValid = true;
+                break;
+            }
+        }
+
         if (!isValid)
         {
             _logger.LogWarning("MCP Server request rejected: invalid API key");
@@ -107,7 +120,7 @@ public class McpServerSecurityMiddleware
                 {
                     _logger.LogWarning(
                         "MCP Server accepted API key from query string (AllowApiKeyInQuery=true). " +
-                        "This is INSECURE — credentials leak to logs/proxies. Migrate client '{RemoteIp}' to X-Api-Key header.",
+                        "This is INSECURE: credentials leak to logs/proxies. Migrate client '{RemoteIp}' to the X-Api-Key header.",
                         request.HttpContext.Connection.RemoteIpAddress);
                     return apiKey;
                 }
@@ -135,7 +148,7 @@ public class McpServerSecurityMiddleware
     /// <para>
     /// <b>UNTRUSTED partition hint.</b> The value is self-reported by the client and is
     /// NOT validated against any tenant store. It is used ONLY to partition rate-limit
-    /// buckets (see <see cref="BuildClientKey"/>) and as an analytics dimension — it MUST
+    /// buckets (see <see cref="BuildClientKey"/>) and as an analytics dimension - it MUST
     /// NEVER be used for data isolation or authorization decisions.
     /// </para>
     /// <para>

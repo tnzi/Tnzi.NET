@@ -40,7 +40,7 @@ public static class WebApplicationExtensions
     /// migration phase, on every boot. Framework infrastructure that needs the schema
     /// to exist (e.g. syncing the code-declared permission catalogue + refreshing the
     /// in-memory snapshot) registers a task here instead of doing DB work in module
-    /// init — which runs BEFORE migrations and fails on a brand-new empty database (the
+    /// init - which runs BEFORE migrations and fails on a brand-new empty database (the
     /// old "boot the app twice" bug). Errors are isolated: a failing task logs and
     /// startup continues. No-op when no tasks are registered.
     /// </summary>
@@ -77,7 +77,7 @@ public static class WebApplicationExtensions
         var isProduction = env?.IsProduction() == true;
 
         // Orthogonal production gates: migrations (idempotent, safe) vs seeding (may mutate data).
-        // Backward-compatible overlay on the legacy SkipDatabaseInitInProduction master switch —
+        // Backward-compatible overlay on the legacy SkipDatabaseInitInProduction master switch -
         // when a new option is unset it falls back to the legacy switch, so existing appsettings
         // (default true → skip both; explicit false → run both) behave exactly as before.
         // Set ApplyMigrationsInProduction=true to migrate-without-seeding in production.

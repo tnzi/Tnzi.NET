@@ -65,7 +65,7 @@
           </div>
         </NPopover>
 
-        <!-- Single attachment button — one file picker; the message kind (image
+        <!-- Single attachment button - one file picker; the message kind (image
              vs file) is derived from the chosen file's MIME type downstream.
              Hidden entirely when the deployment disables file messages. -->
         <button
@@ -94,13 +94,13 @@ import { COMMON_EMOJIS, getFrequentEmojis, recordEmojiUse } from './emoji'
 
 const props = defineProps<{
   disabled?: boolean
-  /** Live upload state — shows a progress bar above the textarea while a
+  /** Live upload state - shows a progress bar above the textarea while a
    *  file/image is uploading so the user isn't left staring at a frozen UI. */
   uploading?: boolean
   uploadProgress?: number
   uploadKind?: 'image' | 'file'
   uploadName?: string
-  /** Deployment file-message toggle — false hides the attachment button and
+  /** Deployment file-message toggle - false hides the attachment button and
    *  ignores drag-and-drop (the server rejects media messages regardless). */
   attachments?: boolean
 }>()
@@ -113,7 +113,7 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 
-// Popover must clear the chat NModal — give it a z-index above it.
+// Popover must clear the chat NModal - give it a z-index above it.
 const POPOVER_Z = 3000
 const EMOJIS = COMMON_EMOJIS
 
@@ -124,7 +124,7 @@ const frequent = ref<string[]>([])
 
 // ── File drag-and-drop onto the input area ──────────────────────────────────
 // A depth counter avoids the flicker of dragenter/dragleave firing as the
-// cursor crosses child elements — `dragging` only clears when the drag truly
+// cursor crosses child elements - `dragging` only clears when the drag truly
 // leaves the composer (or on drop).
 const dragging = ref(false)
 let dragDepth = 0
@@ -343,7 +343,7 @@ function insertEmoji(emoji: string) {
 }
 
 .t-composer__send:hover:not(:disabled) {
-  background: var(--chat-send-hover, #06ad56);
+  background: var(--chat-send-hover, #19665e);
 }
 
 .t-composer__send:disabled {
@@ -353,7 +353,7 @@ function insertEmoji(emoji: string) {
 }
 
 /* Touch: enlarge the tool + send hit areas to ≥40px (the visible glyphs stay
-   the same size — the extra room is padding/min-size so they're comfortable to
+   the same size - the extra room is padding/min-size so they're comfortable to
    tap). Coarse-pointer only, so desktop keeps the compact chrome. */
 @media (pointer: coarse) {
   .t-composer__tool {
@@ -369,7 +369,7 @@ function insertEmoji(emoji: string) {
 </style>
 
 <style>
-/* Unscoped — emoji panel renders inside the teleported `raw` popover (so we own
+/* Unscoped - emoji panel renders inside the teleported `raw` popover (so we own
    all padding; naive's default popover padding caused an oversized right gap). */
 .t-composer__emoji-pop {
   /* Cap at the viewport width (minus a small gutter) so the fixed 300px panel
@@ -388,7 +388,7 @@ function insertEmoji(emoji: string) {
   padding: 2px 2px 4px;
 }
 
-/* repeat(8, 1fr) makes the columns fill the full width — no leftover right
+/* repeat(8, 1fr) makes the columns fill the full width - no leftover right
    margin from fixed-width cells. */
 .t-composer__emoji-grid {
   display: grid;

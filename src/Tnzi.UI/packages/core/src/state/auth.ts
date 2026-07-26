@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/state/auth
  *
- * Authentication state manager — pure logic layer.
+ * Authentication state manager - pure logic layer.
  * Uses @vue/reactivity for reactive state, UI packages can use directly or wrap as Pinia store.
  */
 
@@ -247,11 +247,11 @@ export class AuthStateManager {
    */
   async refreshAccessToken(): Promise<void> {
     // Throw (instead of silent return) when no refresh token is available
-    // so callers — particularly HttpClient.refreshTokenFn wrappers — can
+    // so callers - particularly HttpClient.refreshTokenFn wrappers - can
     // distinguish "refreshed successfully" from "could not refresh". A
     // silent no-op here caused HttpClient to retry the original request
     // with the same stale access token, get another 401, and short-circuit
-    // out without firing `onUnauthorized` — so the page would stay mounted
+    // out without firing `onUnauthorized` - so the page would stay mounted
     // while every API call kept failing.
     if (!this.refreshToken) {
       throw new Error('No refresh token available');
@@ -385,7 +385,7 @@ export class AuthStateManager {
 
   /**
    * Establish an authenticated session from tokens obtained OUTSIDE the
-   * password flow — code login, OAuth callback, magic link, etc. — where the
+   * password flow - code login, OAuth callback, magic link, etc. - where the
    * response carries the access/refresh tokens but no user object.
    *
    * Mirrors the tail of {@link login}: it sets + persists the tokens, syncs
@@ -463,7 +463,14 @@ export class AuthStateManager {
       // Token may be expired, try refresh
       try {
         await this.refreshAccessToken();
+        // The refresh succeeded and persisted a fresh token pair, so the session
+        // is live again - mark it authenticated BEFORE fetching the profile.
+        // fetchUserProfile() short-circuits on `!isAuthenticated`, so skipping
+        // this leaves `user` null and `isLoggedIn` false, and route guards bounce
+        // the user back to the login page even though the refresh just worked.
+        this.isAuthenticated = true;
         await this.fetchUserProfile();
+        this.roles = this.user?.roles ?? [];
       } catch {
         // Refresh also failed, clear auth
         this.clearAuth();

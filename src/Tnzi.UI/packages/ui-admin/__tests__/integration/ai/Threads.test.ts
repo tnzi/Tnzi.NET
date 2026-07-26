@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Threads integration test — production-grade table page (TCrudPage) with an
+ * Threads integration test - production-grade table page (TCrudPage) with an
  * edit-title modal, declarative row actions (View / Export JSON / Export MD /
  * Edit / Delete), a message-transcript detail drawer, and JSON/Markdown export.
  *
@@ -178,13 +178,25 @@ describe('Threads page (TCrudPage table + message drawer)', () => {
     const wrapper = mount(Threads, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as { exportJson: (id: string) => Promise<void> }
-    await vm.exportJson('t1')
-    await flushPromises()
 
-    expect(exportJson).toHaveBeenCalledWith('t1')
-    expect(createObjectURL).toHaveBeenCalledTimes(1)
-    expect(clickSpy).toHaveBeenCalledTimes(1)
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:thread-t1')
+    vi.useFakeTimers()
+    try {
+      await vm.exportJson('t1')
+      await flushPromises()
+
+      expect(exportJson).toHaveBeenCalledWith('t1')
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+
+      // The object URL must NOT be released in the click's own tick: the click
+      // only SCHEDULES the download, and a same-tick revoke has been observed to
+      // cancel it in Firefox and Safari. It is released after a grace period.
+      expect(revokeObjectURL).not.toHaveBeenCalled()
+      vi.runAllTimers()
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:thread-t1')
+    } finally {
+      vi.useRealTimers()
+    }
 
     vi.unstubAllGlobals()
   })

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services.Interfaces;
 
 /// <summary>
-/// 文档相关性评分接口 — 评估检索结果与查询的相关性
+/// 文档相关性评分接口 - 评估检索结果与查询的相关性
 /// </summary>
 /// <remarks>
 /// <para>

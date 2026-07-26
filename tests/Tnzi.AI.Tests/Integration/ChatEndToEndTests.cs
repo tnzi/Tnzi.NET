@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// 端到端聊天请求集成测试 — 验证 AgentRuntime 完整的请求/响应流程
+/// 端到端聊天请求集成测试 - 验证 AgentRuntime 完整的请求/响应流程
 /// </summary>
 public class ChatEndToEndTests : AiIntegrationTestBase
 {

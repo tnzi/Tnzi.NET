@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 namespace Tnzi.AI.Rag.Entities.Configs;
 
 /// <summary>
-/// DocumentChunk 实体配置 — 包含 pgvector 列类型映射
+/// DocumentChunk 实体配置 - 包含 pgvector 列类型映射
 /// </summary>
 public class DocumentChunkConfiguration : EntityTypeConfigurationBase<DocumentChunk, Guid>
 {

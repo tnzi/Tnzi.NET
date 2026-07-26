@@ -27,7 +27,7 @@ export default defineConfig({
   ],
 
   shortcuts: {
-    // Naive UI design tokens — use these instead of hardcoded Tailwind colors
+    // Naive UI design tokens - use these instead of hardcoded Tailwind colors
     'border-naive': 'border border-[var(--n-border-color,#e0e0e6)]',
     'bg-naive-hover': 'bg-[var(--n-color-hover,rgba(0,0,0,0.03))]',
     'bg-naive-card': 'bg-[var(--n-card-color,#fff)]',

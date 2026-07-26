@@ -30,7 +30,7 @@ public class FeatureService : ApplicationService, IFeatureService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<FeatureDefinitionDto>>> GetDefinitionsAsync()
     {
-        // Pull the full merged snapshot from IFeatureManager — this includes
+        // Pull the full merged snapshot from IFeatureManager - this includes
         // both DB-persisted FeatureDefinition rows AND code-level definitions
         // registered via IFeatureDefinitionProvider implementations (e.g. the
         // built-in defaults shipped with the application binaries).
@@ -111,6 +111,9 @@ public class FeatureService : ApplicationService, IFeatureService
         entity.IsEnabled = true;
 
         await _definitionRepository.InsertAsync(entity);
+        // 环境事务下仓储推迟 SaveChanges，而 Id 是框架在 SaveChanges 里生成的 ——
+        // 不 flush 则下面的事件与返回 DTO 都带 Guid.Empty，调用方无法据此再编辑/删除。
+        await _definitionRepository.SaveChangesAsync();
         await _featureManager.InvalidateCacheAsync();
 
         Logger.LogInformation("Feature definition created: {Name}", input.Name);
@@ -277,6 +280,8 @@ public class FeatureService : ApplicationService, IFeatureService
         };
 
         await _valueRepository.InsertAsync(entity);
+        // 同 CreateDefinitionAsync：先 flush 让框架生成 Id，返回的 DTO 才带真实主键。
+        await _valueRepository.SaveChangesAsync();
 
         Logger.LogInformation("Feature value created: {FeatureName} = {Value} for {ProviderName}/{ProviderKey}",
             definition.Name, input.Value, input.ProviderName, input.ProviderKey);

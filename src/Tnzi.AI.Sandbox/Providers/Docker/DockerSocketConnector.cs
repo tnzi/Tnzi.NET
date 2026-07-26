@@ -30,7 +30,7 @@ internal static class DockerSocketConnector
 
         if (dockerHost.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase))
         {
-            // Windows named pipe — strip scheme; NamedPipeClientStream needs server name + pipe name separately.
+            // Windows named pipe - strip scheme; NamedPipeClientStream needs server name + pipe name separately.
             // Docker Desktop default: npipe:////./pipe/docker_engine → server="." pipe="docker_engine"
             var raw = dockerHost["npipe://".Length..];
             var (serverName, pipeName) = ParseNpipePath(raw);

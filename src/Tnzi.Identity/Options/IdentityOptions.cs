@@ -129,19 +129,22 @@ public class TnziSignInOptions
     /// <summary>
     /// 是否允许用户名登录
     /// </summary>
-    [RuntimeSetting(Label = "Allow Username Login", I18n = "admin.modules.system.settings.fields.allowUserNameLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in")]
+    [RuntimeSetting(Label = "Allow Username Login", I18n = "admin.modules.system.settings.fields.allowUserNameLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
+        Description = "Accept the username as the account identifier in the password form. With 'Use Email As Username' on, an email is stored as the username and still resolves here even when 'Allow Email Login' is off.")]
     public bool AllowUserNameLogin { get; set; } = true;
 
     /// <summary>
     /// 是否允许邮箱登录
     /// </summary>
-    [RuntimeSetting(Label = "Allow Email Login", I18n = "admin.modules.system.settings.fields.allowEmailLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in")]
+    [RuntimeSetting(Label = "Allow Email Login", I18n = "admin.modules.system.settings.fields.allowEmailLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
+        Description = "Accept the email address as the account identifier in the password form. Independent of verification codes: passwordless email code-login and email two-factor are controlled by 'Enable Email Codes' in the OTP / Verification Codes group.")]
     public bool AllowEmailLogin { get; set; } = true;
 
     /// <summary>
     /// 是否允许SMS登录
     /// </summary>
-    [RuntimeSetting(Label = "Allow SMS Login", I18n = "admin.modules.system.settings.fields.allowSmsLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in")]
+    [RuntimeSetting(Label = "Allow SMS Login", I18n = "admin.modules.system.settings.fields.allowSmsLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
+        Description = "Accept the phone number as the account identifier in the password form. Independent of verification codes: passwordless SMS code-login and SMS two-factor are controlled by 'Enable SMS Codes' in the OTP / Verification Codes group.")]
     public bool AllowSmsLogin { get; set; } = false;
 
     /// <summary>
@@ -289,14 +292,24 @@ public class OtpOptions
     /// <summary>
     /// 是否启用SMS验证
     /// </summary>
-    [RuntimeSetting(Label = "Enable SMS Codes", I18n = "admin.modules.system.settings.fields.otpEnableSms", Type = SettingFieldType.Boolean)]
+    [RuntimeSetting(Label = "Enable SMS Codes", I18n = "admin.modules.system.settings.fields.otpEnableSms", Type = SettingFieldType.Boolean,
+        Description = "Enable the SMS verification-code channel: passwordless SMS code-login and SMS two-factor. This does not accept the phone number as the account in the password form (that is 'Allow SMS Login' in Registration & Sign-in).")]
     public bool EnableSms { get; set; } = false;
 
     /// <summary>
     /// 是否启用Email验证
     /// </summary>
-    [RuntimeSetting(Label = "Enable Email Codes", I18n = "admin.modules.system.settings.fields.otpEnableEmail", Type = SettingFieldType.Boolean)]
+    [RuntimeSetting(Label = "Enable Email Codes", I18n = "admin.modules.system.settings.fields.otpEnableEmail", Type = SettingFieldType.Boolean,
+        Description = "Enable the email verification-code channel: passwordless email code-login and email two-factor. This does not accept the email as the account in the password form (that is 'Allow Email Login' in Registration & Sign-in).")]
     public bool EnableEmail { get; set; } = true;
+
+    /// <summary>
+    /// 是否启用身份验证器(TOTP)两步验证。默认启用;关闭后个人中心不再展示 TOTP，用户也无法设置/启用 TOTP。
+    /// 与 <see cref="EnableSms"/> / <see cref="EnableEmail"/> 对称，供不需要验证器方式的消费应用整体关闭。
+    /// </summary>
+    [RuntimeSetting(Label = "Enable Authenticator (TOTP)", I18n = "admin.modules.system.settings.fields.otpEnableTotp", Type = SettingFieldType.Boolean,
+        Description = "Enable authenticator app (TOTP) two-factor. Turn off for deployments that do not use TOTP: the User Center hides it and setup is rejected. Unlike SMS/email, TOTP has no passwordless code-login, it is a second factor only.")]
+    public bool EnableTotp { get; set; } = true;
 }
 
 /// <summary>

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Financial Reports page — TTabsPage with seven report tabs (trial balance,
+ * Financial Reports page - TTabsPage with seven report tabs (trial balance,
  * balance sheet, P&L, general ledger, AR/AP aging, tax summary) that aggregate
  * on demand, plus per-tab server-side CSV export.
  */
@@ -197,10 +197,19 @@ describe('Finance Reports page', () => {
     const objectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock')
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     try {
-      await vm.exportCsv('trial-balance')
-      expect(exportTrialBalanceCsv).toHaveBeenCalledTimes(1)
-      expect(objectUrl).toHaveBeenCalledTimes(1)
-      expect(revoke).toHaveBeenCalledWith('blob:mock')
+      vi.useFakeTimers()
+      try {
+        await vm.exportCsv('trial-balance')
+        expect(exportTrialBalanceCsv).toHaveBeenCalledTimes(1)
+        expect(objectUrl).toHaveBeenCalledTimes(1)
+        // Released on a timer, not in the click's tick: a same-tick revoke can
+        // cancel the download in Firefox / Safari.
+        expect(revoke).not.toHaveBeenCalled()
+        vi.runAllTimers()
+        expect(revoke).toHaveBeenCalledWith('blob:mock')
+      } finally {
+        vi.useRealTimers()
+      }
     } finally {
       objectUrl.mockRestore()
       revoke.mockRestore()

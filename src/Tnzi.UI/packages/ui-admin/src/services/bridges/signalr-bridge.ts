@@ -1,11 +1,11 @@
 /**
- * SignalR bridge — delegates to `useAdminSignalRApi`
+ * SignalR bridge - delegates to `useAdminSignalRApi`
  * (from `@tnzi/core/services/signalr`) so admin pages get the standard
  * dependency-injection + single-mock-seam pattern other bridges use.
  *
  * Read endpoints (stats, online-users, per-user connections, group lookups)
  * plus one destructive endpoint (force-disconnect a user). All endpoints
- * return 404 when the host app doesn't load Tnzi.SignalR — the bridge
+ * return 404 when the host app doesn't load Tnzi.SignalR - the bridge
  * still surfaces a typed contract so the page can degrade to an empty state.
  *
  * DTO types are re-exported below so existing page imports keep resolving

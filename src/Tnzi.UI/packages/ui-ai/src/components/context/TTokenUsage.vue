@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TTokenUsage — Token usage indicator
+ * TTokenUsage - Token usage indicator
  *
  * SVG circular progress ring with a hover card showing
  * breakdown of input/output/cached/reasoning tokens and cost.

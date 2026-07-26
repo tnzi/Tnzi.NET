@@ -62,7 +62,7 @@ public static class EventHandlerInvoker
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Failed to create generic handler interface for base type '{baseType.Name}': {ex.Message}");
+                    Debug.WriteLine($"Failed to create generic handler interface for base type '{baseType.Name}': {ex.Message}");
                 }
                 baseType = baseType.BaseType;
             }

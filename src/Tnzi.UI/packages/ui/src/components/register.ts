@@ -12,7 +12,7 @@
  * Tree-shaking note: this module does `import * as components from './index'`
  * (the full barrel), and `plugin.ts` imports it statically. So whenever the
  * `createTnziUi` plugin is used, the whole component barrel is pulled into the
- * bundle EVEN IF `registerComponents: false` — that option only skips the runtime
+ * bundle EVEN IF `registerComponents: false` - that option only skips the runtime
  * `app.component()` calls, it does not tree-shake. For a minimal bundle, do NOT
  * rely on the plugin's global registration: use the on-demand `TnziUiResolver`
  * (`unplugin-vue-components`, covers every `T*` name) plus direct named imports,

@@ -59,7 +59,7 @@ public class ArtifactToolsTests
     [Fact]
     public async Task PresentFiles_NoThreadContext_ReturnsError()
     {
-        // Arrange — no thread
+        // Arrange - no thread
         _contextAccessor.Setup(a => a.CurrentRequest).Returns(new AgentRunRequest { ThreadId = null });
         var tools = new ArtifactTools(_artifactService.Object, _contextAccessor.Object);
 
@@ -79,7 +79,7 @@ public class ArtifactToolsTests
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new AgentArtifactDto()));
 
-        // Act — mix of valid and invalid paths
+        // Act - mix of valid and invalid paths
         var result = await _tools.PresentFilesAsync(["/mnt/outputs/good.txt", ""]);
 
         // Assert
@@ -99,7 +99,7 @@ public class ArtifactToolsTests
         // Act
         await _tools.PresentFilesAsync(["/output/image.png"]);
 
-        // Assert — verify MIME type was inferred as image/png
+        // Assert - verify MIME type was inferred as image/png
         _artifactService.Verify(s => s.CreateAsync(
             It.IsAny<Guid>(), It.IsAny<Guid>(),
             "/output/image.png", "image.png", "image/png", null,

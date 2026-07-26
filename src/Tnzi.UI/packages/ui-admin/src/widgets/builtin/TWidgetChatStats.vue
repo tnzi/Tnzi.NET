@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetChatStats` — chat IM summary widget.
+ * `TWidgetChatStats` - chat IM summary widget.
  *
  * The old announcement-style session API was removed in the Chat IM refactor
  * (feat/chat-im-refactor); the standalone broadcast page was later folded

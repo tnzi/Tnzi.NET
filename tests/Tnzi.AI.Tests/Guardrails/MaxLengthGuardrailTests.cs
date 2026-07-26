@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// MaxLengthGuardrail 单元测试 — 验证输入长度限制的各种边界条件
+/// MaxLengthGuardrail 单元测试 - 验证输入长度限制的各种边界条件
 /// </summary>
 public class MaxLengthGuardrailTests
 {
@@ -74,7 +74,7 @@ public class MaxLengthGuardrailTests
     [Fact]
     public async Task ExactBoundaryLength_ReturnsAllowed()
     {
-        // Arrange: 输入长度恰好等于限制值 — 应通过（不超过）
+        // Arrange: 输入长度恰好等于限制值 - 应通过（不超过）
         const int limit = 20;
         var guardrail = new MaxLengthGuardrail(CreateOptions(g =>
         {

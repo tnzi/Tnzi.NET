@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TCitation — Single citation card for source/reference rendering.
+ * TCitation - Single citation card for source/reference rendering.
  *
  * Displays a citation as a small surface-bg card with optional icon,
  * a strong title and a snippet preview. Use inside a `TCitationList`
@@ -15,7 +15,7 @@ import { Icon } from '@iconify/vue'
 
 withDefaults(
   defineProps<{
-    /** Citation title — typically the document name or page title. */
+    /** Citation title - typically the document name or page title. */
     title: string
     /** Snippet excerpted from the source. */
     snippet?: string

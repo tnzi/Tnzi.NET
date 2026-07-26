@@ -1,13 +1,13 @@
 /**
- * `useChildCollection` — the detail-page analogue of `useCrudPage` for a nested
+ * `useChildCollection` - the detail-page analogue of `useCrudPage` for a nested
  * child collection (matter parties / key-dates / documents / notes …).
  *
  * A multi-section detail page otherwise hand-wires, per child collection, the
  * identical shape: a `list` ref, an add/edit overlay open-state + editing item,
  * `openCreate`/`openEdit`/`save`/`remove`, a per-action busy flag, and an
- * explicit reload-after-write. This composable bundles all of it — fetch into
+ * explicit reload-after-write. This composable bundles all of it - fetch into
  * the section, add/edit overlay, delete, optimistic reload, per-action busy,
- * and `.create/.update/.delete` permission gating — so a detail page declares
+ * and `.create/.update/.delete` permission gating - so a detail page declares
  * the endpoints once instead of ~30 lines per collection.
  *
  *   const parties = useChildCollection({
@@ -31,7 +31,7 @@ export interface UseChildCollectionOptions<TItem, TCreate, TUpdate, TId> {
   getId?: (item: TItem) => TId
   /**
    * Load on creation (default `true`). Pass `false` when the parent id isn't
-   * known yet — then call `load()` once it is.
+   * known yet - then call `load()` once it is.
    */
   autoLoad?: boolean
   /**

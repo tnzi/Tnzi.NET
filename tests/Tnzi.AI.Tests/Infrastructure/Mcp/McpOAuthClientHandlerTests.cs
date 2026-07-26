@@ -348,7 +348,7 @@ public class McpOAuthClientHandlerTests
                     {
                         access_token = "initial-token",
                         token_type = "Bearer",
-                        expires_in = 1, // 1 second — will expire immediately with 60s buffer
+                        expires_in = 1, // 1 second - will expire immediately with 60s buffer
                         refresh_token = "my-refresh-token"
                     }), Encoding.UTF8, "application/json")
                 };
@@ -373,10 +373,10 @@ public class McpOAuthClientHandlerTests
             TokenEndpoint = "https://auth.example.com/token"
         };
 
-        // First call — gets initial token (already expired due to 60s buffer)
+        // First call - gets initial token (already expired due to 60s buffer)
         var token1 = await handler.GetAccessTokenAsync("server1", config, CancellationToken.None);
 
-        // Second call — token expired, should use refresh_token
+        // Second call - token expired, should use refresh_token
         var token2 = await handler.GetAccessTokenAsync("server1", config, CancellationToken.None);
 
         token1.ShouldBe("initial-token");

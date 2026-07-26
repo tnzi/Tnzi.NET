@@ -1,18 +1,18 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import type { CSSProperties } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 
 interface INavBarProps {
   title?: string;
   showBack?: boolean;
   showClose?: boolean;
-  leftContent?: string | object;
-  rightContent?: string | object;
   fixed?: boolean;
+  /** Bar background. Any CSS color. */
   backgroundColor?: string;
+  /** Title, action text and arrow color. Any CSS color. */
   textColor?: string;
   safeAreaInsetTop?: boolean;
-  class?: string | string[];
-  style?: string | Record<string, string | number>;
 }
 
 interface INavBarEmits {
@@ -34,6 +34,19 @@ const props = withDefaults(defineProps<INavBarProps>(), {
 
 const emit = defineEmits<INavBarEmits>();
 
+// Vant styles NavBar through custom properties, so overriding the colors is a
+// matter of redeclaring them on the element rather than fighting its selectors.
+const colorVars = computed<CSSProperties>(() => {
+  const vars: Record<string, string> = {};
+  if (props.backgroundColor) vars['--van-nav-bar-background'] = props.backgroundColor;
+  if (props.textColor) {
+    vars['--van-nav-bar-title-text-color'] = props.textColor;
+    vars['--van-nav-bar-text-color'] = props.textColor;
+    vars['--van-nav-bar-icon-color'] = props.textColor;
+  }
+  return vars as CSSProperties;
+});
+
 const onClickLeft = () => {
   emit('leftClick');
   if (props.showBack) emit('back');
@@ -52,8 +65,7 @@ const onClickRight = () => {
     :safe-area-inset-top="props.safeAreaInsetTop"
     :left-text="props.showBack ? t('common.back') : ''"
     :right-text="props.showClose ? t('common.close') : ''"
-    :class="props.class"
-    :style="props.style"
+    :style="colorVars"
     @click-left="onClickLeft"
     @click-right="onClickRight"
   >

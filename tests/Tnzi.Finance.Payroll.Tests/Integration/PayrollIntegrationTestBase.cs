@@ -50,9 +50,13 @@ public abstract class PayrollIntegrationTestBase : IntegratedTestBase<PayrollTes
         AddRepo<JournalEntry>(services);
         AddRepo<JournalLine>(services);
         AddRepo<FiscalYear>(services);
+        AddRepo<LedgerLock>(services);
         AddRepo<ExchangeRate>(services);
         AddRepo<DocumentSequence>(services);
         AddRepo<AccountPeriodBalance>(services);
+        // 冲销守卫的判定输入（PayRun 作废走冲销漏斗时被查询）
+        AddRepo<Reconciliation>(services);
+        AddRepo<ReconciliationLine>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -72,8 +76,11 @@ public abstract class PayrollIntegrationTestBase : IntegratedTestBase<PayrollTes
         services.AddScoped<IDocumentNumberService, DocumentNumberService>();
         services.AddScoped<IChartOfAccountsService, ChartOfAccountsService>();
         services.AddScoped<IExchangeRateService, ExchangeRateService>();
+        services.AddScoped<ILedgerLockService, LedgerLockService>();
         services.AddScoped<IFiscalYearService, FiscalYearService>();
         services.AddScoped<LedgerPostingEngine>();
+        // 冲销 × 银行对账守卫（PayRun 作废经 ILedgerPostingService.ReverseAsync 走冲销漏斗，必然解析它）
+        services.AddScoped<ReversalGuard>();
         services.AddScoped<BalanceSummaryMaintainer>();
         services.AddScoped<BalanceSummaryReader>();
         services.AddScoped<PostingGuardRunner>();

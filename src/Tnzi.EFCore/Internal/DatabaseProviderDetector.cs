@@ -235,7 +235,7 @@ public static class DatabaseProviderDetector
         };
 
         // 收集所有需要屏蔽的位置（从后往前排序，避免替换后位置偏移）
-        var replacements = new List<(int startIndex, int endIndex, int keyLength)>();
+        var replacements = new List<(int startIndex, int endIndex)>();
 
         foreach (var key in sensitiveKeys)
         {
@@ -251,7 +251,7 @@ public static class DatabaseProviderDetector
                 if (endIndex < 0)
                     endIndex = connectionString.Length;
 
-                replacements.Add((startIndex, endIndex, key.Length));
+                replacements.Add((startIndex, endIndex));
                 searchStart = index + 1; // 继续搜索，支持多个相同键
             }
         }
@@ -265,13 +265,23 @@ public static class DatabaseProviderDetector
 
         // 使用 StringBuilder 进行高效字符串构建
         var sb = new StringBuilder(connectionString);
-        foreach (var (startIndex, endIndex, keyLength) in replacements)
+
+        // 短键是长键的子串（"Key=" ⊂ "ApiKey="、"Token=" ⊂ "AccessToken="），同一段值会被收集多次。
+        // 已按 startIndex 降序处理，因此凡是与"已处理（更靠右）区间"重叠的区间都必须跳过：
+        // 否则第二次会按原始串的长度在已缩短的串上 Remove，越界抛 ArgumentOutOfRangeException，
+        // 把本该抛给用户的配置错误替换成一个无关异常。
+        var appliedStart = int.MaxValue;
+        foreach (var (startIndex, endIndex) in replacements)
         {
+            if (endIndex > appliedStart)
+                continue;
+
             var valueLength = endIndex - startIndex;
             var maskedLength = Math.Min(valueLength, 8);
             var maskedValue = new string('*', maskedLength);
             sb.Remove(startIndex, valueLength);
             sb.Insert(startIndex, maskedValue);
+            appliedStart = startIndex;
         }
 
         return sb.ToString();

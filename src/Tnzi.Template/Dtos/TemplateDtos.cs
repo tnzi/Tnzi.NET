@@ -135,7 +135,7 @@ public abstract class TemplateRequestBase
     public TemplateType Type { get; set; } = TemplateType.Generic;
 
     /// <summary>
-    /// Optional header layout FK — points to a Template_Layout row whose
+    /// Optional header layout FK - points to a Template_Layout row whose
     /// content the engine should use as the header wrapper.
     /// </summary>
     public Guid? HeaderLayoutId { get; set; }
@@ -229,7 +229,7 @@ public class TemplateInfoDto
     public DateTime CreationTime { get; set; }
     public DateTime? LastModificationTime { get; set; }
 
-    /// <summary>Origin of this template row — "Database" or "FileSystem".</summary>
+    /// <summary>Origin of this template row - "Database" or "FileSystem".</summary>
     public string Source { get; set; } = "Database";
 
     /// <summary>

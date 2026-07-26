@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// StreamEvent 序列化测试 — 验证错误字段和工具调用字段正确序列化
+/// StreamEvent 序列化测试 - 验证错误字段和工具调用字段正确序列化
 /// </summary>
 public class StreamEventTests
 {

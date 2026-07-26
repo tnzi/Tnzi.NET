@@ -3,7 +3,7 @@ using Tnzi.AI.Controllers.Admin;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultAgentGrantAdminController — additive governance surface over IAgentGrantService:
+/// DefaultAgentGrantAdminController - additive governance surface over IAgentGrantService:
 /// reverse query ("which agents use resource X") + per-grant enable/priority.
 /// </summary>
 public class DefaultAgentGrantAdminControllerTests

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 嵌入式 AI 客户端 — 绕过 HTTP，直接调用 IAgentRuntime。
+/// 嵌入式 AI 客户端 - 绕过 HTTP，直接调用 IAgentRuntime。
 /// 适用于后台任务（Hangfire）、CLI、集成测试、IM Channel Bridge。
 /// </summary>
 [StableApi(Since = "0.1.0")]

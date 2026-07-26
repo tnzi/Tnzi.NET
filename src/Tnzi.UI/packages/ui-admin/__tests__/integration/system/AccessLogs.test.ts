@@ -7,7 +7,6 @@ import AccessLogs from '../../../src/pages/system/AccessLogs.vue'
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
-    menus: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), reorder: vi.fn() },
     settings: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     accessLogs: {
       fetch: vi.fn(async () => ({

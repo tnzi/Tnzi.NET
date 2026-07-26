@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// 工具执行中间件 — 拦截工具调用的前后处理管道
+/// 工具执行中间件 - 拦截工具调用的前后处理管道
 /// </summary>
 /// <remarks>
 /// <para>
@@ -37,7 +37,7 @@ public interface IToolExecutionMiddleware
 }
 
 /// <summary>
-/// 工具执行上下文 — 传递给中间件的工具调用信息
+/// 工具执行上下文 - 传递给中间件的工具调用信息
 /// </summary>
 [ExperimentalApi(Reason = "Tool middleware pipeline may evolve based on usage patterns")]
 public class ToolExecutionContext

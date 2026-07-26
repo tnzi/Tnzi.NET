@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { formatCurrency, formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
@@ -8,7 +9,7 @@ import { DiscountType, PromotionType } from '../../services/bridges/promotion-br
 import type { PromotionDto } from '../../services/bridges/promotion-bridge'
 
 /**
- * Promotions page config — aligned with `PromotionDto`
+ * Promotions page config - aligned with `PromotionDto`
  * (Tnzi.Payment.Dtos.PromotionDto). `type` / `discountType` serialise as
  * member-name strings (global JsonStringEnumConverter).
  *
@@ -68,7 +69,7 @@ export function buildPromotionColumns(t: (key: string) => string): ColumnDef[] {
       width: 130,
       render: (row) => {
         const v = String((row as unknown as PromotionDto).type ?? '')
-        return TYPE_KEY[v] ? t(`type.${TYPE_KEY[v]}`) : v || '—'
+        return TYPE_KEY[v] ? t(`type.${TYPE_KEY[v]}`) : v || EMPTY_DASH
       },
     },
     {

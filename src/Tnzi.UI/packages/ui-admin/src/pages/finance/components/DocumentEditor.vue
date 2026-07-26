@@ -19,7 +19,7 @@
         <NDatePicker v-model:value="docDateTs" type="date" size="small" style="width: 100%" />
       </div>
       <div v-if="showDueDate" class="fin-doc-editor__field">
-        <span class="fin-doc-editor__label">{{ t('editor.dueDate') }}</span>
+        <span class="fin-doc-editor__label">{{ dueDateLabel ? dueDateLabel : t('editor.dueDate') }}</span>
         <NDatePicker v-model:value="dueDateTs" type="date" size="small" clearable style="width: 100%" />
       </div>
       <div class="fin-doc-editor__field">
@@ -107,7 +107,9 @@
     <div class="fin-doc-editor__footer">
       <NButton size="small" @click="emit('cancel')">{{ t('editor.cancel') }}</NButton>
       <NButton size="small" :loading="savingDraft" @click="save(false)">{{ t('editor.saveDraft') }}</NButton>
-      <NButton size="small" type="primary" :loading="savingPost" @click="save(true)">{{ t('editor.saveAndPost') }}</NButton>
+      <NButton size="small" type="primary" :loading="savingPost" @click="save(true)">
+        {{ primaryLabel ? primaryLabel : t('editor.saveAndPost') }}
+      </NButton>
     </div>
   </div>
 </template>
@@ -184,6 +186,13 @@ const props = withDefaults(defineProps<{
   accountOptions: SelectOption[]
   itemOptions?: SelectOption[]
   taxCodeOptions: SelectOption[]
+  /**
+   * 主按钮文案（已翻译）。默认「保存并过账」；不过账单据（报价单/采购订单）传
+   * 「保存并发出」——它们没有过账这一步，借用会计动词会让人以为它们进了总账。
+   */
+  primaryLabel?: string
+  /** 第二个日期字段的文案（已翻译）。默认「到期日」，报价单是有效期、采购订单是期望交付日。 */
+  dueDateLabel?: string
   /** 页面提供的保存实现（草稿保存 + 可选立即过账），抛错即失败提示。 */
   onSave: (payload: DocumentEditorPayload, post: boolean) => Promise<void>
 }>(), {
@@ -191,6 +200,8 @@ const props = withDefaults(defineProps<{
   showParty: true,
   showDueDate: false,
   itemOptions: () => [],
+  primaryLabel: undefined,
+  dueDateLabel: undefined,
 })
 
 const emit = defineEmits<{ (e: 'cancel'): void }>()
@@ -371,7 +382,7 @@ async function save(post: boolean) {
   color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
 }
 
-/* Desktop: transparent wrapper — the input becomes the grid cell directly, so
+/* Desktop: transparent wrapper - the input becomes the grid cell directly, so
    the sales/expense column templates are untouched and the label stays hidden. */
 .fin-doc-editor__cell {
   display: contents;

@@ -3,7 +3,7 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Engine;
 
 /// <summary>
-/// AgentFactory — verifies that ToolDefinitions is populated from IToolRegistry
+/// AgentFactory - verifies that ToolDefinitions is populated from IToolRegistry
 /// so parallel-tool-execution and GracefulShutdown interrupt actually work.
 /// </summary>
 public class AgentFactoryToolDefinitionsTests
@@ -51,10 +51,10 @@ public class AgentFactoryToolDefinitionsTests
             toolGroups: ["fs"],
             ct: CancellationToken.None);
 
-        // Assert — executor's options must carry the populated ToolDefinitions dict
+        // Assert - executor's options must carry the populated ToolDefinitions dict
         executor.ShouldNotBeNull();
 
-        // Verify via CanExecuteConcurrently — the executor must see ToolDefinitions
+        // Verify via CanExecuteConcurrently - the executor must see ToolDefinitions
         // for two concurrent calls to be allowed (both tools same name = 1 call, so
         // we verify the behavior indirectly by checking CanExecuteConcurrently logic)
         var defs = GetToolDefinitions(executor);
@@ -82,7 +82,7 @@ public class AgentFactoryToolDefinitionsTests
 
         var factory = BuildFactory(toolRegistry.Object, toolResolver.Object);
 
-        // Act — no toolGroups specified
+        // Act - no toolGroups specified
         var executor = await factory.CreateAgentAsync(
             toolGroups: null,
             ct: CancellationToken.None);

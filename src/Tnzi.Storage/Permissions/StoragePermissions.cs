@@ -1,6 +1,22 @@
 namespace Tnzi.Storage.Permissions;
 
 /// <summary>
+/// The Storage permission codes as constants, so the runtime access checks in
+/// <see cref="Tnzi.Storage.Services.FileAccessAuthorizer"/> and the controller
+/// attributes cannot drift apart from the declarations below.
+/// </summary>
+public static class StoragePermissionNames
+{
+    public const string View = "storage.view";
+    public const string FileView = "storage.file.view";
+    public const string FileCreate = "storage.file.create";
+    public const string FileUpdate = "storage.file.update";
+    public const string FileDelete = "storage.file.delete";
+    public const string ChunkView = "storage.chunk.view";
+    public const string VersionView = "storage.version.view";
+}
+
+/// <summary>
 /// Operation-level permission codes for the Storage module's admin surfaces.
 /// </summary>
 /// <remarks>

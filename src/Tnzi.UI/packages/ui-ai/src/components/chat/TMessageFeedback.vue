@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TMessageFeedback — Thumbs up/down feedback
+ * TMessageFeedback - Thumbs up/down feedback
  *
  * Allows users to rate assistant messages as positive or negative.
  * Thumbs-down shows an inline reason input on first click.

@@ -15,6 +15,27 @@ public class FinanceOptionsValidator : OptionsValidatorBase<FinanceOptions>
         if (options.BaseCurrencyDecimals is < 0 or > 4)
             errors.Add("BaseCurrencyDecimals must be between 0 and 4.");
 
+        // 账龄切分点：留空 = 用默认 30/60/90；配了就必须是完整的三个切分点，
+        // 拒绝而不是静默回退——悄悄用回默认值会让人以为自己配的口径生效了。
+        var cuts = options.AgingBucketDays;
+        if (cuts is { Length: > 0 })
+        {
+            if (cuts.Length != 3)
+                errors.Add("AgingBucketDays must be empty (to use 30/60/90) or contain exactly three cut-offs (the bucket count is fixed at five).");
+            else if (cuts[0] <= 0 || cuts[1] <= cuts[0] || cuts[2] <= cuts[1])
+                errors.Add("AgingBucketDays must be positive and strictly ascending, e.g. [30, 60, 90].");
+        }
+
+        if (options.DunningOverdueDays <= 0)
+            errors.Add("DunningOverdueDays must be greater than zero.");
+        if (options.DunningFinalNoticeDays <= options.DunningOverdueDays)
+            errors.Add("DunningFinalNoticeDays must be greater than DunningOverdueDays.");
+        if (options.DunningMinimumAmount < 0)
+            errors.Add("DunningMinimumAmount must not be negative.");
+
+        if (options.MaxAttachmentsPerDocument <= 0)
+            errors.Add("MaxAttachmentsPerDocument must be greater than zero.");
+
         if (options.RoundingTolerance < 0)
             errors.Add("RoundingTolerance cannot be negative.");
 

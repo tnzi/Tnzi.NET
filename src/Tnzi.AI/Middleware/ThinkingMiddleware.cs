@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 推理模式中间件 — 根据 per-request 或 provider 配置自动管理推理模式。
+/// 推理模式中间件 - 根据 per-request 或 provider 配置自动管理推理模式。
 /// <para>
 /// 职责：
 /// 1. 确定有效推理强度 (request override > provider config)
@@ -81,7 +81,7 @@ public class ThinkingMiddleware : IAiMiddleware
 
         if (!supportsReasoning && !isAlwaysOn)
         {
-            // 当前模型不支持推理 — 静默跳过（自动模型切换在 AgentRuntime 预解析阶段完成）
+            // 当前模型不支持推理 - 静默跳过（自动模型切换在 AgentRuntime 预解析阶段完成）
             _logger.LogDebug(
                 "Model '{CurrentModel}' does not support reasoning for provider '{Provider}', skipping thinking injection",
                 currentModel, providerName);

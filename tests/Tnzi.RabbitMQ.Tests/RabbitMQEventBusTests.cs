@@ -192,7 +192,7 @@ public class RabbitMQEventBusTests : IDisposable
         _mockConnection.Setup(c => c.CreateChannelAsync(It.IsAny<CreateChannelOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(recoveredChannel.Object);
 
-        // 第二次发布 — 检测到 IsOpen=false，触发 channel 恢复
+        // 第二次发布 - 检测到 IsOpen=false，触发 channel 恢复
         await bus.PublishAsync(new TestEvent("test2"));
 
         // 验证 channel 创建被调用了两次（初次 + 恢复）

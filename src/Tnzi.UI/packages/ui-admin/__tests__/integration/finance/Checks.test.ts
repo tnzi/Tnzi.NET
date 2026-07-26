@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Checks page — two tabs (print queue + register). The register is a read-only
+ * Checks page - two tabs (print queue + register). The register is a read-only
  * CRUD list with conditional void / reprint row actions; the queue selects a
  * bank account, lists payable checks, and prints selected rows to a PDF.
  */

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 评估指标分析服务实现 — 趋势分析和版本比较
+/// 评估指标分析服务实现 - 趋势分析和版本比较
 /// </summary>
 public class EvaluationMetricsService : ApplicationService, IEvaluationMetricsService
 {

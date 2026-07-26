@@ -1,8 +1,8 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 授权资源类别 — 标识一条 grant 属于哪种 junction 实体，供 per-grant CRUD 路由。
-/// Grant resource category — identifies which junction entity a grant belongs to, for per-grant CRUD routing.
+/// 授权资源类别 - 标识一条 grant 属于哪种 junction 实体，供 per-grant CRUD 路由。
+/// Grant resource category - identifies which junction entity a grant belongs to, for per-grant CRUD routing.
 /// </summary>
 public enum GrantResourceType
 {
@@ -17,7 +17,7 @@ public enum GrantResourceType
 }
 
 /// <summary>
-/// Agent 授权服务 — 管理 Agent 与工具/技能/知识库之间的 junction grant 关系。
+/// Agent 授权服务 - 管理 Agent 与工具/技能/知识库之间的 junction grant 关系。
 /// 取代 Agent 上的 <c>ToolGroups</c>/<c>SkillSlugs</c>/<c>KnowledgeBaseIds</c> JSON 列，
 /// 提供 (1) 只读投影（feed resolver/DTO）、(2) tri-state reconcile 写入（复刻 UpdateAgentDto PATCH 语义）、
 /// (3) per-grant 启用/优先级 CRUD（治理面）、(4) 反向查询（哪些 Agent 使用某资源）。
@@ -46,7 +46,7 @@ public interface IAgentGrantService
     Task<IReadOnlyDictionary<Guid, AgentGrantsProjection>> GetGrantsAsync(IReadOnlyList<Guid> agentIds, CancellationToken ct = default);
 
     // ---------------------------------------------------------------------
-    // Reconcile (write) — tri-state PATCH semantics
+    // Reconcile (write) - tri-state PATCH semantics
     // ---------------------------------------------------------------------
 
     /// <summary>
@@ -94,7 +94,7 @@ public interface IAgentGrantService
     Task<bool> SetGrantPriorityAsync(GrantResourceType resourceType, Guid grantId, int priority, CancellationToken ct = default);
 
     // ---------------------------------------------------------------------
-    // Reverse query — "which agents use resource X"
+    // Reverse query - "which agents use resource X"
     // ---------------------------------------------------------------------
 
     /// <summary>启用授权了指定工具键的 Agent Id（去重）。Distinct agent ids with an enabled grant for the given tool key.</summary>

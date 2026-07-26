@@ -1,5 +1,5 @@
 /**
- * Phase 5 Task 5.4 — AgentRunMonitor pure-data config.
+ * Phase 5 Task 5.4 - AgentRunMonitor pure-data config.
  *
  * Column descriptors and status colour map for the master list / header.
  * Kept separate from the SFC so the i18n key sweep (Task 5.16) can pick
@@ -29,7 +29,7 @@ export const runStatusClass: Record<string, string> = {
   Canceled: 'is-cancelled',
 }
 
-/** Trace event shape — backend has no canonical DTO yet (gap doc'd in
+/** Trace event shape - backend has no canonical DTO yet (gap doc'd in
  * page comment). Kept loose so SSE messages can flow through unchanged. */
 export interface RunTraceEvent {
   type?: string

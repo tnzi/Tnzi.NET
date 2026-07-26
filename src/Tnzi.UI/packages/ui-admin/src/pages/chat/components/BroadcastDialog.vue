@@ -1,12 +1,13 @@
 <template>
   <!--
-    BroadcastDialog — system-notification producer in a modal (opened from the
+    BroadcastDialog - system-notification producer in a modal (opened from the
     Conversations toolbar "Broadcast" button). Two tabs: Compose (form) and
     History (paged BroadcastLog list, each row's full content shown via a
     click popover). Target = All / By role / By user; roles and users are picked
     with multi-select autocompletes (roles loaded in full + local filter; users
     remote-searched by keyword) instead of pasting comma-separated IDs.
   -->
+  <TOverlayTheme>
   <NModal
     :show="show"
     preset="card"
@@ -93,6 +94,7 @@
       </NTabPane>
     </NTabs>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
@@ -105,6 +107,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import TRoleSelector from '../../../components/forms/TRoleSelector.vue'
 import TUserSelector from '../../../components/forms/TUserSelector.vue'
+import { TOverlayTheme } from '../../../components/overlay'
 import type { SelectorOption } from '../../../components/forms/_selector-factory'
 import { createChatBridge } from '../../../services/bridges/chat-bridge'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'

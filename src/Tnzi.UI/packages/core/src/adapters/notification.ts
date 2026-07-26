@@ -4,6 +4,8 @@
  * Platform-agnostic notification adapter.
  */
 
+import { createAdapterSingleton } from './singleton';
+
 export interface NotificationOptions {
   title?: string;
   duration?: number;
@@ -39,17 +41,19 @@ class ConsoleNotificationAdapter implements NotificationAdapter {
 // Singleton
 // ============================================
 
-const _fallback: NotificationAdapter = new ConsoleNotificationAdapter();
-let _active: NotificationAdapter | null = null;
+const _slot = createAdapterSingleton<NotificationAdapter>(
+  'notification',
+  () => new ConsoleNotificationAdapter()
+);
 
 export function setNotificationAdapter(adapter: NotificationAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useNotification(): NotificationAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetNotificationAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

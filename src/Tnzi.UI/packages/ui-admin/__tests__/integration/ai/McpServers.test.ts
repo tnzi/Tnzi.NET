@@ -3,11 +3,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * McpServers integration test — rebuilt three-tab page:
- *   Tab 1 «External Servers» — card grid CRUD over mcpServers (Tnzi as client)
- *   Tab 2 «This Server»       — read-only status (mcp.getStatus/getTools/
+ * McpServers integration test - rebuilt three-tab page:
+ *   Tab 1 «External Servers» - card grid CRUD over mcpServers (Tnzi as client)
+ *   Tab 2 «This Server» - read-only status (mcp.getStatus/getTools/
  *                               getExposedAgents) + exposed-agent management
- *   Tab 3 «Tool Analytics»    — mcpToolAnalytics.getMostUsedTools ranking
+ *   Tab 3 «Tool Analytics» - mcpToolAnalytics.getMostUsedTools ranking
  *
  * Mirrors Personas.test.ts: mock the ai-bridge + client, mount with naive
  * stubs, assert mount fetches + getStatus call + external-server cards render +

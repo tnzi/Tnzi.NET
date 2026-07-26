@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// 上下文提供器贡献者 — 各模块实现此接口注册自己的 IContextProvider
+/// 上下文提供器贡献者 - 各模块实现此接口注册自己的 IContextProvider
 /// </summary>
 /// <remarks>
 /// <para>
@@ -32,7 +32,7 @@ public interface IContextProviderContributor
 }
 
 /// <summary>
-/// ContextProvider 创建上下文 — 传递运行时参数给 contributor
+/// ContextProvider 创建上下文 - 传递运行时参数给 contributor
 /// </summary>
 public sealed class ContextProviderCreationContext
 {

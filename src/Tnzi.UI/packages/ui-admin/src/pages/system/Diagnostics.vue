@@ -1,12 +1,12 @@
 <template>
   <!--
-    Diagnostics — surfaces `/admin/diagnostics/*` (ships with HostingModule).
+    Diagnostics - surfaces `/admin/diagnostics/*` (ships with HostingModule).
     Three tabs:
-      • Modules     — loaded ModuleManifest list (assembly, deps, services, events, options)
-      • Controllers — every Mvc controller route the runtime exposes
-      • Exceptions  — summary KPIs + recent ring buffer + clear
+      • Modules - loaded ModuleManifest list (assembly, deps, services, events, options)
+      • Controllers - every Mvc controller route the runtime exposes
+      • Exceptions - summary KPIs + recent ring buffer + clear
 
-    Read-mostly. No edits, no per-row modal — this is an ops console, not a CRUD page.
+    Read-mostly. No edits, no per-row modal - this is an ops console, not a CRUD page.
   -->
   <TTabsPage
     :title="t('title')"
@@ -17,8 +17,8 @@
     <template #kpis>
       <TKpiRow cols="1 s:3">
         <TKpiCard :label="t('kpi.modules')" :value="modules.length" icon="mdi:view-grid-outline" />
-        <TKpiCard :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? 0" icon="mdi:router-network" />
-        <TKpiCard :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? 0" icon="mdi:alert-circle-outline" />
+        <TKpiCard :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? null" icon="mdi:router-network" />
+        <TKpiCard :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? null" icon="mdi:alert-circle-outline" />
       </TKpiRow>
     </template>
 
@@ -172,6 +172,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
 import { TKpiCard, TKpiRow } from '../../components/data'
@@ -346,7 +347,7 @@ const controllerColumns: DataTableColumns<ControllerInfoDto> = [
     key: 'route',
     width: 280,
     render: (row) =>
-      h('code', { class: 'tnzi-mono text-12px' }, row.route || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.route || EMPTY_DASH),
   },
   { title: () => t('cols.type'), key: 'type', ellipsis: { tooltip: true } },
   { title: () => t('cols.module'), key: 'module', width: 180 },
@@ -449,21 +450,21 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
     render: (row) =>
       row.statusCode != null
         ? h(NTag, { size: 'tiny', bordered: false, type: statusTone(row.statusCode) }, () => String(row.statusCode))
-        : '—',
+        : EMPTY_DASH,
   },
   {
     title: () => t('cols.errorCode'),
     key: 'errorCode',
     width: 160,
     render: (row) =>
-      h('code', { class: 'tnzi-mono text-12px' }, row.errorCode || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.errorCode || EMPTY_DASH),
   },
   {
     title: () => t('cols.requestId'),
     key: 'requestId',
     width: 200,
     render: (row) =>
-      h('code', { class: 'tnzi-mono text-12px' }, row.requestId || '—'),
+      h('code', { class: 'tnzi-mono text-12px' }, row.requestId || EMPTY_DASH),
   },
   { title: () => t('cols.message'), key: 'message', ellipsis: { tooltip: true } },
 ]

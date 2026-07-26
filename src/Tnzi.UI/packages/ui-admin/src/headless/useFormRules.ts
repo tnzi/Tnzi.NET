@@ -1,5 +1,5 @@
 /**
- * `useFormRules()` — i18n-reactive form validation rules for Naive UI's
+ * `useFormRules()` - i18n-reactive form validation rules for Naive UI's
  * `NForm`. Returns a frozen set of `FormItemRule[]` keyed by common field
  * names; consumers pick the ones they need.
  *
@@ -24,32 +24,32 @@ function fb(t: Translate | undefined, key: string, fallback: string): string {
 }
 
 export interface FormRules {
-  /** Required string — non-empty after trim. */
+  /** Required string - non-empty after trim. */
   required(message?: string): FormItemRule
   /** Required + length range. */
   text(opts?: { min?: number; max?: number; message?: string }): FormItemRule[]
-  /** Username — 3-32 chars, letters/digits/dash/underscore. */
+  /** Username - 3-32 chars, letters/digits/dash/underscore. */
   userName: FormItemRule[]
-  /** Email — RFC 5322 light. */
+  /** Email - RFC 5322 light. */
   email: FormItemRule[]
-  /** International phone number — digits + optional `+` and dashes. */
+  /** International phone number - digits + optional `+` and dashes. */
   phone: FormItemRule[]
   /**
-   * Strong password — length range + (by default) at least one letter and one
+   * Strong password - length range + (by default) at least one letter and one
    * digit. Pass `complexity: false` for LOGIN forms where the password must
    * only be non-empty (composition rules belong to register/reset, and the
-   * backend enforces its own policy — the login form must not reject a valid
+   * backend enforces its own policy - the login form must not reject a valid
    * existing password client-side).
    */
   password(opts?: { min?: number; max?: number; complexity?: boolean }): FormItemRule[]
   /**
-   * Account identifier — username, email, OR phone. Length-only (no strict
+   * Account identifier - username, email, OR phone. Length-only (no strict
    * format) so a login form accepts whatever the backend allows. Used by the
    * password-login account field.
    */
   account(opts?: { min?: number; max?: number; message?: string }): FormItemRule[]
   /**
-   * Email or phone — accepts either format in a single field (the consumer
+   * Email or phone - accepts either format in a single field (the consumer
    * auto-detects which `type` to send). Used by code-login / register /
    * password-recovery.
    */

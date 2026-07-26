@@ -3,7 +3,7 @@ using Tnzi.AI.Rag.FileExtractors;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// 文件提取器单元测试 — 验证 PlainTextFileExtractor 和 MarkdownFileExtractor
+/// 文件提取器单元测试 - 验证 PlainTextFileExtractor 和 MarkdownFileExtractor
 /// </summary>
 public class FileExtractorTests
 {

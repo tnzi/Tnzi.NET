@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Events;
 
 /// <summary>
-/// AgentRuntime run lifecycle event publishing tests — verifies AgentRunStartedEvent and AgentRunFailedEvent publishing behavior.
+/// AgentRuntime run lifecycle event publishing tests - verifies AgentRunStartedEvent and AgentRunFailedEvent publishing behavior.
 /// </summary>
 public class AgentRuntimeEventPublishingTests
 {
@@ -91,7 +91,7 @@ public class AgentRuntimeEventPublishingTests
             UserMessage = "Hello"
         };
 
-        // Act — pipeline execution will fail (no real ChatClient), but Started event should have been published
+        // Act - pipeline execution will fail (no real ChatClient), but Started event should have been published
         try { await runtime.RunAsync(request); } catch { /* expected */ }
 
         // Assert
@@ -183,7 +183,7 @@ public class AgentRuntimeEventPublishingTests
     [Fact]
     public async Task RunAsync_EventBusNull_DoesNotThrow()
     {
-        // Arrange — no event bus injected
+        // Arrange - no event bus injected
         var agentResolver = new Mock<IAgentResolver>();
         agentResolver
             .Setup(x => x.ResolveAgentAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
@@ -197,7 +197,7 @@ public class AgentRuntimeEventPublishingTests
             UserMessage = "Hello"
         };
 
-        // Act — should not throw due to null event bus (Started/Failed both skip when _eventBus is null)
+        // Act - should not throw due to null event bus (Started/Failed both skip when _eventBus is null)
         try { await runtime.RunAsync(request); } catch { /* expected from pipeline, not events */ }
 
         // If we get here without NullReferenceException, the test passes

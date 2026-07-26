@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// GraphSearchService 单元测试 — 验证图谱搜索的名称/类型匹配、关系加载和上下文片段生成
+/// GraphSearchService 单元测试 - 验证图谱搜索的名称/类型匹配、关系加载和上下文片段生成
 /// </summary>
 public class GraphSearchServiceTests
 {

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Net.Sockets;
 using Polly;
 using Polly.CircuitBreaker;
 using Polly.Retry;
@@ -5,7 +7,7 @@ using Polly.Retry;
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 重试中间件 — 对瞬态 LLM API 失败执行指数退避重试 + 熔断保护
+/// 重试中间件 - 对瞬态 LLM API 失败执行指数退避重试 + 熔断保护
 /// </summary>
 /// <remarks>
 /// 重试条件：HTTP 429 (Rate Limit)、5xx 服务端错误、TaskCanceledException（连接超时）。
@@ -70,7 +72,7 @@ public class RetryMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 带重试的流式连接 — 重试获取第一个 chunk，成功后返回缓冲的首个 chunk 和剩余流
+    /// 带重试的流式连接 - 重试获取第一个 chunk，成功后返回缓冲的首个 chunk 和剩余流
     /// </summary>
     private async Task<(AgentStreamChunk? FirstChunk, IAsyncEnumerable<AgentStreamChunk>? RemainingStream)> ConnectWithRetryAsync(
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, CancellationToken cancellationToken)
@@ -82,21 +84,23 @@ public class RetryMiddleware : IAiMiddleware
 
         while (true)
         {
+            IAsyncEnumerator<AgentStreamChunk>? enumerator = null;
+            var handedOff = false;
             try
             {
                 var enumerable = next(context, cancellationToken);
-                var enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
+                enumerator = enumerable.GetAsyncEnumerator(cancellationToken);
 
                 var hasFirst = await enumerator.MoveNextAsync();
                 if (!hasFirst)
                 {
-                    await enumerator.DisposeAsync();
                     return (null, null);
                 }
 
                 var firstChunk = enumerator.Current;
                 // 包装剩余流（负责最终 dispose）
                 var remaining = ConsumeRemainingAsync(enumerator, cancellationToken);
+                handedOff = true;
                 return (firstChunk, remaining);
             }
             catch (Exception ex) when (attempt < maxRetries && ShouldRetry(ex) && !ShouldAbortBackground(context, ex))
@@ -109,6 +113,15 @@ public class RetryMiddleware : IAiMiddleware
                 await Task.Delay(delay, cancellationToken);
                 delay = TimeSpan.FromMilliseconds(
                     Math.Min(delay.TotalMilliseconds * retryOptions.BackoffMultiplier, retryOptions.MaxDelay.TotalMilliseconds));
+            }
+            finally
+            {
+                // 未成功交棒给 ConsumeRemainingAsync 的枚举器必须在这里释放，
+                // 否则每次重试/非重试性失败都会泄漏底层的 HTTP 响应流与连接。
+                if (!handedOff && enumerator != null)
+                {
+                    await enumerator.DisposeAsync();
+                }
             }
         }
     }
@@ -217,7 +230,7 @@ public class RetryMiddleware : IAiMiddleware
         }
 
         // 明确的网络层瞬时异常重试（连接重置、套接字错误等）
-        if (ex is System.IO.IOException || ex is System.Net.Sockets.SocketException)
+        if (ex is IOException || ex is SocketException)
             return true;
 
         // 其他未知异常 fail-fast，避免对非幂等工具调用重复执行产生副作用

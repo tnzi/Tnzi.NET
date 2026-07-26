@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * ToolPermissions integration test — three tabs (persisted / session /
+ * ToolPermissions integration test - three tabs (persisted / session /
  * evaluate) over the permission bridge. The bridge is mocked:
  *   • getRules        → { hasRules, sessionRules[] }   (KPI + session tab)
  *   • getPersistedRules → 3 rows out of priority/scope order             (persisted tab)
@@ -25,17 +25,17 @@ const persisted = [
   // re-sort to Priority desc → Scope weight desc (Session=4 > User=3 >
   // Project=2 > System=1).
   {
-    id: 'r-session', toolPattern: 'shell:*', behavior: 1, scope: 3, priority: 10,
+    id: 'r-session', toolPattern: 'shell:*', behavior: 'Ask', scope: 'Session', priority: 10,
     isDestructiveOnly: false, isSubAgentOnly: false, isEnabled: true,
     creationTime: '2026-05-01T00:00:00Z',
   },
   {
-    id: 'r-system', toolPattern: 'write_file', behavior: 2, scope: 0, priority: 200,
+    id: 'r-system', toolPattern: 'write_file', behavior: 'Deny', scope: 'System', priority: 200,
     isDestructiveOnly: true, isSubAgentOnly: false, isEnabled: true,
     creationTime: '2026-05-02T00:00:00Z',
   },
   {
-    id: 'r-user', toolPattern: 'read_file', behavior: 0, scope: 2, priority: 50,
+    id: 'r-user', toolPattern: 'read_file', behavior: 'Allow', scope: 'User', priority: 50,
     isDestructiveOnly: false, isSubAgentOnly: false, isEnabled: false,
     creationTime: '2026-05-03T00:00:00Z',
   },
@@ -44,14 +44,14 @@ const persisted = [
 const snapshot = {
   hasRules: true,
   sessionRules: [
-    { toolPattern: 'shell:rm', toolGroup: 'shell', behavior: 2, scope: 3, priority: 999, isSubAgentOnly: false, isWorkflowOnly: false, isDestructiveOnly: false, reason: 'block rm' },
+    { toolPattern: 'shell:rm', toolGroup: 'shell', behavior: 'Deny', scope: 'Session', priority: 999, isSubAgentOnly: false, isWorkflowOnly: false, isDestructiveOnly: false, reason: 'block rm' },
   ],
 }
 
 const evalResult = {
   toolName: 'write_file',
-  behavior: 2, // Deny
-  scope: 0, // System
+  behavior: 'Deny', // Deny
+  scope: 'System', // System
   matchedRulePattern: 'write_file',
   matchedToolGroup: null,
   matchedServerName: null,
@@ -198,25 +198,25 @@ describe('ToolPermissions page', () => {
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
     // Scope weights: Session=4 > User=3 > Project=2 > System=1.
-    expect(vm.scopeWeight(3)).toBe(4)
-    expect(vm.scopeWeight(2)).toBe(3)
-    expect(vm.scopeWeight(1)).toBe(2)
-    expect(vm.scopeWeight(0)).toBe(1)
+    expect(vm.scopeWeight('Session')).toBe(4)
+    expect(vm.scopeWeight('User')).toBe(3)
+    expect(vm.scopeWeight('Project')).toBe(2)
+    expect(vm.scopeWeight('System')).toBe(1)
     // Behavior weights: Deny=2 > Ask=1 > Allow=0.
-    expect(vm.behaviorWeight(2)).toBe(2)
-    expect(vm.behaviorWeight(1)).toBe(1)
-    expect(vm.behaviorWeight(0)).toBe(0)
+    expect(vm.behaviorWeight('Deny')).toBe(2)
+    expect(vm.behaviorWeight('Ask')).toBe(1)
+    expect(vm.behaviorWeight('Allow')).toBe(0)
   })
 
   it('behavior tone + icon map allow/ask/deny to success/warning/error', async () => {
     const wrapper = mount(ToolPermissions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
-    expect(vm.behaviorTone(0)).toBe('success')
-    expect(vm.behaviorTone(1)).toBe('warning')
-    expect(vm.behaviorTone(2)).toBe('error')
-    expect(vm.behaviorIcon(0)).toBe('mdi:check-circle')
-    expect(vm.behaviorIcon(2)).toBe('mdi:close-circle')
+    expect(vm.behaviorTone('Allow')).toBe('success')
+    expect(vm.behaviorTone('Ask')).toBe('warning')
+    expect(vm.behaviorTone('Deny')).toBe('error')
+    expect(vm.behaviorIcon('Allow')).toBe('mdi:check-circle')
+    expect(vm.behaviorIcon('Deny')).toBe('mdi:close-circle')
   })
 
   it('running an evaluation calls the bridge and surfaces the colour-coded decision', async () => {
@@ -227,7 +227,7 @@ describe('ToolPermissions page', () => {
     await vm.runEvaluate()
     await flushPromises()
     expect(evaluate).toHaveBeenCalledTimes(1)
-    expect(vm.evalResult?.behavior).toBe(2) // Deny
+    expect(vm.evalResult?.behavior).toBe('Deny')
     // The big decision banner + reason are rendered.
     const html = wrapper.html()
     expect(html).toContain('t-perm-page__decision--error')
@@ -268,7 +268,7 @@ describe('ToolPermissions page', () => {
     const vm = wrapper.vm as unknown as Vm
     vm.crud.openCreate()
     await flushPromises()
-    // Leave toolPattern blank — the page guards (schema-form `required` is
+    // Leave toolPattern blank - the page guards (schema-form `required` is
     // visual only) so a blank-pattern rule never reaches the backend.
     await expect(vm.crud.submit()).rejects.toThrow()
     await flushPromises()

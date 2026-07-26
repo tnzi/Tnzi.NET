@@ -79,7 +79,8 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.workflow.execute")]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> Run(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
-        // 管理员可代理但默认用自身 ID
+        // 配额一律记在当前登录用户名下（防止请求体伪造他人 UserId）；
+        // request.UserId 仅在无认证上下文时兜底。
         var userId = CurrentUser?.Id ?? request.UserId;
         var result = await WorkflowService.RunAsync(id, request.Input, userId, cancellationToken);
         return result.ToApiResult();

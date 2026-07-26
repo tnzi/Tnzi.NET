@@ -46,11 +46,18 @@ public class TextTools : IAIToolProvider
         [AIParameter("case", "Target case: 'upper', 'lower', or 'title'")]
         string targetCase)
     {
-        return targetCase.ToLower() switch
+        if (string.IsNullOrEmpty(text))
         {
-            "upper" => Task.FromResult(text.ToUpper()),
-            "lower" => Task.FromResult(text.ToLower()),
-            "title" => Task.FromResult(CultureInfo.CurrentCulture.TextInfo.ToTitleCase(text.ToLower())),
+            return Task.FromResult(string.Empty);
+        }
+
+        // 固定 InvariantCulture：大小写转换若跟随当前请求区域，土耳其语等 locale 下
+        // i/I 的映射会变（Turkish-I 问题），同一输入在不同请求得到不同结果。
+        return (targetCase ?? string.Empty).ToLowerInvariant() switch
+        {
+            "upper" => Task.FromResult(text.ToUpperInvariant()),
+            "lower" => Task.FromResult(text.ToLowerInvariant()),
+            "title" => Task.FromResult(CultureInfo.InvariantCulture.TextInfo.ToTitleCase(text.ToLowerInvariant())),
             _ => Task.FromResult(text)
         };
     }

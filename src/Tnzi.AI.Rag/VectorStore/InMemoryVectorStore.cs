@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.VectorStore;
 
 /// <summary>
-/// 内存向量存储 — 用于开发和测试，无需外部数据库
+/// 内存向量存储 - 用于开发和测试，无需外部数据库
 /// </summary>
 /// <remarks>
 /// <para>

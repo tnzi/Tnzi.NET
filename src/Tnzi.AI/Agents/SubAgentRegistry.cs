@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Agents;
 
 /// <summary>
-/// 子 Agent 类型注册表实现 — 内置 3 种标准类型 + 运行时扩展
+/// 子 Agent 类型注册表实现 - 内置 3 种标准类型 + 运行时扩展
 /// </summary>
 /// <remarks>
 /// 内置类型：

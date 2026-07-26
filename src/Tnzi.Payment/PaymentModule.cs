@@ -32,7 +32,7 @@ public class PaymentModule : TnziApplicationModule
         // 支付渠道配置（独立 Options 类）
         context.Services.AddTnziOptions<StripeOptions, StripeOptionsValidator>(configuration, "Payment:Stripe");
         context.Services.AddTnziOptions<PayPalOptions, PayPalOptionsValidator>(configuration, "Payment:PayPal");
-        // 子模块配置 — 虽为 PaymentOptions 嵌套属性，但服务中单独注入 IOptions<T>
+        // 子模块配置 - 虽为 PaymentOptions 嵌套属性，但服务中单独注入 IOptions<T>
         context.Services.AddTnziOptions<InvoiceOptions>(configuration, "Payment:Invoice");
         context.Services.AddTnziOptions<PromotionOptions>(configuration, "Payment:Promotion");
         context.Services.AddTnziOptions<TaxOptions>(configuration, "Payment:Tax");

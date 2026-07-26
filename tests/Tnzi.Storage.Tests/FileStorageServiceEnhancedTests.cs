@@ -41,6 +41,7 @@ public class FileStorageServiceEnhancedTests
             _mockReferenceRepository.Object,
             _mockStorage.Object,
             optionsMonitor.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             _mockServiceProvider.Object);
     }
 
@@ -49,6 +50,7 @@ public class FileStorageServiceEnhancedTests
         return new FileShareService(
             _mockShareRepository.Object,
             _mockFileRepository.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             _mockServiceProvider.Object);
     }
 

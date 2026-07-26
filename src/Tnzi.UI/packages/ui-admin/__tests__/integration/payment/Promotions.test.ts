@@ -18,7 +18,7 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
-// `useMessage` requires NMessageProvider in the tree — stub it so the page
+// `useMessage` requires NMessageProvider in the tree - stub it so the page
 // can call message.success / error without a real provider in test mounts.
 vi.mock('naive-ui', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('naive-ui')

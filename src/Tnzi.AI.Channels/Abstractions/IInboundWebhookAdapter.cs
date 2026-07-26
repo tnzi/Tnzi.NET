@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Abstractions;
 
 /// <summary>
-/// 入站 Webhook 适配器 — 由可通过 HTTP 回调接收消息的平台适配器实现
+/// 入站 Webhook 适配器 - 由可通过 HTTP 回调接收消息的平台适配器实现
 /// （Slack / Discord / DingTalk / Feishu）。
 /// 由 <c>DefaultChannelWebhookController</c> 调用：先验签 + 处理握手，再分发到适配器。
 /// 验签逻辑与密钥都封装在适配器内部（密钥归属适配器，不应泄漏到控制器）。
@@ -27,13 +27,13 @@ public interface IInboundWebhookAdapter
 /// <summary>Webhook 处理结果类型。</summary>
 public enum WebhookOutcome
 {
-    /// <summary>URL 验证 / 握手挑战 — 控制器应原样回显挑战内容。</summary>
+    /// <summary>URL 验证 / 握手挑战 - 控制器应原样回显挑战内容。</summary>
     Challenge,
 
     /// <summary>已验签并接受（已分发到消息总线）。</summary>
     Accepted,
 
-    /// <summary>验签失败 / 缺少签名（已配置密钥时）— 控制器应返回 401/403，不分发。</summary>
+    /// <summary>验签失败 / 缺少签名（已配置密钥时）- 控制器应返回 401/403，不分发。</summary>
     Rejected
 }
 

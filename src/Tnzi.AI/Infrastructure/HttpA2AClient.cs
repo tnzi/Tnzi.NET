@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// 基于 HTTP 的 A2A 客户端实现 — 通过 HTTP 协议与远程 Agent 通信
+/// 基于 HTTP 的 A2A 客户端实现 - 通过 HTTP 协议与远程 Agent 通信
 /// </summary>
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public class HttpA2AClient : IA2AClient
@@ -46,7 +46,7 @@ public class HttpA2AClient : IA2AClient
 
         if (IsRedirect(response.StatusCode))
         {
-            _logger.LogWarning("A2A discover received redirect {StatusCode} — redirect following is disabled to prevent SSRF", (int)response.StatusCode);
+            _logger.LogWarning("A2A discover received redirect {StatusCode} - redirect following is disabled to prevent SSRF", (int)response.StatusCode);
             throw new InvalidOperationException($"A2A discover received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled.");
         }
 
@@ -85,7 +85,7 @@ public class HttpA2AClient : IA2AClient
 
         if (IsRedirect(response.StatusCode))
         {
-            _logger.LogWarning("A2A send-task received redirect {StatusCode} — treating as failure to prevent SSRF", (int)response.StatusCode);
+            _logger.LogWarning("A2A send-task received redirect {StatusCode} - treating as failure to prevent SSRF", (int)response.StatusCode);
             return new A2AResponse { TaskId = request.TaskId, Status = "failed", Error = $"A2A request received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled." };
         }
 
@@ -119,7 +119,7 @@ public class HttpA2AClient : IA2AClient
 
         if (IsRedirect(response.StatusCode))
         {
-            _logger.LogWarning("A2A get-task-status received redirect {StatusCode} — treating as failure to prevent SSRF", (int)response.StatusCode);
+            _logger.LogWarning("A2A get-task-status received redirect {StatusCode} - treating as failure to prevent SSRF", (int)response.StatusCode);
             return new A2AResponse { TaskId = taskId, Status = "failed", Error = $"A2A request received unexpected redirect ({(int)response.StatusCode}). Redirect following is disabled." };
         }
 
@@ -135,7 +135,7 @@ public class HttpA2AClient : IA2AClient
         => (int)statusCode is >= 300 and <= 399;
 
     /// <summary>
-    /// 构建完整 URL — 确保 endpoint 以 / 结尾并拼接 path，并拒绝非 http/https 协议
+    /// 构建完整 URL - 确保 endpoint 以 / 结尾并拼接 path，并拒绝非 http/https 协议
     /// </summary>
     private static string BuildUrl(string endpoint, string path)
     {

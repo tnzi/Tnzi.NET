@@ -10,7 +10,7 @@ public sealed class ClaimInjectionOptions
     /// <summary>
     /// Prefix filter for claim types. When set (e.g. "ai:"), all claims whose
     /// type starts with this prefix are included. Set to empty string to include
-    /// all claims (dangerous — prefer <see cref="IncludedClaims"/>).
+    /// all claims (dangerous - prefer <see cref="IncludedClaims"/>).
     /// </summary>
     public string ClaimPrefix { get; set; } = "ai:";
 

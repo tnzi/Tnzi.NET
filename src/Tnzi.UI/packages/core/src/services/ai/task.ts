@@ -1,5 +1,5 @@
 /**
- * Agent Task API wrappers — query persisted tasks created during Agent runs.
+ * Agent Task API wrappers - query persisted tasks created during Agent runs.
  *
  * Mirrors `Tnzi.AI/Controllers/Admin/DefaultTaskAdminController` (route
  * `admin/ai/tasks`). Tasks are produced by the agent's todo / task tooling and
@@ -12,12 +12,17 @@ import type { HttpClient } from '../../http/http';
 // Enums (mirror backend Tnzi.AI.Entities.AgentTaskStatus)
 // ---------------------------------------------------------------------------
 
-/** Agent task status. */
+/**
+ * Agent task status. String enum (member name = value): the backend registers a
+ * global `JsonStringEnumConverter`, so `AgentTaskDto.status` arrives as its
+ * PascalCase name. The `by-status` query accepts the name as well (ASP.NET Core
+ * binds enum query values by name). Backend: `Tnzi.AI/Entities/AgentTask.cs`.
+ */
 export enum AgentTaskStatus {
-  Pending = 0,
-  InProgress = 1,
-  Completed = 2,
-  Skipped = 3,
+  Pending = 'Pending',
+  InProgress = 'InProgress',
+  Completed = 'Completed',
+  Skipped = 'Skipped',
 }
 
 // ---------------------------------------------------------------------------

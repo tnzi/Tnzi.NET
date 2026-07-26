@@ -3,7 +3,7 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// MemoryScope record 单元测试 — ToScopeKey 生成 + 隐式转换
+/// MemoryScope record 单元测试 - ToScopeKey 生成 + 隐式转换
 /// </summary>
 public class MemoryScopeTests
 {

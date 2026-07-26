@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Graph;
 
 /// <summary>
-/// 知识图谱搜索服务 — 通过实体名称/类型匹配 + 1-hop 关系扩展实现图谱检索
+/// 知识图谱搜索服务 - 通过实体名称/类型匹配 + 1-hop 关系扩展实现图谱检索
 /// </summary>
 /// <remarks>
 /// <para>
@@ -234,7 +234,7 @@ public class GraphSearchService : IGraphSearchService
 
         if (!string.IsNullOrWhiteSpace(node.Description))
         {
-            sb.Append($" — {node.Description}");
+            sb.Append($" - {node.Description}");
         }
 
         sb.Append('.');

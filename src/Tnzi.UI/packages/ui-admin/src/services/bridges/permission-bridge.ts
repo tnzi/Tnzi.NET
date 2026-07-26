@@ -1,5 +1,5 @@
 /**
- * Permission bridge — wraps `/admin/permissions/*` exposed by
+ * Permission bridge - wraps `/admin/permissions/*` exposed by
  * `Tnzi.AI.Controllers.Admin.DefaultPermissionAdminController`.
  *
  * 5 endpoints:
@@ -14,13 +14,13 @@
  * (`permission.ts`). This bridge delegates to `usePermissionAdminApi(client)`
  * and adds the tolerant `unwrap` + empty-on-404 shaping the page expects.
  *
- * Enum compatibility: core models `PermissionBehavior` / `ToolPermissionScope`
- * as numeric enums (Allow=0 / Ask=1 / Deny=2; System=0 / Project=1 / User=2 /
- * Session=3). The previous bridge used `0 | 1 | 2`(`| 3`) numeric unions.
- * Numeric enum members are numeric literals, so the consuming page's
- * `switch (n) { case 0: … }` checks and `value: 0` NSelect options stay
- * compatible — `ToolPermissions.vue` is unchanged. Both the enums (value) and
- * the types are re-exported so existing imports keep resolving.
+ * Enum form: core models `PermissionBehavior` / `ToolPermissionScope` as STRING
+ * enums whose members equal the PascalCase names the backend serialises
+ * (`"Allow"`, `"Session"`, ...). They used to be numeric enums, which never
+ * matched the wire; the page's select options were already emitting the
+ * strings, so aligning the declaration removed a real mismatch rather than
+ * introducing one. Both the enums (value) and the types are re-exported so
+ * existing imports keep resolving.
  */
 import type { HttpClient } from '@tnzi/core/http'
 import { usePermissionAdminApi, PermissionBehavior, ToolPermissionScope } from '@tnzi/core/services/ai'

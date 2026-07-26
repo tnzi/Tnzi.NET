@@ -1,5 +1,5 @@
 /**
- * `defineEnumMeta` — one declaration of an enum's UI metadata that yields the
+ * `defineEnumMeta` - one declaration of an enum's UI metadata that yields the
  * three shapes pages repeatedly hand-build: locale-reactive select `options`, a
  * `label(value)` accessor, and a `badgeMapping` ready for `<TStatusBadge>`.
  *
@@ -25,7 +25,7 @@ import { translatePageKey } from '../pages/_shared/translate'
 
 export interface EnumMetaSpec<V extends string | number> {
   value: V
-  /** Fallback label — used when `labelKey` is not supplied. */
+  /** Fallback label - used when `labelKey` is not supplied. */
   label?: string
   /** i18n key resolved via the translator (locale-reactive). Wins over `label`. */
   labelKey?: string
@@ -42,7 +42,7 @@ export interface EnumMeta<V extends string | number> {
   tone: (value: V | null | undefined) => StatusType | undefined
   /** Static mapping for `<TStatusBadge :mapping>` (keyed by `String(value)`). */
   badgeMapping: Record<string, { type: StatusType; label?: string; labelKey?: string }>
-  /** The raw specs — e.g. to render a legend. */
+  /** The raw specs - e.g. to render a legend. */
   specs: EnumMetaSpec<V>[]
 }
 

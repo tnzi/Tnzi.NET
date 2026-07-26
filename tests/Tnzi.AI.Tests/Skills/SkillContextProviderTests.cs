@@ -8,11 +8,11 @@ using Tnzi.AI.Skills.Models;
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// SkillContextProvider 单元测试 — Registry + TemplateEngine + 3 on-demand tools + activation state
+/// SkillContextProvider 单元测试 - Registry + TemplateEngine + 3 on-demand tools + activation state
 /// </summary>
 public class SkillContextProviderTests
 {
-    #region GetContextAsync — Instructions Mode
+    #region GetContextAsync - Instructions Mode
 
     [Fact]
     public async Task GetContextAsync_InstructionsMode_InjectsSummaryNotFullContent()
@@ -22,7 +22,7 @@ public class SkillContextProviderTests
             Slug = "code-review",
             Name = "Code Review",
             Description = "Reviews code quality",
-            Content = "FULL SKILL CONTENT — should NOT appear in summary",
+            Content = "FULL SKILL CONTENT - should NOT appear in summary",
             Enabled = true
         };
         var provider = CreateProvider(SkillInjectionMode.Instructions, [skill]);
@@ -36,7 +36,7 @@ public class SkillContextProviderTests
         text.ShouldContain("Code Review");
         text.ShouldContain("Reviews code quality");
         // Summary mode must NOT inject full content
-        text.ShouldNotContain("FULL SKILL CONTENT — should NOT appear in summary");
+        text.ShouldNotContain("FULL SKILL CONTENT - should NOT appear in summary");
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class SkillContextProviderTests
 
     #endregion
 
-    #region GetContextAsync — OnDemandTools Mode
+    #region GetContextAsync - OnDemandTools Mode
 
     [Fact]
     public async Task GetContextAsync_OnDemandMode_InjectsThreeTools()
@@ -72,7 +72,7 @@ public class SkillContextProviderTests
 
     #endregion
 
-    #region GetContextAsync — Both Mode
+    #region GetContextAsync - Both Mode
 
     [Fact]
     public async Task GetContextAsync_BothMode_InjectsSummaryAndTools()

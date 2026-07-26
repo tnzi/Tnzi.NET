@@ -4,7 +4,7 @@ using System.Net.Http;
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// ProviderService 双源合并（Database + Configuration）单元测试 —
+/// ProviderService 双源合并（Database + Configuration）单元测试 -
 /// 覆盖配置条目合并/置顶/分页、同名覆盖隐藏、只读写保护（400）、
 /// API Key 永不泄漏、options 下拉合并。
 /// </summary>
@@ -154,7 +154,7 @@ public class ProviderServiceConfigMergeTests
     [Fact]
     public async Task GetPagedListAsync_DisabledDbRowWithSameName_KeepsConfigEntry()
     {
-        // Runtime falls back to config when the DB row is disabled — admin list mirrors that.
+        // Runtime falls back to config when the DB row is disabled - admin list mirrors that.
         SetupQueryable(new List<Provider> { MakeProvider("DeepSeek", isEnabled: false) });
         var svc = CreateService(MakeAiOptions(("DeepSeek", true, "sk-x")));
 

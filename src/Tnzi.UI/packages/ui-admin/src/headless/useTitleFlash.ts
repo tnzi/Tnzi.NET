@@ -1,5 +1,5 @@
 /**
- * Browser tab title flash — the classic web-IM "you have a message" cue used by
+ * Browser tab title flash - the classic web-IM "you have a message" cue used by
  * Slack / WhatsApp Web / Facebook / LinkedIn when the tab is not focused.
  *
  * `flash(text)` alternates `document.title` between the page's real title and
@@ -30,7 +30,7 @@ export function useTitleFlash() {
   function flash(text: string): void {
     if (typeof document === 'undefined' || typeof window === 'undefined') return
     altText = text
-    if (interval !== null) return // already flashing — just updated the text
+    if (interval !== null) return // already flashing - just updated the text
     original = document.title
     showingAlt = false
     tick() // show the alt text immediately, don't wait a full interval

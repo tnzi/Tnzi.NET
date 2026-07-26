@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * EFT Batches page — two tabs (payable queue + batches). The queue selects
+ * EFT Batches page - two tabs (payable queue + batches). The queue selects
  * bank-transfer payments and creates a batch; batches expose generate /
  * download / void row actions conditional on the batch status.
  */

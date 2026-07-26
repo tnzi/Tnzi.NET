@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Streaming;
 
 /// <summary>
-/// 流式响应写入器 — 支持 SSE 和 NDJSON 格式
+/// 流式响应写入器 - 支持 SSE 和 NDJSON 格式
 /// </summary>
 public static class StreamingResponseWriter
 {
@@ -134,7 +134,7 @@ public static class StreamingResponseWriter
     }
 
     /// <summary>
-    /// 完整的流式传输生命周期管理 — 封装 pre-stream、IsDone 早发、主循环、drain、dispose。
+    /// 完整的流式传输生命周期管理 - 封装 pre-stream、IsDone 早发、主循环、drain、dispose。
     /// Pre-stream 阶段（首事件获取前）异常不会被捕获，由 ASP.NET Core 异常处理器正常返回 HTTP 错误。
     /// </summary>
     public static async Task WriteFullStreamAsync(
@@ -234,7 +234,7 @@ public static class StreamingResponseWriter
     }
 
     /// <summary>
-    /// 完整的流式传输生命周期管理（泛型版本）— 支持自定义事件类型，通过 mapper 转换后写入。
+    /// 完整的流式传输生命周期管理（泛型版本）- 支持自定义事件类型，通过 mapper 转换后写入。
     /// 适用于源事件类型非 StreamEvent 的流式端点（如 Workflow）。
     /// </summary>
     /// <typeparam name="TSource">源事件类型</typeparam>

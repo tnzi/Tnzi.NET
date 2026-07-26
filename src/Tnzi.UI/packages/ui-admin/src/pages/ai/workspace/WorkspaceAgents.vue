@@ -1,11 +1,11 @@
 <template>
   <!--
-    WorkspaceAgents — read-only view of Agent definitions discovered from
+    WorkspaceAgents - read-only view of Agent definitions discovered from
     AGENT.md / PERSONA.md files on disk. A standard TCardPage (mode="page"):
     the shell owns the white header (title + help + keyword search), the scope
     filter (All / Global / Project) is a segmented control in the toolbar, and
     each card opens a read-only detail drawer (deep-linkable via the CRUD `view`
-    open-state). No create/edit/delete — the page is read-only, so those
+    open-state). No create/edit/delete - the page is read-only, so those
     affordances are hidden automatically (no create/update/delete callbacks).
   -->
   <TCardPage
@@ -20,7 +20,7 @@
     :detail-title="(d: WorkspaceAgentDto) => d.name"
     :translate="t"
   >
-    <!-- Scope filter — a segmented control (All / Global / Project). It drives
+    <!-- Scope filter - a segmented control (All / Global / Project). It drives
          the fetch query's `scope` filter; it is NOT navigation, so it stays a
          toolbar control rather than a deep-linked tab. -->
     <template #toolbarLeft>
@@ -45,7 +45,7 @@
           </NTag>
         </div>
         <div class="t-wsa__id font-mono">{{ item.agentId }}</div>
-        <div class="t-wsa__desc">{{ item.description || '—' }}</div>
+        <div class="t-wsa__desc">{{ item.description || EMPTY_DASH }}</div>
         <div v-if="item.provider" class="t-wsa__provider">
           {{ item.provider }}{{ item.model ? ` · ${item.model}` : '' }}
         </div>
@@ -115,6 +115,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, ref } from 'vue'
 import { NButton, NRadioButton, NRadioGroup, NTag, useMessage } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -184,18 +185,18 @@ async function copyPath(path: string): Promise<void> {
       message?.success(t('actions.copied'))
     }
   } catch {
-    // ignore — clipboard access may be denied in some contexts
+    // ignore - clipboard access may be denied in some contexts
   }
 }
 
 // The viewed agent IS the CRUD `view` open-state (card click → `crud.openView`),
 // so it deep-links to `?detail=view:<id>` for free. Every field is already on
-// the row — no lazy load, hence no `onView`.
+// the row - no lazy load, hence no `onView`.
 const viewed = computed(() => crud.formModal.formData.value as WorkspaceAgentDto | null)
 </script>
 
 <style scoped>
-/* Card body — only the ellipsis / line-clamp / mono treatments that unocss
+/* Card body - only the ellipsis / line-clamp / mono treatments that unocss
    atomic classes can't express live here (per C7). */
 .t-wsa__name {
   font-weight: 500;

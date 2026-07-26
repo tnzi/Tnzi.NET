@@ -53,7 +53,7 @@ public class McpServerOptionsValidatorTests
     [Fact]
     public void Validate_EndpointWithoutLeadingSlash_FailsEvenWhenDisabled()
     {
-        // 格式校验不受 Enabled 门控 — 只要给了值就检查
+        // 格式校验不受 Enabled 门控 - 只要给了值就检查
         var result = Validate(new McpServerOptions
         {
             Enabled = false,

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能约束执行器 — 对工具组、模型、Provider 进行约束过滤
+/// 技能约束执行器 - 对工具组、模型、Provider 进行约束过滤
 /// </summary>
 public interface ISkillConstraintEnforcer
 {

@@ -3,7 +3,6 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import type { AdminRouteRecord } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
-import type { MenuTreeNode } from '@tnzi/core/services/system'
 
 describe('useAdminRouteStore', () => {
   beforeEach(() => {
@@ -66,7 +65,7 @@ describe('useAdminRouteStore', () => {
     expect(names).toContain('secret')
   })
 
-  it('menus: logged OUT (no token, no userInfo) does NOT fail-open — collapses to public entries', () => {
+  it('menus: logged OUT (no token, no userInfo) does NOT fail-open - collapses to public entries', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes(authRoutes)
     // No session at all (post-logout / never authenticated). Fail-open here is
@@ -185,15 +184,15 @@ describe('useAdminRouteStore', () => {
         path: '/system',
         meta: { title: 'System', permission: 'system.view', order: 1 },
         children: [
-          { name: 'system.menus', path: 'menus', meta: { title: 'Menus', permission: 'system.menu.view' } },
+          { name: 'system.dictionaries', path: 'dictionaries', meta: { title: 'Dictionaries', permission: 'system.dictionary.view' } },
           { name: 'system.diagnostics', path: 'diagnostics', meta: { title: 'Diag', permission: 'system.diagnostics.view' } },
         ],
       },
     ])
-    login(['system.view', 'system.menu.view']) // has the module + one child, not diagnostics
+    login(['system.view', 'system.dictionary.view']) // has the module + one child, not diagnostics
     const denied = store.deniedRouteNames
     expect(denied.has('system')).toBe(false)
-    expect(denied.has('system.menus')).toBe(false)
+    expect(denied.has('system.dictionaries')).toBe(false)
     expect(denied.has('system.diagnostics')).toBe(true)
   })
 
@@ -251,72 +250,6 @@ describe('useAdminRouteStore', () => {
     expect(names).not.toContain('secret') // no admin.super in any case
   })
 
-  // ── 'merge' menu source: backend Sys_Menu overrides keyed by menuKey ────────
-  function node(partial: {
-    menuKey?: string
-    name: string
-    icon?: string
-    sortOrder?: number
-    isHidden?: boolean
-  }): MenuTreeNode {
-    return {
-      id: `n-${partial.menuKey ?? partial.name}`,
-      parentId: null,
-      menuKey: partial.menuKey,
-      name: partial.name,
-      icon: partial.icon ?? null,
-      path: null,
-      component: null,
-      sortOrder: partial.sortOrder ?? 0,
-      isHidden: partial.isHidden ?? false,
-      permission: null,
-      type: 1,
-      children: [],
-    }
-  }
-
-  it('merge: backend override retitles an entry by menuKey (route name)', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes(authRoutes)
-    login([], true)
-    store.setBackendMenus([node({ menuKey: 'users', name: 'Renamed Users' })])
-    expect(store.menus.find((m) => m.key === 'users')?.label).toBe('Renamed Users')
-  })
-
-  it('merge: backend override with isHidden drops the entry', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes(authRoutes)
-    login([], true)
-    store.setBackendMenus([node({ menuKey: 'secret', name: 'x', isHidden: true })])
-    expect(store.menus.map((m) => m.key)).not.toContain('secret')
-  })
-
-  it('merge: empty backend menus is a no-op (route-derived)', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes(authRoutes)
-    login([], true)
-    store.setBackendMenus([])
-    expect(store.menus.map((m) => m.key)).toContain('users')
-  })
-
-  it('merge: override sortOrder reorders the entry', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes(authRoutes)
-    login([], true)
-    store.setBackendMenus([node({ menuKey: 'users', name: 'Users', sortOrder: 1000 })])
-    const keys = store.menus.map((m) => m.key)
-    expect(keys.indexOf('users')).toBeGreaterThan(keys.indexOf('roles'))
-  })
-
-  it('merge: reacts to setBackendMenus', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes(authRoutes)
-    login([], true)
-    expect(store.menus.find((m) => m.key === 'users')?.label).toBe('Users')
-    store.setBackendMenus([node({ menuKey: 'users', name: 'Live Renamed' })])
-    expect(store.menus.find((m) => m.key === 'users')?.label).toBe('Live Renamed')
-  })
-
   // ── module-availability gating (meta.moduleGate + setAvailableModules) ──────
   const gatedRoutes: AdminRouteRecord[] = [
     { name: 'dashboard', path: '/dashboard', meta: { title: 'Dashboard', order: 0 } }, // no moduleGate → never gated
@@ -362,7 +295,7 @@ describe('useAdminRouteStore', () => {
   it('module gate: holds for SUPER USERS too (orthogonal to permissions)', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes(gatedRoutes)
-    login([], true) // super user — bypasses permission filter, NOT the module gate
+    login([], true) // super user - bypasses permission filter, NOT the module gate
     store.setAvailableModules(new Set(['identity']))
     expect(store.menus.map((m) => m.key)).not.toContain('finance')
   })
@@ -442,7 +375,7 @@ describe('useAdminRouteStore', () => {
   // ── Built-in-menus toggle ─────────────────────────────────────────────
   // Display-only, top-level only: with the toggle OFF (super admin), groups
   // stamped `meta.builtIn` hide except neutral ones (no permission anywhere
-  // in the subtree — the landing dashboard); consumer routes (unstamped)
+  // in the subtree - the landing dashboard); consumer routes (unstamped)
   // always stay. Never touches guards/tabs/reachability.
 
   const builtInRoutes: AdminRouteRecord[] = [
@@ -502,7 +435,7 @@ describe('useAdminRouteStore', () => {
   })
 })
 
-describe('useAdminRouteStore — role gating (meta.roles)', () => {
+describe('useAdminRouteStore - role gating (meta.roles)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -533,7 +466,7 @@ describe('useAdminRouteStore — role gating (meta.roles)', () => {
   it('menus: shows a role-gated route with ANY-of the declared roles (case-insensitive)', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes(roleRoutes)
-    loginAs(['management']) // lowercase — must still match 'Management'
+    loginAs(['management']) // lowercase - must still match 'Management'
     expect(store.menus.map((m) => m.key)).toContain('staff')
   })
 

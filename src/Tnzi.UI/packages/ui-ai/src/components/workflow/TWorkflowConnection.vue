@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowConnection — Connection preview line during drag
+ * TWorkflowConnection - Connection preview line during drag
  */
 
 import { computed } from 'vue';

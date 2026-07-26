@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowControls — Zoom/pan control buttons
+ * TWorkflowControls - Zoom/pan control buttons
  */
 
 import { NButton } from 'naive-ui';

@@ -7,13 +7,13 @@ describe('isCodeRedundant', () => {
     expect(isCodeRedundant('Super Admin', 'SUPERADMIN')).toBe(true)
     expect(isCodeRedundant('Identity', 'identity')).toBe(true)
     expect(isCodeRedundant('blog', 'blog')).toBe(true)
-    // Separators (spaces vs dots) are ignored — a code that is just the spaced
+    // Separators (spaces vs dots) are ignored - a code that is just the spaced
     // name with punctuation still collapses to the same token.
     expect(isCodeRedundant('Finance Account', 'finance.account')).toBe(true)
   })
 
   it('is false when the code still carries information', () => {
-    // Plural label vs singular prefix — the code namespace is distinct.
+    // Plural label vs singular prefix - the code namespace is distinct.
     expect(isCodeRedundant('Users', 'user')).toBe(false)
     expect(isCodeRedundant('View Users', 'user')).toBe(false)
     // A localized name has no ascii token to match against, so the English

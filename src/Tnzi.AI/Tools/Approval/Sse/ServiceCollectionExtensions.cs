@@ -15,10 +15,10 @@ public static class ServiceCollectionExtensions
     /// All registrations are explicit per framework rule #1 (no marker-interface auto-registration
     /// in framework assemblies). The registered components are:
     /// <list type="bullet">
-    ///   <item><see cref="IHttpContextAccessor"/> (Singleton) — for resolving per-call request scope</item>
+    ///   <item><see cref="IHttpContextAccessor"/> (Singleton) - for resolving per-call request scope</item>
     ///   <item><see cref="InMemoryPendingApprovalStore"/> (Singleton) + <see cref="IPendingApprovalStore"/> alias</item>
-    ///   <item><see cref="ApprovalRequestCollector"/> (Scoped) — per-request channel</item>
-    ///   <item><see cref="IToolApprovalHandler"/> (Singleton) — replaces any prior registration</item>
+    ///   <item><see cref="ApprovalRequestCollector"/> (Scoped) - per-request channel</item>
+    ///   <item><see cref="IToolApprovalHandler"/> (Singleton) - replaces any prior registration</item>
     /// </list>
     /// </remarks>
     public static IServiceCollection AddAIToolApprovalSse(this IServiceCollection services)

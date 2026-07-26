@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Store;
 
 /// <summary>
-/// 基于 JSON 文件的线程映射存储 — 适用于开发和简单部署场景。
+/// 基于 JSON 文件的线程映射存储 - 适用于开发和简单部署场景。
 /// 使用 tempfile -> rename 原子写入防止数据损坏。
 /// </summary>
 public class FileChannelThreadStore : IChannelThreadStore
@@ -24,7 +24,7 @@ public class FileChannelThreadStore : IChannelThreadStore
     {
         // Intentional lock-free read fast path: writes (Set/Remove) swap in a brand-new immutable
         // dictionary under _lock, so a concurrent read either sees the old or the new snapshot
-        // atomically — never a half-mutated map. No lock acquisition is needed on the hot read path.
+        // atomically - never a half-mutated map. No lock acquisition is needed on the hot read path.
         var mappings = await LoadAsync();
         var key = BuildKey(channelName, chatId, topicId);
         return mappings.TryGetValue(key, out var threadId) ? threadId : null;

@@ -131,7 +131,7 @@ describe('useDetail (overlay ⇄ URL query)', () => {
       '/list?roles=edit:9',
     )
     await flushPromises()
-    // Items not loaded yet — the deep link is KEPT (busy), not self-wiped.
+    // Items not loaded yet - the deep link is KEPT (busy), not self-wiped.
     expect(api().visible.value).toBe(false)
     expect(router.currentRoute.value.query.roles).toBe('edit:9')
 

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Dtos;
 
 /// <summary>
-/// MCP Server 注册 DTO（输出形状）— 永不暴露明文或密文凭证
+/// MCP Server 注册 DTO（输出形状）- 永不暴露明文或密文凭证
 /// </summary>
 public class McpServerRegistrationDto
 {
@@ -14,16 +14,16 @@ public class McpServerRegistrationDto
     /// <summary>MCP server endpoint URL</summary>
     public string ServerUrl { get; set; } = string.Empty;
 
-    /// <summary>Transport mode — sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
+    /// <summary>Transport mode - sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
     public string Transport { get; set; } = string.Empty;
 
-    /// <summary>Auth type — bearer / api-key / none / oauth</summary>
+    /// <summary>Auth type - bearer / api-key / none / oauth</summary>
     public string? AuthType { get; set; }
 
     /// <summary>Whether an auth token is configured (true = ciphertext present)</summary>
     public bool HasAuthToken { get; set; }
 
-    /// <summary>Priority — for ordering when multiple servers expose same tool</summary>
+    /// <summary>Priority - for ordering when multiple servers expose same tool</summary>
     public int Priority { get; set; }
 
     /// <summary>Whether enabled</summary>
@@ -32,7 +32,7 @@ public class McpServerRegistrationDto
     /// <summary>Description</summary>
     public string? Description { get; set; }
 
-    /// <summary>Tags — JSON-serialized string array</summary>
+    /// <summary>Tags - JSON-serialized string array</summary>
     public string? Tags { get; set; }
 
     /// <summary>Creation time</summary>
@@ -72,15 +72,15 @@ public class CreateMcpServerRegistrationDto
     [StringLength(500)]
     public string ServerUrl { get; set; } = null!;
 
-    /// <summary>Transport mode — sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
+    /// <summary>Transport mode - sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
     [Required]
     [StringLength(50)]
     public string Transport { get; set; } = null!;
 
-    /// <summary>Auth token (plaintext) — encrypted at rest</summary>
+    /// <summary>Auth token (plaintext) - encrypted at rest</summary>
     public string? AuthToken { get; set; }
 
-    /// <summary>Auth type — bearer / api-key / none / oauth</summary>
+    /// <summary>Auth type - bearer / api-key / none / oauth</summary>
     [StringLength(50)]
     public string? AuthType { get; set; }
 
@@ -94,12 +94,12 @@ public class CreateMcpServerRegistrationDto
     [StringLength(500)]
     public string? Description { get; set; }
 
-    /// <summary>Tags — JSON-serialized string array</summary>
+    /// <summary>Tags - JSON-serialized string array</summary>
     public string? Tags { get; set; }
 }
 
 /// <summary>
-/// MCP Server 注册更新请求 DTO — 字段可选；AuthToken 为 null 时保留现有密文
+/// MCP Server 注册更新请求 DTO - 字段可选；AuthToken 为 null 时保留现有密文
 /// </summary>
 public class UpdateMcpServerRegistrationDto
 {
@@ -111,7 +111,7 @@ public class UpdateMcpServerRegistrationDto
     [StringLength(500)]
     public string? ServerUrl { get; set; }
 
-    /// <summary>Transport mode — sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
+    /// <summary>Transport mode - sse / streamable-http / http (stdio is not allowed in the runtime registry)</summary>
     [StringLength(50)]
     public string? Transport { get; set; }
 
@@ -134,7 +134,7 @@ public class UpdateMcpServerRegistrationDto
     [StringLength(500)]
     public string? Description { get; set; }
 
-    /// <summary>Tags — JSON-serialized string array</summary>
+    /// <summary>Tags - JSON-serialized string array</summary>
     public string? Tags { get; set; }
 }
 

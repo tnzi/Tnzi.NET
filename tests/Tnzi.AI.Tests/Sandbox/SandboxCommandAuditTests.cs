@@ -45,13 +45,13 @@ public class SandboxCommandAuditTests : IAsyncLifetime
     }
 
     // ------------------------------------------------------------------ //
-    // SandboxTools — event publication
+    // SandboxTools - event publication
     // ------------------------------------------------------------------ //
 
     [Fact]
     public async Task BashAsync_NoEventBus_StillSucceeds()
     {
-        // EventBus is optional — no observers, no problem.
+        // EventBus is optional - no observers, no problem.
         var tools = CreateTools(eventBus: null);
 
         var result = await tools.BashAsync("echo hello");
@@ -98,14 +98,14 @@ public class SandboxCommandAuditTests : IAsyncLifetime
         var bus = new ThrowingEventBus();
         var tools = CreateTools(eventBus: bus);
 
-        // Must not throw — observability failures must not abort the agent's tool call.
+        // Must not throw - observability failures must not abort the agent's tool call.
         var result = await tools.BashAsync("echo resilient");
 
         result.ShouldNotBeNull();
     }
 
     // ------------------------------------------------------------------ //
-    // SandboxCommandAuditHandler — IAuditSender integration
+    // SandboxCommandAuditHandler - IAuditSender integration
     // ------------------------------------------------------------------ //
 
     [Fact]
@@ -115,7 +115,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
         var handler = new SandboxCommandAuditHandler(auditSender: null);
 
         await handler.HandleAsync(NewEvent(exitCode: 0));
-        // No assertion needed — passing means no exception raised.
+        // No assertion needed - passing means no exception raised.
     }
 
     [Fact]
@@ -177,7 +177,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
 
     /// <summary>
     /// 创建 SandboxTools 并在当前测试的异步流上发布沙箱环境
-    /// （模拟 SandboxMiddleware 的发布动作 — 必须在测试方法体内调用）。
+    /// （模拟 SandboxMiddleware 的发布动作 - 必须在测试方法体内调用）。
     /// </summary>
     private SandboxTools CreateTools(IEventBus? eventBus)
     {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流引擎 — 统一协调器，基于 WorkflowGraph 拓扑排序 + 就绪队列模型执行工作流
+/// 工作流引擎 - 统一协调器，基于 WorkflowGraph 拓扑排序 + 就绪队列模型执行工作流
 /// </summary>
 /// <remarks>
 /// <para>
@@ -106,7 +106,7 @@ public partial class WorkflowEngine
             var readyNodes = graph.GetReadyNodes(completed);
             if (readyNodes.Count == 0) break;
 
-            // Phase 1 (sequential, outer scope) — create/track node records, evaluate conditions.
+            // Phase 1 (sequential, outer scope) - create/track node records, evaluate conditions.
             // All run-store mutations happen here on a single DbContext, never under Task.WhenAll.
             var prepared = new List<NodePreparation>(readyNodes.Count);
             foreach (var step in readyNodes)
@@ -153,7 +153,7 @@ public partial class WorkflowEngine
                 prepared.Add(new NodePreparation(step, stepId, nodeRecord, resumeData, Skipped: false, SkippedResult: null));
             }
 
-            // Phase 2 (parallel) — execute the actual node logic.
+            // Phase 2 (parallel) - execute the actual node logic.
             // Each task gets its own DI scope so that scoped dependencies (DbContext, ChatClient,
             // tool middlewares, etc.) cannot interfere across concurrent fan-out nodes.
             var executionTasks = prepared
@@ -170,7 +170,7 @@ public partial class WorkflowEngine
             var executedResults = await Task.WhenAll(executionTasks);
             var executedById = executedResults.ToDictionary(r => r.StepId, StringComparer.OrdinalIgnoreCase);
 
-            // Phase 3 (sequential) — merge skipped + executed in ready-order for deterministic
+            // Phase 3 (sequential) - merge skipped + executed in ready-order for deterministic
             // post-processing (state writes, conditional edges, loops, run-store updates).
             var results = prepared
                 .Select(p => p.Skipped
@@ -274,7 +274,7 @@ public partial class WorkflowEngine
             // 如果有节点请求审批暂停或通用中断，跳出主循环
             if (awaitingApproval || awaitingInterrupt != null) break;
 
-            // 节点策略为 Fail 时，失败后终止工作流（Skip/Continue 策略的节点已在上方将 failed 置 false）
+            // 只有 Fail 策略（默认）会把 failed 置 true；Skip/Continue 吸收失败，不置位也不中止。
             if (failed) break;
 
             // HITL：检查本层是否有步骤需要人工审批

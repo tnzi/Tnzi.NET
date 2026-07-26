@@ -1,6 +1,6 @@
 /**
  * Shared list-cell renderer for a Setting's `value` column (Parameters +
- * Dictionaries — both map to the same `SettingDto`).
+ * Dictionaries - both map to the same `SettingDto`).
  *
  * Setting values range from a short "false" to a multi-hundred-character JSON
  * blob (e.g. the global admin-theme snapshot). Rendered raw, the long ones wrap

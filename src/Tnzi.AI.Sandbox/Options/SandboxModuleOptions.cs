@@ -23,7 +23,7 @@ public class SandboxModuleOptions
     Icon = "mdi:cube-outline", Order = 157)]
 public class ThreadQuotaOptions
 {
-    /// <summary>Master switch — when false the quota service short-circuits to Allow.</summary>
+    /// <summary>Master switch - when false the quota service short-circuits to Allow.</summary>
     [RuntimeSetting(Label = "Thread Quota Enabled", I18n = "admin.modules.system.settings.fields.sandboxQuotaEnabled",
         Type = SettingFieldType.Boolean, Subsection = "Thread Quota",
         Description = "Master switch for per-thread sandbox resource limits. When off, every bash invocation is allowed and no accounting is recorded.")]
@@ -91,7 +91,7 @@ public class LocalSandboxOptions
     /// Wildcard patterns matched (case-insensitive) against the leaf file name in
     /// <c>read_file</c> / <c>ls</c>. A match is hidden from listings and refused on
     /// read so the agent cannot exfiltrate secrets via the file tools. Note this
-    /// guards the file tools only — a raw <c>bash cat</c> is governed by the command
+    /// guards the file tools only - a raw <c>bash cat</c> is governed by the command
     /// blacklist, not this list.
     /// </summary>
     public List<string> DeniedPatterns { get; set; } = [".env", "*.key", "*.pem", "credentials*"];
@@ -167,7 +167,7 @@ public class DockerSandboxOptions
     /// Wildcard patterns matched (case-insensitive) against the leaf file name in
     /// <c>read_file</c> / <c>ls</c>. A match is hidden from listings and refused on
     /// read so the agent cannot exfiltrate secrets via the file tools. Note this
-    /// guards the file tools only — a raw <c>bash cat</c> is governed by the command
+    /// guards the file tools only - a raw <c>bash cat</c> is governed by the command
     /// blacklist, not this list.
     /// </summary>
     public List<string> DeniedPatterns { get; set; } = [".env", "*.key", "*.pem", "credentials*"];

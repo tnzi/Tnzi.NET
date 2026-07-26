@@ -3,6 +3,7 @@
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="employeeFormSchema"
+        :sections="employeeFormSections"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
         :field-renderers="formRenderers"
@@ -60,7 +61,13 @@ import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createPayrollOptionSources } from './options'
-import { buildEmployeeColumns, employeeFormSchema, assignmentFormSchema, type EmployeeRow } from './employee-config'
+import {
+  buildEmployeeColumns,
+  employeeFormSchema,
+  employeeFormSections,
+  assignmentFormSchema,
+  type EmployeeRow,
+} from './employee-config'
 import { fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../finance/money'
 
 const bridge = createPayrollBridge({ client: useAdminClient() })

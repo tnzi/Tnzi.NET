@@ -16,7 +16,7 @@ namespace Tnzi.AI.Tools.Approval.Sse;
 ///   8. User clicks Approve/Reject → the approval endpoint calls <see cref="IPendingApprovalStore.ResolveAsync"/>
 ///      with the user id (the store rejects mismatched users with <see cref="ResolveResult.NotAuthorized"/>).
 ///
-/// Registered as Singleton — captive-dependency safe because the scoped <see cref="ApprovalRequestCollector"/>
+/// Registered as Singleton - captive-dependency safe because the scoped <see cref="ApprovalRequestCollector"/>
 /// and <see cref="ICurrentUser"/> are resolved per-call from the ambient HTTP request scope via
 /// <see cref="IHttpContextAccessor"/>.
 /// </summary>
@@ -80,7 +80,7 @@ public sealed class SseToolApprovalHandler : IToolApprovalHandler
             CreatedAt: request.RequestedAt,
             UserId: userId);
 
-        // Emit BEFORE registering — a failed emit must not leave an orphan entry in the store.
+        // Emit BEFORE registering - a failed emit must not leave an orphan entry in the store.
         try
         {
             await collector.WriteAsync(pending, ct).ConfigureAwait(false);
@@ -99,7 +99,7 @@ public sealed class SseToolApprovalHandler : IToolApprovalHandler
             "Tool approval required: {ToolName} (group: {ToolGroup}), id: {Id}, userId: {UserId}",
             request.ToolName, request.ToolGroup, id, userId);
 
-        // Cleanup on client disconnect — without this the entry would linger until TTL.
+        // Cleanup on client disconnect - without this the entry would linger until TTL.
         // Fire-and-forget against the store; ResolveAsSystemAsync is a no-op if the entry
         // is already gone (user resolved first or sweep won the race).
         var disconnectRegistration = httpContext.RequestAborted.Register(() =>

@@ -41,7 +41,7 @@ import { parameterColumns, parameterFormSchema } from './parameter-config'
 import { makePageTranslator } from '../_shared/translate'
 import type { SettingDto } from '@tnzi/core/services/system'
 
-// Mapped to SettingDto — no separate Parameter entity in the backend.
+// Mapped to SettingDto - no separate Parameter entity in the backend.
 const title = 'title'
 const bridge = createSystemBridge({ client: useAdminClient() })
 

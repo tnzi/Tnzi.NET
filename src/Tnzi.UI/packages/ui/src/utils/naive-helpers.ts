@@ -1,7 +1,7 @@
 /**
  * @tnzi/ui/utils/naive-helpers
  *
- * Shared Naive UI bridge utilities — extracted to eliminate duplication
+ * Shared Naive UI bridge utilities - extracted to eliminate duplication
  * across components, stores, and adapters.
  */
 

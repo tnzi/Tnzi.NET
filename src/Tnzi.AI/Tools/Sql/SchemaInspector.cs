@@ -30,7 +30,7 @@ public sealed partial class SchemaInspector : ISchemaInspector
         _execOptions = new ReadOnlySqlExecutionOptions(Dialect: _options.DefaultDialect);
 
         var providersList = (providers ?? Array.Empty<ISqlSchemaProvider>()).ToList();
-        // Last registration wins for a given dialect — apps can override the built-in.
+        // Last registration wins for a given dialect - apps can override the built-in.
         _providersByDialect = providersList
             .GroupBy(p => p.Dialect)
             .ToDictionary(g => g.Key, g => g.Last());

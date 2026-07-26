@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { NTag } from 'naive-ui'
 import type { StatusType } from '@tnzi/ui'
@@ -11,7 +12,7 @@ import { formatDateTime } from '@tnzi/core'
 // the untyped `ColumnDef[]`, so the render row is cast to the DTO locally.
 const asShare = (row: Record<string, unknown>) => row as unknown as FileShareSummaryDto
 
-// Absolute i18n namespace — TStatusBadge's admin wrapper resolves `labelKey`
+// Absolute i18n namespace - TStatusBadge's admin wrapper resolves `labelKey`
 // from the locale root, so mapping keys must be fully qualified.
 const SHARE_NS = 'admin.modules.storage.shares'
 
@@ -54,7 +55,7 @@ export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
       render: (r) =>
         asShare(r).requirePassword
           ? h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('passwordRequired') })
-          : '—',
+          : EMPTY_DASH,
     },
     {
       key: 'status',
@@ -66,7 +67,7 @@ export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
       title: 'columns.expiresAt',
       render: (r) => {
         const v = asShare(r).expiresAt
-        return v ? formatDateTime(v) : '—'
+        return v ? formatDateTime(v) : EMPTY_DASH
       },
     },
     {
@@ -78,7 +79,7 @@ export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
 }
 
 // Advanced search fields (drive query.filters). Free-text keyword is unused by
-// the backend share query — these typed filters are the supported surface.
+// the backend share query - these typed filters are the supported surface.
 export const shareSearchFields: FormSchemaItem[] = [
   { key: 'fileId', labelKey: 'search.fileId', label: 'File ID', type: 'text' },
   { key: 'creatorId', labelKey: 'search.creatorId', label: 'Creator ID', type: 'text' },

@@ -207,7 +207,7 @@ public class ValidateCoder
                     ? Color.FromRgb((byte)Random.Shared.Next(70, 200), (byte)Random.Shared.Next(70, 200), (byte)Random.Shared.Next(70, 200))
                     : Color.FromRgb(90, 90, 90);
 
-                ctx.DrawLine(lineColor, 2, new SixLabors.ImageSharp.PointF(x1, y1), new SixLabors.ImageSharp.PointF(x2, y2));
+                ctx.DrawLine(lineColor, 2, new PointF(x1, y1), new PointF(x2, y2));
             }
 
             // 绘制干扰点
@@ -224,15 +224,23 @@ public class ValidateCoder
             }
 
             // 绘制验证码字符
-            // 使用字体回退机制：优先使用 FontNames 中的字体
-            var fontFamily = GetAvailableFontFamily(FontNames);
+            // 使用字体回退机制：汉字验证码走 FontNamesForHanzi（拉丁字体多数不含 CJK 字形，
+            // 用 FontNames 会画成豆腐块），其余类型走 FontNames
+            var preferredFonts = codeType == ValidateCodeType.Hanzi ? FontNamesForHanzi : FontNames;
+            var fontFamily = GetAvailableFontFamily(preferredFonts);
             Font font = fontFamily.CreateFont(FontSize, FontStyle.Bold);
 
+            // 每个字符水平占一个 FontWidth 槽位；垂直方向以图片中线为基准居中对齐
+            // （旧实现把字形顶部钉在 y = FontSize，24px 粗体字会画到 y≈48、超出 36px
+            // 图片高度而被底部裁切）。随机位置模式在中线附近做有界抖动，仍保证不越界。
+            float centerY = height / 2f;
+            int jitter = Math.Max(1, FontSize / 6);
             for (int i = 0; i < code.Length; i++)
             {
                 string charStr = code[i].ToString();
-                float x = RandomPosition ? Random.Shared.Next(FontWidth / 2) + i * FontWidth : i * FontWidth + FontWidth / 4;
-                float y = RandomPosition ? Random.Shared.Next(FontSize / 2) + FontSize / 2 : FontSize;
+                float slotCenterX = i * FontWidth + FontWidth / 2f + FontWidth / 2f; // 槽位中心（含左侧半格留白）
+                float x = RandomPosition ? slotCenterX + Random.Shared.Next(-FontWidth / 4, FontWidth / 4 + 1) : slotCenterX;
+                float y = RandomPosition ? centerY + Random.Shared.Next(-jitter, jitter + 1) : centerY;
 
                 Rgba32 bgRgba = BgColor.ToPixel<Rgba32>();
                 Color charColor = RandomColor
@@ -242,8 +250,8 @@ public class ValidateCoder
                 var textOptions = new RichTextOptions(font)
                 {
                     Origin = new PointF(x, y),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Top
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
                 };
 
                 if (RandomItalic)

@@ -38,7 +38,7 @@ function mountItem(item: ConversationListItemDto) {
   })
 }
 
-describe('TConversationItem — disabled peer marker', () => {
+describe('TConversationItem - disabled peer marker', () => {
   it('renders the "unavailable" marker for a Direct peer that lost chat.use', () => {
     const wrapper = mountItem(makeItem({ peerDisabled: true }))
     // The distinct grey marker replaces the normal presence dot.

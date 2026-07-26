@@ -1,7 +1,7 @@
 namespace Tnzi.AI.A2A;
 
 /// <summary>
-/// A2A 服务端接口 — 接收并处理来自远程 Agent 的任务
+/// A2A 服务端接口 - 接收并处理来自远程 Agent 的任务
 /// </summary>
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public interface IA2AServer

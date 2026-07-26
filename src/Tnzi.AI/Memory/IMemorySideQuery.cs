@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// 记忆侧查询 — 用轻量 LLM 调用预筛记忆相关性。
+/// 记忆侧查询 - 用轻量 LLM 调用预筛记忆相关性。
 /// 与 SearchAsync 的向量匹配互补：SearchAsync 用向量，SideQuery 用语义判断。
 /// </summary>
 public interface IMemorySideQuery

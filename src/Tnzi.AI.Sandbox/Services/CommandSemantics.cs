@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Sandbox.Services;
 
 /// <summary>
-/// 命令语义映射 — 将非零退出码映射为语义化含义。
+/// 命令语义映射 - 将非零退出码映射为语义化含义。
 /// 借鉴 Claude Code 对 grep/diff/find 等命令的退出码语义理解。
 /// </summary>
 public static class CommandSemantics

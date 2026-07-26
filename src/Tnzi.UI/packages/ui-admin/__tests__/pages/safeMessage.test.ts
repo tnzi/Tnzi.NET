@@ -5,7 +5,7 @@ import { useSafeMessage } from '../../src/pages/_shared/safeMessage'
 
 /**
  * useSafeMessage covers the case where a page mounts without an
- * NMessageProvider ancestor — calling useMessage() directly would
+ * NMessageProvider ancestor - calling useMessage() directly would
  * throw a synchronous Naive UI warning. The helper swallows it and
  * returns a no-op MessageApi so the page can keep functioning.
  */
@@ -44,7 +44,7 @@ describe('useSafeMessage', () => {
     mount(Probe)
     const api = captured.api!
     // success/error/etc return MessageReactive (or our noop equivalent)
-    // with a destroy() function — calling it should also not throw.
+    // with a destroy() function - calling it should also not throw.
     expect(() => {
       const handle = api.success('hello') as { destroy?: () => void }
       handle.destroy?.()

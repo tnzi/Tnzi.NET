@@ -121,7 +121,7 @@ function remove(index: number) {
   color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
 }
 
-/* Desktop: transparent wrapper — the input becomes the grid cell directly, so
+/* Desktop: transparent wrapper - the input becomes the grid cell directly, so
    the original column sizing is untouched and the label stays hidden. */
 .pr-brackets__cell {
   display: contents;

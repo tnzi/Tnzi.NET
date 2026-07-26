@@ -1,6 +1,6 @@
 <template>
   <!--
-    Refunds — admin view of refund requests. Read-only list + lifecycle actions:
+    Refunds - admin view of refund requests. Read-only list + lifecycle actions:
       • View    → read-only quick preview (crud view modal)
       • Approve → declarative RowAction with an inline confirm (POST approve, approved=true)
       • Reject  → useDetail(modal) + TDetailHost with a reason textarea (approved=false)
@@ -14,7 +14,7 @@
     :translate="t"
     :row-actions="rowActions"
   >
-    <!-- Read-only quick preview (right drawer) — reached via the row View
+    <!-- Read-only quick preview (right drawer) - reached via the row View
          action. A #detail slot (not #form) is required so the view surface
          mounts on this create/update-free page. -->
     <template #detail="{ data }">
@@ -28,7 +28,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Reject overlay — reason required. Deep-linkable as `?reject=edit:<id>`. -->
+  <!-- Reject overlay - reason required. Deep-linkable as `?reject=edit:<id>`. -->
   <TDetailHost :state="rejectDetail" :title="t('rejectTitle')" :width="480" :translate="t">
     <template #default>
       <NForm>
@@ -81,7 +81,7 @@ const crud = useCrudPage<RefundDto, string>({
   columns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.refunds.fetch(query),
-  // Refund records are immutable — lifecycle moves via approve/reject only.
+  // Refund records are immutable - lifecycle moves via approve/reject only.
 })
 
 // Only pending / in-review refunds can be approved or rejected.

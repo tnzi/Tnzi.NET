@@ -3,7 +3,7 @@ using System.ClientModel.Primitives;
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// OpenAI 兼容的 ChatClient 提供商 — 覆盖 OpenAI / AzureOpenAI / Compatible 三种模式
+/// OpenAI 兼容的 ChatClient 提供商 - 覆盖 OpenAI / AzureOpenAI / Compatible 三种模式
 /// </summary>
 public class OpenAIChatClientProvider : IChatClientProvider
 {

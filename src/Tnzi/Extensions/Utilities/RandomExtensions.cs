@@ -108,7 +108,7 @@ public static class RandomExtensions
     {
         Check.GreaterThanOrEqual(length, 0);
         char[] pattern = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
-        var result = new System.Text.StringBuilder(length);
+        var result = new StringBuilder(length);
         int n = pattern.Length;
         for (int i = 0; i < length; i++)
         {
@@ -129,7 +129,7 @@ public static class RandomExtensions
         Check.GreaterThanOrEqual(length, 0);
         char[] pattern = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
             'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z' };
-        var result = new System.Text.StringBuilder(length);
+        var result = new StringBuilder(length);
         int n = pattern.Length;
         for (int i = 0; i < length; i++)
         {
@@ -151,7 +151,7 @@ public static class RandomExtensions
         char[] pattern = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
             'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z' };
-        var result = new System.Text.StringBuilder(length);
+        var result = new StringBuilder(length);
         int n = pattern.Length;
         for (int i = 0; i < length; i++)
         {

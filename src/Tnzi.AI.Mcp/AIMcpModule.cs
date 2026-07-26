@@ -1,12 +1,13 @@
 using ModelContextProtocol.AspNetCore;
 using Tnzi.AI.Mcp.Options;
+using Tnzi.AI.Mcp.Permissions;
 using Tnzi.AI.Mcp.Services;
 using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 
 namespace Tnzi.AI.Mcp;
 
 /// <summary>
-/// MCP Server 模块 — 将 Tnzi.AI Agent 通过 HTTP/SSE 暴露为 MCP Server。
+/// MCP Server 模块 - 将 Tnzi.AI Agent 通过 HTTP/SSE 暴露为 MCP Server。
 /// Client 侧管理（外部 MCP Server 注册表、OAuth Token）由 Tnzi.AI 核心提供。
 /// </summary>
 [DependsOn(typeof(AIModule))]
@@ -32,22 +33,28 @@ public class AIMcpModule : TnziApplicationModule
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var services = context.Services;
+
+        // Code-declared permissions for this module's admin surfaces (ai.mcpServer.*).
+        // The Authorization module's PermissionDbSeeder picks every registered
+        // provider up on startup (no-op when Authorization is not loaded).
+        services.AddTransient<IPermissionDefinitionProvider, AIMcpPermissions>();
+
         var mcpServerOptions = context.Configuration.GetSection("AI:McpServer").Get<TnziMcpServerOptions>() ?? new TnziMcpServerOptions();
         var mcpHttpServiceProviderAccessor = new McpServerServiceProviderAccessor();
         var mcpHttpHandlerBridge = new McpServerHttpHandlerBridge(mcpHttpServiceProviderAccessor);
 
-        // IHttpContextAccessor — needed by McpServerHost to read the caller hash from HTTP context
+        // IHttpContextAccessor - needed by McpServerHost to read the caller hash from HTTP context
         services.AddHttpContextAccessor();
 
         // MCP Tool Analytics
         services.AddScoped<IMcpToolAnalyticsService, McpToolAnalyticsService>();
 
-        // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）— Singleton 以保持速率限制状态
+        // MCP Server Host（可选，通过 AI:McpServer:Enabled 激活）- Singleton 以保持速率限制状态
         services.AddSingleton<McpServerSecurityMiddleware>();
         services.AddSingleton(mcpHttpServiceProviderAccessor);
         services.AddSingleton(mcpHttpHandlerBridge);
         // McpServerHttpSecurityMiddleware is convention-based ASP.NET middleware (RequestDelegate ctor)
-        // — instantiated by UseMiddleware<T>(), NOT by DI container
+        // - instantiated by UseMiddleware<T>(), NOT by DI container
         services.TryAddSingleton<IMcpServerHost, McpServerHost>();
 
         if (mcpServerOptions.Enabled)

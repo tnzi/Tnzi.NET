@@ -4,7 +4,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// AI 集成测试 DbContext — 注册所有 AI 核心实体
+/// AI 集成测试 DbContext - 注册所有 AI 核心实体
 /// </summary>
 public class AiIntegrationDbContext : TnziDbContext<AiIntegrationDbContext>
 {
@@ -29,7 +29,6 @@ public class AiIntegrationDbContext : TnziDbContext<AiIntegrationDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UserQuotaConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.MemoryEntryConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.EntityMemoryConfiguration());
-        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.EvaluationRunConfiguration());
@@ -40,15 +39,15 @@ public class AiIntegrationDbContext : TnziDbContext<AiIntegrationDbContext>
 }
 
 /// <summary>
-/// AI 集成测试基类 — 提供可编程 Mock AI 提供商、真实 AgentRuntime、SQLite 内存数据库
+/// AI 集成测试基类 - 提供可编程 Mock AI 提供商、真实 AgentRuntime、SQLite 内存数据库
 /// </summary>
 /// <remarks>
 /// <para>设计策略：</para>
 /// <list type="bullet">
-///   <item>MockChatClientProvider — 可编程的 AI 响应队列</item>
-///   <item>真实 AgentRuntime 和中间件管道 — 测试真正的请求处理流程</item>
-///   <item>SQLite 内存数据库 — 真实的 EF Core 持久化和查询</item>
-///   <item>Mock 外部依赖 — IWorkflowService、ISkillRegistry 等复杂基础设施</item>
+///   <item>MockChatClientProvider - 可编程的 AI 响应队列</item>
+///   <item>真实 AgentRuntime 和中间件管道 - 测试真正的请求处理流程</item>
+///   <item>SQLite 内存数据库 - 真实的 EF Core 持久化和查询</item>
+///   <item>Mock 外部依赖 - IWorkflowService、ISkillRegistry 等复杂基础设施</item>
 /// </list>
 /// </remarks>
 public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDbContext>
@@ -125,7 +124,7 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         // 5. 基础设施 Mock
         services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
 
-        // AgentGrantService — resource grants are the sole source of truth for tool groups/skills/
+        // AgentGrantService - resource grants are the sole source of truth for tool groups/skills/
         // knowledge. The multi-agent strategy loader resolves it from DI to load a sub-agent's tool
         // groups; an empty projection (no grants) is sufficient for these orchestration tests.
         var grantServiceMock = new Mock<IAgentGrantService>();
@@ -133,18 +132,18 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             .ReturnsAsync(new AgentGrantsProjection());
         services.AddScoped(_ => grantServiceMock.Object);
 
-        // ToolRegistry / ToolScanner — 空实现即可
+        // ToolRegistry / ToolScanner - 空实现即可
         services.AddSingleton<IToolScanner, ToolScanner>();
         services.AddSingleton<IToolRegistry, ToolRegistry>();
 
-        // ToolResolver — 返回空工具列表
+        // ToolResolver - 返回空工具列表
         var toolResolverMock = new Mock<IToolResolver>();
         toolResolverMock.Setup(r => r.ResolveToolsAsync(
                 It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IList<AITool>?)null);
         services.AddScoped(_ => toolResolverMock.Object);
 
-        // AgentFactory — 使用 Mock 直接返回简单 AgentExecutor
+        // AgentFactory - 使用 Mock 直接返回简单 AgentExecutor
         services.AddScoped<IAgentFactory>(sp =>
         {
             var factoryMock = new Mock<IAgentFactory>();
@@ -170,7 +169,7 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             return factoryMock.Object;
         });
 
-        // AgentResolver — 使用 Mock 返回简单的 AgentResolution
+        // AgentResolver - 使用 Mock 返回简单的 AgentResolution
         services.AddScoped<IAgentResolver>(sp =>
         {
             var resolverMock = new Mock<IAgentResolver>();
@@ -195,14 +194,14 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             return resolverMock.Object;
         });
 
-        // RunStore / TraceStore — 真实实现需要 DB
+        // RunStore / TraceStore - 真实实现需要 DB
         services.AddScoped<IRunStore, RunStore>();
         services.AddScoped<ITraceStore, TraceStore>();
 
-        // WorkflowService — Mock（工作流测试有独立 fixture）
+        // WorkflowService - Mock（工作流测试有独立 fixture）
         services.AddScoped(_ => Mock.Of<IWorkflowService>());
 
-        // IServiceScopeFactory — EventPublisher 需要
+        // IServiceScopeFactory - EventPublisher 需要
         services.AddSingleton<IServiceScopeFactory>(sp =>
             sp.GetRequiredService<IServiceScopeFactory>());
 
@@ -214,7 +213,7 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             sp.GetRequiredService<ILogger<EventPublisher>>()));
         services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
 
-        // 中间件 — 默认不注册中间件，子类可通过 ConfigureMiddlewares 添加
+        // 中间件 - 默认不注册中间件，子类可通过 ConfigureMiddlewares 添加
         ConfigureMiddlewares(services);
 
         // 注册 AgentRuntime

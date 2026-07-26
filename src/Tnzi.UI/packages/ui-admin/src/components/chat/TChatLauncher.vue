@@ -25,7 +25,7 @@ const props = withDefaults(
     unreadCount: number
     /** Attention animation style; None disables it. */
     effect?: ChatNewMessageEffect
-    /** Bump this counter to (re)play the animation once — e.g. on each new message. */
+    /** Bump this counter to (re)play the animation once - e.g. on each new message. */
     attention?: number
   }>(),
   { effect: ChatNewMessageEffect.None, attention: 0 },

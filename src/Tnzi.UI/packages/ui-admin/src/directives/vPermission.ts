@@ -1,12 +1,12 @@
 /**
- * `v-permission` directive — hide/remove an element when the current user
+ * `v-permission` directive - hide/remove an element when the current user
  * doesn't have a required permission code.
  *
  * Use modes:
- *   v-permission="'user.delete'"        — remove element if user lacks code
- *   v-permission="['user.delete','user.update']" — remove if user lacks ALL codes
- *   v-permission.any="['a','b']"        — remove only if user lacks BOTH (any-of)
- *   v-permission.hide="'user.delete'"   — set visibility:hidden instead of removing
+ *   v-permission="'user.delete'" - remove element if user lacks code
+ *   v-permission="['user.delete','user.update']" - remove if user lacks ALL codes
+ *   v-permission.any="['a','b']" - remove only if user lacks BOTH (any-of)
+ *   v-permission.hide="'user.delete'" - set visibility:hidden instead of removing
  *
  * Backed by `useAdminAuthStore.hasPermission/hasAnyPermission/hasAllPermissions`
  * plus the `isSuperUser` bypass. Super-admins pass every check.

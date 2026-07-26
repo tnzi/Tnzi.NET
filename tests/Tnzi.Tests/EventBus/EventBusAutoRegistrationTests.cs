@@ -279,7 +279,7 @@ public class EventBusAutoRegistrationTests
     /// Regression: framework handlers are auto-registered AND then manually
     /// re-registered later in the module lifecycle, so the DI container ends
     /// up with two `IEventHandler&lt;TEvent&gt;` descriptors for the same concrete
-    /// type — every event publish fires the handler twice (manifested as e.g.
+    /// type - every event publish fires the handler twice (manifested as e.g.
     /// duplicate LoginLog rows per login).
     ///
     /// `ExcludeFrameworkAssemblies = true` (the default) makes auto-scan skip
@@ -289,7 +289,7 @@ public class EventBusAutoRegistrationTests
     [Fact]
     public void AutoRegisterHandlers_ExcludesFrameworkAssemblies_ByDefault()
     {
-        // Arrange — no HandlerAssemblies set → falls through to "scan everything
+        // Arrange - no HandlerAssemblies set → falls through to "scan everything
         // loaded" path, which is exactly the path framework modules hit at boot.
         var services = new ServiceCollection();
         services.AddLogging();
@@ -303,8 +303,8 @@ public class EventBusAutoRegistrationTests
         var module = new TestableEventBusModule();
         module.TestAutoRegisterHandlers(services, options);
 
-        // Assert — no Tnzi.* handlers picked up via auto-scan. We sample a
-        // representative event interface from Tnzi.Identity (UserEvents) —
+        // Assert - no Tnzi.* handlers picked up via auto-scan. We sample a
+        // representative event interface from Tnzi.Identity (UserEvents) -
         // the assembly only loads if the test host references it, so we just
         // assert the GENERIC truth: no IEventHandler descriptor's
         // ImplementationType comes from an assembly named "Tnzi*".
@@ -321,7 +321,7 @@ public class EventBusAutoRegistrationTests
     [Fact]
     public void AutoRegisterHandlers_IncludesFrameworkAssemblies_WhenOptOut()
     {
-        // Arrange — explicit opt-OUT of the new default restores legacy
+        // Arrange - explicit opt-OUT of the new default restores legacy
         // behaviour for consumers that depend on framework auto-scan.
         var services = new ServiceCollection();
         services.AddLogging();

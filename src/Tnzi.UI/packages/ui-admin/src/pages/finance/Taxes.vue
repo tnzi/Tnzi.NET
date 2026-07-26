@@ -27,6 +27,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h, onMounted } from 'vue'
 import { NSelect } from 'naive-ui'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
@@ -86,7 +87,7 @@ interface AgencyRow { id?: string; name?: string; description?: string | null; i
 
 const agencyColumns: ColumnDef<AgencyRow>[] = [
   { key: 'name', title: 'columns.name', minWidth: 160, primary: true },
-  { key: 'description', title: 'columns.description', minWidth: 220, render: (r) => r.description ?? '—' },
+  { key: 'description', title: 'columns.description', minWidth: 220, render: (r) => r.description ?? EMPTY_DASH },
   statusColumn<AgencyRow>(),
 ]
 
@@ -115,7 +116,7 @@ interface RateRow { id?: string; agencyId?: string; agencyName?: string | null; 
 
 const rateColumns: ColumnDef<RateRow>[] = [
   { key: 'name', title: 'columns.name', minWidth: 160, primary: true },
-  { key: 'agencyName', title: 'columns.agency', minWidth: 140, render: (r) => r.agencyName ?? '—' },
+  { key: 'agencyName', title: 'columns.agency', minWidth: 140, render: (r) => r.agencyName ?? EMPTY_DASH },
   { key: 'rate', title: 'columns.rate', width: 110, render: (r) => amountCell(`${r.rate ?? 0}%`) },
   statusColumn<RateRow>(),
 ]
@@ -150,7 +151,7 @@ const codeColumns: ColumnDef<CodeRow>[] = [
     key: 'components',
     title: 'columns.components',
     minWidth: 220,
-    render: (r) => (r.components ?? []).map((c) => `${c.rateName ?? c.taxRateId} (${c.rate}%)`).join(' + ') || '—',
+    render: (r) => (r.components ?? []).map((c) => `${c.rateName ?? c.taxRateId} (${c.rate}%)`).join(' + ') || EMPTY_DASH,
   },
   statusColumn<CodeRow>(),
 ]

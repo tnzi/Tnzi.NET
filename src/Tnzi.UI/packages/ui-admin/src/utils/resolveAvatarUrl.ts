@@ -1,5 +1,5 @@
 /**
- * `resolveAvatarUrl` — turn a user-like profile object into a displayable
+ * `resolveAvatarUrl` - turn a user-like profile object into a displayable
  * avatar `<img>` source, or `null` when the user has no avatar.
  *
  * Two facts about the backend shape this helper hides from callers:
@@ -8,10 +8,10 @@
  *     the external avatar link as `avatar`, while `UserDetailDto` /
  *     `UpdateUserDto` call the same concept `avatarUrl`. Rather than force
  *     every call site to know which DTO it holds, we read **both** and prefer
- *     `avatarUrl`. (We deliberately do NOT touch the DTO contracts here —
+ *     `avatarUrl`. (We deliberately do NOT touch the DTO contracts here -
  *     renaming them would ripple into the music/webshop consumers.)
  *  2. **Local file uploads.** When the avatar was uploaded through the storage
- *     module there is no external URL — only an `avatarId` pointing at a file
+ *     module there is no external URL - only an `avatarId` pointing at a file
  *     record. `GET /files/{id}/preview` is `[AllowAnonymous]`, so the file id
  *     resolves to a plain image URL via `storageApi.getPreviewUrl(id)` with no
  *     token/cookie/extra request needed.
@@ -51,11 +51,11 @@ export function resolveAvatarUrl(
 ): string | null {
   if (!profile) return null
 
-  // 1. External link wins — covers both DTO naming conventions.
+  // 1. External link wins - covers both DTO naming conventions.
   if (hasText(profile.avatarUrl)) return profile.avatarUrl
   if (hasText(profile.avatar)) return profile.avatar
 
-  // 2. Local upload — turn the file id into an anonymous preview URL.
+  // 2. Local upload - turn the file id into an anonymous preview URL.
   if (hasText(profile.avatarId)) return storageApi.getPreviewUrl(profile.avatarId)
 
   // 3. No avatar.

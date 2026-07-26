@@ -1,6 +1,6 @@
 <template>
   <!--
-    Layouts page — Phase 3.37
+    Layouts page - Phase 3.37
     Admin CRUD for template layout definitions.
     Layouts are the wrapper HTML/content that templates render within.
     Standard CRUD operations: list, create, edit, delete.
@@ -55,7 +55,7 @@ const crud = useCrudPage<LayoutInfoDto, string>({
 })
 
 // FileSystem-source layouts ship with the binaries and backend rejects
-// edit/delete on them — suppress those actions for read-only rows.
+// edit/delete on them - suppress those actions for read-only rows.
 const rowActions: RowAction<LayoutInfoDto>[] = [
   editAction(crud, { show: (row) => !row.isReadOnly }),
   deleteAction(crud, { show: (row) => !row.isReadOnly }),

@@ -67,11 +67,18 @@ describe('useAdminTaskApi', () => {
   });
 });
 
+// AgentTaskDto.status is serialized by the global JsonStringEnumConverter, so
+// the mirror must be a string enum (member name = value).
 describe('AgentTaskStatus enum', () => {
-  it('mirrors backend values', () => {
-    expect(AgentTaskStatus.Pending).toBe(0);
-    expect(AgentTaskStatus.InProgress).toBe(1);
-    expect(AgentTaskStatus.Completed).toBe(2);
-    expect(AgentTaskStatus.Skipped).toBe(3);
+  it('mirrors the backend member names', () => {
+    expect(AgentTaskStatus.Pending).toBe('Pending');
+    expect(AgentTaskStatus.InProgress).toBe('InProgress');
+    expect(AgentTaskStatus.Completed).toBe('Completed');
+    expect(AgentTaskStatus.Skipped).toBe('Skipped');
+  });
+
+  it('matches a raw wire payload without any coercion', () => {
+    const wire = JSON.parse('{"status":"InProgress"}');
+    expect(wire.status).toBe(AgentTaskStatus.InProgress);
   });
 });

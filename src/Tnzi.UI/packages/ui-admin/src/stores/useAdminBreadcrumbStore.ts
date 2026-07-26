@@ -15,7 +15,7 @@ export interface BreadcrumbItem {
 /**
  * Holds per-route breadcrumb contributions so a detail page can inject either
  * the record's name (leaf label) or an entire cross-entity drill trail that the
- * static route tree cannot express — e.g. `Clients / <name> / File / <number>`,
+ * static route tree cannot express - e.g. `Clients / <name> / File / <number>`,
  * where the file was reached THROUGH a client even though `clients/:id` and
  * `matters/:id` are sibling (flat) routes.
  *

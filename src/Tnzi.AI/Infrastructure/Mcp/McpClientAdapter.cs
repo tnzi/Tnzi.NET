@@ -8,10 +8,10 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// <remarks>
 /// 按职责拆分为多个 partial 文件：
 /// <list type="bullet">
-///   <item><c>McpClientAdapter.cs</c> — 字段/构造/共享反射辅助方法</item>
-///   <item><c>McpClientAdapter.Tools.cs</c> — 工具列举与 MCP Tool → AIFunction 转换</item>
-///   <item><c>McpClientAdapter.Resources.cs</c> — 资源/提示（Resource/Prompt）列举与读取</item>
-///   <item><c>McpClientAdapter.Lifecycle.cs</c> — 释放（DisposeAsync）</item>
+///   <item><c>McpClientAdapter.cs</c> - 字段/构造/共享反射辅助方法</item>
+///   <item><c>McpClientAdapter.Tools.cs</c> - 工具列举与 MCP Tool → AIFunction 转换</item>
+///   <item><c>McpClientAdapter.Resources.cs</c> - 资源/提示（Resource/Prompt）列举与读取</item>
+///   <item><c>McpClientAdapter.Lifecycle.cs</c> - 释放（DisposeAsync）</item>
 /// </list>
 /// </remarks>
 internal sealed partial class McpClientAdapter : IMcpClientAdapter
@@ -21,7 +21,7 @@ internal sealed partial class McpClientAdapter : IMcpClientAdapter
     private readonly ILogger _logger;
     private readonly bool _prefixToolNameWithServer;
 
-    // 反射缓存 — 构造时一次性解析，避免每次调用 GetMethod()
+    // 反射缓存 - 构造时一次性解析，避免每次调用 GetMethod()
     private readonly MethodInfo? _listResourcesMethod;
     private readonly MethodInfo? _readResourceMethod;
     private readonly MethodInfo? _listPromptsMethod;

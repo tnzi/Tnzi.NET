@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TTaskItem — Subtask display with left vertical border and file badges
+ * TTaskItem - Subtask display with left vertical border and file badges
  */
 
 import { ref } from 'vue';

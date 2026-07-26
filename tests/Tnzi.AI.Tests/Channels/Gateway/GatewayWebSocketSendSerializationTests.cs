@@ -4,7 +4,7 @@ using Tnzi.AI.Channels.Gateway.Models;
 namespace Tnzi.AI.Tests.Channels.Gateway;
 
 /// <summary>
-/// B9 — verifies all WebSocket sends (heartbeat + stream) are serialized through a
+/// B9 - verifies all WebSocket sends (heartbeat + stream) are serialized through a
 /// per-connection semaphore so SendAsync calls never overlap (WebSocket forbids that).
 /// </summary>
 public class GatewayWebSocketSendSerializationTests
@@ -12,7 +12,7 @@ public class GatewayWebSocketSendSerializationTests
     [Fact]
     public async Task HeartbeatAndStream_NeverOverlapSends()
     {
-        // Arrange — gateway yields many chunks with tiny gaps so streaming runs while the
+        // Arrange - gateway yields many chunks with tiny gaps so streaming runs while the
         // heartbeat fires; FakeWebSocket.SendDelay widens each send to expose any overlap.
         var gatewayMock = new Mock<IGateway>();
         gatewayMock
@@ -39,7 +39,7 @@ public class GatewayWebSocketSendSerializationTests
         // Act
         await handler.HandleAsync(ws, userId: "u1", CancellationToken.None);
 
-        // Assert — sends were serialized; the high-water mark of concurrent in-flight sends is 1.
+        // Assert - sends were serialized; the high-water mark of concurrent in-flight sends is 1.
         ws.MaxConcurrentSends.ShouldBe(1);
         // Sanity: both heartbeat and stream actually sent (not a vacuous pass).
         ws.SentMessages.Count.ShouldBeGreaterThan(1);

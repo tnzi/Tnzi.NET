@@ -30,10 +30,10 @@ export const defaultThemeSettings: ThemeSettings = {
 
 /**
  * Input type for {@link mergeThemeSettings}. Narrower than `Partial<ThemeSettings>`
- * because `colors` may itself be partial — missing roles inherit from defaults.
+ * because `colors` may itself be partial - missing roles inherit from defaults.
  */
 export interface MergeThemeSettingsInput extends Omit<Partial<ThemeSettings>, 'colors' | 'palettes'> {
-  /** Optional partial override of base colors — missing roles inherit from defaults. */
+  /** Optional partial override of base colors - missing roles inherit from defaults. */
   colors?: Partial<ThemeColors>
 }
 

@@ -17,6 +17,7 @@ public class AuthService : ApplicationService, IAuthService
     private readonly ISessionService? _sessionService;
     private readonly ILoginSecurityService? _loginSecurityService;
     private readonly ITwoFactorService? _twoFactorService;
+    private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -36,7 +37,8 @@ public class AuthService : ApplicationService, IAuthService
         ILoginSecurityService? loginSecurityService = null,
         ITwoFactorService? twoFactorService = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ILoginSessionCoordinator? loginSessionCoordinator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -50,6 +52,7 @@ public class AuthService : ApplicationService, IAuthService
         _sessionService = sessionService;
         _loginSecurityService = loginSecurityService;
         _twoFactorService = twoFactorService;
+        _loginSessionCoordinator = loginSessionCoordinator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -145,15 +148,28 @@ public class AuthService : ApplicationService, IAuthService
 
         var (user, loginIdentifier) = validationResult.Data;
 
-        // 检查是否需要 2FA
+        // 检查是否需要 2FA:总开关开着 且 至少一种方式当前可用(渠道未被关闭)。
+        // 若已启用的方式因部署渠道全部关闭而无一可用,则按"未开启 2FA"直接放行。
         if (await _userManager.GetTwoFactorEnabledAsync(user))
         {
-            return await Handle2FAChallengeAsync<string>(user);
+            var supportedTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+            if (supportedTypes.Count > 0)
+            {
+                return await Handle2FAChallengeAsync<string>(user, supportedTypes);
+            }
+            LogInformation("User {UserId} has 2FA enabled but no usable method (all channels disabled); signing in without challenge.", user.Id);
         }
 
-        // 生成 Token
+        // 建立登录会话（应用多登录策略；Reject 达上限则拒绝本次登录）
+        var sessionResult = await EstablishLoginSessionAsync(user);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<string>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+        }
+
+        // 生成 Token（携带 session_id claim，供服务端每请求校验会话）
         var roles = await GetRolesWithTenantContextAsync(user);
-        var token = _tokenService.GenerateToken(user, roles);
+        var token = _tokenService.GenerateToken(user, roles, sessionId: ToSessionClaim(sessionResult.Data));
 
         // 清除登录失败记录
         if (_captchaService != null)
@@ -190,14 +206,27 @@ public class AuthService : ApplicationService, IAuthService
 
         var (user, loginIdentifier) = validationResult.Data;
 
-        // 检查是否需要 2FA
+        // 检查是否需要 2FA:总开关开着 且 至少一种方式当前可用(渠道未被关闭)。
+        // 若已启用的方式因部署渠道全部关闭而无一可用,则按"未开启 2FA"直接放行。
         if (await _userManager.GetTwoFactorEnabledAsync(user))
         {
-            return await Handle2FAChallengeAsync<TokenResult>(user);
+            var supportedTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+            if (supportedTypes.Count > 0)
+            {
+                return await Handle2FAChallengeAsync<TokenResult>(user, supportedTypes);
+            }
+            LogInformation("User {UserId} has 2FA enabled but no usable method (all channels disabled); signing in without challenge.", user.Id);
         }
 
-        // 生成TokenResult并保存RefreshToken
-        var tokenResult = await GenerateAndSaveTokenResultAsync(user, enableRefreshToken: true);
+        // 建立登录会话（应用多登录策略；Reject 达上限则拒绝本次登录）
+        var sessionResult = await EstablishLoginSessionAsync(user);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<TokenResult>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+        }
+
+        // 生成TokenResult并保存RefreshToken（access token 携带 session_id，刷新令牌绑定该会话）
+        var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: true);
 
         // 清除登录失败记录
         if (_captchaService != null)
@@ -226,12 +255,13 @@ public class AuthService : ApplicationService, IAuthService
         var userAgent = ScopedContext?.UserAgent;
         var options = IdentityOptions;
         var signInOptions = options.SignIn;
-        var multiLoginOptions = options.MultiLogin;
         var captchaOptions = options.Captcha;
         var registrationOptions = options.Registration;
         var loginIdentifier = ipAddress ?? input.UserName;
 
-        // 1. 验证码校验
+        // 1. 验证码校验(自适应:同一登录标识失败次数达阈值才要求验证码)。
+        //    需要但缺失/无效时,返回专用错误码 IDENTITY_CAPTCHA_REQUIRED + 一张新验证码图,
+        //    前端据此内联渲染验证码框并让用户重试(平时登录零打扰)。
         if (captchaOptions.EnableCaptchaOnLogin && _captchaService != null)
         {
             var captchaRequired = await _captchaService.IsCaptchaRequiredAsync(loginIdentifier);
@@ -240,7 +270,7 @@ public class AuthService : ApplicationService, IAuthService
                 var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "login");
                 if (!captchaValid)
                 {
-                    return Fail<(User, string)>("Invalid or expired captcha", 400);
+                    return await BuildCaptchaRequiredResultAsync<(User, string)>("login");
                 }
             }
         }
@@ -295,12 +325,9 @@ public class AuthService : ApplicationService, IAuthService
             }
         }
 
-        // 7. 多登录策略检查
-        var multiLoginCheck = await CheckMultiLoginPolicyAsync(user.Id, multiLoginOptions);
-        if (!multiLoginCheck.Success)
-        {
-            return Fail<(User, string)>(multiLoginCheck.Message, 403);
-        }
+        // 注意：多登录策略（单设备/限并发/踢旧/拒新）已移至 EstablishLoginSessionAsync，
+        // 在**签发令牌前、建立会话时**统一处理（2FA 路径也经此），避免旧实现"校验点与
+        // 会话创建点分离"导致的竞态与不生效。
 
         // 验证通过，返回用户和登录标识符
         return Result<(User, string)>.Success((user, loginIdentifier));
@@ -335,6 +362,18 @@ public class AuthService : ApplicationService, IAuthService
         if (user == null)
             return Fail<TokenResult>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
 
+        // 会话校验：刷新令牌绑定了会话（SessionId 非空）时，会话被撤销/过期即拒绝刷新，
+        // 使"踢下线"对刷新链路也生效（被踢设备无法用未过期的刷新令牌续命）。
+        // 遗留令牌（SessionId=Guid.Empty）跳过，向后兼容。
+        if (ShouldEnforceSessionValidation() && tokenEntry.SessionId != Guid.Empty && _sessionService != null)
+        {
+            var sessionValid = await _sessionService.IsSessionValidAsync(tokenEntry.SessionId);
+            if (!sessionValid)
+            {
+                return Fail<TokenResult>("Session has been revoked or expired", 401, ErrorCodes.IDENTITY_SESSION_REVOKED);
+            }
+        }
+
         // 先标记旧 token 为已使用（带并发控制，防止 token 重放攻击）
         var marked = await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
         if (!marked)
@@ -342,8 +381,15 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TokenResult>("Refresh token has already been used", 400);
         }
 
-        // 再生成新 token
-        var tokenResult = await GenerateAndSaveTokenResultAsync(user, enableRefreshToken: true);
+        // 再生成新 token，沿用同一会话（session_id claim + 刷新令牌绑定不变）
+        var tokenResult = await GenerateAndSaveTokenResultAsync(user, tokenEntry.SessionId, enableRefreshToken: true);
+
+        // 滑动续期会话：使活跃用户随刷新持续在线（会话硬过期跟随新刷新令牌生命周期）
+        if (tokenEntry.SessionId != Guid.Empty && _sessionService != null)
+        {
+            var newExpiresAt = DateTime.UtcNow.AddDays(IdentityOptions.Jwt.RefreshTokenExpirationDays);
+            await _sessionService.RenewSessionAsync(tokenEntry.SessionId, newExpiresAt);
+        }
 
         return Result<TokenResult>.Success(tokenResult);
     }
@@ -363,7 +409,17 @@ public class AuthService : ApplicationService, IAuthService
 
         if (_sessionService != null)
         {
-            await _sessionService.RevokeAllSessionsAsync(userId);
+            // 只登出当前设备：从 access token 的 session_id claim 取当前会话，仅撤销它。
+            // 取不到会话（遗留令牌/未启用会话强制）时回退撤销该用户全部会话（旧行为）。
+            var currentSessionId = ParseCurrentSessionId();
+            if (currentSessionId.HasValue)
+            {
+                await _sessionService.RevokeSessionAsync(currentSessionId.Value);
+            }
+            else
+            {
+                await _sessionService.RevokeAllSessionsAsync(userId);
+            }
         }
 
         if (_eventBus != null)
@@ -407,7 +463,16 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TwoFactorChallengeDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // 只接受登录挑战实际提供的方式：挑战列表已按"用户已启用的方式 ∩ 部署开启的渠道"
+        // 过滤，此处复算并校验，否则持有临时令牌者可绕过用户单独关闭的某种方式。
+        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+        if (usableTypes is { Count: > 0 } && !usableTypes.Contains(input.Type))
+        {
+            return Fail<TwoFactorChallengeDto>("The selected two-factor method is not enabled", 400);
+        }
+
         bool sent = false;
+        string? maskedAddress = null;
         if (input.Type == TwoFactorType.Sms)
         {
             if (string.IsNullOrWhiteSpace(user.PhoneNumber))
@@ -416,6 +481,7 @@ public class AuthService : ApplicationService, IAuthService
             }
             var smsResult = await _twoFactorService.SendSmsCodeAsync(userId, user.PhoneNumber);
             sent = smsResult.Succeeded;
+            maskedAddress = MaskPhone(user.PhoneNumber);
         }
         else if (input.Type == TwoFactorType.Email)
         {
@@ -425,6 +491,7 @@ public class AuthService : ApplicationService, IAuthService
             }
             var emailResult = await _twoFactorService.SendEmailCodeAsync(userId, user.Email);
             sent = emailResult.Succeeded;
+            maskedAddress = MaskEmail(user.Email);
         }
         else
         {
@@ -436,22 +503,57 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TwoFactorChallengeDto>("Failed to send verification code", 500);
         }
 
+        // 回执里的可选方式与登录挑战保持同一口径（用户已启用 ∩ 部署开启的渠道），
+        // 否则前端会重新渲染出用户已单独关闭的方式（此前还漏掉 TOTP）。
+        // 解析不出方式时（无 2FA 服务）回退为"已验证地址"派生。
         var supportedTypes = new List<TwoFactorType>();
-        if (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed)
+        if (usableTypes is { Count: > 0 })
         {
-            supportedTypes.Add(TwoFactorType.Sms);
+            supportedTypes.AddRange(usableTypes);
         }
-        if (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed)
+        else
         {
-            supportedTypes.Add(TwoFactorType.Email);
+            if (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed)
+            {
+                supportedTypes.Add(TwoFactorType.Sms);
+            }
+            if (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed)
+            {
+                supportedTypes.Add(TwoFactorType.Email);
+            }
         }
 
+        // 回填 CodeSent + MaskedAddress，让登录页可显示"验证码已发送到 j•••@example.com"，
+        // 消除用户"到底发没发"的疑虑（此前 DTO 有字段但从不填充 = 死字段）。
         return Result<TwoFactorChallengeDto>.Success(new TwoFactorChallengeDto
         {
             RequiresTwoFactor = true,
             SupportedTypes = supportedTypes,
-            TempToken = input.TempToken
+            TempToken = input.TempToken,
+            CodeSent = sent,
+            MaskedAddress = maskedAddress
         });
+    }
+
+    /// <summary>邮箱脱敏：保留首字符与域名（<c>john@ex.com</c> → <c>j***@ex.com</c>）。</summary>
+    private static string? MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var at = email.IndexOf('@');
+        if (at <= 0) return "***";
+        var name = email[..at];
+        var domain = email[at..]; // 含 '@'
+        var visible = name.Length <= 1 ? name : name[..1];
+        return $"{visible}***{domain}";
+    }
+
+    /// <summary>手机号脱敏：仅保留末 4 位（<c>+14155552671</c> → <c>•••••2671</c>）。</summary>
+    private static string? MaskPhone(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return null;
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        if (digits.Length <= 4) return "••••";
+        return $"•••••{digits[^4..]}";
     }
 
     public async Task<Result<TokenResult>> VerifyTwoFactorAndLoginAsync(VerifyTwoFactorDto input)
@@ -484,6 +586,15 @@ public class AuthService : ApplicationService, IAuthService
         var ipAddress = ScopedContext?.ClientIpAddress;
         var userAgent = ScopedContext?.UserAgent;
 
+        // 与 SendTwoFactorCodeAsync 同款校验：只接受当前确实可用的方式，
+        // 使"单独关闭某方式"在验证环节也生效（挑战列表之外的方式一律拒绝）。
+        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+        if (usableTypes is { Count: > 0 } && !usableTypes.Contains(input.Type))
+        {
+            await PublishLoginFailedEventAsync(userId, user.UserName, "2FA method not enabled", ipAddress, userAgent);
+            return Fail<TokenResult>("The selected two-factor method is not enabled", 400);
+        }
+
         // 验证2FA验证码
         var isValid = await _twoFactorService.VerifyCodeAsync(userId, input.Code, input.Type);
         if (!isValid.Succeeded)
@@ -495,10 +606,17 @@ public class AuthService : ApplicationService, IAuthService
         // 标记临时Token为已使用（核心业务逻辑，必须同步执行）
         await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
 
-        // 生成TokenResult并保存RefreshToken
-        var tokenResult = await GenerateAndSaveTokenResultAsync(user, enableRefreshToken: true);
+        // 2FA 通过后才建立登录会话（应用多登录策略；Reject 达上限则拒绝）
+        var sessionResult = await EstablishLoginSessionAsync(user);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<TokenResult>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+        }
 
-        // 发布用户登录事件（由事件处理器处理日志记录和会话创建）
+        // 生成TokenResult并保存RefreshToken
+        var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: true);
+
+        // 发布用户登录事件（由事件处理器处理日志记录）
         await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.JWT);
 
         return Result<TokenResult>.Success(tokenResult);
@@ -508,21 +626,23 @@ public class AuthService : ApplicationService, IAuthService
 
     /// <summary>
     /// 生成TokenResult并保存RefreshToken（如果启用）
-    /// 统一处理Token生成、RefreshToken保存逻辑，减少代码重复
+    /// 统一处理Token生成、RefreshToken保存逻辑，减少代码重复。
+    /// <paramref name="sessionId"/> 为登录会话ID：写入 access token 的 session_id claim，
+    /// 并把刷新令牌绑定到该会话（<see cref="Guid.Empty"/> 表示不绑定，向后兼容）。
     /// </summary>
-    private async Task<TokenResult> GenerateAndSaveTokenResultAsync(User user, bool enableRefreshToken = true)
+    private async Task<TokenResult> GenerateAndSaveTokenResultAsync(User user, Guid sessionId, bool enableRefreshToken = true)
     {
         var roles = await GetRolesWithTenantContextAsync(user);
         var jwtOptions = IdentityOptions.Jwt;
 
-        // 生成AccessToken
-        var accessToken = _tokenService.GenerateToken(user, roles);
+        // 生成AccessToken（携带 session_id claim）
+        var accessToken = _tokenService.GenerateToken(user, roles, sessionId: ToSessionClaim(sessionId));
         var accessTokenExpiresAt = DateTime.UtcNow.AddMinutes(jwtOptions.AccessTokenExpirationMinutes);
 
         string? refreshToken = null;
         DateTime? refreshTokenExpiresAt = null;
 
-        // 如果启用RefreshToken，生成并保存
+        // 如果启用RefreshToken，生成并保存（按会话绑定：多设备各自独立刷新令牌）
         if (enableRefreshToken && jwtOptions.EnableRefreshToken)
         {
             refreshToken = _tokenService.GenerateRefreshToken();
@@ -536,7 +656,8 @@ public class AuthService : ApplicationService, IAuthService
                     IdentityConstants.TokenProvider.JWT,
                     IdentityConstants.TokenName.RefreshToken,
                     refreshToken,
-                    refreshTokenExpiresAt);
+                    refreshTokenExpiresAt,
+                    sessionId);
             }
         }
 
@@ -552,11 +673,61 @@ public class AuthService : ApplicationService, IAuthService
         };
     }
 
+    /// <summary>会话ID为 <see cref="Guid.Empty"/> 时返回 null，令牌不写 session_id claim（不受强制校验）。</summary>
+    private static Guid? ToSessionClaim(Guid sessionId) => sessionId == Guid.Empty ? null : sessionId;
+
+    /// <summary>是否强制会话校验（Session 配置开关，默认开）。</summary>
+    private bool ShouldEnforceSessionValidation()
+        => (ServiceProvider?.GetService<IOptions<SessionOptions>>()?.Value ?? new SessionOptions()).EnforceSessionValidation;
+
+    /// <summary>从当前请求主体的 session_id claim 解析会话ID；无则返回 null。</summary>
+    private Guid? ParseCurrentSessionId()
+    {
+        var raw = CurrentUser?.FindClaim(IdentityConstants.ClaimTypeNames.SessionId);
+        return !string.IsNullOrEmpty(raw) && Guid.TryParse(raw, out var sid) && sid != Guid.Empty ? sid : null;
+    }
+
+    /// <summary>
+    /// 建立登录会话并应用多登录策略。无协调器（如纯单元测试）时返回空会话（不做绑定/强制），
+    /// 令牌退回旧的无 session_id 行为。
+    /// </summary>
+    private async Task<Result<Guid>> EstablishLoginSessionAsync(User user)
+    {
+        if (_loginSessionCoordinator == null)
+        {
+            return Ok(Guid.Empty);
+        }
+
+        return await _loginSessionCoordinator.EstablishAsync(user.Id);
+    }
+
     private async Task<bool> VerifyCaptchaAsync(string? captchaId, string? captchaCode, string purpose)
     {
         if (_captchaService == null) return true;
         if (string.IsNullOrEmpty(captchaId) || string.IsNullOrEmpty(captchaCode)) return false;
         return await _captchaService.VerifyAsync(captchaId, captchaCode, purpose);
+    }
+
+    /// <summary>
+    /// 构建"需要图形验证码"失败结果:生成一张新验证码,连同专用错误码
+    /// <see cref="ErrorCodes.IDENTITY_CAPTCHA_REQUIRED"/> 一并返回,前端据此内联渲染
+    /// 验证码框(id + base64 图片)并让用户重试。缓存不可用(无法生成)时回退为不带图片的同码错误。
+    /// </summary>
+    private async Task<Result<T>> BuildCaptchaRequiredResultAsync<T>(string purpose)
+    {
+        object? details = null;
+        if (_captchaService is { IsCacheAvailable: true })
+        {
+            var captcha = await _captchaService.GenerateAsync(purpose);
+            details = new CaptchaDto
+            {
+                CaptchaId = captcha.CaptchaId,
+                ImageBase64 = Convert.ToBase64String(captcha.ImageBytes),
+                ExpirationSeconds = captcha.ExpirationSeconds,
+            };
+        }
+
+        return Fail<T>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, details);
     }
 
     private async Task<User?> FindUserByLoginInputAsync(string loginInput, TnziSignInOptions signInOptions)
@@ -590,75 +761,80 @@ public class AuthService : ApplicationService, IAuthService
         return await _userManager.GetRolesAsync(user);
     }
 
-    private async Task<(bool Success, string Message)> CheckMultiLoginPolicyAsync(Guid userId, MultiLoginOptions multiLoginOptions)
+    /// <summary>
+    /// 在独立 DI scope 中持久化 2FA 临时令牌，使其立即提交、不被外层请求事务回滚。
+    /// 原因见 <see cref="Handle2FAChallengeAsync{T}"/> —— 2FA 挑战返回失败信封会触发
+    /// UnitOfWork 过滤器回滚，独立 scope 的 DbContext 无外层事务、写入即时提交。
+    /// </summary>
+    private async Task PersistTwoFactorTempTokenAsync(Guid userId, string tempToken, DateTime expiresAt)
     {
-        if (_sessionService == null) return (true, string.Empty);
-        var sessionsResult = await _sessionService.GetUserSessionsAsync(userId);
-        var activeSessions = sessionsResult.Succeeded ? sessionsResult.Data!.ToList() : new List<UserSessionDto>();
+        // 无 ServiceProvider（理论上不发生）时回退常规保存 —— 至少在未启用全局 UoW 的
+        // 部署下仍能工作。
+        if (ServiceProvider == null)
+        {
+            if (_authTokenService != null)
+            {
+                await _authTokenService.SaveTokenAsync(
+                    userId, IdentityConstants.TokenProvider.TwoFactor, IdentityConstants.TokenName.TempToken, tempToken, expiresAt);
+            }
+            return;
+        }
 
-        if (!multiLoginOptions.AllowMultiLogin)
+        using var scope = ServiceProvider.CreateScope();
+        var tokenService = scope.ServiceProvider.GetService<IAuthTokenService>();
+        if (tokenService != null)
         {
-            if (activeSessions.Any())
-            {
-                if (multiLoginOptions.OnConflict == LoginConflictPolicy.Reject)
-                {
-                    return (false, "Already logged in on another device");
-                }
-                await _sessionService.RevokeAllSessionsAsync(userId);
-            }
+            await tokenService.SaveTokenAsync(
+                userId, IdentityConstants.TokenProvider.TwoFactor, IdentityConstants.TokenName.TempToken, tempToken, expiresAt);
         }
-        else if (multiLoginOptions.MaxConcurrentSessions > 0)
-        {
-            if (activeSessions.Count >= multiLoginOptions.MaxConcurrentSessions)
-            {
-                if (multiLoginOptions.OnConflict == LoginConflictPolicy.Reject)
-                {
-                    return (false, "Maximum concurrent sessions reached");
-                }
-                var oldest = activeSessions.OrderBy(s => s.LastActivityTime).FirstOrDefault();
-                if (oldest == null)
-                {
-                    Logger.LogWarning("Active sessions count indicates sessions exist, but FirstOrDefault returned null for user {UserId}", userId);
-                    return (false, "Unable to revoke session: no active session found");
-                }
-                await _sessionService.RevokeSessionAsync(oldest.Id);
-            }
-        }
-        return (true, string.Empty);
     }
 
-    private async Task<Result<T>> Handle2FAChallengeAsync<T>(User user)
+    /// <summary>
+    /// 计算登录挑战应展示的 2FA 方式集合:优先经 <see cref="ITwoFactorService"/>（已按部署渠道
+    /// 开关 EnableSms/EnableEmail/EnableTotp + 地址验证过滤）；无该服务时回退，回退路径同样按
+    /// OTP 渠道开关门控（关闭的渠道不出现）。返回空集合表示当前无任何可用方式。
+    /// </summary>
+    private async Task<List<TwoFactorType>> ResolveSupportedTwoFactorTypesAsync(User user)
     {
-        // 使用 CSPRNG 生成安全的临时令牌，防止可预测性攻击
-        var tempToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-        if (_authTokenService != null)
+        if (_twoFactorService != null)
         {
-            await _authTokenService.SaveTokenAsync(
-                user.Id,
-                IdentityConstants.TokenProvider.TwoFactor,
-                IdentityConstants.TokenName.TempToken,
-                tempToken,
-                DateTime.UtcNow.AddMinutes(10));
+            return await _twoFactorService.GetEnabledTwoFactorTypesAsync(user);
         }
 
+        // 无 2FA 服务时回退:按 OTP 渠道开关 + 已验证地址/已配置 TOTP 计算。
+        var otpOptions = IdentityOptions.Otp;
         var supportedTypes = new List<TwoFactorType>();
-        if (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed)
+        if (otpOptions.EnableSms && !string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed)
         {
             supportedTypes.Add(TwoFactorType.Sms);
         }
-        if (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed)
+        if (otpOptions.EnableEmail && !string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed)
         {
             supportedTypes.Add(TwoFactorType.Email);
         }
-
-        // TOTP 检测（需要 TwoFactorType.Totp 枚举值，由 Phase 3 添加）
-        var authenticatorKey = await _userManager.GetAuthenticatorKeyAsync(user);
-        if (!string.IsNullOrEmpty(authenticatorKey))
+        if (otpOptions.EnableTotp)
         {
-            supportedTypes.Add(TwoFactorType.Totp);
+            var authenticatorKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            if (!string.IsNullOrEmpty(authenticatorKey))
+            {
+                supportedTypes.Add(TwoFactorType.Totp);
+            }
         }
+        return supportedTypes;
+    }
 
-        // Result<T> checks
+    private async Task<Result<T>> Handle2FAChallengeAsync<T>(User user, List<TwoFactorType> supportedTypes)
+    {
+        // 使用 CSPRNG 生成安全的临时令牌，防止可预测性攻击
+        var tempToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+        // 2FA 挑战以"失败"信封返回(403 2FA_REQUIRED)，让前端停在登录页切到验证步骤。
+        // 但在 EnableGlobalUnitOfWork 下，UnitOfWork 过滤器对非成功结果会**回滚整个请求
+        // 事务** —— 这会把刚保存的临时令牌一并丢弃，导致后续 verify-2fa / send-2fa-code
+        // 全部因 "Invalid or expired temporary token" 失败（2FA 登录彻底不可用）。
+        // 因此在**独立 DI scope**（独立 DbContext + 连接、无外层事务）中保存，令其立即
+        // 提交、不受外层回滚影响；无 scope 时回退到常规保存。
+        await PersistTwoFactorTempTokenAsync(user.Id, tempToken, DateTime.UtcNow.AddMinutes(10));
 
         return Fail<T>("Two-factor authentication required", 403, ErrorCodes.IDENTITY_2FA_REQUIRED, new { TempToken = tempToken, SupportedTypes = supportedTypes });
     }
@@ -906,8 +1082,15 @@ public class AuthService : ApplicationService, IAuthService
             }
         }
 
+        // 建立登录会话（应用多登录策略；Reject 达上限则拒绝本次登录）
+        var sessionResult = await EstablishLoginSessionAsync(user);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<CodeLoginResultDto>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+        }
+
         // 生成Token和RefreshToken并保存
-        var tokenResult = await GenerateAndSaveTokenResultAsync(user, enableRefreshToken: jwtOptions.EnableRefreshToken);
+        var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: jwtOptions.EnableRefreshToken);
 
         // 发布登录成功事件
         await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.CodeLogin);

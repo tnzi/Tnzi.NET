@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../src/utils/placeholders'
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TKpiCard from '../../../src/components/data/TKpiCard.vue'
@@ -27,9 +28,9 @@ describe('TKpiCard', () => {
     expect(w.find('.t-stat-card__value').text()).toContain('Yes')
   })
 
-  it('renders an em dash for null values and hides the suffix', () => {
+  it('renders an placeholder for null values and hides the suffix', () => {
     const w = mountCard({ label: 'Rate', value: null, suffix: '%' })
-    expect(w.find('.t-stat-card__value').text()).toContain('—')
+    expect(w.find('.t-stat-card__value').text()).toContain(EMPTY_DASH)
     expect(w.find('.t-stat-card__suffix').exists()).toBe(false)
   })
 

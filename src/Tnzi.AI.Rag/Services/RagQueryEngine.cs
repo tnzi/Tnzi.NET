@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// RAG 查询引擎 — 单轮 Q&amp;A，无历史上下文
+/// RAG 查询引擎 - 单轮 Q&amp;A，无历史上下文
 /// <para>
 /// 流程：IRagRetriever.RetrieveAsync → 格式化上下文 → 单次 IAiUtility 调用 → 返回回答 + 引用。
 /// 不维护对话历史，不经过 Agent 中间件管道。适合独立问答和搜索增强场景。

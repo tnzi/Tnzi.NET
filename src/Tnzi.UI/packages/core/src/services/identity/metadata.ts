@@ -44,30 +44,42 @@ export function getOAuthProviderLabel(provider: OAuthProvider): string {
 }
 
 /**
- * Two-factor authentication type
+ * Two-factor authentication type.
+ *
+ * String enum (member name = value): the backend registers a global
+ * `JsonStringEnumConverter`, so `TwoFactorChallengeDto.supportedTypes` and
+ * friends arrive as PascalCase names. Inbound params accept the name too
+ * (the converter allows integers as well, so sending the name is safe).
+ * Backend: `Tnzi.Identity/Entities/TwoFactorCode.cs`.
  */
 export enum TwoFactorType {
-  Sms = 1,
-  Email = 2,
+  Sms = 'Sms',
+  Email = 'Email',
+  /** TOTP (authenticator app). Configured/verified via the dedicated
+   *  totp/setup + totp/enable endpoints, NOT the code-channel enable flow. */
+  Totp = 'Totp',
 }
 
 /**
- * Login status
+ * Login status. String enum - backend `Tnzi.Identity/Entities/LoginLog.cs`
+ * serializes it by member name.
  */
 export enum LoginStatus {
-  Success = 1,
-  Failed = 2,
+  Success = 'Success',
+  Failed = 'Failed',
 }
 
 /**
- * Password strength level
+ * Password strength level. String enum - backend
+ * `Tnzi.Identity/Services/Interfaces/IPasswordPolicyService.cs` returns it on
+ * `PasswordStrengthResultDto.level`, serialized by member name.
  */
 export enum PasswordStrengthLevel {
-  VeryWeak = 0,
-  Weak = 1,
-  Fair = 2,
-  Strong = 3,
-  VeryStrong = 4,
+  VeryWeak = 'VeryWeak',
+  Weak = 'Weak',
+  Fair = 'Fair',
+  Strong = 'Strong',
+  VeryStrong = 'VeryStrong',
 }
 
 /**
@@ -91,22 +103,27 @@ export function getPasswordStrengthLabel(level: PasswordStrengthLevel): string {
 }
 
 /**
- * Abnormal login type
+ * Abnormal login type. String enum - backend
+ * `Tnzi.Identity/Services/Interfaces/ILoginSecurityService.cs` returns these on
+ * `AbnormalLoginResultDto.abnormalTypes`, serialized by member name.
  */
 export enum AbnormalLoginType {
-  NewDevice = 0,
-  NewIpAddress = 1,
-  LocationChange = 2,
-  ImpossibleTravel = 3,
-  FrequentAttempts = 4,
-  UnusualTime = 5,
+  NewDevice = 'NewDevice',
+  NewIpAddress = 'NewIpAddress',
+  LocationChange = 'LocationChange',
+  ImpossibleTravel = 'ImpossibleTravel',
+  FrequentAttempts = 'FrequentAttempts',
+  UnusualTime = 'UnusualTime',
 }
 
 /**
- * Abnormal login recommended action
+ * Abnormal login recommended action. String enum - backend
+ * `ILoginSecurityService.cs` returns it on `AbnormalLoginResultDto.recommendedAction`.
  */
 export enum AbnormalLoginAction {
-  None = 0,
-  Notify = 1,
-  RequireVerification = 2,
+  None = 'None',
+  Notify = 'Notify',
+  RequireVerification = 'RequireVerification',
+  /** Block the login outright. Was missing from the mirror. */
+  Block = 'Block',
 }

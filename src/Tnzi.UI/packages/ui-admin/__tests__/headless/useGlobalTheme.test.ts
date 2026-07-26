@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createThemeContext, mergeThemeSettings, type ThemeContext } from '@tnzi/ui'
 import { useGlobalTheme } from '../../src/headless/useGlobalTheme'
-import { buildThemeSnapshot } from '../../src/theme/snapshot'
+import { applyThemeSnapshot, buildThemeSnapshot } from '../../src/theme/snapshot'
 import { useAdminThemeStore } from '../../src/stores/useAdminThemeStore'
+import { BUILTIN_APPEARANCE_PRESETS } from '../../src/theme/appearancePresets'
 import type { AdminGlobalThemeDto } from '@tnzi/core/services/system'
 
 function createCtx(): ThemeContext {
@@ -65,6 +66,49 @@ describe('useGlobalTheme', () => {
     })
     await controller.load()
     expect(ctx.settings.value.colors.primary).toBe('#EF4444')
+  })
+
+  it('load() re-applies the user-chosen LOOK (whole preset) over the global theme', async () => {
+    const ctx = createCtx()
+    const store = useAdminThemeStore()
+    // Author a global snapshot with a specific sider color.
+    store.setSiderBg('#111111')
+    const remote = buildThemeSnapshot(store, createCtx())
+    store.reset()
+    // The non-privileged user picked the "nord" whole look.
+    store.setUserPresetLook('nord')
+
+    const controller = useGlobalTheme({
+      themeContext: ctx,
+      bridge: fakeBridge(remote as unknown as Record<string, unknown>),
+      appearancePresets: BUILTIN_APPEARANCE_PRESETS,
+    })
+    await controller.load()
+    // Nord's coordinated surfaces win over the global #111111 sider.
+    expect(store.siderBg).toBe('#2E3440')
+    expect(store.contentBg).toBe('#242933')
+  })
+
+  it('load() re-applies the personal look even when the store already equals the snapshot (regression: bootstrap instance applied it first)', async () => {
+    const ctx = createCtx()
+    const store = useAdminThemeStore()
+    store.setSiderBg('#111111')
+    const remote = buildThemeSnapshot(store, createCtx())
+    store.reset()
+    // Simulate the defineAdminApp bootstrap useGlobalTheme having applied the
+    // raw global snapshot already (local == remote) WITHOUT the look overlay -
+    // the idempotence guard must not swallow the overlay in that case.
+    applyThemeSnapshot(remote, store, ctx, { modeAsDefault: true })
+    store.setUserPresetLook('nord')
+
+    const controller = useGlobalTheme({
+      themeContext: ctx,
+      bridge: fakeBridge(remote as unknown as Record<string, unknown>),
+      appearancePresets: BUILTIN_APPEARANCE_PRESETS,
+    })
+    await controller.load()
+    expect(store.siderBg).toBe('#2E3440')
+    expect(store.contentBg).toBe('#242933')
   })
 
   it('load() ignores an invalid / unset payload (legacy backend degrades gracefully)', async () => {

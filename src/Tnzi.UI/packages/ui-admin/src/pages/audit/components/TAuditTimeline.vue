@@ -1,6 +1,6 @@
 <template>
   <div class="t-audit-timeline">
-    <!-- Filter toolbar — flush on the parent card surface (Logs/Operations
+    <!-- Filter toolbar - flush on the parent card surface (Logs/Operations
          wrap this in a `TContentPage card scroll="fill"`, so the white surface
          and fill-height come from the shell; this component just fills it). -->
     <div class="t-audit-timeline__filters">
@@ -45,7 +45,7 @@
       <span class="t-audit-timeline__count">{{ t('summary', { n: total }) }}</span>
     </div>
 
-    <!-- Timeline grouped by day — scrolls inside the filled card -->
+    <!-- Timeline grouped by day - scrolls inside the filled card -->
     <div class="t-audit-timeline__scroll">
       <NSpin :show="loading && groups.length === 0">
         <TEmpty
@@ -77,7 +77,7 @@
               >
                 <div class="t-audit-timeline__item-main">
                   <strong class="t-audit-timeline__user">{{ item.userName ?? item.userId ?? t('anonymous') }}</strong>
-                  <span class="t-audit-timeline__action">{{ item.functionName ?? item.url ?? '—' }}</span>
+                  <span class="t-audit-timeline__action">{{ item.functionName ?? item.url ?? EMPTY_DASH }}</span>
                   <NTag size="small" :bordered="false" :type="typeFor(item)">{{ resultLabel(item.resultType) }}</NTag>
                   <span v-if="item.elapsed != null" class="t-audit-timeline__elapsed">{{ item.elapsed }}ms</span>
                   <TSvgIcon class="t-audit-timeline__chevron" icon="mdi:chevron-right" :size="16" />
@@ -99,31 +99,33 @@
       </NSpin>
     </div>
 
-    <!-- Detail drawer -->
-    <NDrawer v-model:show="detailOpen" :width="520" placement="right">
-      <NDrawerContent :title="t('detail.title')" closable>
+    <!-- Detail drawer. `TDrawerShell` rather than a bare NDrawer: naive does not
+         clamp a fixed px width to the viewport, so `:width="520"` left 145px of
+         the panel off-screen on a 375px phone (28% of the content clipped). The
+         shell caps the width and resets the overlay theme. -->
+    <TDrawerShell v-model:show="detailOpen" :title="t('detail.title')" :width="520">
         <template v-if="detailItem">
           <NDescriptions :column="1" label-placement="left" size="small" bordered>
             <NDescriptionsItem :label="t('detail.user')">
-              {{ detailItem.userName ?? detailItem.userId ?? '—' }}
+              {{ detailItem.userName ?? detailItem.userId ?? EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.action')">
-              {{ detailItem.functionName ?? '—' }}
+              {{ detailItem.functionName ?? EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.url')">
               <code>{{ detailItem.httpMethod }} {{ detailItem.url }}</code>
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.ip')">
-              {{ detailItem.ip ?? '—' }}
+              {{ detailItem.ip ?? EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.result')">
               <NTag size="small" :type="typeFor(detailItem)">{{ resultLabel(detailItem.resultType) }}</NTag>
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.elapsed')">
-              {{ detailItem.elapsed != null ? `${detailItem.elapsed} ms` : '—' }}
+              {{ detailItem.elapsed != null ? `${detailItem.elapsed} ms` : EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.time')">
-              {{ formatDateTime(detailItem.startTime, { fallback: '—' }) }}
+              {{ formatDateTime(detailItem.startTime, { fallback: EMPTY_DASH }) }}
             </NDescriptionsItem>
           </NDescriptions>
 
@@ -140,7 +142,7 @@
             <pre>{{ detailItem.requestParameters }}</pre>
           </details>
 
-          <!-- Entity-level changes (fetched via fetchDetail — list rows carry no entityEntries) -->
+          <!-- Entity-level changes (fetched via fetchDetail - list rows carry no entityEntries) -->
           <NSpin v-if="detailLoading" size="small" class="t-audit-timeline__entities-spin" />
           <details v-else-if="detailItem.entityEntries?.length" class="t-audit-timeline__details" open>
             <summary>{{ t('detail.entityChanges', { n: detailItem.entityEntries.length }) }}</summary>
@@ -169,29 +171,30 @@
                 <tbody>
                   <tr v-for="p in entry.propertyEntries" :key="p.id">
                     <td class="t-audit-timeline__prop-name">{{ p.propertyName }}</td>
-                    <td><code>{{ p.originalValue ?? '—' }}</code></td>
-                    <td><code>{{ p.newValue ?? '—' }}</code></td>
+                    <td><code>{{ p.originalValue ?? EMPTY_DASH }}</code></td>
+                    <td><code>{{ p.newValue ?? EMPTY_DASH }}</code></td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </details>
         </template>
-      </NDrawerContent>
-    </NDrawer>
+    </TDrawerShell>
   </div>
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, ref, onMounted } from 'vue'
 import {
   NButton, NInput, NSelect, NDatePicker, NSpin, NTimeline, NTimelineItem,
-  NTag, NDrawer, NDrawerContent, NDescriptions, NDescriptionsItem,
+  NTag, NDescriptions, NDescriptionsItem,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDate, formatDateOnly, formatDateTime } from '@tnzi/core'
 import TEmpty from '../../../components/data/TEmpty.vue'
 import TUserSelector from '../../../components/forms/TUserSelector.vue'
+import { TDrawerShell } from '../../../components/overlay'
 import type { SelectorOption } from '../../../components/forms/_selector-factory'
 import { useSafeMessage } from '../../_shared/safeMessage'
 // 0.2.72+ (B4): Re-routed through the bridge so the page stays clean
@@ -206,10 +209,10 @@ import type { CrudPageQuery, CrudPageResult } from '../../../services/types'
 interface Props {
   /** Title shown in the parent card / page title; passed through translate(). */
   pageId: string
-  /** Bridge fetcher — returns CrudPageResult so we can drive pagination. */
+  /** Bridge fetcher - returns CrudPageResult so we can drive pagination. */
   fetch: (query: CrudPageQuery) => Promise<CrudPageResult<AuditOperationDto>>
   /**
-   * Full-detail fetcher (bridge `detail`) — list rows carry no entityEntries;
+   * Full-detail fetcher (bridge `detail`) - list rows carry no entityEntries;
    * when provided, opening the drawer re-fetches the operation by id so the
    * entity-level change tree (entityEntries → propertyEntries) can render.
    */
@@ -242,14 +245,14 @@ const userFetcher = async (keyword: string): Promise<SelectorOption[]> => {
       value: u.id,
     }))
   } catch {
-    // A failed lookup should not spam the message center — the selector just
+    // A failed lookup should not spam the message center - the selector just
     // shows no options. The audit list itself surfaces its own errors.
     return []
   }
 }
 
 interface Filters {
-  /** Backend `AuditOperationQueryDto.UserId` (Guid) — set from the selector. */
+  /** Backend `AuditOperationQueryDto.UserId` (Guid) - set from the selector. */
   userId?: string
   functionName?: string
   resultType?: AuditResultType
@@ -287,7 +290,7 @@ function resultLabel(rt: AuditResultType | undefined | null): string {
   if (rt === AuditResultType.Success) return t('results.success')
   if (rt === AuditResultType.Failed) return t('results.failed')
   if (rt === AuditResultType.Warning) return t('results.warning')
-  return '—'
+  return EMPTY_DASH
 }
 
 const hasMore = computed(() => items.value.length < total.value)
@@ -307,9 +310,9 @@ const groups = computed<DayGroup[]>(() => {
 })
 
 // startTime is a real timestamp (not a date-only field), so render the local
-// calendar date / time — no `utc` normalization.
+// calendar date / time - no `utc` normalization.
 function dayLabel(v?: string | Date | null): string {
-  return formatDateOnly(v, { fallback: '—' })
+  return formatDateOnly(v, { fallback: EMPTY_DASH })
 }
 
 function timeLabel(v?: string | Date | null): string {
@@ -359,7 +362,7 @@ function resetFilters(): void {
   void loadFirst()
 }
 
-// Monotonic token guarding stale responses — repeated Search-button clicks
+// Monotonic token guarding stale responses - repeated Search-button clicks
 // and back-to-back Load-more taps must not let an older page overwrite a
 // newer one (especially since the filter row sits above the list).
 let fetchToken = 0
@@ -389,7 +392,7 @@ function changeLabel(type: EntityChangeType | undefined | null): string {
   if (type === EntityChangeType.Added) return t('detail.changes.added')
   if (type === EntityChangeType.Modified) return t('detail.changes.modified')
   if (type === EntityChangeType.Deleted) return t('detail.changes.deleted')
-  return String(type ?? '—')
+  return String(type ?? EMPTY_DASH)
 }
 
 function changeTagType(type: EntityChangeType | undefined | null): 'success' | 'warning' | 'error' | 'default' {
@@ -402,7 +405,7 @@ function changeTagType(type: EntityChangeType | undefined | null): 'success' | '
 function openDetail(item: AuditOperationDto): void {
   detailItem.value = item
   detailOpen.value = true
-  // Enrich with the full record (entityEntries) — the list row is shown
+  // Enrich with the full record (entityEntries) - the list row is shown
   // immediately, the change tree streams in when the by-id fetch resolves.
   if (props.fetchDetail && item.id) {
     const requestedId = item.id
@@ -435,7 +438,7 @@ onMounted(() => {
   min-height: 0;
 }
 
-/* Filter toolbar — flush, wraps gracefully; the count is pushed to the far
+/* Filter toolbar - flush, wraps gracefully; the count is pushed to the far
    right of the first row (or wraps below on narrow widths). */
 .t-audit-timeline__filters {
   display: flex;

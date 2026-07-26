@@ -263,11 +263,11 @@ public class AgentEvaluatorTests
         // Act
         await _evaluator.EvaluateBatchAsync(cases);
 
-        // Assert — 验证 Insert 时状态为 running
+        // Assert - 验证 Insert 时状态为 running
         insertStatus.ShouldBe("Running");
         insertCaseCount.ShouldBe(1);
 
-        // Assert — 验证 Update 时状态为 completed（对象已被修改，直接验证最终状态）
+        // Assert - 验证 Update 时状态为 completed（对象已被修改，直接验证最终状态）
         _repositoryMock.Verify(r => r.UpdateAsync(It.Is<EvaluationRun>(run =>
             run.Status == EvaluationRunStatus.Completed && run.PassedCount == 1), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -304,7 +304,7 @@ public class AgentEvaluatorTests
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
 
-        // Assert — 忽略大小写的精确匹配
+        // Assert - 忽略大小写的精确匹配
         result.Passed.ShouldBeTrue();
         result.Score.ShouldBe(1.0);
     }
@@ -330,7 +330,7 @@ public class AgentEvaluatorTests
     [Fact]
     public async Task EvaluateAsync_LlmJudgeMarkdownWrapped_IsParsed()
     {
-        // LLM responses often wrap JSON in markdown fences — must still parse
+        // LLM responses often wrap JSON in markdown fences - must still parse
         var evaluationCase = new EvaluationCase { Input = "Q", ExpectedOutput = "Paris" };
 
         _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
@@ -347,7 +347,7 @@ public class AgentEvaluatorTests
     [Fact]
     public async Task EvaluateAsync_ExactMatch_DoesNotCallLlmJudge()
     {
-        // Exact match is a zero-cost fast path — LLM judge must not be invoked
+        // Exact match is a zero-cost fast path - LLM judge must not be invoked
         var evaluationCase = new EvaluationCase { Input = "What is 2+2?", ExpectedOutput = "4" };
         _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "4" }));

@@ -1,6 +1,6 @@
 <template>
   <!--
-    Shares — active share-link management. Read + revoke only: shares are
+    Shares - active share-link management. Read + revoke only: shares are
     created from the file detail / user API, never here. The list is paged
     via `shares.fetch` (filters: fileId / creatorId / includeExpired /
     includeDisabled). Per-row Revoke + batch Revoke both call

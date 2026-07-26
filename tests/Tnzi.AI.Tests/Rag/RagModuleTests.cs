@@ -4,7 +4,7 @@ using Tnzi.Modules;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// AIRagModule 单元测试 — 验证模块属性和配置
+/// AIRagModule 单元测试 - 验证模块属性和配置
 /// </summary>
 public class RagModuleTests
 {

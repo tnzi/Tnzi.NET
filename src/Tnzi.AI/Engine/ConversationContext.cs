@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// 对话上下文 — 纯 JSON 序列化，无反射
+/// 对话上下文 - 纯 JSON 序列化，无反射
 /// </summary>
 public class ConversationContext
 {

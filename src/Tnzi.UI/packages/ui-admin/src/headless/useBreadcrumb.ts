@@ -4,11 +4,11 @@ import { useAdminBreadcrumbStore, type BreadcrumbItem } from '../stores/useAdmin
 import { isMultiInstanceRoute, multiInstanceKey } from '../stores/useAdminTabStore'
 
 /**
- * Per-instance breadcrumb key for a route — identical logic to the tab store's
+ * Per-instance breadcrumb key for a route - identical logic to the tab store's
  * tab id (param routes → `route.path`, query-agnostic; multiTab+query →
  * `fullPath`; otherwise route name). Guarantees a contribution written by
  * {@link useBreadcrumbTrail} / {@link useBreadcrumbLabel} targets the SAME record
- * instance the breadcrumb component reads back — so two KeepAlive detail tabs
+ * instance the breadcrumb component reads back - so two KeepAlive detail tabs
  * (customer A vs B) keep distinct trails.
  */
 export function breadcrumbRouteKey(route: {
@@ -30,7 +30,7 @@ export function breadcrumbRouteKey(route: {
  * Shared plumbing: resolve the current route key + store once at call time
  * (mirrors `useTabTitle`), run the caller's `apply`, and auto-clear the entry
  * when the calling scope disposes. No-op (swallowed) when there is no router /
- * pinia — e.g. isolated unit tests that mount a page without a shell.
+ * pinia - e.g. isolated unit tests that mount a page without a shell.
  */
 function useBreadcrumbContribution(
   apply: (store: ReturnType<typeof useAdminBreadcrumbStore>, key: string) => void,
@@ -49,7 +49,7 @@ function useBreadcrumbContribution(
 
 /**
  * Declare the CURRENT detail page's full breadcrumb trail from a reactive
- * source — the escape hatch for cross-entity drill-downs the static route tree
+ * source - the escape hatch for cross-entity drill-downs the static route tree
  * can't express.
  *
  * The route tree is flat (`clients/:id` and `matters/:id` are siblings), so a
@@ -85,7 +85,7 @@ export function useBreadcrumbTrail(source: MaybeRefOrGetter<BreadcrumbItem[] | n
 
 /**
  * Override just the trailing (leaf) breadcrumb crumb's label from a reactive
- * source — the breadcrumb twin of `useTabTitle`.
+ * source - the breadcrumb twin of `useTabTitle`.
  *
  * A detail route inherits the static list `meta.title` (e.g. "Clients"), so the
  * breadcrumb leaf reads "Clients" instead of the record. Calling

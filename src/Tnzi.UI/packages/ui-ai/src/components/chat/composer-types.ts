@@ -2,7 +2,7 @@
  * Shared composer types for TThreadComposer / TLandingPage.
  *
  * `ComposerAction` lets consumers declaratively add toolbar buttons to the
- * composer without forking the component — the primary answer to
+ * composer without forking the component - the primary answer to
  * "the input bar should allow placing more buttons".
  */
 

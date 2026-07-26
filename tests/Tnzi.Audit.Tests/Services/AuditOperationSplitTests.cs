@@ -2,7 +2,7 @@
 namespace Tnzi.Audit.Tests.Services;
 
 /// <summary>
-/// Logs / Operations 语义分流测试 — IsWriteOperation / HttpMethod 查询过滤。
+/// Logs / Operations 语义分流测试 - IsWriteOperation / HttpMethod 查询过滤。
 /// Logs 视图（IsWriteOperation=null）返回全部请求级审计；
 /// Operations 视图（IsWriteOperation=true）仅返回 POST/PUT/PATCH/DELETE 变更类操作，
 /// 且按 query-via-POST 惯例排除路径以 "/query" 结尾的 POST 列表查询（纯读）。

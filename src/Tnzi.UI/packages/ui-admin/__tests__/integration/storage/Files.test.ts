@@ -94,7 +94,7 @@ async function flush(): Promise<void> {
   await new Promise((r) => setTimeout(r, 20))
 }
 
-describe('Files page — Finder file manager', () => {
+describe('Files page - Finder file manager', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     getTree.mockClear()

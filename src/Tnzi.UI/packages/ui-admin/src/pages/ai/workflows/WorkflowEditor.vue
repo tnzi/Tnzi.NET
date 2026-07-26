@@ -1,9 +1,9 @@
 <template>
   <!--
-    WorkflowEditor — heavyweight visual editor.
+    WorkflowEditor - heavyweight visual editor.
 
     Layout:
-      - Top header:     TDetailLayout plain — title (workflow name) + back + action buttons
+      - Top header:     TDetailLayout plain - title (workflow name) + back + action buttons
       - View tabs:      visual / JSON toggle rendered inside body (below header)
       - Left panel:     node palette ("add node by type") + node list (select/delete/duplicate)
       - Center canvas:  Vue Flow with drag-to-move + drag-to-connect.
@@ -13,7 +13,7 @@
                         OR workflow metadata + stats (when nothing is selected).
 
     The JSON view stays available as an advanced fall-through tab, but the
-    visual editor is now the primary path — `addStep` builds typed templates
+    visual editor is now the primary path - `addStep` builds typed templates
     and the property form mutates draft.steps in place so the round-trip
     matches what the backend executors expect.
   -->
@@ -59,7 +59,7 @@
 
     <template #default>
       <div class="t-wf-editor">
-        <!-- View-mode tabs (visual / JSON) — rendered inside body so they stay with the content -->
+        <!-- View-mode tabs (visual / JSON) - rendered inside body so they stay with the content -->
         <div class="t-wf-editor__view-bar">
           <NTabs
             v-model:value="viewMode"
@@ -153,7 +153,7 @@
               @connect="onCanvasConnect"
             >
               <!--
-                Custom default-node template — mirrors the palette: an mdi
+                Custom default-node template - mirrors the palette: an mdi
                 icon tinted with the node-type color sits to the left of the
                 step id label. `Handle` (re-exported from @vue-flow/core via
                 @tnzi/ui-ai) provides the drag-to-connect source/target dots.
@@ -401,6 +401,7 @@
     </div>
 
         <!-- Run modal -->
+        <TOverlayTheme>
         <NModal v-model:show="runModal.show" :title="t('actions.run')" preset="card" size="small" class="max-w-560px">
           <NForm label-placement="left" label-width="100px">
             <NFormItem :label="t('run.input')" required>
@@ -421,8 +422,10 @@
             </div>
           </template>
         </NModal>
+        </TOverlayTheme>
 
         <!-- Validate result modal -->
+        <TOverlayTheme>
         <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" size="small" class="max-w-520px">
           <NAlert
             v-if="validateModal.result"
@@ -443,6 +446,7 @@
             </div>
           </template>
         </NModal>
+        </TOverlayTheme>
       </div>
     </template>
   </TDetailHost>
@@ -470,6 +474,7 @@ import {
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
+import { TOverlayTheme } from '../../../components/overlay'
 import { useDetail } from '../../../headless/useDetail'
 import { useTabTitle } from '../../../headless/useTabTitle'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
@@ -496,14 +501,15 @@ import type {
 // 0.2.72+ (B4): enum value routed through ai-bridge so the page stays
 // clean under the `no-restricted-imports` guard.
 import { WorkflowExecutionMode } from '../../../services/bridges/ai-bridge'
-// Re-exported from @tnzi/ui-ai → @vue-flow/core. Pulling them in here is fine
-// because this route component is itself lazy-loaded (route-level chunk), so
-// chat pages don't pay the vue-flow cost just by sharing the @tnzi/ui-ai
-// barrel.
-import { Handle, Position, type NodeProps } from '@tnzi/ui-ai'
+// Re-exported from @tnzi/ui-ai/workflow → @vue-flow/core. The `/workflow`
+// subpath (not the root barrel) is what keeps vue-flow out of chat: the root
+// used to eagerly import `@vue-flow/core` for these two symbols, so anyone
+// touching `@tnzi/ui-ai` at all paid for the whole canvas. This route component
+// is itself lazy-loaded, so the cost stays in its own chunk.
+import { Handle, Position, type NodeProps } from '@tnzi/ui-ai/workflow'
 
 // `@vue-flow/core` lives inside `@tnzi/ui-ai`'s dependency tree but isn't a
-// direct ui-admin dep — type the canvas inputs structurally so we can keep
+// direct ui-admin dep - type the canvas inputs structurally so we can keep
 // the canvas import lazy without pulling vue-flow's type declarations into
 // the ui-admin typecheck pass.
 interface FlowNode {
@@ -554,7 +560,7 @@ const LoadingStub = {
 }
 
 const WorkflowCanvas = defineAsyncComponent({
-  loader: () => import('@tnzi/ui-ai').then((m) => m.TWorkflowCanvas),
+  loader: () => import('@tnzi/ui-ai/workflow').then((m) => m.TWorkflowCanvas),
   loadingComponent: LoadingStub,
   delay: 200,
   timeout: 30000,
@@ -568,7 +574,7 @@ const { can } = usePermissionGuard()
 // unusable on touch; overlay a read-only scrim + guidance while keeping the
 // left node list (view/select) usable. Desktop canvas is untouched.
 const { isSm } = useBreakpoint()
-// Guarded message — ui-admin shells don't always wrap with NMessageProvider
+// Guarded message - ui-admin shells don't always wrap with NMessageProvider
 // (and unit tests mount bare), so `useSafeMessage` no-ops without a provider.
 const message = useSafeMessage()
 
@@ -585,7 +591,7 @@ const workflowId = computed<string | undefined>(() => {
 // --- View mode --------------------------------------------------------------
 const viewMode = ref<'visual' | 'json'>('visual')
 
-// The single detail engine, page mode — this editor is a sectionless detail
+// The single detail engine, page mode - this editor is a sectionless detail
 // page, so `useDetail` only supplies `TDetailHost` its page-mode state (no
 // sections, no overlay hash). The workflow record is held in `workflow` below.
 const detail = useDetail({ mode: 'page' })
@@ -748,7 +754,7 @@ function selectStep(stepId: string | null | undefined): void {
  *
  * Sync `selectedStepId` and rewrite any sibling `dependsOn` references that
  * pointed to the old id so the DAG stays internally consistent. Uniqueness is
- * not enforced here — the backend `validate` endpoint flags duplicates on save.
+ * not enforced here - the backend `validate` endpoint flags duplicates on save.
  */
 function onStepIdInput(newId: string): void {
   const step = selectedStep.value
@@ -774,7 +780,7 @@ function markDirty(): void {
 }
 
 function ensureStepShape(steps: WorkflowStepDto[]): WorkflowStepDto[] {
-  // Defensive normalization on load — older workflow definitions may not have
+  // Defensive normalization on load - older workflow definitions may not have
   // a stepId or a configuration bag. Without a stepId the canvas can't render
   // and `dependsOn` references won't resolve, so we synthesize one.
   return steps.map((step, idx) => {
@@ -933,7 +939,7 @@ const vfEdges = computed<FlowEdge[]>(() => {
 
 // --- Canvas event handlers --------------------------------------------------
 function onCanvasNodeClick(event: unknown): void {
-  // Vue Flow's node-click emits `{ node: { id } }` — we don't depend on the
+  // Vue Flow's node-click emits `{ node: { id } }` - we don't depend on the
   // full type definition (kept structural here for tree-shaking), so we narrow
   // defensively.
   const node = (event as { node?: { id?: string } } | undefined)?.node
@@ -1099,7 +1105,7 @@ void loadAgents()
 </script>
 
 <style scoped>
-/* Inner body wrapper — fills TDetailLayout's scrollable body region */
+/* Inner body wrapper - fills TDetailLayout's scrollable body region */
 .t-wf-editor {
   display: flex;
   flex-direction: column;
@@ -1299,7 +1305,7 @@ void loadAgents()
   font-weight: 400;
   color: var(--tnzi-base-text-muted);
 }
-/* Inside the `#node-default` custom node — icon + label aligned + tight gap.
+/* Inside the `#node-default` custom node - icon + label aligned + tight gap.
    `min-width: 0` on the flex child below lets ellipsis trigger inside the
    200px node frame; without it the label would still overflow.
    Tooltip on hover (`title` attr on container) surfaces the full id. */

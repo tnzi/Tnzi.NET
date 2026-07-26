@@ -7,6 +7,10 @@ public class SkillEntityConfiguration : EntityTypeConfigurationBase<SkillEntity,
 {
     public override void Configure(EntityTypeBuilder<SkillEntity> builder)
     {
+        // 显式基名 "Skill"（去掉类名的 Entity 后缀）；TableNamePrefixConfiguration
+        // 随后叠加 AISkillsModule.TableNamePrefix "AI" → 最终表名 AI_Skill。
+        builder.ToTable("Skill");
+
         builder.Property(e => e.Slug)
             .IsRequired()
             .HasMaxLength(64);

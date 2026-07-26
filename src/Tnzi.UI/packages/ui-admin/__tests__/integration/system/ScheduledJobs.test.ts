@@ -7,13 +7,22 @@ import ScheduledJobs from '../../../src/pages/system/ScheduledJobs.vue'
 const mockTrigger = vi.fn(async () => undefined)
 const mockDelete = vi.fn(async () => undefined)
 const mockFetch = vi.fn(async () => ({
-  items: [] as never[],
-  totalCount: 0,
+  items: [
+    {
+      id: 'nightly-sync',
+      cron: '0 3 * * *',
+      queue: 'default',
+      lastJobState: 'Failed',
+      error: 'Connection refused',
+      removed: false,
+    },
+  ] as never[],
+  totalCount: 1,
   pageIndex: 1,
   pageSize: 20,
 }))
 
-// Mock the client composable — the page now calls useAdminClient() to get
+// Mock the client composable - the page now calls useAdminClient() to get
 // an HttpClient for the bridge. Tests don't need a real client because
 // createSystemBridge is fully mocked below, but the composable must return
 // something truthy so the require-client check at useAdminClient() passes.
@@ -23,7 +32,6 @@ vi.mock('../../../src/plugin/client', () => ({
 
 vi.mock('../../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
-    menus: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), reorder: vi.fn() },
     settings: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     accessLogs: { fetch: vi.fn() },
     scheduledJobs: {
@@ -60,13 +68,17 @@ describe('ScheduledJobs page (Phase 3.16)', () => {
     vi.clearAllMocks()
   })
 
-  it('mounts and attempts to fetch scheduled jobs on load', async () => {
+  it('renders each job as a row card carrying its cron and failure reason', async () => {
     const wrapper = mount(ScheduledJobs, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    // fetch was called (even though stub returns empty list)
     expect(mockFetch).toHaveBeenCalled()
+    expect(wrapper.findAll('.t-item-card')).toHaveLength(1)
+    expect(wrapper.text()).toContain('nightly-sync')
+    expect(wrapper.text()).toContain('0 3 * * *')
+    // The reason a job failed is the field an admin opens this page for; the
+    // old table had no column for it at all.
+    expect(wrapper.find('.sj-error').text()).toContain('Connection refused')
   })
 
   it('hides Create button (Hangfire jobs are registered in code, not via admin)', async () => {

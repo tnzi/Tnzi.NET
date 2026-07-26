@@ -39,6 +39,9 @@ export default defineConfig({
         locale: resolve(__dirname, 'src/locale/index.ts'),
         shell: resolve(__dirname, 'src/shell/index.ts'),
         utils: resolve(__dirname, 'src/utils/index.ts'),
+        // Everything that touches @vue-flow/core. A dedicated entry keeps the
+        // heavy dep reachable only through `@tnzi/ui-ai/workflow`.
+        workflow: resolve(__dirname, 'src/workflow/index.ts'),
         // Declaring `themes` as a top-level entry forces rollup to
         // preserve the named re-exports in `themes/index.ts`
         // (applyAiTheme / lightTokens / darkTokens / AiThemeTokens).

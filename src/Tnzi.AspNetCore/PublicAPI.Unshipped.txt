@@ -33,3 +33,4 @@ virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpd
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.UpdatePermission.get -> string!
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!
 static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.RunPostMigrationStartupTasksAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
+override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.Priority.get -> int

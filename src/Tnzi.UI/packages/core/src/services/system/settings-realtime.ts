@@ -1,10 +1,11 @@
-import { HubConnectionBuilder, LogLevel, type HubConnection } from '@microsoft/signalr';
+import type { HubConnection } from '@microsoft/signalr';
+import { createHubClient, type HubClientOptions } from '../signalr/hub-client';
 
 /**
  * Payload of the `Settings.Changed` SignalR event, broadcast by the backend
  * (Tnzi.System `SettingChangedEventHandler`) to ALL connected clients whenever a
  * Global-scope setting is written. Carries only the changed key (never the value,
- * so no secret leaks) — clients decide by key prefix whether to hot-refresh the
+ * so no secret leaks) - clients decide by key prefix whether to hot-refresh the
  * affected config (e.g. `Chat:*` → re-fetch chat config, `Appearance:AdminTheme`
  * → reload the global theme) without a manual page reload.
  */
@@ -15,12 +16,7 @@ export interface SettingsChangedPayload {
   isRemoval: boolean;
 }
 
-export interface SettingsRealtimeClientOptions {
-  /** Hub URL, e.g. `/hubs/settings` (relative — resolved against origin / vite proxy). */
-  url: string;
-  /** Returns the current JWT (called on each (re)connect). */
-  accessTokenFactory: () => string;
-}
+export type SettingsRealtimeClientOptions = HubClientOptions;
 
 type SettingsEvent = 'Settings.Changed';
 
@@ -34,23 +30,10 @@ export interface SettingsRealtimeClient {
 }
 
 /**
- * Generic realtime client for the `/hubs/settings` hub — mirrors
- * `createChatSignalRClient` but for deployment-config change notifications.
- * Auto-reconnects; the token is read on every (re)connect via `accessTokenFactory`.
+ * Realtime client for the `/hubs/settings` hub - deployment-config change
+ * notifications. Shares the connection plumbing (auto-reconnect, state-safe
+ * `start()`) with every other framework hub via {@link createHubClient}.
  */
 export function createSettingsRealtimeClient(opts: SettingsRealtimeClientOptions): SettingsRealtimeClient {
-  const connection = new HubConnectionBuilder()
-    .withUrl(opts.url, { accessTokenFactory: opts.accessTokenFactory })
-    .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-    .configureLogging(LogLevel.Warning)
-    .build();
-
-  return {
-    connection,
-    isConnected: () => (connection.state as unknown as string) === 'Connected',
-    async start() { if ((connection.state as unknown as string) !== 'Connected') await connection.start(); },
-    async stop() { await connection.stop(); },
-    on(event, handler) { connection.on(event, handler); },
-    off(event, handler) { connection.off(event, handler); },
-  };
+  return createHubClient<SettingsEvent>(opts);
 }

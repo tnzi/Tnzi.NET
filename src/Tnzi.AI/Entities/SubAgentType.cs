@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 子 Agent 类型定义实体 — 持久化 SubAgentRegistry 中的自定义类型
+/// 子 Agent 类型定义实体 - 持久化 SubAgentRegistry 中的自定义类型
 /// </summary>
 public class SubAgentType : AuditedEntity<Guid>, IMultiTenant
 {

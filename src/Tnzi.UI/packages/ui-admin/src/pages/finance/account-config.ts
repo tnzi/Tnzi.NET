@@ -1,9 +1,11 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { AccountRootType, AccountSystemRole, CashFlowActivity } from '../../services/bridges/finance-bridge'
 import { amountCell, fmtAmount } from './money'
+import TMoney from '../../components/finance/TMoney.vue'
 /** All-optional row shape (house pattern) so ColumnDef<AccountRow> stays
  * assignable to the ColumnDef<Record<string, unknown>> the CRUD shell expects.
  * Enum fields carry the backend PascalCase member string (JsonStringEnumConverter). */
@@ -85,7 +87,7 @@ export const accountColumns: ColumnDef<AccountRow>[] = [
     title: 'columns.name',
     minWidth: 200,
     render: (row) =>
-      h('span', { style: { paddingLeft: `${(row._depth ?? 0) * 16}px`, fontWeight: row.isGroup ? 600 : 400 } }, row.name ?? '—'),
+      h('span', { style: { paddingLeft: `${(row._depth ?? 0) * 16}px`, fontWeight: row.isGroup ? 600 : 400 } }, row.name ?? EMPTY_DASH),
   },
   {
     key: 'rootType',
@@ -95,25 +97,25 @@ export const accountColumns: ColumnDef<AccountRow>[] = [
       h(TStatusBadge, {
         value: row.rootType ?? '',
         type: ROOT_TYPE_BADGE[row.rootType ?? ''] ?? 'default',
-        label: row.rootType ? ROOT_TYPE_LABELS[row.rootType] ?? String(row.rootType) : '—',
+        label: row.rootType ? ROOT_TYPE_LABELS[row.rootType] ?? String(row.rootType) : EMPTY_DASH,
       }),
   },
-  { key: 'subType', title: 'columns.subType', width: 120, render: (row) => row.subType ?? '—' },
+  { key: 'subType', title: 'columns.subType', width: 120, render: (row) => row.subType ?? EMPTY_DASH },
   {
     key: 'isGroup',
     title: 'columns.isGroup',
     width: 100,
     render: (row) =>
-      row.isGroup ? h(TStatusBadge, { value: 1, type: 'default', label: 'Group' }) : '—',
+      row.isGroup ? h(TStatusBadge, { value: 1, type: 'default', label: 'Group' }) : EMPTY_DASH,
   },
   {
     key: 'systemRole',
     title: 'columns.systemRole',
     minWidth: 160,
     mobileHidden: true,
-    render: (row) => (row.systemRole ? SYSTEM_ROLE_LABELS[row.systemRole] ?? String(row.systemRole) : '—'),
+    render: (row) => (row.systemRole ? SYSTEM_ROLE_LABELS[row.systemRole] ?? String(row.systemRole) : EMPTY_DASH),
   },
-  { key: 'currency', title: 'columns.currency', width: 96, mobileHidden: true, render: (row) => row.currency ?? '—' },
+  { key: 'currency', title: 'columns.currency', width: 96, mobileHidden: true, render: (row) => row.currency ?? EMPTY_DASH },
   {
     key: 'balance',
     title: 'columns.balance',
@@ -121,7 +123,7 @@ export const accountColumns: ColumnDef<AccountRow>[] = [
     // Base currency (an account restricted to EUR still reports its base-currency
     // balance) - so render a plain amount, never the account's own currency symbol.
     // Signed: debit-positive, so liability/equity/income accounts read negative.
-    render: (row) => (row.isGroup || row.balance == null ? '—' : amountCell(fmtAmount(row.balance))),
+    render: (row) => (row.isGroup || row.balance == null ? EMPTY_DASH : h(TMoney, { value: row.balance })),
   },
   {
     key: 'isActive',
@@ -151,26 +153,43 @@ export const accountColumns: ColumnDef<AccountRow>[] = [
  * role is selected (clearing the role in the same edit re-enables it - the
  * backend guard keys on the resulting state, not the original).
  */
+/**
+ * An account is identified, then classified, then wired into the reports.
+ * Keeping those three apart matters more here than on most forms: `rootType` /
+ * `parentId` / `isGroup` decide where the account sits in the chart, while
+ * `systemRole` / `cashFlowActivity` decide which statements pick it up. Mixing
+ * them in one column is how a posting account ends up in the wrong section.
+ */
+export const accountFormSections: FormSchemaSection[] = [
+  { key: 'basics', labelKey: 'admin.shared.formSections.basics', label: 'Basics', icon: 'mdi:tag-outline' },
+  { key: 'classification', labelKey: 'admin.shared.formSections.classification', label: 'Classification', icon: 'mdi:file-tree-outline' },
+  { key: 'reporting', labelKey: 'admin.shared.formSections.behaviour', label: 'Reporting', icon: 'mdi:chart-box-outline' },
+  { key: 'notes', labelKey: 'admin.shared.formSections.notes', label: 'Notes', icon: 'mdi:note-text-outline' },
+]
+
 export const accountFormSchema: FormSchemaItem[] = [
-  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', required: true },
-  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
+  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', required: true, section: 'basics' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true, section: 'basics' },
+  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'finance-is-active', section: 'basics' },
   {
     key: 'rootType',
     labelKey: 'form.rootType',
     label: 'Root Type',
     type: 'finance-root-type',
     required: true,
+    section: 'classification',
     options: Object.entries(ROOT_TYPE_LABELS).map(([value, label]) => ({ label, value })),
   },
-  { key: 'parentId', labelKey: 'form.parentId', label: 'Parent Account', type: 'finance-parent' },
-  { key: 'isGroup', labelKey: 'form.isGroup', label: 'Group Account', type: 'finance-is-group' },
-  { key: 'subType', labelKey: 'form.subType', label: 'Sub Type', type: 'text' },
-  { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
+  { key: 'parentId', labelKey: 'form.parentId', label: 'Parent Account', type: 'finance-parent', section: 'classification' },
+  { key: 'isGroup', labelKey: 'form.isGroup', label: 'Group Account', type: 'finance-is-group', section: 'classification' },
+  { key: 'subType', labelKey: 'form.subType', label: 'Sub Type', type: 'text', section: 'classification' },
+  { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text', section: 'classification' },
   {
     key: 'systemRole',
     labelKey: 'form.systemRole',
     label: 'System Role',
     type: 'select',
+    section: 'reporting',
     options: [
       { label: 'None', value: '' },
       ...Object.entries(SYSTEM_ROLE_LABELS).map(([value, label]) => ({ label, value })),
@@ -181,11 +200,11 @@ export const accountFormSchema: FormSchemaItem[] = [
     labelKey: 'form.cashFlowActivity',
     label: 'Cash Flow Activity',
     type: 'select',
+    section: 'reporting',
     options: [
       { label: 'None', value: '' },
       ...Object.entries(CASH_FLOW_LABELS).map(([value, label]) => ({ label, value })),
     ],
   },
-  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
-  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'finance-is-active' },
+  { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea', section: 'notes' },
 ]

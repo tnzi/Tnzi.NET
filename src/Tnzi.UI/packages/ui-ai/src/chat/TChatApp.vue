@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TChatApp — production-grade chat application shell with Manus-inspired design.
+ * TChatApp - production-grade chat application shell with Manus-inspired design.
  *
  * Drop-in chat product. Internally composes TCollapsibleSidebar +
  * TLandingPage + TThreadComposer + TArtifactPanel + TSettingsDialog +
@@ -17,8 +17,8 @@
  *   - Message thread with reasoning trace, copy/regenerate actions
  *   - Sticky composer (uses TThreadComposer)
  *   - Optional artifact panel (right pane)
- *   - Settings dialog (Account / Appearance / About — extensible)
- *   - Command palette (Cmd+K) — optional, off by default
+ *   - Settings dialog (Account / Appearance / About - extensible)
+ *   - Command palette (Cmd+K) - optional, off by default
  *   - Auto theme application (light/dark/system)
  *
  * See packages/ui-ai/playground/src/components/AppShell.vue for the
@@ -36,6 +36,7 @@ import type { LandingChip } from '@/shell/TLandingPage.vue'
 import TThreadComposer from '@/components/chat/TThreadComposer.vue'
 import TMessageResponse from '@/components/chat/TMessageResponse.vue'
 import { useAutoScroll } from '@/composables/useAutoScroll'
+import { useAiI18n } from '@/locale/index'
 import type { ComposerAction } from '@/components/chat/composer-types'
 import { DEFAULT_COMPOSER_ACCEPT } from '@/components/chat/composer-types'
 import TReasoningStage from '@/components/chat/TReasoningStage.vue'
@@ -47,9 +48,8 @@ import type {
 } from '@/components/artifact/TArtifactPanel.vue'
 import type { SettingsSection } from '@/composables/useSettingsDialog'
 import type { CommandAction } from '@/composables/useCommandPalette'
-import type { SidebarMode } from '@/composables/useSidebarState'
+import { useSidebarState, type SidebarMode } from '@/composables/useSidebarState'
 import type { ChatMessage } from '@/composables/useChat'
-import { applyAiTheme, lightTokens, darkTokens } from '@/themes/tokens'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -89,8 +89,15 @@ const props = withDefaults(
 
     // ── Sidebar nav ─────────────────────────────────────────────────────
     mainNav?: ReadonlyArray<NavItem>
-    /** Initial sidebar mode. */
+    /** Initial sidebar mode. Ignored when a persisted mode is found under
+     *  `sidebarStorageKey`. */
     initialSidebarMode?: SidebarMode
+    /** localStorage key the sidebar mode is remembered under. Pass `null` to
+     *  disable persistence and always start from `initialSidebarMode`. */
+    sidebarStorageKey?: string | null
+    /** Viewport width (px) below which the sidebar auto-collapses to hidden;
+     *  the previous desktop mode is restored on the way back up. */
+    sidebarMobileBreakpoint?: number
     /** Expanded sidebar width (px). */
     sidebarWidth?: number
     /** Section heading above the threads list. */
@@ -109,10 +116,10 @@ const props = withDefaults(
     // ── Chat thread ─────────────────────────────────────────────────────
     messages?: ReadonlyArray<ChatMessage>
     isStreaming?: boolean
-    /** Composer text — v-model'able. */
+    /** Composer text - v-model'able. */
     inputText?: string
     composerPlaceholder?: string
-    /** Extra composer toolbar buttons (declarative — "more buttons"). */
+    /** Extra composer toolbar buttons (declarative - "more buttons"). */
     composerActions?: ReadonlyArray<ComposerAction>
     /** Built-in voice (speech-to-text) mic button. Default true. */
     enableVoice?: boolean
@@ -145,7 +152,7 @@ const props = withDefaults(
     settingsSections?: ReadonlyArray<SettingsSection>
     settingsTitle?: string
     /** Account info for the built-in settings Account section (props-driven,
-     *  consumer-supplied — ui-ai stays business-agnostic). */
+     *  consumer-supplied - ui-ai stays business-agnostic). */
     accountName?: string
     accountEmail?: string
     accountRole?: string
@@ -156,8 +163,10 @@ const props = withDefaults(
 
     // ── Theme ───────────────────────────────────────────────────────────
     theme?: ThemePref
-    /** When true (default), TChatApp calls `applyAiTheme()` on mount and
-     *  whenever the theme changes. Set false if your app owns theme. */
+    /** When true (default), TChatApp toggles the `dark` class on the document
+     *  element on mount and whenever the resolved theme changes, which is what
+     *  switches the `--tnzi-ai-*` palette. Set false if your app owns the
+     *  document theme class. */
     autoApplyTheme?: boolean
 
     // ── Artifact ────────────────────────────────────────────────────────
@@ -174,6 +183,8 @@ const props = withDefaults(
     brandLogo: 'monogram',
     mainNav: () => [],
     initialSidebarMode: 'expanded',
+    sidebarStorageKey: 'tnzi-ui-ai-sidebar-mode',
+    sidebarMobileBreakpoint: 768,
     sidebarWidth: 300,
     threadsLabel: 'All tasks',
     newChatLabel: 'New chat',
@@ -250,7 +261,24 @@ const emit = defineEmits<{
 // Internal state
 // ---------------------------------------------------------------------------
 
-const sidebarMode = ref<SidebarMode>(props.initialSidebarMode)
+/* Sidebar state comes from useSidebarState so TChatApp inherits its two
+   behaviours for free: the mode is remembered in localStorage across reloads,
+   and dropping below `sidebarMobileBreakpoint` collapses the sidebar and
+   restores the previous desktop mode on the way back up. Writes go through
+   `setMode` (not the raw ref) so persistence happens on every change,
+   including the direct `sidebarMode = 'icon'` assignments in the template. */
+const t = useAiI18n()
+
+const sidebar = useSidebarState({
+  initialMode: props.initialSidebarMode,
+  storageKey: props.sidebarStorageKey,
+  mobileBreakpoint: props.sidebarMobileBreakpoint,
+})
+const sidebarMode = computed<SidebarMode>({
+  get: () => sidebar.mode.value,
+  set: (v) => sidebar.setMode(v),
+})
+
 const settingsOpen = ref(false)
 const commandPaletteOpen = ref(false)
 const copiedId = ref<string | null>(null)
@@ -268,17 +296,20 @@ const customSettingsSections = computed(() =>
   ),
 )
 
-const themeOptions: ReadonlyArray<{ id: ThemePref; label: string }> = [
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
-  { id: 'system', label: 'Follow System' },
-]
+const themeOptions = computed<ReadonlyArray<{ id: ThemePref; label: string }>>(() => [
+  { id: 'light', label: t.value.settings.themeLight },
+  { id: 'dark', label: t.value.settings.themeDark },
+  { id: 'system', label: t.value.settings.themeSystem },
+])
+
+/* The OS colour-scheme preference has to live in a ref: `matchMedia().matches`
+   is a plain boolean read, so a computed that calls it tracks nothing and
+   would never re-evaluate when the OS flips. The media-query listener below
+   writes this ref, which is what makes `theme="system"` reactive. */
+const prefersDark = ref(false)
 
 const resolvedTheme = computed<'light' | 'dark'>(() => {
-  if (props.theme === 'system') {
-    if (typeof window === 'undefined' || !window.matchMedia) return 'light'
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  }
+  if (props.theme === 'system') return prefersDark.value ? 'dark' : 'light'
   return props.theme === 'dark' ? 'dark' : 'light'
 })
 
@@ -288,10 +319,15 @@ const isDark = computed(() => resolvedTheme.value === 'dark')
 // Theme application
 // ---------------------------------------------------------------------------
 
+/* Applying the theme means toggling `.dark` on the document element: the
+   package stylesheet declares the full light and dark `--tnzi-ai-*` palettes
+   and switches between them off that class. TChatApp deliberately does NOT
+   push token values of its own here - writing inline variables would pin them
+   above any palette the host app configured on `:root`. Consumers who want
+   different colours call `applyAiTheme()` from `@tnzi/ui-ai/themes`. */
 function applyTheme(): void {
   if (!props.autoApplyTheme) return
   if (typeof document === 'undefined') return
-  applyAiTheme(isDark.value ? darkTokens : lightTokens)
   document.documentElement.classList.toggle('dark', isDark.value)
 }
 
@@ -302,16 +338,17 @@ watch(resolvedTheme, applyTheme, { immediate: false })
 // ---------------------------------------------------------------------------
 
 let systemMediaQuery: MediaQueryList | null = null
-function onSystemThemeChange(): void {
-  if (props.theme === 'system') applyTheme()
+function onSystemThemeChange(event: MediaQueryListEvent): void {
+  prefersDark.value = event.matches
 }
 
 onMounted(() => {
-  applyTheme()
   if (typeof window !== 'undefined' && window.matchMedia) {
     systemMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    prefersDark.value = systemMediaQuery.matches
     systemMediaQuery.addEventListener('change', onSystemThemeChange)
   }
+  applyTheme()
 })
 
 onBeforeUnmount(() => {
@@ -369,6 +406,13 @@ function cancelDeleteThread(): void {
   confirmingDeleteId.value = null
 }
 
+/* Timer handle so unmounting mid-confirmation does not leave a callback
+   pointing at a destroyed component's state. */
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null
+onBeforeUnmount(() => {
+  if (copyResetTimer != null) clearTimeout(copyResetTimer)
+})
+
 async function onCopyMessage(message: ChatMessage): Promise<void> {
   emit('copy', message.id)
   try {
@@ -376,11 +420,13 @@ async function onCopyMessage(message: ChatMessage): Promise<void> {
       await navigator.clipboard.writeText(message.content)
     }
     copiedId.value = message.id
-    setTimeout(() => {
+    if (copyResetTimer != null) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      copyResetTimer = null
       if (copiedId.value === message.id) copiedId.value = null
     }, 1500)
   } catch {
-    // ignore — clipboard may be unavailable in sandboxed contexts
+    // ignore - clipboard may be unavailable in sandboxed contexts
   }
 }
 
@@ -427,7 +473,7 @@ function onArtifactWidthChange(w: number): void {
             <button
               type="button"
               class="t-chat-app__brand-collapse"
-              aria-label="Collapse sidebar"
+              :aria-label="t.sidebar.collapse"
               @click="sidebarMode = 'icon'"
             >
               <Icon icon="lucide:panel-left" />
@@ -473,7 +519,7 @@ function onArtifactWidthChange(w: number): void {
               <button
                 type="button"
                 class="t-chat-app__section-act"
-                aria-label="New chat"
+                :aria-label="t.chat.newChat"
                 @click="emit('new-chat')"
               >
                 <Icon icon="lucide:plus" />
@@ -491,12 +537,12 @@ function onArtifactWidthChange(w: number): void {
                   type="button"
                   class="t-chat-app__thread-confirm t-chat-app__thread-confirm--yes"
                   @click="confirmDeleteThread(thread.id)"
-                >Yes</button>
+                >{{ t.common.yes }}</button>
                 <button
                   type="button"
                   class="t-chat-app__thread-confirm"
                   @click="cancelDeleteThread"
-                >No</button>
+                >{{ t.common.no }}</button>
               </template>
               <template v-else>
                 <button
@@ -511,7 +557,7 @@ function onArtifactWidthChange(w: number): void {
                   v-if="enableThreadDelete"
                   type="button"
                   class="t-chat-app__thread-del"
-                  aria-label="Delete conversation"
+                  :aria-label="t.chat.deleteConversation"
                   @click="askDeleteThread(thread.id)"
                 >
                   <Icon icon="lucide:x" />
@@ -530,7 +576,7 @@ function onArtifactWidthChange(w: number): void {
               v-if="enableSettings"
               type="button"
               class="t-chat-app__foot-btn"
-              aria-label="Settings"
+              :aria-label="t.sidebar.settings"
               @click="settingsOpen = true; emit('open-settings')"
             >
               <Icon icon="lucide:settings-2" />
@@ -539,7 +585,7 @@ function onArtifactWidthChange(w: number): void {
               v-if="enableCommandPalette"
               type="button"
               class="t-chat-app__foot-btn"
-              aria-label="Command palette"
+              :aria-label="t.sidebar.commandPalette"
               @click="commandPaletteOpen = true"
             >
               <Icon icon="lucide:command" />
@@ -555,7 +601,7 @@ function onArtifactWidthChange(w: number): void {
             <button
               type="button"
               class="t-chat-app__rail-brand"
-              aria-label="Expand sidebar"
+              :aria-label="t.sidebar.expand"
               @click="sidebarMode = 'expanded'"
             >
               <span class="t-chat-app__rail-brand-logo" aria-hidden="true">
@@ -581,7 +627,7 @@ function onArtifactWidthChange(w: number): void {
                 type="button"
                 class="t-chat-app__rail-btn"
                 :class="{ 'is-active': hasMessages || activeThreadId }"
-                aria-label="New chat"
+                :aria-label="t.chat.newChat"
                 @click="emit('new-chat')"
               >
                 <Icon icon="lucide:square-pen" />
@@ -603,7 +649,7 @@ function onArtifactWidthChange(w: number): void {
                 v-if="enableSettings"
                 type="button"
                 class="t-chat-app__rail-btn"
-                aria-label="Settings"
+                :aria-label="t.sidebar.settings"
                 @click="settingsOpen = true; emit('open-settings')"
               >
                 <Icon icon="lucide:settings-2" />
@@ -621,7 +667,7 @@ function onArtifactWidthChange(w: number): void {
           v-if="sidebarMode === 'hidden'"
           type="button"
           class="t-chat-app__topbar-toggle"
-          aria-label="Show sidebar"
+          :aria-label="t.sidebar.show"
           @click="sidebarMode = 'expanded'"
         >
           <Icon icon="lucide:panel-left-open" />
@@ -705,7 +751,7 @@ function onArtifactWidthChange(w: number): void {
                     <span
                       v-if="msg.isStreaming"
                       class="t-chat-app__msg-streaming"
-                      aria-label="streaming"
+                      :aria-label="t.chat.streaming"
                     >●</span>
                   </div>
 
@@ -718,14 +764,14 @@ function onArtifactWidthChange(w: number): void {
 
                   <div v-if="msg.status === 'error'" class="t-chat-app__msg-error">
                     <Icon icon="lucide:circle-alert" class="t-chat-app__msg-error-icon" />
-                    <span>{{ msg.error || 'Something went wrong. Please try again.' }}</span>
+                    <span>{{ msg.error || t.chat.errorGeneric }}</span>
                     <button
                       type="button"
                       class="t-chat-app__msg-error-retry"
                       @click="emit('regenerate', msg.id)"
                     >
                       <Icon icon="lucide:rotate-ccw" />
-                      Retry
+                      {{ t.common.retry }}
                     </button>
                   </div>
                   <template v-else>
@@ -736,7 +782,7 @@ function onArtifactWidthChange(w: number): void {
                     />
                     <div v-if="msg.status === 'stopped'" class="t-chat-app__msg-stopped">
                       <span class="t-chat-app__msg-stopped-mark" aria-hidden="true" />
-                      Generation stopped
+                      {{ t.chat.generationStopped }}
                     </div>
                   </template>
 
@@ -744,7 +790,7 @@ function onArtifactWidthChange(w: number): void {
                     <button
                       type="button"
                       class="t-chat-app__msg-action"
-                      :aria-label="copiedId === msg.id ? 'Copied' : 'Copy'"
+                      :aria-label="copiedId === msg.id ? t.chat.copied : t.chat.copy"
                       @click="onCopyMessage(msg)"
                     >
                       <Icon :icon="copiedId === msg.id ? 'lucide:check' : 'lucide:copy'" />
@@ -752,7 +798,7 @@ function onArtifactWidthChange(w: number): void {
                     <button
                       type="button"
                       class="t-chat-app__msg-action"
-                      aria-label="Regenerate"
+                      :aria-label="t.chat.regenerate"
                       @click="emit('regenerate', msg.id)"
                     >
                       <Icon icon="lucide:refresh-ccw" />
@@ -760,7 +806,7 @@ function onArtifactWidthChange(w: number): void {
                     <button
                       type="button"
                       class="t-chat-app__msg-action"
-                      aria-label="Like"
+                      :aria-label="t.chat.like"
                       @click="emit('feedback', msg.id, 'positive')"
                     >
                       <Icon icon="lucide:thumbs-up" />
@@ -768,7 +814,7 @@ function onArtifactWidthChange(w: number): void {
                     <button
                       type="button"
                       class="t-chat-app__msg-action"
-                      aria-label="Dislike"
+                      :aria-label="t.chat.dislike"
                       @click="emit('feedback', msg.id, 'negative')"
                     >
                       <Icon icon="lucide:thumbs-down" />
@@ -800,7 +846,7 @@ function onArtifactWidthChange(w: number): void {
                   v-if="isStreaming"
                   type="button"
                   class="t-chat-app__stop-btn"
-                  aria-label="Stop"
+                  :aria-label="t.chat.stop"
                   @click="emit('stop')"
                 >
                   <Icon icon="lucide:square" />
@@ -830,7 +876,7 @@ function onArtifactWidthChange(w: number): void {
       :sections="effectiveSettingsSections"
       :title="settingsTitle"
     >
-      <!-- Default Account section — real profile card (props-driven) -->
+      <!-- Default Account section - real profile card (props-driven) -->
       <template #account>
         <slot name="settings-account">
           <div class="t-chat-app__account">
@@ -840,16 +886,16 @@ function onArtifactWidthChange(w: number): void {
                 :name="accountName"
                 :size="52"
                 color="var(--tnzi-ai-accent)"
-                text-color="#fff"
+                text-color="var(--tnzi-ai-on-accent)"
               />
               <div class="t-chat-app__account-meta">
-                <div class="t-chat-app__account-name">{{ accountName || 'User' }}</div>
+                <div class="t-chat-app__account-name">{{ accountName || t.account.fallbackName }}</div>
                 <div v-if="accountRole" class="t-chat-app__account-role">{{ accountRole }}</div>
               </div>
               <button
                 type="button"
                 class="t-chat-app__account-signout"
-                aria-label="Sign out"
+                :aria-label="t.account.signOut"
                 @click="emit('sign-out')"
               >
                 <Icon icon="lucide:log-out" />
@@ -858,16 +904,16 @@ function onArtifactWidthChange(w: number): void {
             <div v-if="accountEmail || accountRole" class="t-chat-app__account-details">
               <div v-if="accountEmail" class="t-chat-app__account-row">
                 <div class="t-chat-app__account-row-text">
-                  <span class="t-chat-app__account-row-label">Email</span>
-                  <span class="t-chat-app__account-row-sub">Your login email address</span>
+                  <span class="t-chat-app__account-row-label">{{ t.account.email }}</span>
+                  <span class="t-chat-app__account-row-sub">{{ t.account.emailHint }}</span>
                 </div>
                 <span class="t-chat-app__account-row-value">{{ accountEmail }}</span>
               </div>
               <div v-if="accountEmail && accountRole" class="t-chat-app__account-divider" />
               <div v-if="accountRole" class="t-chat-app__account-row">
                 <div class="t-chat-app__account-row-text">
-                  <span class="t-chat-app__account-row-label">Role</span>
-                  <span class="t-chat-app__account-row-sub">Your system role and permissions</span>
+                  <span class="t-chat-app__account-row-label">{{ t.account.role }}</span>
+                  <span class="t-chat-app__account-row-sub">{{ t.account.roleHint }}</span>
                 </div>
                 <span class="t-chat-app__account-badge">{{ accountRole }}</span>
               </div>
@@ -880,7 +926,7 @@ function onArtifactWidthChange(w: number): void {
       <template #appearance>
         <slot name="settings-appearance" :theme="theme" :pick-theme="pickTheme">
           <div class="t-chat-app__settings-group">
-            <div class="t-chat-app__settings-label">Appearance</div>
+            <div class="t-chat-app__settings-label">{{ t.settings.appearance }}</div>
             <div class="t-chat-app__theme-tiles">
               <button
                 v-for="opt in themeOptions"
@@ -903,7 +949,7 @@ function onArtifactWidthChange(w: number): void {
           <div class="t-chat-app__settings-group">
             <div class="t-chat-app__settings-label">{{ brandName }}</div>
             <div class="t-chat-app__settings-desc">
-              Powered by Tnzi.NET — modular AI framework.
+              {{ t.settings.poweredBy }}
             </div>
           </div>
         </slot>
@@ -930,7 +976,7 @@ function onArtifactWidthChange(w: number): void {
 
 <style scoped>
 /* ===========================================================================
- *  TChatApp — Manus-aligned visual layer.
+ *  TChatApp - Manus-aligned visual layer.
  *
  *  Every dimension / colour / motion value below is sourced from the playground
  *  AppShell.vue reference (`packages/ui-ai/playground/src/components/AppShell.vue`).
@@ -971,8 +1017,8 @@ function onArtifactWidthChange(w: number): void {
   width: 32px;
   height: 32px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #3a3a3a 100%);
-  color: #ffffff;
+  background: var(--tnzi-ai-brand-mark-bg);
+  color: var(--tnzi-ai-brand-mark-fg);
   flex-shrink: 0;
 }
 .t-chat-app__brand-mark-svg {
@@ -1281,8 +1327,8 @@ function onArtifactWidthChange(w: number): void {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #3a3a3a 100%);
-  color: #ffffff;
+  background: var(--tnzi-ai-brand-mark-bg);
+  color: var(--tnzi-ai-brand-mark-fg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1530,7 +1576,7 @@ function onArtifactWidthChange(w: number): void {
   flex-shrink: 0;
 }
 
-/* Message action buttons — pill chips. Default rendering is icon-only (a
+/* Message action buttons - pill chips. Default rendering is icon-only (a
  * 30×30 circle); when content includes a label text span next to the icon
  * the chip widens to a pill via the cap classes below. */
 .t-chat-app__msg-actions {

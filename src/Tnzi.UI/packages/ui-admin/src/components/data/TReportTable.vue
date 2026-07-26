@@ -11,7 +11,7 @@
 
 <script setup lang="ts" generic="T extends Record<string, unknown>">
 /**
- * `TReportTable` — the financial-report table pattern collapsed into one wrapper
+ * `TReportTable` - the financial-report table pattern collapsed into one wrapper
  * over `TResponsiveTable`: declare columns with `money` / `total` roles and it
  * right-aligns + tabular-nums the money cells, formats them, renders an auto
  * totals row summing the `total` columns, and (optionally) emits a drill-down

@@ -24,7 +24,7 @@ public class ChannelManagerHostedService : IHostedService
 
     public async Task StartAsync(CancellationToken ct)
     {
-        // 订阅出站 — 将回复路由到对应 Adapter
+        // 订阅出站 - 将回复路由到对应 Adapter
         var adapterMap = _adapters.ToDictionary(a => a.Name, StringComparer.OrdinalIgnoreCase);
         await _bus.SubscribeOutboundAsync(async outbound =>
         {
@@ -55,7 +55,7 @@ public class ChannelManagerHostedService : IHostedService
 
         foreach (var adapter in _adapters)
         {
-            // Adapters are DI singletons — the container owns disposal. Only stop listening
+            // Adapters are DI singletons - the container owns disposal. Only stop listening
             // here; calling DisposeAsync would double-dispose (StopAsync + container teardown).
             await adapter.StopAsync(ct);
         }

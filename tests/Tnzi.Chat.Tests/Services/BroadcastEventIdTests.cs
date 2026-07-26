@@ -81,7 +81,7 @@ public class BroadcastEventIdTests : Integration.IntegrationTestBase
         _eventBus.Published.Count.ShouldBe(1);
         var evt = _eventBus.Published[0].ShouldBeOfType<ConversationMessageSentEvent>();
 
-        // IDs must be non-empty — old code captured Guid.Empty before SaveChangesAsync.
+        // IDs must be non-empty - old code captured Guid.Empty before SaveChangesAsync.
         evt.ConversationId.ShouldNotBe(Guid.Empty);
         evt.MessageId.ShouldNotBe(Guid.Empty);
 

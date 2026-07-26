@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TBackTop` — Phase H4 L6: thin Naive UI `NBackTop` wrapper that
+ * `TBackTop` - Phase H4 L6: thin Naive UI `NBackTop` wrapper that
  * watches the nearest scrollable ancestor (or window) and shows a
  * floating circular button in the bottom-right when scrolled past
  * a threshold. Click → smooth-scroll to top.

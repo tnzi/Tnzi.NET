@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// QuotaService 单元测试 — 覆盖 GetPagedListAsync 分页查询
+/// QuotaService 单元测试 - 覆盖 GetPagedListAsync 分页查询
 /// </summary>
 public class QuotaServiceTests
 {

@@ -25,3 +25,7 @@ global using Tnzi.Utilities;
 // Tnzi.Finance.Ai
 global using Tnzi.Finance.Ai.Options;
 global using Tnzi.Finance.Ai.Services;
+
+// Tnzi.Finance.Banking（IReceiptExtractor 契约随银行域走）
+global using Tnzi.Finance.Banking;
+global using Tnzi.Finance.Banking.Services.Interfaces;

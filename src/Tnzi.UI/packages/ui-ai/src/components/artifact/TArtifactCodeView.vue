@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TArtifactCodeView — Code view using Shiki
+ * TArtifactCodeView - Code view using Shiki
  */
 
 import { NButton, NTooltip } from 'naive-ui';

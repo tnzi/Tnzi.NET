@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TWorkspaceTopbar — Manus-style transparent chat top bar.
+ * TWorkspaceTopbar - Manus-style transparent chat top bar.
  *
  * 3-segment layout: workspace switcher on the left, a flex spacer in
  * the middle, and a right-side action cluster. All three regions are
@@ -12,7 +12,7 @@
  * Pass `#left` to fully replace it. Use `#right` for the action cluster
  * (Share / Publish / etc).
  *
- * The component is purely presentational — keeps its own bg transparent
+ * The component is purely presentational - keeps its own bg transparent
  * so it inherits the canvas color and reads as part of the main column.
  */
 import { Icon } from '@iconify/vue'

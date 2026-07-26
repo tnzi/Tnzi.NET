@@ -2,7 +2,7 @@
  * @tnzi/core/types/shared-ui
  *
  * Shared UI data structures used across all Tnzi UI packages.
- * These are pure DTOs — no Props/Emits contracts.
+ * These are pure DTOs - no Props/Emits contracts.
  */
 
 // ============================================

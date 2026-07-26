@@ -108,6 +108,52 @@ describe('EventBus', () => {
       bus.emit('keep', 'data');
       expect(handler).toHaveBeenCalledWith('data');
     });
+
+    it('a stale unsubscribe from before off() must not wipe later subscribers', () => {
+      // on() -> SetA; off() orphans SetA; on() installs a fresh SetB. Calling
+      // the first unsubscribe used to delete its handler from the orphaned
+      // SetA, see size 0, and drop the whole event key - silently taking SetB
+      // (and everyone in it) with it.
+      const first = vi.fn();
+      const second = vi.fn();
+
+      const offFirst = bus.on('test', first);
+      bus.off('test');
+      bus.on('test', second);
+
+      offFirst();
+      bus.emit('test', 'data');
+
+      expect(second).toHaveBeenCalledWith('data');
+      expect(first).not.toHaveBeenCalled();
+    });
+
+    it('unsubscribing one handler leaves its siblings subscribed', () => {
+      const h1 = vi.fn();
+      const h2 = vi.fn();
+      const off1 = bus.on('test', h1);
+      bus.on('test', h2);
+
+      off1();
+      bus.emit('test', 'data');
+
+      expect(h1).not.toHaveBeenCalled();
+      expect(h2).toHaveBeenCalledWith('data');
+    });
+
+    it('calling an unsubscribe twice does not throw or disturb others', () => {
+      const gone = vi.fn();
+      const kept = vi.fn();
+      const off = bus.on('test', gone);
+      bus.on('test', kept);
+
+      off();
+      expect(() => off()).not.toThrow();
+      bus.emit('test', 'data');
+
+      expect(gone).not.toHaveBeenCalled();
+      expect(kept).toHaveBeenCalledWith('data');
+    });
   });
 
   // ------------------------------------------

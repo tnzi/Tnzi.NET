@@ -4,7 +4,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// 流式管道集成测试 — 验证流式特有行为（chunk 顺序、工具调用交错、错误恢复、取消、元数据）
+/// 流式管道集成测试 - 验证流式特有行为（chunk 顺序、工具调用交错、错误恢复、取消、元数据）
 /// </summary>
 public class StreamingIntegrationTests
 {

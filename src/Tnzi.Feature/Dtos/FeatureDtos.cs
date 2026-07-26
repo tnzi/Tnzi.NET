@@ -53,7 +53,7 @@ public class FeatureDefinitionDto
     public string? Group { get; set; }
 
     /// <summary>
-    /// Origin of this feature row — "Database" (editable, persisted as
+    /// Origin of this feature row - "Database" (editable, persisted as
     /// <see cref="FeatureDefinition"/>) or "Code" (defined statically by
     /// an <c>IFeatureDefinitionProvider</c> implementation, not editable).
     /// </summary>

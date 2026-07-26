@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TAdminAutoBreadcrumb` — route-driven wrapper around `TAdminBreadcrumb`.
+ * `TAdminAutoBreadcrumb` - route-driven wrapper around `TAdminBreadcrumb`.
  *
  * Walks `route.matched`, skips the bare `/admin` shell root and any
  * route flagged `hideInMenu`, and emits the resulting items into the
@@ -9,7 +9,7 @@
  * stays visually consistent with the active menu row.
  *
  * Mirrors `soybean-admin-example/src/layouts/modules/global-breadcrumb/index.vue`
- * in spirit — soybean drives its breadcrumb from a separate
+ * in spirit - soybean drives its breadcrumb from a separate
  * `routeStore.breadcrumbs` builder, but the matched-array walk
  * produces the same result for a standard parent→child route tree.
  */
@@ -39,7 +39,7 @@ const router = useRouter()
 
 // Runtime breadcrumb contributions (record name / cross-entity drill trail).
 // Guarded: TAdminAutoBreadcrumb is mounted in unit tests WITHOUT pinia, so the
-// store may be unavailable — degrade to the pure route-derived walk.
+// store may be unavailable - degrade to the pure route-derived walk.
 let breadcrumbStore: ReturnType<typeof useAdminBreadcrumbStore> | null = null
 try {
   breadcrumbStore = useAdminBreadcrumbStore()
@@ -69,7 +69,7 @@ function resolveLabel(r: RouteLocationNormalizedLoaded['matched'][number]): stri
     (typeof r.name === 'string' ? r.name : r.path)
   if (props.translate) {
     const translated = props.translate(raw)
-    // When translate returns the key unchanged it missed — fall back to
+    // When translate returns the key unchanged it missed - fall back to
     // a humanised version of the key so the user never sees raw
     // dotted-i18n strings in the breadcrumb.
     if (translated && translated !== raw) return translated
@@ -117,7 +117,7 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
         // activeMenu target is frequently hidden from the sidebar on purpose
         // (a list surfaced only via a parent record, e.g. a client's Files) yet
         // is a legitimate breadcrumb ancestor. Filtering it collapsed the whole
-        // trail down to just the leaf ("Files") — the bug this branch fixes.
+        // trail down to just the leaf ("Files") - the bug this branch fixes.
         const crumbs = (resolved.matched as readonly MatchedRecord[])
           .filter((r) => r.path !== '/admin')
           .map(toCrumb)
@@ -126,7 +126,7 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
         return crumbs
       }
     } catch {
-      // Unknown activeMenu name — fall back to the plain matched walk.
+      // Unknown activeMenu name - fall back to the plain matched walk.
     }
   }
   // Plain matched walk: drop the shell root and intermediate hidden branch nodes.
@@ -141,7 +141,7 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
 
 const items = computed<TAdminBreadcrumbItem[]>(() => {
   // 1) A full runtime trail contributed by the page (cross-entity drill that the
-  //    flat route tree cannot express — e.g. Clients / <name> / File / <number>).
+  //    flat route tree cannot express - e.g. Clients / <name> / File / <number>).
   const trail = breadcrumbStore?.trailFor(currentKey.value)
   if (trail && trail.length) {
     return trail.map((c) => ({

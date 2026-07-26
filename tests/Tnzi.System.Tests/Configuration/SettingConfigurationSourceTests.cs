@@ -6,7 +6,7 @@ using Tnzi.Utilities;
 namespace Tnzi.System.Tests.Configuration;
 
 /// <summary>
-/// Tests for SettingConfigurationSource / Provider — verifies excluded-key filter,
+/// Tests for SettingConfigurationSource / Provider - verifies excluded-key filter,
 /// reload OnChange propagation, and encrypted-setting exclusion.
 /// </summary>
 public class SettingConfigurationSourceTests
@@ -56,7 +56,7 @@ public class SettingConfigurationSourceTests
         var p1 = source.Build(builder);
         var p2 = source.Build(builder);
 
-        // Reload contract requires a stable provider instance — SystemModule keeps
+        // Reload contract requires a stable provider instance - SystemModule keeps
         // a reference and triggers ReloadFromDatabaseAsync on the same provider.
         p1.ShouldBeSameAs(p2);
     }
@@ -135,7 +135,7 @@ public class SettingConfigurationSourceTests
         var source = builder.Sources.OfType<SettingConfigurationSource>().Single();
         builder.Build();
 
-        // Without AttachAsync, Reload must not throw — startup race tolerance.
+        // Without AttachAsync, Reload must not throw - startup race tolerance.
         await Should.NotThrowAsync(async () => await source.ReloadAsync());
     }
 

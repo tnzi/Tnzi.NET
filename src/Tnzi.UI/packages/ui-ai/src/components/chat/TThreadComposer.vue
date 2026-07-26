@@ -1,15 +1,20 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TThreadComposer — Manus-style sticky-bottom composer for in-progress
- * conversations.
+ * TThreadComposer - the package's single chat composer.
  *
  * Supports text + voice input, file attachments (paperclip / drag-drop /
- * paste-image), and declarative extra toolbar buttons via `composerActions`
- * — the answer to "the input bar should allow placing more buttons". All
+ * paste-image), and declarative extra toolbar buttons via `composerActions`,
+ * the answer to "the input bar should allow placing more buttons". All
  * built-ins are opt-in/opt-out so the composer stays as light or as rich as
  * the consumer needs. Extra clusters can still go in `#left` / `#right`, and
  * the send button is replaceable via `#send`.
+ *
+ * Two layouts, same component: `sticky` (default) pins it to the bottom of a
+ * scrolling thread, and `:sticky="false"` renders it as a static block, which
+ * is what TLandingPage embeds for its hero composer. Keeping one
+ * implementation is the point - the landing page used to carry a near-copy
+ * that had already started to drift.
  *
  * Fires `send(text, files)` on the built-in send button (when there is text
  * or at least one attachment) or on Enter without Shift (IME-safe).
@@ -17,8 +22,10 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { formatFileSize } from '@tnzi/core'
+import { useAiI18n, formatAiMessage } from '../../locale/index'
 import { useVoiceInput } from '../../composables/useVoiceInput'
 import { useComposerAttachments } from '../../composables/useComposerAttachments'
+import type { RejectedAttachment } from '../../composables/useComposerAttachments'
 import { useAutoGrowTextarea } from '../../composables/useAutoGrowTextarea'
 import { fileIconForName } from '../../lib/fileIcon'
 import type { ComposerAction } from './composer-types'
@@ -46,6 +53,14 @@ const props = withDefaults(
     maxFileSize?: number
     /** Voice recognition language (BCP-47). */
     voiceLang?: string
+    /** Pin to the bottom of the scrolling thread. Set false for a static
+     *  block (landing hero). */
+    sticky?: boolean
+    /** Render the send button in its ready state even with an empty input.
+     *  Purely visual: sending still requires text or an attachment. */
+    alwaysShowSend?: boolean
+    /** Max width of the composer box in pixels. Unbounded when omitted. */
+    maxWidth?: number
   }>(),
   {
     placeholder: 'Send a message',
@@ -57,6 +72,9 @@ const props = withDefaults(
     accept: DEFAULT_COMPOSER_ACCEPT,
     maxFileSize: 10 * 1024 * 1024,
     voiceLang: 'en-US',
+    sticky: true,
+    alwaysShowSend: false,
+    maxWidth: undefined,
   },
 )
 
@@ -64,7 +82,12 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   send: [text: string, files: File[]]
   action: [id: string]
+  /** One or more dropped/selected files were refused (currently only for
+   *  exceeding `maxFileSize`). */
+  'attachments-rejected': [rejected: readonly RejectedAttachment[]]
 }>()
+
+const t = useAiI18n()
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -72,17 +95,31 @@ useAutoGrowTextarea(textareaRef, computed(() => props.modelValue), 200)
 
 const {
   files,
+  rejected,
   isDragOver,
   addFiles,
   removeFile,
   clearFiles,
+  clearRejected,
   getPreviewUrl,
   isImageFile,
   onPaste,
   onDrop,
   onDragOver,
   onDragLeave,
-} = useComposerAttachments({ maxFileSize: props.maxFileSize })
+} = useComposerAttachments({
+  maxFileSize: props.maxFileSize,
+  onReject: (list) => emit('attachments-rejected', list),
+})
+
+const rejectedMessage = computed(() =>
+  rejected.value.length === 0
+    ? ''
+    : formatAiMessage(t.value.composer.filesTooLarge, {
+        size: formatFileSize(props.maxFileSize),
+        names: rejected.value.map((r) => r.file.name).join(', '),
+      }),
+)
 
 let voiceBase = ''
 const { isListening, isSupported, start: startVoice, stop: stopVoice } = useVoiceInput({
@@ -94,6 +131,14 @@ const { isListening, isSupported, start: startVoice, stop: stopVoice } = useVoic
 
 const canSend = computed(
   () => !props.disabled && (props.modelValue.trim().length > 0 || files.value.length > 0),
+)
+
+/* `alwaysShowSend` only changes how the button looks, never whether an empty
+   message can leave the composer. */
+const sendLooksReady = computed(() => canSend.value || (props.alwaysShowSend && !props.disabled))
+
+const boxStyle = computed(() =>
+  props.maxWidth == null ? undefined : { maxWidth: `${props.maxWidth}px` },
 )
 
 const leftActions = computed(() =>
@@ -149,17 +194,32 @@ function onFileChange(e: Event): void {
 </script>
 
 <template>
-  <div class="t-thread-composer-wrap">
+  <div class="t-thread-composer-wrap" :class="{ 'is-sticky': sticky }">
     <div
       class="t-thread-composer"
       :class="{ 'is-dragover': isDragOver }"
+      :style="boxStyle"
       @drop="onDrop"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
     >
+      <!-- Oversized files are refused; say so instead of dropping them silently. -->
+      <div v-if="rejectedMessage" class="t-thread-composer__reject" role="status">
+        <Icon icon="lucide:triangle-alert" class="t-thread-composer__reject-icon" />
+        <span class="t-thread-composer__reject-text">{{ rejectedMessage }}</span>
+        <button
+          type="button"
+          class="t-thread-composer__chip-x"
+          :aria-label="t.composer.dismiss"
+          @click="clearRejected"
+        >
+          <Icon icon="lucide:x" />
+        </button>
+      </div>
+
       <!-- attachment chips -->
       <div v-if="files.length > 0" class="t-thread-composer__files">
-        <div v-for="(f, i) in files" :key="i" class="t-thread-composer__chip">
+        <div v-for="(f, i) in files" :key="`${f.name}:${f.size}:${f.lastModified}:${i}`" class="t-thread-composer__chip">
           <img
             v-if="isImageFile(f)"
             :src="getPreviewUrl(f)"
@@ -172,7 +232,7 @@ function onFileChange(e: Event): void {
           <button
             type="button"
             class="t-thread-composer__chip-x"
-            aria-label="Remove attachment"
+            :aria-label="t.composer.removeAttachment"
             @click="removeFile(i)"
           >
             <Icon icon="lucide:x" />
@@ -210,8 +270,8 @@ function onFileChange(e: Event): void {
             v-if="enableAttachments"
             type="button"
             class="t-thread-composer__act"
-            title="Attach files"
-            aria-label="Attach files"
+            :title="t.composer.attach"
+            :aria-label="t.composer.attach"
             @click="openFile"
           >
             <Icon icon="lucide:paperclip" />
@@ -221,8 +281,8 @@ function onFileChange(e: Event): void {
             type="button"
             class="t-thread-composer__act"
             :class="{ 'is-recording': isListening }"
-            :title="isListening ? 'Stop recording' : 'Voice input'"
-            :aria-label="isListening ? 'Stop recording' : 'Voice input'"
+            :title="isListening ? t.composer.stopRecording : t.composer.voiceInput"
+            :aria-label="isListening ? t.composer.stopRecording : t.composer.voiceInput"
             @click="toggleVoice"
           >
             <Icon :icon="isListening ? 'lucide:square' : 'lucide:mic'" />
@@ -247,9 +307,9 @@ function onFileChange(e: Event): void {
             <button
               type="button"
               class="t-thread-composer__send"
-              :class="{ 'is-ready': canSend }"
+              :class="{ 'is-ready': sendLooksReady }"
               :disabled="!canSend"
-              aria-label="Send"
+              :aria-label="t.composer.send"
               @click="doSend"
             >
               <Icon icon="lucide:arrow-up" />
@@ -272,8 +332,15 @@ function onFileChange(e: Event): void {
 
 <style scoped>
 .t-thread-composer-wrap {
-  margin-top: auto;
   padding-top: 24px;
+  display: flex;
+  justify-content: center;
+}
+/* Sticky variant: pinned to the bottom of a scrolling thread, with a fade so
+   messages dissolve into the canvas behind it. The landing hero opts out
+   (`:sticky="false"`) and renders as a plain centred block. */
+.t-thread-composer-wrap.is-sticky {
+  margin-top: auto;
   position: sticky;
   bottom: 0;
   background: linear-gradient(
@@ -281,8 +348,6 @@ function onFileChange(e: Event): void {
     transparent 0%,
     var(--tnzi-ai-bg, #f8f8f7) 24px
   );
-  display: flex;
-  justify-content: center;
 }
 .t-thread-composer {
   width: 100%;
@@ -300,6 +365,32 @@ function onFileChange(e: Event): void {
 .t-thread-composer.is-dragover {
   border-color: var(--tnzi-ai-accent, #0d9488);
   box-shadow: 0 0 0 3px var(--tnzi-ai-accent-soft, rgba(13, 148, 136, 0.12));
+}
+
+/* rejected-attachment notice */
+.t-thread-composer__reject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 14px 8px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-ai-warning) 32%, transparent);
+  background: color-mix(in srgb, var(--tnzi-ai-warning) 10%, transparent);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--tnzi-ai-text);
+}
+.t-thread-composer__reject-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--tnzi-ai-warning);
+}
+.t-thread-composer__reject-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* attachment chips */
@@ -419,7 +510,7 @@ function onFileChange(e: Event): void {
   background: var(--tnzi-ai-accent-soft, rgba(13, 148, 136, 0.12));
 }
 .t-thread-composer__act.is-recording {
-  color: #fff;
+  color: var(--tnzi-ai-on-accent);
   background: var(--tnzi-ai-accent, #0d9488);
   animation: t-composer-pulse 1.4s ease-in-out infinite;
 }
@@ -449,7 +540,7 @@ function onFileChange(e: Event): void {
 }
 .t-thread-composer__send.is-ready {
   background: var(--tnzi-ai-accent, #0d9488);
-  color: #fff;
+  color: var(--tnzi-ai-on-accent);
   box-shadow: 0 8px 20px var(--tnzi-ai-accent-glow, rgba(13, 148, 136, 0.32));
 }
 .t-thread-composer__send.is-ready:hover {

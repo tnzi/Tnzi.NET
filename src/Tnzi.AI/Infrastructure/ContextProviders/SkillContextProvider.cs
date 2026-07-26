@@ -328,7 +328,7 @@ public sealed class SkillContextProvider : IContextProvider
             _activatedSkills.Add(skill);
         }
 
-        // Activation implies the AI has read the skill content — mark as loaded
+        // Activation implies the AI has read the skill content - mark as loaded
         // so RequiresSkillToolMiddleware doesn't reject tools requiring this skill
         MarkSkillLoaded(slug);
 
@@ -541,7 +541,7 @@ public sealed class SkillContextProvider : IContextProvider
     /// skill name + slug + a one-line routing hint. The hint prefers
     /// <see cref="SkillDefinition.WhenToUse"/> (a "pushy" trigger-phrase list
     /// aimed at the router) and falls back to <see cref="SkillDefinition.Description"/>
-    /// (the human-readable summary) when WhenToUse is empty — most legacy
+    /// (the human-readable summary) when WhenToUse is empty - most legacy
     /// skills only populate Description.
     /// Applies character budget: if total exceeds <see cref="SkillListingBudget"/>, truncates by priority (lower priority dropped first).
     /// </summary>
@@ -566,13 +566,13 @@ public sealed class SkillContextProvider : IContextProvider
             line.Append($"- **{skill.Name}** (`{skill.Slug}`)");
             var routingHint = !string.IsNullOrWhiteSpace(skill.WhenToUse) ? skill.WhenToUse : skill.Description;
             if (!string.IsNullOrWhiteSpace(routingHint))
-                line.Append($" — {routingHint}");
+                line.Append($" - {routingHint}");
             line.AppendLine();
 
             var lineStr = line.ToString();
             if (lineStr.Length > budgetRemaining && includedCount > 0)
             {
-                // Budget exceeded — append truncation notice
+                // Budget exceeded - append truncation notice
                 var truncated = totalCount - includedCount;
                 sb.AppendLine($"- _...and {truncated} more skill(s) omitted due to context budget._");
                 break;

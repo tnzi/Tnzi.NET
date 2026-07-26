@@ -9,7 +9,7 @@ using Tnzi.Data;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultThreadController 单元测试 — 覆盖参数传递、所有权验证、Result → ApiResult 转换
+/// DefaultThreadController 单元测试 - 覆盖参数传递、所有权验证、Result → ApiResult 转换
 /// </summary>
 public class DefaultThreadControllerTests
 {

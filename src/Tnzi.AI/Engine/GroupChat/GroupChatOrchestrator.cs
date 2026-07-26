@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine.GroupChat;
 
 /// <summary>
-/// GroupChat 编排器 — 多 Agent 轮流讨论
+/// GroupChat 编排器 - 多 Agent 轮流讨论
 /// </summary>
 /// <remarks>
 /// <para>

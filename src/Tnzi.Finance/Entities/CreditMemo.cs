@@ -1,7 +1,7 @@
 namespace Tnzi.Finance.Entities;
 
 /// <summary>
-/// 销售贷项单（A/R 贷项；GL 投影为发票的镜像，可核销到发票 — P2c）
+/// 销售贷项单（A/R 贷项；GL 投影为发票的镜像，可核销到发票 - P2c）
 /// </summary>
 public class CreditMemo : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
 {

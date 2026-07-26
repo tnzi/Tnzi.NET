@@ -50,7 +50,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
-    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent)
+    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
     {
         var sessionId = Guid.NewGuid();
         var now = DateTime.UtcNow;
@@ -64,6 +64,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
             UserAgent = userAgent,
             CreationTime = now,
             LastActivityTime = now,
+            ExpiresAt = expiresAt,
             IsRevoked = false
         };
 
@@ -85,6 +86,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 UserAgent = userAgent,
                 CreationTime = now,
                 LastActivityTime = now,
+                ExpiresAt = expiresAt,
                 IsRevoked = false
             };
             await _repository.InsertAsync(session);
@@ -92,6 +94,24 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
         LogInformation("Session created: {SessionId} for user: {UserId}", sessionId, userId);
         return sessionId;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsSessionValidAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return false;
+        }
+
+        // Redis 记录本身即缓存：TTL 过期返回 null，撤销则 IsRevoked=true。
+        var sessionData = await GetSessionAsync(sessionId);
+        if (sessionData == null || sessionData.IsRevoked)
+        {
+            return false;
+        }
+
+        return sessionData.ExpiresAt == null || sessionData.ExpiresAt > DateTime.UtcNow;
     }
 
     /// <inheritdoc />
@@ -134,6 +154,9 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 UserAgent = sessionData.UserAgent,
                 CreationTime = sessionData.CreationTime,
                 LastActivityTime = sessionData.LastActivityTime,
+                // 必须带上硬过期时间：调用方（LoginSessionCoordinator）据 ExpiresAt
+                // 判定会话是否仍计入并发数，漏填会让 Redis 模式下所有会话被视为"永不过期"。
+                ExpiresAt = sessionData.ExpiresAt,
                 IsRevoked = sessionData.IsRevoked,
                 RevokedAt = sessionData.RevokedAt
             });
@@ -155,7 +178,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     {
         Check.NotNull(query);
 
-        // Redis 无法高效遍历全部会话 — 与 GetSessionStatisticsAsync 同理，
+        // Redis 无法高效遍历全部会话 - 与 GetSessionStatisticsAsync 同理，
         // 启用数据库审计日志时降级到数据库查询。
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
@@ -320,6 +343,35 @@ public class DistributedSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    public async Task<Result> RenewSessionAsync(Guid sessionId, DateTime expiresAt)
+    {
+        var sessionData = await GetSessionAsync(sessionId);
+        if (sessionData == null || sessionData.IsRevoked)
+        {
+            return Ok();
+        }
+
+        sessionData.LastActivityTime = DateTime.UtcNow;
+        sessionData.ExpiresAt = expiresAt;
+        // SetSessionAsync 会据 ExpiresAt 重设 Redis 绝对 TTL（滑动延长记录存活）。
+        await SetSessionAsync(sessionData);
+
+        // 若启用数据库审计日志，同步更新
+        if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
+        {
+            var dbSession = await _repository.GetAsync(sessionId);
+            if (dbSession != null && !dbSession.IsRevoked)
+            {
+                dbSession.LastActivityTime = sessionData.LastActivityTime;
+                dbSession.ExpiresAt = expiresAt;
+                await _repository.UpdateAsync(dbSession);
+            }
+        }
+
+        return Ok();
+    }
+
+    /// <inheritdoc />
     public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
     {
         // Redis 会话使用 TTL 自动过期，无法高效遍历所有会话
@@ -396,7 +448,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         if (top <= 0) top = 50;
         if (top > 500) top = 500;
 
-        // Same rationale as GetSessionStatisticsAsync — Redis can't aggregate
+        // Same rationale as GetSessionStatisticsAsync - Redis can't aggregate
         // efficiently, so we fall back to the DB audit log when present.
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
@@ -475,28 +527,38 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
         var options = new DistributedCacheEntryOptions();
 
-        // 获取过期时间：如果 ExpirationMinutes 为 0，尝试使用 AccountSecurity.SessionTimeoutMinutes
-        var expirationMinutes = _sessionOptions.ExpirationMinutes;
-        if (expirationMinutes == 0)
+        // 会话硬过期（绑定刷新令牌生命周期）优先：显式 ExpiresAt 时用绝对 TTL，
+        // 使登录会话记录活到刷新令牌到期，避免因短会话超时把刷新令牌"提前作废"。
+        if (sessionData.ExpiresAt.HasValue)
         {
-            // 尝试从 IdentityOptions 获取 AccountSecurity.SessionTimeoutMinutes
-            var accountSecurityTimeout = _identityOptions?.Value?.AccountSecurity?.SessionTimeoutMinutes ?? 0;
-            if (accountSecurityTimeout > 0)
-            {
-                expirationMinutes = accountSecurityTimeout;
-            }
-            // 如果仍然为 0，则不设置过期时间（永不过期）
+            var ttl = sessionData.ExpiresAt.Value - DateTime.UtcNow;
+            // 已过期则给一个极短 TTL 让其尽快消失（GetSession/IsSessionValid 也会判定失效）。
+            options.AbsoluteExpirationRelativeToNow = ttl > TimeSpan.Zero ? ttl : TimeSpan.FromSeconds(1);
         }
-
-        if (expirationMinutes > 0)
+        else
         {
-            if (_sessionOptions.SlidingExpiration)
+            // 无显式过期（遗留语义）：沿用 ExpirationMinutes / AccountSecurity.SessionTimeoutMinutes。
+            var expirationMinutes = _sessionOptions.ExpirationMinutes;
+            if (expirationMinutes == 0)
             {
-                options.SlidingExpiration = TimeSpan.FromMinutes(expirationMinutes);
+                var accountSecurityTimeout = _identityOptions?.Value?.AccountSecurity?.SessionTimeoutMinutes ?? 0;
+                if (accountSecurityTimeout > 0)
+                {
+                    expirationMinutes = accountSecurityTimeout;
+                }
+                // 如果仍然为 0，则不设置过期时间（永不过期）
             }
-            else
+
+            if (expirationMinutes > 0)
             {
-                options.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(expirationMinutes);
+                if (_sessionOptions.SlidingExpiration)
+                {
+                    options.SlidingExpiration = TimeSpan.FromMinutes(expirationMinutes);
+                }
+                else
+                {
+                    options.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(expirationMinutes);
+                }
             }
         }
 
@@ -648,6 +710,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         public string? UserAgent { get; set; }
         public DateTime CreationTime { get; set; }
         public DateTime LastActivityTime { get; set; }
+        public DateTime? ExpiresAt { get; set; }
         public bool IsRevoked { get; set; }
         public DateTime? RevokedAt { get; set; }
     }

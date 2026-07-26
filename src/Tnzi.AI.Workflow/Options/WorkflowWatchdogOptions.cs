@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Options;
 
 /// <summary>
-/// 工作流执行 Watchdog 配置项 — 控制超时检测行为
+/// 工作流执行 Watchdog 配置项 - 控制超时检测行为
 /// </summary>
 [ConfigSection("AI:WorkflowWatchdog")]
 [RuntimeSettingGroup(Key = "ai-workflow", Module = "AI", DisplayName = "Workflow Watchdog",

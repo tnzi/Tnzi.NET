@@ -1,11 +1,11 @@
 /**
- * `defineCrudBridge` / `defineChildBridge` — factories for the ubiquitous
+ * `defineCrudBridge` / `defineChildBridge` - factories for the ubiquitous
  * "plain REST resource" bridge shape so consumer apps declare an endpoint base
  * instead of hand-writing the same `unwrapResult(await client.post(...))` /
  * `ensureOk(await client.delete(...))` plumbing for every resource.
  *
  * The framework's own built-in bridges wrap structured `useXxxApi(client)`
- * sub-contracts; these factories target the other common case — an app hitting
+ * sub-contracts; these factories target the other common case - an app hitting
  * a conventional REST controller (`POST {base}/query`, `POST {base}`,
  * `PUT {base}/{id}`, `DELETE {base}/batch`, `GET {base}/{child}/by-parent/{id}`)
  * directly, which is exactly the per-resource boilerplate a consumer repeats.
@@ -40,11 +40,11 @@ export interface CrudBridgeOptions<TCreateDto, TUpdateDto> {
 
 export interface CrudBridge<TDto, TCreateDto, TUpdateDto, TId extends string>
   extends BridgeCrudContract<TDto, TCreateDto, TUpdateDto, TId> {
-  /** `GET {base}/{id}` — full detail record. */
+  /** `GET {base}/{id}` - full detail record. */
   getDetail(id: TId): Promise<TDto>
-  /** `GET {base}` — unpaged full list (small lookups). */
+  /** `GET {base}` - unpaged full list (small lookups). */
   listAll(): Promise<TDto[]>
-  /** Create when `id` is null, else update — for a shared create/edit form. */
+  /** Create when `id` is null, else update - for a shared create/edit form. */
   save(id: TId | null, data: TCreateDto | TUpdateDto): Promise<TDto>
 }
 
@@ -97,7 +97,7 @@ export function defineCrudBridge<
 }
 
 export interface ChildBridge<TDto> {
-  /** `GET {base}/{parentSegment}/{parentId}` — all children of one parent. */
+  /** `GET {base}/{parentSegment}/{parentId}` - all children of one parent. */
   byParent(parentId: string): Promise<TDto[]>
   create(data: unknown): Promise<TDto>
   update(id: string, data: unknown): Promise<TDto>

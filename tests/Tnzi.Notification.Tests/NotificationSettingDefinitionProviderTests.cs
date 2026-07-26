@@ -4,7 +4,7 @@ using Tnzi.Notification.Options;
 namespace Tnzi.Notification.Tests;
 
 /// <summary>
-/// Notification 配置中心属性驱动定义测试 — 验证 NotificationOptions + RetryOptions 的
+/// Notification 配置中心属性驱动定义测试 - 验证 NotificationOptions + RetryOptions 的
 /// [RuntimeSetting] 注解经 RuntimeSettingMetadataExtractor 扫描合并后符合配置中心契约。
 /// </summary>
 public class NotificationSettingDefinitionProviderTests

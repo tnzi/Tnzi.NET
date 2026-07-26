@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 工具权限规则持久化实体 — 存储管理员配置的 allow/deny/ask 规则
+/// 工具权限规则持久化实体 - 存储管理员配置的 allow/deny/ask 规则
 /// </summary>
 public class ToolPermissionRuleEntity : AuditedEntity<Guid>, IMultiTenant
 {

@@ -54,13 +54,17 @@ public class FileFolderService : ApplicationService, IFileFolderService
 
         await _folderRepository.InsertAsync(folder);
 
-        await EventBus?.PublishAsync(new FileFolderCreatedEvent
+        // EventBus 为空表示宿主未加载 EventBus 模块（可选依赖），此时跳过发布
+        if (EventBus != null)
         {
-            FolderId = folder.Id,
-            Name = folder.Name,
-            ParentId = folder.ParentId,
-            Path = folder.Path
-        })!;
+            await EventBus.PublishAsync(new FileFolderCreatedEvent
+            {
+                FolderId = folder.Id,
+                Name = folder.Name,
+                ParentId = folder.ParentId,
+                Path = folder.Path
+            });
+        }
 
         return Ok(await MapToDto(folder));
     }
@@ -75,6 +79,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
             return Fail<FileFolderDto>("Folder not found", 404);
         }
 
+        var newName = folder.Name;
         var nameChanged = false;
 
         if (input.Name != null)
@@ -84,9 +89,28 @@ public class FileFolderService : ApplicationService, IFileFolderService
             if (trimmedName != folder.Name)
             {
                 nameChanged = true;
-                folder.Name = trimmedName;
+                newName = trimmedName;
             }
         }
+
+        var oldPath = folder.Path;
+        var newPath = oldPath;
+
+        // 重名冲突必须在写回实体之前判定：folder 处于 DbContext 跟踪中，
+        // 提前赋值会让"校验失败"分支把脏值随外层 UoW 一起提交。
+        if (nameChanged)
+        {
+            newPath = await BuildPathAsync(newName, folder.ParentId);
+
+            var exists = await _folderRepository.AnyAsync(
+                f => f.Path == newPath && f.Id != id && !f.IsDeleted);
+            if (exists)
+            {
+                return Fail<FileFolderDto>("A folder with the same name already exists at this location", 409);
+            }
+        }
+
+        folder.Name = newName;
 
         if (input.Description != null)
         {
@@ -98,19 +122,9 @@ public class FileFolderService : ApplicationService, IFileFolderService
             folder.SortOrder = input.SortOrder.Value;
         }
 
-        // Rebuild path if name changed
         if (nameChanged)
         {
-            var oldPath = folder.Path;
-            folder.Path = await BuildPathAsync(folder.Name, folder.ParentId);
-
-            // Check for duplicate path
-            var exists = await _folderRepository.AnyAsync(
-                f => f.Path == folder.Path && f.Id != id && !f.IsDeleted);
-            if (exists)
-            {
-                return Fail<FileFolderDto>("A folder with the same name already exists at this location", 409);
-            }
+            folder.Path = newPath;
 
             // Atomically update descendant paths together with the folder itself so a partial
             // failure cannot leave the tree inconsistent.
@@ -152,12 +166,15 @@ public class FileFolderService : ApplicationService, IFileFolderService
 
         await _folderRepository.DeleteAsync(folder);
 
-        await EventBus?.PublishAsync(new FileFolderDeletedEvent
+        if (EventBus != null)
         {
-            FolderId = folder.Id,
-            Name = folder.Name,
-            Path = folder.Path
-        })!;
+            await EventBus.PublishAsync(new FileFolderDeletedEvent
+            {
+                FolderId = folder.Id,
+                Name = folder.Name,
+                Path = folder.Path
+            });
+        }
 
         return Ok();
     }
@@ -226,16 +243,20 @@ public class FileFolderService : ApplicationService, IFileFolderService
         var oldParentId = folder.ParentId;
         var oldPath = folder.Path;
 
-        folder.ParentId = newParentId;
-        folder.Path = await BuildPathAsync(folder.Name, newParentId);
+        // 先算出新路径并校验冲突，确认无冲突后才写回实体：folder 处于 DbContext 跟踪中，
+        // 提前赋值会让"校验失败"分支把脏值随外层 UoW 一起提交。
+        var newPath = await BuildPathAsync(folder.Name, newParentId);
 
         // Check for duplicate path at new location
         var exists = await _folderRepository.AnyAsync(
-            f => f.Path == folder.Path && f.Id != id && !f.IsDeleted);
+            f => f.Path == newPath && f.Id != id && !f.IsDeleted);
         if (exists)
         {
             return Fail("A folder with the same name already exists at the target location", 409);
         }
+
+        folder.ParentId = newParentId;
+        folder.Path = newPath;
 
         // Atomically update the folder itself and all descendant paths so a mid-way failure
         // cannot leave the folder tree in an inconsistent state.
@@ -245,15 +266,18 @@ public class FileFolderService : ApplicationService, IFileFolderService
             await _folderRepository.UpdateAsync(folder, ct);
         });
 
-        await EventBus?.PublishAsync(new FileFolderMovedEvent
+        if (EventBus != null)
         {
-            FolderId = folder.Id,
-            Name = folder.Name,
-            OldParentId = oldParentId,
-            NewParentId = newParentId,
-            OldPath = oldPath,
-            NewPath = folder.Path
-        })!;
+            await EventBus.PublishAsync(new FileFolderMovedEvent
+            {
+                FolderId = folder.Id,
+                Name = folder.Name,
+                OldParentId = oldParentId,
+                NewParentId = newParentId,
+                OldPath = oldPath,
+                NewPath = folder.Path
+            });
+        }
 
         return Ok();
     }

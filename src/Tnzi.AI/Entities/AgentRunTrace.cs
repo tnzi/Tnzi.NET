@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 执行轨迹条目 — 细粒度日志。
+/// 执行轨迹条目 - 细粒度日志。
 /// 记录 LLM 调用、工具调用、路由决策等低级别事件。
 /// </summary>
 public class AgentRunTrace : CreationAuditedEntity<Guid>, IMultiTenant

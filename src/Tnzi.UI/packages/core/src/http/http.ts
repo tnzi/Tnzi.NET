@@ -137,12 +137,20 @@ export class HttpClient {
   }
 
   /**
-   * Set access token. Resets the 401 deduplication guard so subsequent
-   * unauthorized responses will trigger the callback again.
+   * Set access token.
+   *
+   * Setting a NON-EMPTY token starts a new auth cycle and re-arms the 401
+   * deduplication guard. Clearing the token (`null`) deliberately does NOT:
+   * clearing is what a session-expired handler does while it is being notified,
+   * and re-arming there would reopen the gate mid-notification so every queued
+   * 401 fires the listeners again - breaking the once-per-cycle contract
+   * {@link addUnauthorizedListener} documents.
    */
   setAccessToken(token: string | null): void {
     this.accessToken = token;
-    this.unauthorizedHandled = false;
+    if (token) {
+      this.unauthorizedHandled = false;
+    }
   }
 
   /**
@@ -206,8 +214,40 @@ export class HttpClient {
   /**
    * Upload form data with progress tracking.
    * Always resolves with ApiResult<T> instead of rejecting on errors.
+   *
+   * Uploads take the same 401 path as JSON requests: refresh once (sharing the
+   * client-wide refresh mutex), retry, and fall through to `onUnauthorized`
+   * when that fails. Previously an expired token made every upload fail with a
+   * bare 401 that never reached the session-expired handler.
    */
   async uploadFormData<T>(
+    url: string,
+    formData: FormData,
+    options?: UploadOptions
+  ): Promise<ApiResult<T>> {
+    const result = await this.executeUpload<T>(url, formData, options);
+    if (result.code !== 401 || options?.skipAuthRefresh) {
+      return result;
+    }
+
+    const refreshResult = await this.tryRefreshAndRetry<T>(() =>
+      this.executeUpload<T>(url, formData, options)
+    );
+    if (refreshResult && refreshResult.code !== 401) {
+      return refreshResult;
+    }
+    // Refresh "succeeded" but the retry still 401'd (revoked session): notify
+    // here, exactly like the JSON path does.
+    if (refreshResult?.code === 401) {
+      this.notifyUnauthorized();
+    }
+    return refreshResult ?? result;
+  }
+
+  /**
+   * Perform a single multipart upload over XHR (no retry, no 401 handling).
+   */
+  private executeUpload<T>(
     url: string,
     formData: FormData,
     options?: UploadOptions
@@ -305,7 +345,7 @@ export class HttpClient {
   /**
    * Download file. Returns ApiResult<Blob> for consistent error handling.
    *
-   * Downloads are exempt from the default request timeout — large files can
+   * Downloads are exempt from the default request timeout - large files can
    * legitimately take longer than {@link DEFAULT_REQUEST_TIMEOUT}. An explicit
    * per-request `timeout` is still honored when provided.
    *
@@ -409,8 +449,18 @@ export class HttpClient {
       config = await this.config.requestInterceptor(config);
     }
 
-    // GET deduplication: reuse inflight promise for identical GET URLs
-    if (method === 'GET' && this.config.deduplicateGets !== false) {
+    // GET deduplication: reuse inflight promise for identical GET URLs.
+    //
+    // Only signal-free GETs take part. The dedup key is the resolved URL and
+    // cannot encode an AbortSignal, so a signal-bearing caller that aborts
+    // would cancel the shared fetch out from under every other subscriber.
+    // Worse, a caller that joins a just-aborted entry receives that abort as
+    // an ordinary failed result while its OWN signal is still un-aborted, so
+    // it cannot recognise the failure as a cancellation and drops the list
+    // into an error state (cancel-then-refetch, as DataQueryController does).
+    // Callers that pass a signal are exactly the cancel-and-refetch ones, and
+    // they gain nothing from sharing a request anyway.
+    if (method === 'GET' && this.config.deduplicateGets !== false && !config.signal) {
       const dedupKey = this.buildUrl(config.url, config.params);
       const inflight = this._inflightGets.get(dedupKey);
       if (inflight) {
@@ -456,14 +506,16 @@ export class HttpClient {
       // and logout calls issued during a refresh cycle would otherwise
       // re-enter the refresh mutex and deadlock until its timeout).
       if (lastResult.code === 401 && !isRetryAfterRefresh && !config.skipAuthRefresh) {
-        const refreshResult = await this.tryRefreshAndRetry<T>(config);
+        const refreshResult = await this.tryRefreshAndRetry<T>(() =>
+          this.executeWithRetry<T>(config, true)
+        );
         if (refreshResult && refreshResult.code !== 401) {
           return refreshResult;
         }
         // Either refresh threw (refreshTokenFn rejected → tryRefreshAndRetry
         // already called notifyUnauthorized), or refresh "succeeded" but the
         // retry still 401'd (stale token / backend revoked session).
-        // In the second case we must notify here too — otherwise the only
+        // In the second case we must notify here too - otherwise the only
         // signal the consumer's session-expired handler ever sees is the
         // first scenario, and a backend-side revoke would leave the user
         // stuck on an API-error loop without redirect.
@@ -487,11 +539,11 @@ export class HttpClient {
   }
 
   /**
-   * Try to refresh token and retry the request.
+   * Try to refresh the token, then run `retry` with the new one.
    * Uses mutex pattern: concurrent 401s share the same refresh promise.
    * Returns the retry result on success, or null if refresh is not available or failed.
    */
-  private async tryRefreshAndRetry<T>(config: RequestConfig): Promise<ApiResult<T> | null> {
+  private async tryRefreshAndRetry<T>(retry: () => Promise<ApiResult<T>>): Promise<ApiResult<T> | null> {
     if (!this.config.refreshTokenFn) {
       this.notifyUnauthorized();
       return null;
@@ -500,7 +552,7 @@ export class HttpClient {
     try {
       // Mutex: if a refresh is already in progress, wait for it.
       // The refresh call is wrapped with a timeout so a refreshTokenFn that
-      // never settles cannot deadlock the mutex — without it, every queued
+      // never settles cannot deadlock the mutex - without it, every queued
       // request would await a forever-pending promise and freeze the app.
       if (!this._refreshPromise) {
         this._refreshPromise = this.withRefreshTimeout(this.config.refreshTokenFn());
@@ -509,9 +561,9 @@ export class HttpClient {
       this.setAccessToken(newToken);
 
       // Retry the original request once with new token
-      return await this.executeWithRetry<T>(config, true);
+      return await retry();
     } catch {
-      // Refresh failed, threw, or timed out — waiters fall back to the
+      // Refresh failed, threw, or timed out - waiters fall back to the
       // original 401 result (executeWithRetry returns `lastResult` on null).
       this.notifyUnauthorized();
       return null;
@@ -562,7 +614,7 @@ export class HttpClient {
   }
 
   /**
-   * Trigger the unauthorized handler (deduplicated — only fires once per auth cycle).
+   * Trigger the unauthorized handler (deduplicated - only fires once per auth cycle).
    */
   private notifyUnauthorized(): void {
     if (this.unauthorizedHandled) {
@@ -624,7 +676,7 @@ export class HttpClient {
         data = normalizeApiResult<T>(await response.json());
       } catch (parseError) {
         // An abort during body read (timeout or caller cancellation) is not
-        // a JSON problem — rethrow and let the outer catch classify it.
+        // a JSON problem - rethrow and let the outer catch classify it.
         if (isDomAbortError(parseError)) {
           throw parseError;
         }
@@ -682,7 +734,7 @@ export class HttpClient {
       // Return normalized failed result
       return createFailedApiResultFromError<T>(error);
     } finally {
-      // Always clear the pending timer — previously it leaked whenever
+      // Always clear the pending timer - previously it leaked whenever
       // fetch itself rejected (network error / abort before response).
       timeout.dispose();
     }

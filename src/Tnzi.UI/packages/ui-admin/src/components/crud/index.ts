@@ -12,4 +12,8 @@ export type { TListShellProps } from './TListShell.vue'
 export { default as TCardPage } from './TCardPage.vue'
 export { default as TCardRenderer } from './renderers/TCardRenderer.vue'
 export { default as TTableRenderer } from './renderers/TTableRenderer.vue'
+// Third list shape: full-width document rows (see TItemCard). Same shell, so a
+// page moves between table / tile grid / row list in one line.
+export { default as TItemPage } from './TItemPage.vue'
+export { default as TItemRenderer } from './renderers/TItemRenderer.vue'
 export { default as TCrudSearchDrawer } from './TCrudSearchDrawer.vue'

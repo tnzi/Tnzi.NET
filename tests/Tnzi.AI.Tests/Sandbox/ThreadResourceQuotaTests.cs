@@ -60,7 +60,7 @@ public class ThreadResourceQuotaTests : IDisposable
         check.IsAllowed.ShouldBeTrue();
         check.RemainingCommands.ShouldBe(long.MaxValue);
 
-        // Recording on a disabled quota is a no-op — usage stays zero.
+        // Recording on a disabled quota is a no-op - usage stays zero.
         await quota.RecordExecutionAsync(_threadId, 100, 100);
         var usage = await quota.GetUsageAsync(_threadId);
         usage.CommandCount.ShouldBe(0);
@@ -81,7 +81,7 @@ public class ThreadResourceQuotaTests : IDisposable
         check.IsAllowed.ShouldBeTrue();
         // CheckAsync reserves one command slot up-front (hard cap), so 99 remain.
         check.RemainingCommands.ShouldBe(99);
-        // Soft caps are evaluated against recorded usage (still zero) — full budget.
+        // Soft caps are evaluated against recorded usage (still zero) - full budget.
         check.RemainingDurationMs.ShouldBe(5_000);
         check.RemainingOutputBytes.ShouldBe(10_240);
     }
@@ -107,7 +107,7 @@ public class ThreadResourceQuotaTests : IDisposable
     [Fact]
     public async Task RecordExecution_DoesNotIncrementCommandCount()
     {
-        // Record only charges the soft caps — the command counter is reserved
+        // Record only charges the soft caps - the command counter is reserved
         // exclusively by CheckAsync, so Record must not double-count it.
         var quota = CreateQuota();
 
@@ -139,7 +139,7 @@ public class ThreadResourceQuotaTests : IDisposable
     public async Task ConcurrentChecks_NeverAdmitMoreThanCommandCap()
     {
         // TOCTOU regression guard: 50 parallel CheckAsync probes against a cap of
-        // 10 must admit exactly 10 — the atomic reserve-then-rollback prevents two
+        // 10 must admit exactly 10 - the atomic reserve-then-rollback prevents two
         // probes from both passing at the boundary.
         var quota = CreateQuota(new ThreadQuotaOptions { MaxCommandCount = 10 });
 
@@ -262,7 +262,7 @@ public class ThreadResourceQuotaTests : IDisposable
         var bus = new CapturingEventBus();
         var tools = CreateTools(fixture, quota: quota, eventBus: bus);
 
-        // First call succeeds — fills the single-command quota.
+        // First call succeeds - fills the single-command quota.
         await tools.BashAsync("echo first");
         bus.Captured.OfType<SandboxCommandExecutedEvent>().Single().Denied.ShouldBeFalse();
 
@@ -283,7 +283,7 @@ public class ThreadResourceQuotaTests : IDisposable
 
     /// <summary>
     /// 创建 SandboxTools 并在当前测试的异步流上发布沙箱环境
-    /// （模拟 SandboxMiddleware 的发布动作 — 必须在测试方法体内调用）。
+    /// （模拟 SandboxMiddleware 的发布动作 - 必须在测试方法体内调用）。
     /// </summary>
     private SandboxTools CreateTools(SandboxToolsFixture fixture, IThreadResourceQuota? quota, IEventBus? eventBus = null)
     {

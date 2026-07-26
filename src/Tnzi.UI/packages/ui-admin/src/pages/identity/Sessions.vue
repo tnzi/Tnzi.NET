@@ -13,8 +13,8 @@
     <div class="t-session-page">
     <!-- KPI cards -->
     <TKpiRow class="t-session-page__stats" cols="1 s:2 m:3" :gap="16">
-      <TKpiCard :label="t('stats.activeSessions')" :value="stats?.activeSessionCount ?? 0" />
-      <TKpiCard :label="t('stats.onlineUsers')" :value="stats?.onlineUserCount ?? 0" />
+      <TKpiCard :label="t('stats.activeSessions')" :value="stats?.activeSessionCount ?? null" />
+      <TKpiCard :label="t('stats.onlineUsers')" :value="stats?.onlineUserCount ?? null" />
       <TKpiCard
         :label="t('stats.topDevice')"
         :value="stats?.topDevices?.[0]?.deviceInfo ?? null"
@@ -22,7 +22,7 @@
       />
     </TKpiRow>
 
-    <!-- Toolbar: the user picker is an OPTIONAL filter — the page lists all
+    <!-- Toolbar: the user picker is an OPTIONAL filter - the page lists all
          active sessions globally; picking a user narrows the list to them. -->
     <NCard size="small" :bordered="false" class="t-session-page__toolbar">
       <NSpace align="center" :wrap-item="false">
@@ -52,7 +52,7 @@
       </NSpace>
     </NCard>
 
-    <!-- Session list — global by default, narrowed when a user is picked -->
+    <!-- Session list - global by default, narrowed when a user is picked -->
     <NCard
       size="small"
       :bordered="false"
@@ -60,7 +60,7 @@
       class="t-session-page__list"
     >
       <template #header-extra>
-        <!-- Revoke-all is a per-user operation — only offered when filtered. -->
+        <!-- Revoke-all is a per-user operation - only offered when filtered. -->
         <NPopconfirm v-if="targetUserId && can('session.delete')" @positive-click="handleRevokeAll">
           <template #trigger>
             <NButton size="small" type="error" ghost :disabled="!sessions.length">
@@ -99,6 +99,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, ref, onMounted } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
@@ -138,13 +139,13 @@ const pageIndex = ref(1)
 const pageSize = ref(20)
 const totalCount = ref(0)
 
-// Active users picker — loaded once on mount + manually refreshable.
+// Active users picker - loaded once on mount + manually refreshable.
 const activeUsers = ref<ActiveUserSummaryDto[]>([])
 const loadingActiveUsers = ref(false)
 
 const activeUserOptions = computed<SelectOption[]>(() =>
   activeUsers.value.map((u) => ({
-    label: `${u.userName ?? '(unknown)'} — ${u.sessionCount} ${t('toolbar.sessionsSuffix')}`,
+    label: `${u.userName ?? '(unknown)'} - ${u.sessionCount} ${t('toolbar.sessionsSuffix')}`,
     value: u.userId,
   })),
 )
@@ -189,7 +190,7 @@ async function refreshAll(): Promise<void> {
 }
 
 // Any filter change (user picked/cleared, includeRevoked toggled, explicit
-// Fetch click) resets to page 1 and reloads — the list is always live, no
+// Fetch click) resets to page 1 and reloads - the list is always live, no
 // "pick a user first" gate.
 function onFilterChanged(): void {
   pageIndex.value = 1
@@ -255,7 +256,7 @@ async function handleCleanExpired(): Promise<void> {
 }
 
 function formatTime(v: string | Date | null | undefined): string {
-  if (!v) return '—'
+  if (!v) return EMPTY_DASH
   try {
     return new Date(v).toLocaleString()
   } catch {
@@ -272,7 +273,7 @@ const columns = computed<DataTableColumns<UserSessionRow>>(() => [
     ellipsis: { tooltip: true },
     // userName is populated by the global list endpoint; fall back to the
     // raw userId so per-user rows (or older payloads) still identify the owner.
-    render: (row) => row.userName ?? row.userId ?? '—',
+    render: (row) => row.userName ?? row.userId ?? EMPTY_DASH,
   },
   {
     key: 'deviceInfo',
@@ -331,7 +332,7 @@ const columns = computed<DataTableColumns<UserSessionRow>>(() => [
   },
 ])
 
-// Declarative operation column — revoke is offered only for still-active
+// Declarative operation column - revoke is offered only for still-active
 // sessions (`show`); revoked rows render no action.
 const rowActions: RowAction<UserSessionRow>[] = [
   {
@@ -351,7 +352,7 @@ onMounted(() => {
 
 <style scoped>
 .t-session-page {
-  /* Inner flex column — TContentPage body (scroll="fill") provides the
+  /* Inner flex column - TContentPage body (scroll="fill") provides the
      full-height container; this div fills it and stacks the cards. */
   display: flex;
   flex-direction: column;

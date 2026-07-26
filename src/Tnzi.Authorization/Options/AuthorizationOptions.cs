@@ -12,7 +12,7 @@ public class AuthorizationOptions
     public const string DefaultSuperAdminRoleName = "SuperAdmin";
 
     /// <summary>
-    /// Role names whose members are treated as super administrators —
+    /// Role names whose members are treated as super administrators -
     /// every <see cref="Tnzi.Security.Authorization.IFunctionAuthorizationService"/>
     /// check short-circuits to "granted" and
     /// <c>GetUserPermissionNamesAsync</c> returns the full enabled-function
@@ -24,7 +24,7 @@ public class AuthorizationOptions
     /// <see cref="DisableSuperAdminBypass"/> to opt into the legacy
     /// "all permissions require an explicit assignment" mode instead.
     /// NOTE: the convention default is intentionally NOT a property
-    /// initializer — the configuration binder APPENDS to a pre-populated
+    /// initializer - the configuration binder APPENDS to a pre-populated
     /// list, so a class-level default would duplicate configured entries.
     /// </summary>
     public List<string> SuperAdminRoles { get; set; } = [];
@@ -40,7 +40,7 @@ public class AuthorizationOptions
     public bool DisableSuperAdminBypass { get; set; }
 
     /// <summary>
-    /// Per-code category overrides applied at permission seed time — lets a
+    /// Per-code category overrides applied at permission seed time - lets a
     /// deployment reclassify a framework default without code changes, e.g.
     /// <c>{ "audit.log.view": "Technical" }</c>. The category is informational
     /// metadata (assignment UIs render a "Technical" badge on ops/dangerous
@@ -62,14 +62,14 @@ public class AuthorizationOptions
 
     /// <summary>
     /// User names to assign to the first existing super-admin role at startup
-    /// — the "first super admin" bootstrap. Assignment only happens while ALL
+    /// - the "first super admin" bootstrap. Assignment only happens while ALL
     /// configured super-admin roles have ZERO members: a zero-member
     /// super-admin role means the system has no recovery account at all
     /// (usually a fresh install, or an accidental lockout this bootstrap is
     /// the designated escape from), so re-applying on restart is a feature
     /// here, not an operational-clear resurrection. Once any member exists
     /// the list is ignored. Listed users must already exist (created via
-    /// registration or an application seeder) — this never creates users and
+    /// registration or an application seeder) - this never creates users and
     /// never touches passwords; missing names are logged as warnings.
     /// </summary>
     public List<string> BootstrapSuperAdminUsers { get; set; } = [];

@@ -66,7 +66,7 @@ public class TenantResolverMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, _currentTenantMock.Object);
 
-        // Assert — 应返回 400
+        // Assert - 应返回 400
         Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
         Assert.Equal("application/json", context.Response.ContentType);
 
@@ -120,7 +120,7 @@ public class TenantResolverMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, _currentTenantMock.Object);
 
-        // Assert — 应正常通过并切换租户上下文
+        // Assert - 应正常通过并切换租户上下文
         Assert.True(nextCalled);
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
 
@@ -132,7 +132,7 @@ public class TenantResolverMiddlewareTests
     [Fact]
     public async Task NoTenantHeader_PassesThrough()
     {
-        // Arrange — 请求中没有任何租户标识，也没有默认租户 ID
+        // Arrange - 请求中没有任何租户标识，也没有默认租户 ID
         var nextCalled = false;
         RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
@@ -148,7 +148,7 @@ public class TenantResolverMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, _currentTenantMock.Object);
 
-        // Assert — 应直接传递给下一个中间件，不切换租户
+        // Assert - 应直接传递给下一个中间件，不切换租户
         Assert.True(nextCalled);
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
 
@@ -161,7 +161,7 @@ public class TenantResolverMiddlewareTests
     [Fact]
     public async Task NoTenantChecker_ValidHeader_PassesThrough()
     {
-        // Arrange — 没有 ITenantChecker，即便提供了有效 Header 也应直接通过
+        // Arrange - 没有 ITenantChecker，即便提供了有效 Header 也应直接通过
         var tenantId = Guid.NewGuid();
 
         var nextCalled = false;
@@ -179,7 +179,7 @@ public class TenantResolverMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, _currentTenantMock.Object);
 
-        // Assert — 没有检查器时跳过验证，直接通过并切换租户
+        // Assert - 没有检查器时跳过验证，直接通过并切换租户
         Assert.True(nextCalled);
         _currentTenantMock.Verify(c => c.Change(tenantId, It.IsAny<string?>()), Times.Once);
     }
@@ -208,7 +208,7 @@ public class TenantResolverMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, _currentTenantMock.Object);
 
-        // Assert — 应记录 Warning 日志
+        // Assert - 应记录 Warning 日志
         _loggerMock.Verify(
             l => l.Log(
                 LogLevel.Warning,

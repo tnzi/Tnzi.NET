@@ -47,7 +47,7 @@
       <NDivider class="t-crud-column-setting__divider" />
       <!-- Draggable rows. `filter=".none_draggable"` keeps clicks on the
            checkbox from initiating a drag.
-           v-model AND v-for both bind to `localOrder` (string[]) — earlier
+           v-model AND v-for both bind to `localOrder` (string[]) - earlier
            split (v-model on the keys array, v-for on a derived ColumnDef
            list) made VueDraggable's reactivity inconsistent: after a drag
            the popover went blank because the two arrays drifted out of
@@ -67,7 +67,7 @@
           class="t-crud-column-setting__row"
         >
           <div class="t-crud-column-setting__row-main">
-            <!-- Touch/phone (isSm): hide the tiny 16px drag handle — its hit
+            <!-- Touch/phone (isSm): hide the tiny 16px drag handle - its hit
                  area is unusable on touch and the drag gesture fights the
                  list's vertical scroll. Cards keep only the checkbox toggle
                  (reordering has little value on a stacked card list). -->
@@ -143,7 +143,7 @@ watch(
 
 const columnMap = computed(() => new Map(props.allColumns.map((c) => [c.key, c])))
 
-/** Resolve display label for a key — handles i18n keys (`columns.username`,
+/** Resolve display label for a key - handles i18n keys (`columns.username`,
  *  `admin.crud.X`) and falls back to the raw title or the key itself. */
 function columnLabel(key: string): string {
   const col = columnMap.value.get(key)
@@ -219,7 +219,7 @@ function onReset(): void {
 .t-crud-column-setting__divider {
   margin: 4px 0 !important;
 }
-/* List — capped height so very wide tables don't push the popover off
+/* List - capped height so very wide tables don't push the popover off
    screen; internal scroll picks up the global macOS-style overlay rules. */
 .t-crud-column-setting__list {
   display: flex;

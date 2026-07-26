@@ -61,7 +61,7 @@ public class InputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_GuardrailsDisabled_PassesThrough()
     {
-        // Arrange — GuardrailRunner 内部检查 Enabled=false 直接放行
+        // Arrange - GuardrailRunner 内部检查 Enabled=false 直接放行
         var runner = CreateGuardrailRunner(enabled: false);
         var middleware = new InputGuardrailMiddleware(
             runner,
@@ -84,7 +84,7 @@ public class InputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_InputPasses_PassesThrough()
     {
-        // Arrange — Guardrail 返回 Allowed
+        // Arrange - Guardrail 返回 Allowed
         var guardrail = new Mock<IInputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailResult.Allowed());
@@ -111,7 +111,7 @@ public class InputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_InputRejected_ReturnsGuardrailRejectedResult()
     {
-        // Arrange — Guardrail 拒绝
+        // Arrange - Guardrail 拒绝
         var guardrail = new Mock<IInputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailResult.Rejected("MaxLength", "Input too long"));
@@ -141,7 +141,7 @@ public class InputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_TripwireThrown_ReturnsGuardrailRejectedResult()
     {
-        // Arrange — Guardrail 抛出 TripwireGuardrailException
+        // Arrange - Guardrail 抛出 TripwireGuardrailException
         var guardrail = new Mock<IInputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TripwireGuardrailException("PromptInjection", "Potential injection detected"));
@@ -161,7 +161,7 @@ public class InputGuardrailMiddlewareTests
             return Task.FromResult(SuccessResult());
         });
 
-        // Assert — Tripwire 在中间件层被 catch，不会向上传播
+        // Assert - Tripwire 在中间件层被 catch，不会向上传播
         nextCalled.ShouldBeFalse();
         result.FinishReason.ShouldBe(FinishReasons.GuardrailRejected);
         result.Status.ShouldBe(AgentRunStatus.Failed);

@@ -1,4 +1,4 @@
-import { ref, computed, watch, onBeforeUnmount, getCurrentInstance, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 
 export type SidebarMode = 'expanded' | 'icon' | 'hidden'
 
@@ -13,6 +13,12 @@ export interface UseSidebarStateReturn {
   isMobile: ComputedRef<boolean>
   setMode: (mode: SidebarMode) => void
   cycle: () => void
+  /**
+   * Detach the resize listener and stop the breakpoint watcher. Called
+   * automatically when the owning effect scope (component or `effectScope()`)
+   * is disposed; call it by hand only when there is no scope to hang off.
+   */
+  dispose: () => void
 }
 
 const VALID_MODES: readonly SidebarMode[] = ['expanded', 'icon', 'hidden']
@@ -75,7 +81,7 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
   }
 
   let lastIsMobile = isMobile.value
-  watch(isMobile, (nowMobile) => {
+  const stopBreakpointWatch = watch(isMobile, (nowMobile) => {
     if (nowMobile && !lastIsMobile) {
       if (mode.value !== 'hidden') {
         rememberedDesktopMode.value = mode.value
@@ -93,21 +99,29 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
     }
   }
 
-  // Attach immediately — Vue's onMounted does not fire when composables are
+  // Attach immediately: Vue's onMounted does not fire when composables are
   // called outside a component setup context (e.g. unit tests or the
   // playground store factory), so deferring would break those callers.
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', onResize)
   }
 
-  // Cleanup only fires in a real component setup context.
-  if (getCurrentInstance()) {
-    onBeforeUnmount(() => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('resize', onResize)
-      }
-    })
+  let disposed = false
+  function dispose(): void {
+    if (disposed) return
+    disposed = true
+    stopBreakpointWatch()
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('resize', onResize)
+    }
   }
 
-  return { mode, isMobile, setMode, cycle }
+  // onScopeDispose covers components AND standalone effectScope() owners; the
+  // `failSilently` flag keeps it quiet for the documented scope-less callers,
+  // who are expected to call `dispose()` themselves. Registering the listener
+  // unconditionally while only cleaning it up inside a component would leak on
+  // every scope-less call.
+  onScopeDispose(dispose, true)
+
+  return { mode, isMobile, setMode, cycle, dispose }
 }

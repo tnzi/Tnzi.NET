@@ -98,7 +98,7 @@ describe('useSectionRoute', () => {
     await flushPromises()
     section().value = 'b'
     await flushPromises()
-    // Business params ride along verbatim — the nav only owns its own key.
+    // Business params ride along verbatim - the nav only owns its own key.
     expect(router.currentRoute.value.query).toEqual({ page: '2', kw: 'x', section: 'b' })
   })
 
@@ -135,7 +135,7 @@ describe('useSectionRoute', () => {
   })
 
   // A page detail and a modal detail opened on top of it each track their OWN
-  // section in ONE URL without clobbering each other — namespacing is native to
+  // section in ONE URL without clobbering each other - namespacing is native to
   // the query string (one key per owner).
   it('coexists with a sibling key in one URL (nested page + overlay sections)', async () => {
     const overlayOn = ref(false)
@@ -144,7 +144,7 @@ describe('useSectionRoute', () => {
     const Comp = defineComponent({
       setup() {
         pageSection = useSectionRoute({ sections, defaultSection: 'a', key: 'section' })
-        // The overlay activates later (when opened) — mirrors a modal opening on
+        // The overlay activates later (when opened) - mirrors a modal opening on
         // top of the page so the two initial writes never race.
         overlaySection = useSectionRoute({
           sections,
@@ -168,7 +168,7 @@ describe('useSectionRoute', () => {
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ section: 'a', edit: 'c' })
 
-    // Switch each independently — neither clobbers the other.
+    // Switch each independently - neither clobbers the other.
     pageSection.value = 'b'
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ section: 'b', edit: 'c' })

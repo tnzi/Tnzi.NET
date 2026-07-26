@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// <see cref="McpClientAdapter"/> 的资源/提示相关 partial — Resource/Prompt 的列举与读取（经 SDK 反射）。
+/// <see cref="McpClientAdapter"/> 的资源/提示相关 partial - Resource/Prompt 的列举与读取（经 SDK 反射）。
 /// </summary>
 internal sealed partial class McpClientAdapter
 {

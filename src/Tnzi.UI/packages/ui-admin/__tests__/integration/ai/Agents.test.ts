@@ -3,10 +3,10 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Agents integration test — production-grade card page (TCardPage) with a health
+ * Agents integration test - production-grade card page (TCardPage) with a health
  * KPI strip, per-card tier badges, clone, and a drill-in detail route.
  *
- * Mocks the ai-bridge boundary (NOT @tnzi/core/services/ai directly — the page
+ * Mocks the ai-bridge boundary (NOT @tnzi/core/services/ai directly - the page
  * convention mocks at the bridge so pages stay decoupled from API factory
  * shapes) + vue-router's useRouter (push spy for the View action). Mirrors the
  * Personas.test.ts card-grid pattern. Stub naming uses the un-prefixed Naive
@@ -29,7 +29,7 @@ const agentFetch = vi.fn(async () => ({
       latencyTier: 1,
       costTier: 2,
       executionMode: 0,
-      personaId: 'p1',
+      persona: 'You speak with empathy.',
       creationTime: '2026-04-01T00:00:00Z',
     },
     {
@@ -43,7 +43,7 @@ const agentFetch = vi.fn(async () => ({
       latencyTier: 2,
       costTier: 3,
       executionMode: 2,
-      personaId: null,
+      persona: null,
       creationTime: '2026-04-02T00:00:00Z',
     },
   ],
@@ -155,7 +155,7 @@ describe('Agents page (production card grid)', () => {
   it('renders the health KPI strip from getHealth', async () => {
     const wrapper = mount(Agents, { global: { stubs } })
     await flushPromises()
-    // 4 KPI cards (total/healthy/unhealthy/disabled) — values 2/1/1/1.
+    // 4 KPI cards (total/healthy/unhealthy/disabled) - values 2/1/1/1.
     expect(wrapper.findAll('.ai-agent-page__kpi')).toHaveLength(4)
     expect(wrapper.text()).toContain('Total')
   })

@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine.Strategies;
 
 /// <summary>
-/// 单 Agent 直通策略 — 默认行为，直接委托给 AgentExecutor
+/// 单 Agent 直通策略 - 默认行为，直接委托给 AgentExecutor
 /// </summary>
 public class SingleAgentStrategy : IExecutionStrategy
 {

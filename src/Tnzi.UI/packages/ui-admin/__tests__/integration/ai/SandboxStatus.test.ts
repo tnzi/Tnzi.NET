@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * SandboxStatus integration test — a read-only operations view over
+ * SandboxStatus integration test - a read-only operations view over
  * `/admin/sandbox/status`. The admin client + sandbox bridge are mocked so the
  * page mounts without a backend. Assertions cover: the status overview (enabled
  * / provider / data root + denylist counts), the three denylist sections with

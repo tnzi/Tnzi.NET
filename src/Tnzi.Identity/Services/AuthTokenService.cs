@@ -20,13 +20,14 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
     /// <summary>
     /// 保存令牌
     /// </summary>
-    public async Task<Guid> SaveTokenAsync(Guid userId, string loginProvider, string name, string value, DateTime? expiresAt = null)
+    public async Task<Guid> SaveTokenAsync(Guid userId, string loginProvider, string name, string value, DateTime? expiresAt = null, Guid sessionId = default)
     {
-        // 先查找是否已存在
+        // 先查找是否已存在（唯一键含 SessionId：会话绑定令牌按会话各存一条）
         var existingToken = await _repository
             .Where(ut => ut.UserId == userId
                 && ut.LoginProvider == loginProvider
-                && ut.Name == name)
+                && ut.Name == name
+                && ut.SessionId == sessionId)
             .FirstOrDefaultAsync();
 
         if (existingToken != null)
@@ -48,6 +49,7 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
             Name = name,
             Value = value,
             ExpiresAt = expiresAt,
+            SessionId = sessionId,
             IsUsed = false
         };
 
@@ -66,7 +68,8 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
                 var conflictedToken = await _repository
                     .Where(ut => ut.UserId == userId
                         && ut.LoginProvider == loginProvider
-                        && ut.Name == name)
+                        && ut.Name == name
+                        && ut.SessionId == sessionId)
                     .FirstOrDefaultAsync();
 
                 if (conflictedToken != null)

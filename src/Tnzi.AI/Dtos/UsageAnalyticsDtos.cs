@@ -237,7 +237,7 @@ public class AgentUsageDto
 }
 
 /// <summary>
-/// 成本摘要 DTO — 按时段汇总成本
+/// 成本摘要 DTO - 按时段汇总成本
 /// </summary>
 public class CostSummaryDto
 {

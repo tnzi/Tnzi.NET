@@ -7,7 +7,7 @@ using Xunit;
 namespace Tnzi.AI.Tests.Tools.Sse;
 
 /// <summary>
-/// Adversarial coverage for <see cref="InMemoryPendingApprovalStore"/> — security-relevant edge
+/// Adversarial coverage for <see cref="InMemoryPendingApprovalStore"/> - security-relevant edge
 /// cases the previous implementation did not enforce (cross-user authz, TTL fail-closed,
 /// duplicate registration, missing user identity).
 /// </summary>
@@ -115,7 +115,7 @@ public class InMemoryPendingApprovalStoreAdversarialTests
         // Advance virtual time well past the TTL.
         fakeTime.Advance(TimeSpan.FromSeconds(60));
 
-        // Wait for the next sweep cycle (every 30s real-time) — accelerate by manually invoking
+        // Wait for the next sweep cycle (every 30s real-time) - accelerate by manually invoking
         // the sweep via reflection-free path: trigger another Register/Resolve to allow the timer
         // background tick. Easier: spin-wait briefly for the timer to fire.
         var decision = await store.AwaitDecisionAsync(req.Id).WaitAsync(TimeSpan.FromSeconds(45));
@@ -182,7 +182,7 @@ public class InMemoryPendingApprovalStoreAdversarialTests
     }
 
     /// <summary>
-    /// Minimal <see cref="TimeProvider"/> fake — advances on demand so TTL tests don't need real time.
+    /// Minimal <see cref="TimeProvider"/> fake - advances on demand so TTL tests don't need real time.
     /// </summary>
     private sealed class ControllableTimeProvider(DateTimeOffset start) : TimeProvider
     {

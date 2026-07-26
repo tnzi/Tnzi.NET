@@ -348,7 +348,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
 
         // 获取知识库配置：query 向量必须与摄取时使用相同的 embedding provider/model，
         // 否则向量空间不一致、检索无意义（此前漏传 options 致回退到 AI 顶层 DefaultProvider，
-        // 与摄取使用的 DefaultEmbeddingProvider 不一致 — 例如 DeepSeek 根本无 embedding API）。
+        // 与摄取使用的 DefaultEmbeddingProvider 不一致 - 例如 DeepSeek 根本无 embedding API）。
         var kb = await _kbRepository.GetAsync(kbId, ct);
         if (kb == null)
         {
@@ -379,7 +379,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         {
             Content = r.Content,
             SourceName = docs.GetValueOrDefault(r.DocumentId),
-            KnowledgeBaseName = kb?.Name,
+            KnowledgeBaseName = kb.Name,
             Score = r.Score,
             ChunkIndex = r.ChunkIndex,
             Metadata = r.Metadata
@@ -447,10 +447,14 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         return Ok(doc.MapTo<KnowledgeDocumentDto>());
     }
 
-    // 重新索引批处理大小 — 每批读取/嵌入/回写的块数量。
+    // 重新索引批处理大小 - 每批读取/嵌入/回写的块数量。
     // 选择 50 作为折中：足够大以摊销每批 LLM/HTTP 往返开销，又足够小以保持单批 UOW 提交可控、
     // 内存占用稳定（每个 chunk 文本通常 < 2KB，50 chunks ≈ 100KB）。
     private const int ReindexBatchSize = 50;
+
+    // A reindex is considered abandoned (crashed worker) after this window, at which
+    // point another caller is allowed to take over the lock.
+    private static readonly TimeSpan ReindexStaleLockThreshold = TimeSpan.FromHours(2);
 
     /// <inheritdoc />
     /// <remarks>
@@ -460,14 +464,10 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     /// - 适用规模：典型 KB（≤ 数千 chunks）。超大规模 KB 应在未来迭代引入后台任务 + 进度查询端点。
     /// - 幂等性：对同一 KB 多次调用产生相同终态（每个 chunk 的 Embedding 被对应文本的最新嵌入覆盖）。
     /// - 失败语义：单个 chunk 嵌入失败 → fail-fast，返回错误并附带失败的 chunk id；不静默跳过。
-    /// - UOW 范围：按批提交（每批一次 UpdateManyAsync）。这是 stage-2 的明确权衡 —
+    /// - UOW 范围：按批提交（每批一次 UpdateManyAsync）。这是 stage-2 的明确权衡：
     ///   单一全量 UOW 对大 KB 内存压力过大；按批提交意味着中途失败时已嵌入的批次会持久化，
     ///   但由于操作是幂等的，重新触发即可恢复一致状态。
     /// </remarks>
-    // A reindex is considered abandoned (crashed worker) after this window —
-    // another caller is then allowed to take over the lock.
-    private static readonly TimeSpan ReindexStaleLockThreshold = TimeSpan.FromHours(2);
-
     public async Task<Result<ReindexResultDto>> ReindexAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default)
     {
         var kb = await _kbRepository.GetAsync(knowledgeBaseId, cancellationToken);
@@ -521,7 +521,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 cancellationToken.ThrowIfCancellationRequested();
 
                 // GetRange is O(batch); Skip+Take on List<T> is O(offset+batch) and walks
-                // the whole prefix every iteration — measurable on multi-thousand-chunk KBs.
+                // the whole prefix every iteration, which is measurable on multi-thousand-chunk KBs.
                 var batchCount = Math.Min(ReindexBatchSize, allChunks.Count - offset);
                 var batch = allChunks.GetRange(offset, batchCount);
                 var texts = batch.Select(c => c.Content).ToList();
@@ -591,7 +591,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
 
     /// <remarks>
     /// Acquires the reindex mutex via conditional UPDATE. ExecuteUpdateAsync makes
-    /// the check+set atomic server-side — safe across multiple app instances. Test
+    /// the check+set atomic server-side - safe across multiple app instances. Test
     /// doubles that don't implement IAsyncQueryProvider fall back to a load+update
     /// path with a narrower (milliseconds) race window that is adequate for a unit
     /// test harness.
@@ -608,7 +608,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         }
         catch (InvalidOperationException ex) when (IsProviderUnsupportedExecuteUpdate(ex))
         {
-            // Test double / in-memory provider — fall back to load-then-update with a
+            // Test double / in-memory provider - fall back to load-then-update with a
             // narrower (millisecond) race window. Genuine runtime InvalidOperation now
             // propagates instead of being silently swallowed.
             if (kb.ReindexingAt != null && kb.ReindexingAt >= staleCutoff)

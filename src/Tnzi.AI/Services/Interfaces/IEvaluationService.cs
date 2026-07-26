@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 评估运行管理服务接口 — 提供评估历史的只读查询和删除
+/// 评估运行管理服务接口 - 提供评估历史的只读查询和删除
 /// </summary>
 public interface IEvaluationService
 {

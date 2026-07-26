@@ -45,15 +45,15 @@ public class GatewayWebSocketHardeningTests
     [Fact]
     public async Task HandleAsync_AnonymousOverCap_ClosesConnection()
     {
-        // Arrange — already at the cap (2) of anonymous connections
+        // Arrange - already at the cap (2) of anonymous connections
         var presence = CreatePresenceWith(anonymousCount: 2);
         var handler = CreateHandler(presence, maxConnectionsPerUser: 2);
         var ws = new FakeWebSocket();
 
-        // Act — the N+1 anonymous connection
+        // Act - the N+1 anonymous connection
         await handler.HandleAsync(ws, userId: null, CancellationToken.None);
 
-        // Assert — connection rejected/closed, never tracked
+        // Assert - connection rejected/closed, never tracked
         ws.CloseStatusValue.ShouldBe(WebSocketCloseStatus.PolicyViolation);
         presence.GetConnections().Count.ShouldBe(2);
     }
@@ -61,7 +61,7 @@ public class GatewayWebSocketHardeningTests
     [Fact]
     public async Task HandleAsync_AnonymousUnderCap_Accepts()
     {
-        // Arrange — one anonymous connection exists, cap is 2
+        // Arrange - one anonymous connection exists, cap is 2
         var presence = CreatePresenceWith(anonymousCount: 1);
         var handler = CreateHandler(presence, maxConnectionsPerUser: 2);
         var ws = new FakeWebSocket();
@@ -70,7 +70,7 @@ public class GatewayWebSocketHardeningTests
         // Act
         await handler.HandleAsync(ws, userId: null, CancellationToken.None);
 
-        // Assert — it was tracked (then removed on disconnect); not a policy-violation close
+        // Assert - it was tracked (then removed on disconnect); not a policy-violation close
         ws.CloseStatusValue.ShouldNotBe(WebSocketCloseStatus.PolicyViolation);
     }
 
@@ -85,7 +85,7 @@ public class GatewayWebSocketHardeningTests
         // Act
         await handler.HandleAsync(ws, userId: null, CancellationToken.None);
 
-        // Assert — rejected before any tracking
+        // Assert - rejected before any tracking
         ws.CloseStatusValue.ShouldBe(WebSocketCloseStatus.PolicyViolation);
         presence.GetConnections().Count.ShouldBe(0);
     }
@@ -93,20 +93,20 @@ public class GatewayWebSocketHardeningTests
     [Fact]
     public void ResolveChatId_AuthedUser_IgnoresClientSuppliedChatId()
     {
-        // Arrange — authed user supplies someone else's chatId in the payload
+        // Arrange - authed user supplies someone else's chatId in the payload
         var payload = JsonSerializer.SerializeToElement(new { text = "hi", chatId = "victim-peer" });
 
         // Act
         var chatId = GatewayWebSocketHandler.ResolveChatId(payload, userId: "real-user");
 
-        // Assert — chatId is FORCED to the authed user identity, not the spoofed value
+        // Assert - chatId is FORCED to the authed user identity, not the spoofed value
         chatId.ShouldBe("real-user");
     }
 
     [Fact]
     public void ResolveChatId_Anonymous_UsesClientSuppliedChatId()
     {
-        // Arrange — anonymous client may pick its own chatId discriminator
+        // Arrange - anonymous client may pick its own chatId discriminator
         var payload = JsonSerializer.SerializeToElement(new { text = "hi", chatId = "session-abc" });
 
         // Act
@@ -126,7 +126,7 @@ public class GatewayWebSocketHardeningTests
     [Fact]
     public async Task HandleChatSend_AuthedUser_SessionKeyBoundToUserNotSpoofedChatId()
     {
-        // Arrange — authed user "real-user" sends a chat.send carrying "victim-peer" as chatId.
+        // Arrange - authed user "real-user" sends a chat.send carrying "victim-peer" as chatId.
         // The gateway must receive ChatId == userId so the session key cannot impersonate another peer.
         GatewayRequest? captured = null;
         var gatewayMock = new Mock<IGateway>();

@@ -73,11 +73,11 @@ public class AesSettingEncryptorTests
         // Arrange
         var plainText = "same-input";
 
-        // Act — 多次加密同一明文
+        // Act - 多次加密同一明文
         var encrypted1 = _encryptor.Encrypt(plainText);
         var encrypted2 = _encryptor.Encrypt(plainText);
 
-        // Assert — 由于随机 nonce，密文应不同
+        // Assert - 由于随机 nonce，密文应不同
         encrypted1.ShouldNotBe(encrypted2);
 
         // 但解密结果应相同
@@ -96,7 +96,7 @@ public class AesSettingEncryptorTests
     [Fact]
     public void Decrypt_Too_Short_Data_Should_Throw_BusinessException()
     {
-        // Arrange — 有效 Base64 但数据太短（少于 nonce + tag = 28 字节）
+        // Arrange - 有效 Base64 但数据太短（少于 nonce + tag = 28 字节）
         var shortData = Convert.ToBase64String(new byte[10]);
 
         // Act & Assert
@@ -123,7 +123,7 @@ public class AesSettingEncryptorTests
     [Fact]
     public void Decrypt_With_Wrong_Key_Should_Throw_BusinessException()
     {
-        // Arrange — 用一个密钥加密
+        // Arrange - 用一个密钥加密
         var encrypted = _encryptor.Encrypt("secret");
 
         // 用另一个密钥创建新的解密器
@@ -158,7 +158,7 @@ public class AesSettingEncryptorTests
     [Fact]
     public void Constructor_Should_Throw_When_Key_Wrong_Length()
     {
-        // Arrange — 16 字节密钥（AES-128，不是 AES-256）
+        // Arrange - 16 字节密钥（AES-128，不是 AES-256）
         var shortKey = Convert.ToBase64String(new byte[16]);
         var options = Microsoft.Extensions.Options.Options.Create(new SettingEncryptionOptions
         {
@@ -241,7 +241,7 @@ public class SettingEncryptionOptionsValidatorTests
     [Fact]
     public void Validate_Enabled_With_Wrong_Key_Length_Should_Fail()
     {
-        // Arrange — 16 字节密钥，不是 32
+        // Arrange - 16 字节密钥，不是 32
         var options = new SettingEncryptionOptions
         {
             Enabled = true,

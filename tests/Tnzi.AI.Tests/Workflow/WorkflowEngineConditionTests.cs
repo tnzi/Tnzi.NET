@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// WorkflowEngine 步骤条件门控（EvaluateCondition）测试 — fail-closed 语义：
+/// WorkflowEngine 步骤条件门控（EvaluateCondition）测试 - fail-closed 语义：
 /// 空条件 = 执行；非空时仅白名单 "true"/"1"/"yes"（大小写不敏感）判真；
 /// 未解析模板（{{...}} 残留）与任意自由文本一律判假跳过节点。
 /// </summary>

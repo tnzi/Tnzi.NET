@@ -1,5 +1,5 @@
 /**
- * useWorkflowVisualization — Converts workflow definitions to @vue-flow nodes/edges
+ * useWorkflowVisualization - Converts workflow definitions to @vue-flow nodes/edges
  */
 
 import { ref, computed, readonly, type Ref, type DeepReadonly } from 'vue';

@@ -89,7 +89,7 @@ public class FunctionAuthCacheTests
     }
 
     // NOTE: FunctionAuthCache.CheckPermissionAsync/CheckPermissionsAsync were
-    // removed — the per-user cache key holds EXPLICIT grants only, so any
+    // removed - the per-user cache key holds EXPLICIT grants only, so any
     // check built on it would bypass the super-admin short-circuit.
     // Permission checks live in FunctionAuthorizationService (covered by
     // SuperAdminAccessIntegrationTests).

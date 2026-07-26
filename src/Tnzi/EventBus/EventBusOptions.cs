@@ -61,7 +61,7 @@ public class EventBusOptions
     /// 跑，IsAlreadyRegistered 检查时手动注册还未发生，handler 通过
     /// `TryAddEnumerable` 注册一次；随后应用模块通过 `AddScoped` 又注册
     /// 一次。结果同一 handler 在 DI 容器里出现两个 descriptor，每次事件
-    /// 发布触发两次执行 — 例如 `UserLoggedInEventHandler` 写两条登录日志。
+    /// 发布触发两次执行 - 例如 `UserLoggedInEventHandler` 写两条登录日志。
     ///
     /// 设为 false 可恢复旧行为（同时扫描框架与应用程序集）。仅当 consumer
     /// 显式指定了 `HandlerAssemblies` 时本选项不生效（认为是显式选择）。

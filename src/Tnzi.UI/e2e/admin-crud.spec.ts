@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * Phase 6.4 — Admin CRUD E2E
+ * Phase 6.4 - Admin CRUD E2E
  *
  * Exercises TTable row-action + pagination flow in the playground's
  * Data section. This substitutes for a full UserManagement E2E because
@@ -40,7 +40,7 @@ test.describe('TTable row action (playground Data section)', () => {
     const firstRowActionButton = tableCard.locator('.n-data-table-tr').filter({ has: page.locator('.n-data-table-td') }).first().locator('button').first()
     await expect(firstRowActionButton).toBeVisible()
     await firstRowActionButton.click()
-    // Playground's handleAction fires msgAdapter.info — any n-message toast shows up
+    // Playground's handleAction fires msgAdapter.info - any n-message toast shows up
     await expect(page.locator('.n-message-wrapper').first()).toBeVisible({ timeout: 4000 })
   })
 

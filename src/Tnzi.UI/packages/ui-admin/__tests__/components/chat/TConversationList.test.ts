@@ -76,7 +76,7 @@ function mountList(conversations = makeConversations(), activeId: string | null 
     global: {
       stubs: {
         // Stub NScrollbar (virtual-scroll) and heavy render deps.
-        // NInput is left real — it renders a native <input> internally.
+        // NInput is left real - it renders a native <input> internally.
         NScrollbar: NScrollbarStub,
         NBadge: NBadgeStub,
         Icon: IconStub,

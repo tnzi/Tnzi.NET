@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * TDarkModeContainer — local theme-invert wrapper.
+ * TDarkModeContainer - local theme-invert wrapper.
  *
  * When `inverted` is true, the slot subtree consumes the inverted token
  * surface (dark background + bright foreground) regardless of the global
  * light/dark mode. Useful for designs where the sider stays dark while the
- * rest of the page is light (or vice-versa) — e.g. soybean-admin's hybrid
+ * rest of the page is light (or vice-versa) - e.g. soybean-admin's hybrid
  * layouts and most dashboards with a deep brand-colored side rail.
  *
  * Inspired by soybean-admin's `DarkModeContainer` (src/components/common/).
@@ -19,8 +19,8 @@ interface Props {
   tag?: string
   /**
    * Transition mode between light <-> dark surfaces. (Phase I.6.7)
-   *   - `'smooth'` — 300ms color + background-color crossfade (default)
-   *   - `'none'`   — no transition (preferred for full-page hard-flips)
+   *   - `'smooth'` - 300ms color + background-color crossfade (default)
+   *   - `'none'` - no transition (preferred for full-page hard-flips)
    */
   transition?: 'smooth' | 'none'
 }
@@ -49,7 +49,7 @@ withDefaults(defineProps<Props>(), {
 
 <style scoped>
 .t-dark-mode-container {
-  /* No-op when neither modifier is active — token cascade is unchanged. */
+  /* No-op when neither modifier is active - token cascade is unchanged. */
   color: var(--tnzi-base-text);
   background-color: transparent;
 }

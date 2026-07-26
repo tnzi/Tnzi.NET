@@ -1,6 +1,0 @@
-<Project>
-  <!-- Remove language folders copied from NuGet packages after publish (keep only 'runtimes') -->
-  <Target Name="TnziRemoveLanguageFolders" AfterTargets="Publish">
-    <Exec Command="powershell -NoProfile -Command &quot;Get-ChildItem '$(PublishDir)' -Directory | Where-Object { $_.Name -ne 'runtimes' } | Remove-Item -Recurse -Force&quot;" />
-  </Target>
-</Project>

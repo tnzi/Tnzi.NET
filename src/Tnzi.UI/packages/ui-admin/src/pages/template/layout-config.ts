@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -5,7 +6,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TSourceBadge } from '@tnzi/ui'
 
 /**
- * Template Layout page config — Phase 3 Task 3.37.
+ * Template Layout page config - Phase 3 Task 3.37.
  *
  * Columns and form schema for the admin Template Layout management view.
  * Backend fields from LayoutInfoDto / LayoutEntityDto:
@@ -32,7 +33,7 @@ export const layoutColumns: ColumnDef[] = [
     render: (row) =>
       row.isDefault
         ? h(TStatusBadge, { value: true, type: 'info', label: 'Default' })
-        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, '—'),
+        : h('span', { style: 'color: var(--tnzi-base-text-muted)' }, EMPTY_DASH),
   },
   {
     key: 'isActive',

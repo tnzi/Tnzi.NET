@@ -38,10 +38,10 @@ describe('useDataQuery composable', () => {
       autoRefreshInterval: 5000,
     });
 
-    // Initial state — no fetch yet
+    // Initial state - no fetch yet
     expect(fetchFn).toHaveBeenCalledTimes(0);
 
-    // Advance 5 seconds — should trigger first auto-refresh
+    // Advance 5 seconds - should trigger first auto-refresh
     await vi.advanceTimersByTimeAsync(5000);
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
@@ -64,7 +64,7 @@ describe('useDataQuery composable', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
-    // Dispose and advance — should NOT fire again
+    // Dispose and advance - should NOT fire again
     query.dispose();
     await vi.advanceTimersByTimeAsync(15000);
     expect(fetchFn).toHaveBeenCalledTimes(1);

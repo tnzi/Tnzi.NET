@@ -5,3 +5,6 @@
  * implicitly resolve `*.css` imports without `vite/client` in scope.
  */
 declare module '*.css';
+
+/** UnoCSS virtual entry; resolved by `unocss/vite` at build time. */
+declare module 'virtual:uno.css';

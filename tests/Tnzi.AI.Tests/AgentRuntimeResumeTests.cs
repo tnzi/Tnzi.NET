@@ -270,7 +270,7 @@ public class AgentRuntimeResumeTests
     }
 
     /// <summary>
-    /// 短路中间件 — 直接返回固定结果，使测试无需真实执行策略/ChatClient。
+    /// 短路中间件 - 直接返回固定结果，使测试无需真实执行策略/ChatClient。
     /// </summary>
     private sealed class StaticResultMiddleware : IAiMiddleware
     {

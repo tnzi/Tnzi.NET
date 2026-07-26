@@ -63,7 +63,7 @@ public class FileUploadMiddlewareTests : IDisposable
 
     #endregion
 
-    #region InvokeAsync — No attachments
+    #region InvokeAsync - No attachments
 
     [Fact]
     public async Task InvokeAsync_NoAttachments_PassesThroughWithoutInjection()
@@ -103,7 +103,7 @@ public class FileUploadMiddlewareTests : IDisposable
 
     #endregion
 
-    #region InvokeAsync — Valid attachment
+    #region InvokeAsync - Valid attachment
 
     [Fact]
     public async Task InvokeAsync_ValidAttachment_InjectsUploadedFilesBlock()
@@ -135,7 +135,7 @@ public class FileUploadMiddlewareTests : IDisposable
 
     #endregion
 
-    #region InvokeAsync — Path traversal rejection
+    #region InvokeAsync - Path traversal rejection
 
     [Theory]
     [InlineData("../etc/passwd")]
@@ -156,14 +156,14 @@ public class FileUploadMiddlewareTests : IDisposable
         // Act
         await middleware.InvokeAsync(context, next);
 
-        // Assert — no system message injected (file rejected)
+        // Assert - no system message injected (file rejected)
         context.Messages.Count.ShouldBe(1); // only original user message
         context.Messages[0].Role.ShouldBe(ChatRole.User);
     }
 
     #endregion
 
-    #region InvokeAsync — File not on disk
+    #region InvokeAsync - File not on disk
 
     [Fact]
     public async Task InvokeAsync_FileNotOnDisk_SkipsFile()
@@ -180,7 +180,7 @@ public class FileUploadMiddlewareTests : IDisposable
         // Act
         await middleware.InvokeAsync(context, next);
 
-        // Assert — no system message injected (file not found)
+        // Assert - no system message injected (file not found)
         context.Messages.Count.ShouldBe(1);
     }
 
@@ -219,7 +219,7 @@ public class FileUploadMiddlewareTests : IDisposable
 
     #endregion
 
-    #region InvokeAsync — No ThreadUploadsDir
+    #region InvokeAsync - No ThreadUploadsDir
 
     [Fact]
     public async Task InvokeAsync_NoThreadUploadsDir_SkipsInjection()

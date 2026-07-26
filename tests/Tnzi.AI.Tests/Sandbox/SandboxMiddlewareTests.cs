@@ -67,7 +67,7 @@ public class SandboxMiddlewareTests
             Assert.NotNull(observed!.Sandbox);
             Assert.Equal(threadId, observed.ThreadId);
 
-            // 运行结束后环境被移除 — 沙箱已释放，绝不允许悬挂引用
+            // 运行结束后环境被移除 - 沙箱已释放，绝不允许悬挂引用
             Assert.False(properties.ContainsKey(SandboxPropertyKeys.ToolEnvironment));
         }
         finally

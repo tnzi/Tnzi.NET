@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * Phase 6.6 — Chat in light + dark mode E2E
+ * Phase 6.6 - Chat in light + dark mode E2E
  *
  * Runs against the @tnzi/ui-ai playground (port 5174). Verifies:
  * - Chat demo mounts in the default (light) theme
@@ -60,7 +60,7 @@ test.describe('ui-ai chat themes', () => {
 
   test('locale toggle switches between EN and 中文 labels', async ({ page }) => {
     // Locale button shows "中文" when locale is en, "EN" when locale is zh.
-    // Text includes icon whitespace — use a broader match.
+    // Text includes icon whitespace - use a broader match.
     const localeButton = page.locator('header button').filter({ hasText: /中文|^\s*EN\s*$/ }).first()
     await expect(localeButton).toBeVisible()
     const before = (await localeButton.textContent())?.replace(/\s/g, '')

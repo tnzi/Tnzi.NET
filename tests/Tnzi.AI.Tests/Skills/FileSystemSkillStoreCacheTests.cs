@@ -44,7 +44,7 @@ public class FileSystemSkillStoreCacheTests : IDisposable
         var first = await store.GetAllAsync();
         first.Count.ShouldBe(1);
 
-        // Add a new skill file — TTL has not expired
+        // Add a new skill file - TTL has not expired
         CreateSkillFile("skill-b", """
             ---
             name: Skill B
@@ -53,7 +53,7 @@ public class FileSystemSkillStoreCacheTests : IDisposable
             """);
 
         var second = await store.GetAllAsync();
-        second.Count.ShouldBe(1); // still cached — new file not visible
+        second.Count.ShouldBe(1); // still cached - new file not visible
         ReferenceEquals(first, second).ShouldBeTrue();
     }
 
@@ -85,11 +85,11 @@ public class FileSystemSkillStoreCacheTests : IDisposable
             ---
             """);
 
-        // Trigger options change — cache should be invalidated
+        // Trigger options change - cache should be invalidated
         monitor.TriggerChange();
 
         var second = await store.GetAllAsync();
-        second.Count.ShouldBe(2); // re-scanned — both files visible
+        second.Count.ShouldBe(2); // re-scanned - both files visible
         second.ShouldContain(s => s.Name == "Skill A");
         second.ShouldContain(s => s.Name == "Skill B");
     }
@@ -110,7 +110,7 @@ public class FileSystemSkillStoreCacheTests : IDisposable
         var first = await store.GetAllAsync();
         var second = await store.GetAllAsync();
 
-        // No change triggered — same cached list
+        // No change triggered - same cached list
         ReferenceEquals(first, second).ShouldBeTrue();
     }
 
@@ -178,7 +178,7 @@ public class FileSystemSkillStoreCacheTests : IDisposable
             ---
             """);
 
-        // CreateStore uses IOptions only — no monitor
+        // CreateStore uses IOptions only - no monitor
         using var store = CreateStore(ttl: TimeSpan.FromMinutes(5));
         var skills = await store.GetAllAsync();
         skills.Count.ShouldBe(1);

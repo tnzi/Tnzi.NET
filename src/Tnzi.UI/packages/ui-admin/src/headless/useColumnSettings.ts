@@ -11,7 +11,7 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
    * space and only shrinks down to this floor. The table therefore fills
    * its container (no right-hand gap) and a horizontal scrollbar appears
    * only when the sum of every column's minimum width genuinely exceeds the
-   * container — not on every wide-ish or empty table the way a fixed-`width`
+   * container - not on every wide-ish or empty table the way a fixed-`width`
    * sum did. Prefer `minWidth` for text columns (name, email, description);
    * keep `width` for fixed-content columns (status badges, dates, icons,
    * numbers, the operation column). Forwarded to NDataTable's column
@@ -66,7 +66,7 @@ export interface UseColumnSettingsReturn {
   orderedKeys: Ref<string[]>
   hiddenKeys: Ref<Set<string>>
   /**
-   * Runtime overrides for the `fixed` property — separate from the
+   * Runtime overrides for the `fixed` property - separate from the
    * ColumnDef's static value so the user's column-setting popover
    * choices don't mutate the page config. `null` means "explicitly
    * unfix", absent means "use the ColumnDef default".

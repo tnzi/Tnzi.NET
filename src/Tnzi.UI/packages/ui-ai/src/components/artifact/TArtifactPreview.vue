@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TArtifactPreview — iframe preview with address bar and console
+ * TArtifactPreview - iframe preview with address bar and console
  */
 
 import { NInput, NButton, NTooltip } from 'naive-ui';

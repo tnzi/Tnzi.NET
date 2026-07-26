@@ -42,7 +42,7 @@ public partial class SkillService : ApplicationService, ISkillService
     /// <c>AgentPersonaService.ApplyVisibility</c>:
     /// </para>
     /// <list type="bullet">
-    ///   <item>Single-tenant mode (<c>_currentTenant?.Id == null</c>): no filter — all rows visible.</item>
+    ///   <item>Single-tenant mode (<c>_currentTenant?.Id == null</c>): no filter - all rows visible.</item>
     ///   <item>Multi-tenant mode: keep System rows + Tenant/User rows owned by the current tenant.</item>
     /// </list>
     /// </summary>
@@ -550,12 +550,22 @@ public partial class SkillService : ApplicationService, ISkillService
         var toInsert = new List<SkillEntity>();
         var toUpdate = new List<SkillEntity>();
 
+        // Tenant isolation: System-scope rows are tenant-agnostic and administrator-managed
+        // (UpdateAsync/DeleteAsync return 403 for them, and the admin create endpoint pins
+        // Scope=Tenant). Import must not be a side door that lets a tenant user create or
+        // overwrite globally visible System skills, so reject it in multi-tenant mode.
+        // Single-tenant hosts (_currentTenant?.Id == null) keep the existing behaviour.
+        if (targetScope == SkillScope.System && _currentTenant?.Id != null)
+            return Fail<SkillImportResultDto>("Access denied: system skills are managed by administrators.", 403, ErrorCodes.SkillUnauthorized);
+
         // Resolve TenantId for the import batch (same rule as CreateAsync):
         // Tenant- and User-scoped rows both record the current tenant; System stays null.
         Guid? importTenantId = targetScope == SkillScope.System ? null : _currentTenant?.Id;
 
-        // Pre-load existing slugs in target scope+tenant for conflict detection
-        var existingSlugs = await _repository.AsQueryable()
+        // Pre-load existing slugs in target scope+tenant for conflict detection.
+        // ApplyTenantVisibility is layered on as defence in depth so the update branch
+        // below can never resolve a row outside the caller's tenant.
+        var existingSlugs = await ApplyTenantVisibility(_repository.AsQueryable())
             .Where(e => e.Scope == targetScope && e.TenantId == importTenantId)
             .Select(e => new { e.Id, e.Slug })
             .ToDictionaryAsync(e => e.Slug, e => e.Id, StringComparer.OrdinalIgnoreCase);

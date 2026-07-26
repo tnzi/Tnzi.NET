@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TPinToggler` — pin / unpin button (used by mix-layout sub-sider to lock
+ * `TPinToggler` - pin / unpin button (used by mix-layout sub-sider to lock
  * the second-level drawer open). Icon orientation reflects pinned state.
  */
 import { computed } from 'vue'
@@ -9,11 +9,14 @@ import TButtonIcon from '../display/TButtonIcon.vue'
 interface Props {
   pinned?: boolean
   translate?: (key: string) => string
+  /** Pixel size for the pin icon. Defaults to 18 (mirrors TButtonIcon). */
+  size?: number | string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   pinned: false,
   translate: undefined,
+  size: 18,
 })
 
 const emit = defineEmits<{
@@ -42,6 +45,7 @@ const tooltip = computed(() =>
   <TButtonIcon
     :icon="icon"
     :tooltip="tooltip"
+    :icon-size="size"
     :class="['t-pin-toggler', { 't-pin-toggler--active': pinned }]"
     @click="onClick"
   />

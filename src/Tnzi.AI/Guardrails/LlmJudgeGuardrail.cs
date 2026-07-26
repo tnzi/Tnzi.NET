@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// LLM-as-Judge Guardrail — 使用 LLM 评估输入/输出内容的安全性和适当性
+/// LLM-as-Judge Guardrail - 使用 LLM 评估输入/输出内容的安全性和适当性
 /// </summary>
 /// <remarks>
 /// 同时实现 IInputGuardrail 和 IOutputGuardrail，通过不同的系统提示词分别评估输入和输出。
@@ -88,25 +88,25 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // 超时（非外部取消）— fail-open
+            // 超时（非外部取消）- fail-open
             _logger.LogWarning("LLM-as-Judge timed out after {TimeoutSeconds}s, allowing content through (fail-open)", JudgeOptions.TimeoutSeconds);
             return GuardrailResult.Allowed();
         }
         catch (OperationCanceledException)
         {
-            // 外部取消 — 重新抛出
+            // 外部取消 - 重新抛出
             throw;
         }
         catch (Exception ex)
         {
-            // LLM 调用失败 — fail-open
+            // LLM 调用失败 - fail-open
             _logger.LogWarning(ex, "LLM-as-Judge evaluation failed, allowing content through (fail-open)");
             return GuardrailResult.Allowed();
         }
     }
 
     /// <summary>
-    /// IGuardrailProvider 实现 — 评估内容安全性
+    /// IGuardrailProvider 实现 - 评估内容安全性
     /// </summary>
     async Task<GuardrailDecision> IGuardrailProvider.EvaluateAsync(GuardrailRequest request, CancellationToken ct)
     {
@@ -151,7 +151,7 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
             return GuardrailResult.Rejected(GuardrailName, reason);
         }
 
-        // 无法解析的响应 — 视为通过（fail-open）
+        // 无法解析的响应 - 视为通过（fail-open）
         return GuardrailResult.Allowed();
     }
 }

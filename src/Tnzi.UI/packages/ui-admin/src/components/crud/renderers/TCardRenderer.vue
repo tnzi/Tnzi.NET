@@ -45,6 +45,7 @@
           :index="index"
           :selected="showSelection && isSelected(item)"
           :toggleSelect="() => toggle(item)"
+          :rowActions="props.rowActions"
         />
       </div>
     </div>
@@ -57,6 +58,7 @@ import { NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TEmpty from '../../data/TEmpty.vue'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
+import type { RowAction } from '../../../headless/rowActions'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
 
@@ -67,6 +69,12 @@ export interface TCardRendererProps<T, TId extends string | number = string | nu
   gap?: number
   cardKey?: (row: T) => string | number
   showSelection?: boolean
+  /**
+   * Declarative row operations, handed straight back to the `#card` slot.
+   * A tile places its own operations (footer strip, hover overlay, kebab), so
+   * the renderer carries the declaration through rather than drawing it.
+   */
+  rowActions?: RowAction<T>[]
   translate?: (key: string) => string
 }
 
@@ -75,11 +83,18 @@ const props = withDefaults(defineProps<TCardRendererProps<T, TId>>(), {
   gap: 16,
   cardKey: undefined,
   showSelection: false,
+  rowActions: undefined,
   translate: undefined,
 })
 
 defineSlots<{
-  card?: (props: { item: T; index: number; selected: boolean; toggleSelect: () => void }) => unknown
+  card?: (props: {
+    item: T
+    index: number
+    selected: boolean
+    toggleSelect: () => void
+    rowActions: RowAction<T>[] | undefined
+  }) => unknown
   empty?: () => unknown
 }>()
 
@@ -136,7 +151,7 @@ function toggle(row: T): void {
 /* In page mode the shell gives the renderer a bounded height via the flex chain
    (`.t-list-shell--page .t-list-shell__body` is `flex:1; min-height:0; overflow:hidden`).
    The table renderer scrolls its own NDataTable, but the card grid has no internal
-   scroller — so it must fill the body and own the scroll itself, or the overflowing
+   scroller - so it must fill the body and own the scroll itself, or the overflowing
    cards get clipped. Scoped to page mode only (ancestor class match) so container-mode
    card grids stay content-height and let the outer page scroll. */
 .t-list-shell--page .t-card-renderer {

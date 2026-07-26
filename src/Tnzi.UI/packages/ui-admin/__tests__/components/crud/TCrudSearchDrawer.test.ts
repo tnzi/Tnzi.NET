@@ -27,6 +27,11 @@ describe('TCrudSearchDrawer', () => {
     expect(w.find('.t-crud-search-advanced').exists()).toBe(true)
   })
 
+  it('wraps the drawer in TOverlayTheme so it follows the GLOBAL mode (not a dark card surface)', () => {
+    const w = mount(TCrudSearchDrawer, { props: { show: true, state: makeState() as any, searchFields: fields }, global: { stubs } })
+    expect(w.findComponent({ name: 'TOverlayTheme' }).exists()).toBe(true)
+  })
+
   it('does not render drawer content when show=false', () => {
     const w = mount(TCrudSearchDrawer, { props: { show: false, state: makeState() as any, searchFields: fields }, global: { stubs } })
     expect(w.find('.n-drawer-stub').exists()).toBe(false)

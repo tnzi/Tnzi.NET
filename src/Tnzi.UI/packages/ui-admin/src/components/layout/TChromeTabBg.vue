@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TChromeTabBg` — SVG arc background for the chrome-style tab.
+ * `TChromeTabBg` - SVG arc background for the chrome-style tab.
  * Ported from soybean-admin's `chrome-tab-bg.vue` (the SVG path that
  * gives chrome tabs their characteristic curved shoulders).
  *

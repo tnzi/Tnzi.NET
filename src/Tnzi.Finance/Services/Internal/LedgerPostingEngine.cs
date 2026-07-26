@@ -20,6 +20,7 @@ public sealed class LedgerPostingEngine
     private readonly IExchangeRateService _exchangeRateService;
     private readonly IDocumentNumberService _numberService;
     private readonly BalanceSummaryMaintainer _summaryMaintainer;
+    private readonly ReversalGuard _reversalGuard;
     private readonly TimeProvider _timeProvider;
     private readonly FinanceOptions _options;
     private readonly ICurrentUser? _currentUser;
@@ -30,6 +31,7 @@ public sealed class LedgerPostingEngine
         IExchangeRateService exchangeRateService,
         IDocumentNumberService numberService,
         BalanceSummaryMaintainer summaryMaintainer,
+        ReversalGuard reversalGuard,
         TimeProvider timeProvider,
         IOptionsSnapshot<FinanceOptions> options,
         ICurrentUser? currentUser = null)
@@ -39,6 +41,7 @@ public sealed class LedgerPostingEngine
         _exchangeRateService = Check.NotNull(exchangeRateService);
         _numberService = Check.NotNull(numberService);
         _summaryMaintainer = Check.NotNull(summaryMaintainer);
+        _reversalGuard = Check.NotNull(reversalGuard);
         _timeProvider = Check.NotNull(timeProvider);
         _options = Check.NotNull(options).Value;
         _currentUser = currentUser;
@@ -207,14 +210,25 @@ public sealed class LedgerPostingEngine
     /// <summary>
     /// 构建一张冲销凭证（借贷互换，金额精确取自原凭证，不重新换算）
     /// </summary>
+    /// <remarks>
+    /// <b>这里是全部单据的冲销漏斗</b>：每种单据的 <c>VoidAsync</c> 与
+    /// <c>IJournalEntryService.ReverseAsync</c>（<c>ILedgerPostingService.ReverseAsync</c> 委托它）
+    /// 最终都经由本方法构造冲销凭证，所以冲销的准入校验放这里一处即覆盖全部单据类型，
+    /// 且不必按 DocType 分别去找它的总账凭证。
+    /// <para>
+    /// 校验经 <see cref="ReversalGuard"/>（期间封账 + 已完成对账 + 已匹配银行流水），
+    /// 与只读的 <c>GetReversibilityAsync</c> 同源。守卫只读且位于凭证号分配与余额桶累加之前，
+    /// 拒绝路径零写入。
+    /// </para>
+    /// </remarks>
     public async Task<Result<JournalEntry>> BuildReversalAsync(JournalEntry original, DateTime postingDate, string? memo, CancellationToken cancellationToken = default)
     {
         Check.NotNull(original);
 
         var date = postingDate.ToUtcDate();
-        var dateResult = await _fiscalYearService.ValidatePostingDateAsync(date, cancellationToken);
-        if (!dateResult.Succeeded)
-            return Result<JournalEntry>.Failure(dateResult.Message ?? "Posting date is not allowed.", dateResult.Code ?? 400);
+        var block = await _reversalGuard.EvaluateAsync(original, date, cancellationToken);
+        if (block != null)
+            return Result<JournalEntry>.Failure(block.Detail, block.Code);
 
         var reversal = new JournalEntry
         {

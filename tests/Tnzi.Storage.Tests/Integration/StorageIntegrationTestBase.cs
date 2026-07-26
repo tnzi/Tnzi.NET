@@ -94,6 +94,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
             storage,
             optionsMonitor.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider);
     }
 
@@ -111,6 +112,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileVersion, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
+            TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider);
     }
 
@@ -139,6 +141,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         return new FileShareService(
             new EFCoreRepository<StorageTestDbContext, Tnzi.Storage.Entities.FileShare, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
+            TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider);
     }
 

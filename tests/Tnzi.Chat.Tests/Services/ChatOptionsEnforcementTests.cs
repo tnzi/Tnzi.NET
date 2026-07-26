@@ -34,7 +34,7 @@ public class ChatInvisibleDisabledConfigTests : Integration.IntegrationTestBase
 {
     private IChatConfigService Config => ServiceProvider.GetRequiredService<IChatConfigService>();
 
-    protected override void ConfigureChatOptions(ChatOptions options) => options.AllowInvisible = false;
+    protected override void ConfigurePresenceOptions(PresenceOptions options) => options.AllowInvisible = false;
 
     [Fact]
     public async Task GetClientConfig_Should_Report_Invisible_Disabled()
@@ -146,7 +146,7 @@ public class ChatGroupMemberCapTests : Integration.IntegrationTestBase
             MemberIds = new List<Guid> { existing, Guid.NewGuid() }
         })).Data!;
 
-        // Re-adding an active member adds nobody new — must NOT trip the cap.
+        // Re-adding an active member adds nobody new - must NOT trip the cap.
         var r = await Group.AddMembersAsync(g.Id, new[] { existing });
         r.Succeeded.ShouldBeTrue(r.Message);
     }
@@ -227,7 +227,7 @@ public class ConversationListMemberAvatarsTests : Integration.IntegrationTestBas
         lateRow = await DbContext.Set<ConversationMember>().FirstAsync(m => m.ConversationId == g.Id && m.UserId == late);
         lateRow.CreationTime = DateTime.UtcNow.AddHours(1);
 
-        // Force the owner's membership row to look like the VERY LATEST join — the
+        // Force the owner's membership row to look like the VERY LATEST join - the
         // display order must still put the owner first (owner rank beats join time).
         var ownerRow = await DbContext.Set<ConversationMember>()
             .FirstAsync(m => m.ConversationId == g.Id && m.UserId == CurrentUserId);
@@ -242,7 +242,7 @@ public class ConversationListMemberAvatarsTests : Integration.IntegrationTestBas
         var detail = (await Conversations.GetByIdAsync(g.Id)).Data!;
         detail.Members[0].UserId.ShouldBe(CurrentUserId);
         detail.Members.Last().UserId.ShouldBe(late);
-        // The creation batch shares one timestamp — set equality only.
+        // The creation batch shares one timestamp - set equality only.
         detail.Members.Skip(1).Take(2).Select(m => m.UserId).ShouldBe(new[] { m1, m2 }, ignoreOrder: true);
     }
 }

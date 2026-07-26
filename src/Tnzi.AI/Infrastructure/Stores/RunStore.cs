@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Stores;
 
 /// <summary>
-/// Run 持久化存储 — 基于 EF Core Repository 实现
+/// Run 持久化存储 - 基于 EF Core Repository 实现
 /// </summary>
 public class RunStore : IRunStore
 {

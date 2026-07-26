@@ -57,7 +57,7 @@ public class AIFunctionAttribute : Attribute
     public int MaxResultSizeChars { get; set; }
 
     /// <summary>
-    /// 搜索提示 — 提供额外匹配关键词用于工具搜索评分
+    /// 搜索提示 - 提供额外匹配关键词用于工具搜索评分
     /// </summary>
     public string? SearchHint { get; set; }
 
@@ -72,7 +72,7 @@ public class AIFunctionAttribute : Attribute
     public int Priority { get; set; }
 
     /// <summary>
-    /// 工具中断行为 — 当 Agent 取消时工具如何响应。默认 Cancel（立即取消）。
+    /// 工具中断行为 - 当 Agent 取消时工具如何响应。默认 Cancel（立即取消）。
     /// </summary>
     public ToolInterruptBehavior InterruptBehavior { get; set; } = ToolInterruptBehavior.Cancel;
 

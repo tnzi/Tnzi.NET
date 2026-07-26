@@ -1,5 +1,5 @@
 /**
- * Payment statistics bridge — thin adapter over `@tnzi/core`'s admin
+ * Payment statistics bridge - thin adapter over `@tnzi/core`'s admin
  * payment-statistics API (`useAdminPaymentStatisticsApi`, wrapping
  * `/admin/payment-statistics/*` exposed by
  * `Tnzi.Payment.Controllers.Admin.DefaultPaymentStatisticsAdminController`).

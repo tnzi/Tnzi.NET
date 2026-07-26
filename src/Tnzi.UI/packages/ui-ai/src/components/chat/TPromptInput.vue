@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TPromptInput — Advanced chat input
+ * TPromptInput - Advanced chat input
  *
  * Auto-resizing textarea with file drag/drop, paste images,
  * keyboard shortcuts, and send/stop button.
@@ -191,7 +191,7 @@ onBeforeUnmount(() => {
     >
       <div
         v-for="(file, index) in files"
-        :key="index"
+        :key="`${file.name}:${file.size}:${file.lastModified}:${index}`"
         class="group/file relative flex items-center gap-1.5 rounded-md bg-muted px-2 py-1"
       >
         <!-- Image preview -->

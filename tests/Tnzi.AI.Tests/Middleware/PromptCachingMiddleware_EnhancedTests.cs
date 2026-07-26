@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// PromptCachingMiddleware 增强功能测试 — 3-tier caching + OAuth guard
+/// PromptCachingMiddleware 增强功能测试 - 3-tier caching + OAuth guard
 /// </summary>
 public class PromptCachingMiddleware_EnhancedTests
 {

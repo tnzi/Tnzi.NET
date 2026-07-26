@@ -8,7 +8,7 @@ export interface AdminUserInfo {
   displayName?: string
   /**
    * Short, first-name-only form for personal greetings, the header status bar
-   * and the chat "me" label — never the surname (`Hi, John`, not `Hi, John
+   * and the chat "me" label - never the surname (`Hi, John`, not `Hi, John
    * Doe`). Precedence: nickname → firstName → username. Formal / accountability
    * surfaces (e.g. the watermark) keep using {@link displayName} (full name).
    */
@@ -25,7 +25,7 @@ export interface AdminUserInfo {
 }
 
 /**
- * Admin auth store — authentication state and permission checks.
+ * Admin auth store - authentication state and permission checks.
  *
  * Integrates with @tnzi/core AuthStateManager and the application's
  * identity service. The login/refresh/logout actions are left as injection
@@ -83,7 +83,7 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
 
   function hasRole(role: string): boolean {
     // Case-insensitive, matching `hasPermission` and the route store's role
-    // gate (`meta.roles`) — otherwise a route visible in the sidebar (store
+    // gate (`meta.roles`) - otherwise a route visible in the sidebar (store
     // lowercases both sides) would bounce to /403 on click when the backend's
     // role casing differs from the declared `meta.roles`.
     const target = role.toLowerCase()

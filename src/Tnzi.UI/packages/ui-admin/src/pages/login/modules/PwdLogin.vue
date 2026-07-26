@@ -1,16 +1,16 @@
 <script setup lang="ts">
 /**
- * `PwdLogin` — account + password login module.
+ * `PwdLogin` - account + password login module.
  *
  * Soybean reference: `src/views/_builtin/login/modules/pwd-login.vue` (118 lines).
  * Endpoint wired via `useLoginContext().callbacks.pwdLogin`, which the consumer
  * typically backs with `POST /auth/login-with-refresh-token`
  * (`Tnzi.Identity.DefaultAuthController.LoginWithRefreshToken`).
  *
- * The account field accepts username / email / phone — the backend resolves
+ * The account field accepts username / email / phone - the backend resolves
  * the identifier (`AuthService.FindUserByLoginInputAsync`), so the form must
  * NOT format-restrict it. The password field likewise only requires non-empty
- * at login (no composition policy — that belongs to register/reset). Which
+ * at login (no composition policy - that belongs to register/reset). Which
  * identifiers are accepted, and the visibility of the code-login / register /
  * forgot-password entries, is driven by `useLoginContext().features` (sourced
  * from `GET /auth/config`) plus whether the consumer wired the callback.
@@ -34,15 +34,35 @@ import {
 import { TSvgIcon } from '@tnzi/ui'
 import { useFormRules } from '../../../headless/useFormRules'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
+import { useLoginCaptcha } from '../../../headless/useLoginCaptcha'
 import { isModuleAvailable } from '../../../headless/loginFeatures'
 import { useLoginContext, type LoginDemoAccount } from '../useLoginContext'
+import TLoginCaptcha from './TLoginCaptcha.vue'
 
 defineOptions({ name: 'PwdLogin' })
 
-const { translate, toggleLoginModule, callbacks, demoAccounts, ui, thirdParty, scene, helpers, features } =
+const { translate, toggleLoginModule, callbacks, demoAccounts, ui, thirdParty, scene, helpers, features, pendingCaptcha } =
   useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
+
+// Adaptive login captcha - hidden until the backend demands one (after repeated
+// failures) and pushes a fresh picture via `helpers.setCaptchaRequired`, which
+// lands in `pendingCaptcha`. We seed the field from it and show the refresh
+// button only when the consumer wired `callbacks.getCaptcha`.
+const {
+  captchaId,
+  imageBase64: captchaImage,
+  code: captchaCode,
+  loading: captchaLoading,
+  canRefresh: captchaCanRefresh,
+  load: loadCaptcha,
+  seed: seedCaptcha,
+} = useLoginCaptcha('login')
+const showCaptcha = computed(() => pendingCaptcha.value !== null)
+watch(pendingCaptcha, (c) => {
+  if (c) seedCaptcha(c)
+})
 
 interface FormModel {
   userName: string
@@ -56,7 +76,7 @@ const submitError = ref('')
 
 // Controlled password visibility (instead of naive's internal
 // `show-password-on`) so the split layout's animated characters can react:
-// they look away while the password is visible — and sneak the occasional
+// they look away while the password is visible - and sneak the occasional
 // peek. The username focus + password length feed the same scene state.
 const passwordVisible = ref(false)
 watch(passwordVisible, (visible) => {
@@ -75,8 +95,8 @@ onBeforeUnmount(() => {
 })
 
 // The accepted identifier set (username / email / phone) is backend-driven.
-// The account field is intentionally NOT format-restricted — all three are
-// valid — so we use the length-only `account` rule and just surface the
+// The account field is intentionally NOT format-restricted - all three are
+// valid - so we use the length-only `account` rule and just surface the
 // accepted set in the label + placeholder.
 const identifierParts = computed(() => {
   const ids = features.identifiers
@@ -96,7 +116,7 @@ const accountPlaceholder = computed(() =>
 
 const rules = computed<FormRules>(() => ({
   userName: r.account(),
-  // Login must NOT enforce password composition — a valid existing password
+  // Login must NOT enforce password composition - a valid existing password
   // (all letters / all digits) would be rejected client-side before the request
   // is even sent. Only non-empty here; the backend enforces its own policy.
   password: r.password({ min: 1, max: 128, complexity: false }),
@@ -119,12 +139,30 @@ async function handleSubmit(): Promise<void> {
     )
     return
   }
+  // When the adaptive captcha is on screen the user must solve it before we
+  // resubmit - the backend would just re-issue the challenge otherwise.
+  if (showCaptcha.value && !captchaCode.value.trim()) {
+    submitError.value = translate('admin.login.captcha.required', 'Please enter the captcha.')
+    return
+  }
+  // Whether a captcha was already showing before this attempt - if it still is
+  // afterwards, the code we just submitted was wrong.
+  const hadCaptcha = pendingCaptcha.value !== null
   submitting.value = true
   try {
     await callbacks.pwdLogin(
-      { userName: model.userName, password: model.password, remember: model.remember },
+      {
+        userName: model.userName,
+        password: model.password,
+        remember: model.remember,
+        captchaId: captchaId.value || undefined,
+        captchaCode: captchaCode.value.trim() || undefined,
+      },
       helpers,
     )
+    if (pendingCaptcha.value && hadCaptcha) {
+      submitError.value = translate('admin.login.captcha.invalid', 'Incorrect captcha, please try again.')
+    }
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Login failed')
   } finally {
@@ -178,17 +216,46 @@ async function handleAccountLogin(account: LoginDemoAccount): Promise<void> {
         </template>
       </NInput>
     </NFormItem>
+    <NFormItem v-if="showCaptcha" :label="translate('admin.login.captcha.label', 'Captcha')">
+      <div class="w-full">
+        <TLoginCaptcha
+          v-model="captchaCode"
+          :image="captchaImage"
+          :loading="captchaLoading"
+          :refreshable="captchaCanRefresh"
+          :placeholder="translate('admin.login.captcha.placeholder', 'Enter the characters shown')"
+          :refresh-title="translate('admin.login.captcha.refresh', 'Refresh captcha')"
+          @refresh="loadCaptcha"
+        />
+        <p class="m-0 mt-6px text-12px text-muted">
+          {{ translate('admin.login.captcha.hint', 'For your security, please enter the captcha to continue.') }}
+        </p>
+      </div>
+    </NFormItem>
     <NSpace vertical :size="24">
       <div class="flex-y-center justify-between">
         <NCheckbox v-model:checked="model.remember">{{ translate('admin.login.rememberMe', 'Remember me') }}</NCheckbox>
         <NButton v-if="showRecovery" quaternary @click="toggleLoginModule('reset-pwd')">{{ translate('admin.login.forgotPassword', 'Forgot password?') }}</NButton>
       </div>
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
+        <template #icon>
+          <TSvgIcon icon="mdi:login-variant" :size="18" />
+        </template>
         {{ translate('admin.login.submit', 'Sign in') }}
       </NButton>
       <div v-if="showCodeLogin || showRegister" class="flex-y-center justify-between gap-12px">
-        <NButton v-if="showCodeLogin" class="flex-1" block :round="ui.pill" @click="toggleLoginModule('code-login')">{{ translate('admin.login.codeLogin', 'Code login') }}</NButton>
-        <NButton v-if="showRegister" class="flex-1" block :round="ui.pill" @click="toggleLoginModule('register')">{{ translate('admin.login.register', 'Register') }}</NButton>
+        <NButton v-if="showCodeLogin" class="flex-1" block :round="ui.pill" @click="toggleLoginModule('code-login')">
+          <template #icon>
+            <TSvgIcon icon="mdi:cellphone-message" :size="18" />
+          </template>
+          {{ translate('admin.login.codeLogin', 'Code login') }}
+        </NButton>
+        <NButton v-if="showRegister" class="flex-1" block :round="ui.pill" @click="toggleLoginModule('register')">
+          <template #icon>
+            <TSvgIcon icon="mdi:account-plus-outline" :size="18" />
+          </template>
+          {{ translate('admin.login.register', 'Register') }}
+        </NButton>
       </div>
       <template v-if="thirdParty.length > 0">
         <NDivider class="text-14px text-muted !m-0">{{ translate('admin.login.orWith', 'Or continue with') }}</NDivider>

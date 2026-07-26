@@ -10,6 +10,7 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
     private readonly IJournalEntryService _journalEntryService;
     private readonly LedgerPostingEngine _engine;
     private readonly PostingGuardRunner _guards;
+    private readonly ReversalGuard _reversalGuard;
     private readonly FinanceOptions _options;
 
     public LedgerPostingService(
@@ -19,6 +20,7 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
         IJournalEntryService journalEntryService,
         LedgerPostingEngine engine,
         PostingGuardRunner guards,
+        ReversalGuard reversalGuard,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
@@ -27,6 +29,7 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
         _journalEntryService = Check.NotNull(journalEntryService);
         _engine = Check.NotNull(engine);
         _guards = Check.NotNull(guards);
+        _reversalGuard = Check.NotNull(reversalGuard);
         _options = Check.NotNull(options).Value;
     }
 
@@ -111,6 +114,33 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
         // 委托凭证服务：期间锁定、并发（409）、事件与钩子（Reverse on JournalEntry）语义完全一致
         return await _journalEntryService.ReverseAsync(journalEntryId, input ?? new ReverseJournalEntryDto(), cancellationToken);
     }
+
+    public async Task<Result<ReversibilityDto>> GetReversibilityAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+    {
+        var entry = await _entryRepository.AsNoTracking()
+            .Include(e => e.Lines)
+            .FirstOrDefaultAsync(e => e.Id == journalEntryId, cancellationToken);
+
+        if (entry == null)
+            return Fail<ReversibilityDto>("Journal entry not found.", 404);
+
+        // 状态门与 IJournalEntryService.ReverseAsync 的前置校验逐条同序、同措辞
+        if (entry.Status == JournalEntryStatus.Draft)
+            return Ok(Blocked(entry.Id, ReversalBlockReasons.NotPosted, "Draft entries cannot be reversed. Delete the draft instead."));
+        if (entry.Status == JournalEntryStatus.Reversed || entry.ReversedByEntryId.HasValue)
+            return Ok(Blocked(entry.Id, ReversalBlockReasons.AlreadyReversed, "The entry has already been reversed."));
+
+        // 期间封账 / 已完成对账 / 已匹配银行流水：与冲销漏斗共用同一段守卫，两处规则不会漂移。
+        // 日期取原凭证记账日 —— ReverseAsync 不传日期时的默认，也是全部 VoidAsync 的实际取值。
+        var block = await _reversalGuard.EvaluateAsync(entry, entry.PostingDate, cancellationToken);
+        if (block != null)
+            return Ok(Blocked(entry.Id, block.Reason, block.Detail));
+
+        return Ok(new ReversibilityDto { JournalEntryId = entry.Id, CanReverse = true });
+    }
+
+    private static ReversibilityDto Blocked(Guid journalEntryId, string reason, string detail)
+        => new() { JournalEntryId = journalEntryId, CanReverse = false, BlockedBy = reason, Detail = detail };
 
     public async Task<Result<List<JournalEntryDto>>> GetBySourceAsync(string sourceType, string sourceId, CancellationToken cancellationToken = default)
     {

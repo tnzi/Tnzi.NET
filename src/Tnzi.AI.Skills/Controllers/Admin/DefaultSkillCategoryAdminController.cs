@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills.Controllers.Admin;
 
 /// <summary>
-/// 技能分类管理控制器（管理员） — 提供分类 CRUD 和树形查询功能。
+/// 技能分类管理控制器（管理员） - 提供分类 CRUD 和树形查询功能。
 /// </summary>
 [DefaultController]
 [Route("admin/ai/skill-categories")]

@@ -2,12 +2,12 @@
 import { computed } from 'vue'
 
 /**
- * Skeleton loader — placeholder shapes that shimmer while data loads.
+ * Skeleton loader - placeholder shapes that shimmer while data loads.
  * Bag of shapes you can compose into table rows, card body skeletons,
  * KPI placeholders, list items.
  *
  * Inspired by the shimmer keyframes already shipped in
- * `styles/transition.css` — this component just hangs the right CSS class
+ * `styles/transition.css` - this component just hangs the right CSS class
  * on an element with the configured dimensions.
  */
 interface Props {
@@ -19,7 +19,7 @@ interface Props {
   height?: number | string
   /** Border radius override. */
   radius?: number | string
-  /** Multiple text lines — for variant=text. */
+  /** Multiple text lines - for variant=text. */
   lines?: number
   /** Disable animation (e.g. when prefers-reduced-motion is on). */
   animated?: boolean

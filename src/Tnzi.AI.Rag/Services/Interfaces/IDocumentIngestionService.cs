@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services.Interfaces;
 
 /// <summary>
-/// 文档摄取服务接口 — 负责提取文本、切块、嵌入、存储到向量数据库
+/// 文档摄取服务接口 - 负责提取文本、切块、嵌入、存储到向量数据库
 /// </summary>
 public interface IDocumentIngestionService
 {

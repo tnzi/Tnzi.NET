@@ -21,7 +21,7 @@ public static class ParallelTeamTemplate
 
         var builder = WorkflowBuilder.Create();
 
-        // 1. Parallel 节点 — 分发给多个 Worker 并行执行
+        // 1. Parallel 节点 - 分发给多个 Worker 并行执行
         var workers = options.Workers.Select((w, i) => new Dictionary<string, object>
         {
             ["stepId"] = w.Name ?? $"worker-{i + 1}",
@@ -32,7 +32,7 @@ public static class ParallelTeamTemplate
         builder.AddParallelStep("parallel-workers")
             .WithConfiguration("workers", workersJson);
 
-        // 2. Synthesize 节点 — 汇总所有 Worker 的输出
+        // 2. Synthesize 节点 - 汇总所有 Worker 的输出
         builder.AddSynthesizeStep("synthesize", agentId: options.SynthesizerAgentId)
             .DependsOn("parallel-workers")
             .WithInstructions(options.SynthesizeInstructions

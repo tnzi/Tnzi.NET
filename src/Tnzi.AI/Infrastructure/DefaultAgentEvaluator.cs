@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// 默认 Agent 评估器实现 — 通过 IChatService 发送输入并与期望输出对比
+/// 默认 Agent 评估器实现 - 通过 IChatService 发送输入并与期望输出对比
 /// </summary>
 [ExperimentalApi(Reason = "Agent evaluation is in preview")]
 public class DefaultAgentEvaluator : IAgentEvaluator
@@ -155,13 +155,13 @@ public class DefaultAgentEvaluator : IAgentEvaluator
                 hasOutput ? "Output generated (no expected output specified)" : "No output generated");
         }
 
-        // 精确匹配（忽略大小写和首尾空白）— 快速路径，省去 LLM 调用
+        // 精确匹配（忽略大小写和首尾空白）- 快速路径，省去 LLM 调用
         if (string.Equals(actualOutput.Trim(), expectedOutput.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return (true, 1.0, "Exact match");
         }
 
-        // LLM-as-judge 语义评分（取代脆弱的字符串包含匹配 — "巴黎" vs "答案是巴黎" 应判等价）
+        // LLM-as-judge 语义评分（取代脆弱的字符串包含匹配 - "巴黎" vs "答案是巴黎" 应判等价）
         var judged = await TryLlmJudgeAsync(input, actualOutput, expectedOutput, ct);
         if (judged != null)
         {

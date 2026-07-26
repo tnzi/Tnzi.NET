@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// 统一 Guardrail 提供者协议 — 可插拔的输入/输出/工具级评估。
+/// 统一 Guardrail 提供者协议 - 可插拔的输入/输出/工具级评估。
 /// </summary>
 /// <remarks>
 /// 与 IInputGuardrail/IOutputGuardrail 不同，IGuardrailProvider 接收结构化请求（含工具信息），
@@ -41,7 +41,7 @@ public interface IGuardrailProvider
 }
 
 /// <summary>
-/// Guardrail 评估请求 — 统一的输入/输出/工具评估请求
+/// Guardrail 评估请求 - 统一的输入/输出/工具评估请求
 /// </summary>
 public record GuardrailRequest
 {
@@ -68,7 +68,7 @@ public record GuardrailRequest
 }
 
 /// <summary>
-/// Guardrail 评估决策 — 包含是否允许、拒绝原因列表、策略 ID 和元数据
+/// Guardrail 评估决策 - 包含是否允许、拒绝原因列表、策略 ID 和元数据
 /// </summary>
 public record GuardrailDecision(
     bool IsAllowed,

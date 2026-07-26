@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// ApprovalNode 单元测试 — 覆盖 NodeType、AwaitingApproval 标志、上游输出传递、元数据包含审批状态
+/// ApprovalNode 单元测试 - 覆盖 NodeType、AwaitingApproval 标志、上游输出传递、元数据包含审批状态
 /// </summary>
 public class ApprovalNodeTests
 {

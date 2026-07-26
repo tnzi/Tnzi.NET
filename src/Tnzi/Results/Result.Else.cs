@@ -1,7 +1,7 @@
 namespace Tnzi.Results;
 
 /// <summary>
-/// Result 错误恢复/降级扩展 — 当结果失败时提供备选值或替换错误
+/// Result 错误恢复/降级扩展 - 当结果失败时提供备选值或替换错误
 /// </summary>
 public static class ResultElseExtensions
 {

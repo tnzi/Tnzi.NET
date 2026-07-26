@@ -4,11 +4,11 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// DatabaseEntityMemoryStore 单元测试 — AgentId 过滤 + 批量 Upsert + 过期
+/// DatabaseEntityMemoryStore 单元测试 - AgentId 过滤 + 批量 Upsert + 过期
 /// </summary>
 public class DatabaseEntityMemoryStoreTests
 {
-    #region GetRelevantEntitiesAsync — AgentId filtering
+    #region GetRelevantEntitiesAsync - AgentId filtering
 
     [Fact]
     public async Task GetRelevantEntitiesAsync_FiltersById_ReturnsMatching()
@@ -99,7 +99,7 @@ public class DatabaseEntityMemoryStoreTests
 
     #endregion
 
-    #region GetRelevantEntitiesAsync — Expiration
+    #region GetRelevantEntitiesAsync - Expiration
 
     [Fact]
     public async Task GetRelevantEntitiesAsync_WithExpiration_FiltersExpired()
@@ -202,7 +202,7 @@ public class DatabaseEntityMemoryStoreTests
 
     #endregion
 
-    #region UpsertEntitiesAsync — Batch
+    #region UpsertEntitiesAsync - Batch
 
     [Fact]
     public async Task UpsertEntitiesAsync_EmptyList_DoesNothing()
@@ -299,7 +299,7 @@ public class DatabaseEntityMemoryStoreTests
 
     #endregion
 
-    #region MapToEntry — Properties deserialization
+    #region MapToEntry - Properties deserialization
 
     [Fact]
     public async Task GetRelevantEntitiesAsync_DeserializesProperties()

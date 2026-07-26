@@ -4,17 +4,17 @@ import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 
 /**
- * Subscriptions page config — aligned with NotificationPreferenceDto
+ * Subscriptions page config - aligned with NotificationPreferenceDto
  * (2026-04-14 unstub). Backend fields:
  *   id, userId, channel, category, isEnabled,
  *   quietHoursStart, quietHoursEnd, maxFrequencyPerHour
  *
- * "Subscription" in the admin UI is the Preference entity — keyed by
+ * "Subscription" in the admin UI is the Preference entity - keyed by
  * (userId, channel, category). Create/update both upsert through
  * PUT /admin/notification-preferences/user/{userId}.
  */
 export const notificationSubscriptionColumns: ColumnDef[] = [
-  // Shows the raw userId — a resolved user-name column needs a backend join
+  // Shows the raw userId - a resolved user-name column needs a backend join
   // (NotificationPreferenceDto carries only userId), so that is left out.
   { key: 'userId',              title: 'columns.userId' },
   { key: 'channel',             title: 'columns.channel' },

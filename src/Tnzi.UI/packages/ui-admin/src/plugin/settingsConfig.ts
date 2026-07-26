@@ -1,5 +1,5 @@
 /**
- * `useAdminSettingsConfig()` — install-time configuration for the built-in
+ * `useAdminSettingsConfig()` - install-time configuration for the built-in
  * Settings Center page shipped by `@tnzi/ui-admin`.
  *
  * The default `Settings.vue` page consumes this via `inject()` so the
@@ -27,20 +27,25 @@ export interface AdminSettingsSection {
   label: string
   /** Iconify icon name. */
   icon?: string
-  /** Left-nav group label; defaults to 'App'. */
+  /** Left-nav group label; defaults to 'App'. A backend module name (e.g.
+   *  'System') merges the section into that schema group instead. */
   group?: string
   /** Sort order inside the nav (schema groups use backend Order). */
   order?: number
   /** Optional permission code required to SEE this section. Checked via usePermissionGuard().can(); omit to always show (super-admin / not-yet-loaded fail-open as everywhere). */
   permission?: string
-  /** Panel component — rendered in the right panel, owns its own data + save bar. */
+  /** Module short-name required to SEE this section - hidden when the backend
+   *  hasn't loaded that module (e.g. `'chat'`). Fail-open when the module
+   *  signal is unavailable. Mirrors the User Center section contract. */
+  module?: string
+  /** Panel component - rendered in the right panel, owns its own data + save bar. */
   component: Component | (() => Promise<unknown>)
 }
 
 /**
  * Realtime route for `Settings.Changed` broadcasts: when a Global setting whose
  * key matches `prefix` changes (exact match or prefix match, e.g. 'Blog:'),
- * `handler` runs in every open admin session — the consumer's twin of the
+ * `handler` runs in every open admin session - the consumer's twin of the
  * built-in routes (Appearance:AdminTheme → theme reload, Chat:* → chat config).
  */
 export interface AdminSettingsRealtimeRoute {
@@ -54,7 +59,14 @@ export interface AdminSettingsConfig {
   /** Hide built-in schema-driven groups by group key (e.g. 'ai-tools'). */
   hideGroups?: string[]
   /**
-   * Consumer realtime routes for the app's own `[RuntimeSetting]` configs —
+   * Hide the built-in "Advanced / Parameters" section (the raw setting-value
+   * table). Default `false` (shown when the caller holds `system.parameter.view`).
+   * Set `true` for a product that doesn't want to expose the raw parameter
+   * editor at all - the schema-driven groups stay, only the Advanced entry drops.
+   */
+  hideAdvanced?: boolean
+  /**
+   * Consumer realtime routes for the app's own `[RuntimeSetting]` configs -
    * re-fetch/apply live when a super admin changes them (no page reload).
    */
   realtime?: AdminSettingsRealtimeRoute[]

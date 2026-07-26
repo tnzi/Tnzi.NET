@@ -118,6 +118,28 @@ public class ReverseJournalEntryDto
 }
 
 /// <summary>
+/// 凭证可冲销性（<see cref="Services.Interfaces.ILedgerPostingService.GetReversibilityAsync"/> 的只读判定结果）
+/// </summary>
+/// <remarks>
+/// 判定口径与冲销实际执行的校验同源，因此 <see cref="CanReverse"/> 为 true 时冲销不会因本判定覆盖的
+/// 原因被拒。它<b>不是</b>预约：并发的过账/对账/封账仍可能在两次调用之间改变结论，冲销漏斗内的守卫才是权威。
+/// </remarks>
+public class ReversibilityDto
+{
+    /// <summary>被判定的凭证</summary>
+    public Guid JournalEntryId { get; set; }
+
+    /// <summary>现在能否冲销</summary>
+    public bool CanReverse { get; set; }
+
+    /// <summary>受阻原因代码（见 <see cref="ReversalBlockReasons"/>）；CanReverse 时为 null。</summary>
+    public string? BlockedBy { get; set; }
+
+    /// <summary>面向操作员的说明（含补救办法）；CanReverse 时为 null。</summary>
+    public string? Detail { get; set; }
+}
+
+/// <summary>
 /// 凭证查询请求
 /// </summary>
 public class JournalEntryQueryDto : PagedQueryDto

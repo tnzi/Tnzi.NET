@@ -1,6 +1,6 @@
 <template>
   <!-- Phase J overhaul (2026-05-18): removed the top-of-page NAlert banner.
-       Diagnostic context lives in the (i) popover next to the title now —
+       Diagnostic context lives in the (i) popover next to the title now -
        see TCrudPage `titleHelp` prop. The banner was always-visible chrome
        that pushed the data table down on every visit; the popover is just
        as discoverable on hover/click and stays out of the way otherwise. -->
@@ -49,7 +49,7 @@ const crud = useCrudPage<FileChunkAuditDto>({
   columns: chunkColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.chunks.fetch(query),
-  // Chunks are owned by the upload lifecycle — no admin write surface.
+  // Chunks are owned by the upload lifecycle - no admin write surface.
 })
 
 const t = makePageTranslator('storage.chunks')

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure;
 
 /// <summary>
-/// Unified AI execution entry point — all AI execution (chat, workflow, agent run) goes through this.
+/// Unified AI execution entry point - all AI execution (chat, workflow, agent run) goes through this.
 /// Composes middleware pipeline + execution strategy + run tracking.
 /// </summary>
 public partial class AgentRuntime : IAgentRuntime
@@ -76,7 +76,7 @@ public partial class AgentRuntime : IAgentRuntime
 
             var sw = Stopwatch.StartNew();
             var setup = await SetupContextAndResolveAsync(request, isStreaming: false, cancellationToken);
-            if (!setup!.Resolution.IsSuccess)
+            if (!setup.Resolution.IsSuccess)
             {
                 throw CreateAgentResolutionException(setup.Resolution);
             }
@@ -102,7 +102,7 @@ public partial class AgentRuntime : IAgentRuntime
                     if (result.FinishReason == FinishReasons.MaxToolIterations)
                     {
                         _logger.LogWarning(
-                            "Agent run {RunId} reached MaxToolIterations limit — response may be incomplete",
+                            "Agent run {RunId} reached MaxToolIterations limit - response may be incomplete",
                             run.Id);
                     }
                 }
@@ -195,7 +195,7 @@ public partial class AgentRuntime : IAgentRuntime
             }
 
             var setup = await SetupContextAndResolveAsync(request, isStreaming: true, cancellationToken);
-            if (!setup!.Resolution.IsSuccess)
+            if (!setup.Resolution.IsSuccess)
             {
                 yield return new AgentStreamChunk
                 {
@@ -225,7 +225,7 @@ public partial class AgentRuntime : IAgentRuntime
     }
 
     /// <summary>
-    /// Streaming workflow path — delegates to IWorkflowDelegator.ExecuteWorkflowStreamingAsync
+    /// Streaming workflow path - delegates to IWorkflowDelegator.ExecuteWorkflowStreamingAsync
     /// and publishes a completion event when the stream terminates.
     /// </summary>
     private async IAsyncEnumerable<AgentStreamChunk> StreamWorkflowAsync(
@@ -262,7 +262,7 @@ public partial class AgentRuntime : IAgentRuntime
     }
 
     /// <summary>
-    /// Streaming pipeline path — runs the middleware pipeline, aggregates tokens/usage,
+    /// Streaming pipeline path - runs the middleware pipeline, aggregates tokens/usage,
     /// and finalizes run tracking + events in a robust finally block.
     /// </summary>
     private async IAsyncEnumerable<AgentStreamChunk> StreamPipelineAsync(
@@ -326,7 +326,7 @@ public partial class AgentRuntime : IAgentRuntime
     }
 
     /// <summary>
-    /// Finalize streaming run state — persists run, records traces, publishes events.
+    /// Finalize streaming run state - persists run, records traces, publishes events.
     /// All exceptions logged and swallowed so they don't propagate through yield/finally.
     /// </summary>
     private async Task FinalizeStreamingAsync(
@@ -365,7 +365,7 @@ public partial class AgentRuntime : IAgentRuntime
                     if (lastFinishReason == FinishReasons.MaxToolIterations)
                     {
                         _logger.LogWarning(
-                            "Agent run {RunId} reached MaxToolIterations limit — response may be incomplete",
+                            "Agent run {RunId} reached MaxToolIterations limit - response may be incomplete",
                             run.Id);
                     }
 

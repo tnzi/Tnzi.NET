@@ -56,7 +56,7 @@ public class ConfigurationControllerFilterProviderTests
     [Fact]
     public void DisabledAssemblies_RemovesEntireAssembly()
     {
-        // Arrange — 所有测试 Controller 都在当前程序集
+        // Arrange - 所有测试 Controller 都在当前程序集
         var assemblyName = typeof(FooController).Assembly.GetName().Name!;
         var options = new ControllerFilterOptions { DisabledAssemblies = [assemblyName] };
         var provider = new ConfigurationControllerFilterProvider(options);
@@ -72,7 +72,7 @@ public class ConfigurationControllerFilterProviderTests
     [Fact]
     public void ControllerPredicate_CustomFilter_Works()
     {
-        // Arrange — 只保留名称以 "Foo" 开头的 Controller
+        // Arrange - 只保留名称以 "Foo" 开头的 Controller
         var options = new ControllerFilterOptions
         {
             ControllerPredicate = type => type.Name.StartsWith("Foo", StringComparison.OrdinalIgnoreCase)
@@ -91,7 +91,7 @@ public class ConfigurationControllerFilterProviderTests
     [Fact]
     public void MixedRules_BothApplied()
     {
-        // Arrange — 按程序集禁用不会命中（使用不存在的程序集名），按名称禁用 Admin
+        // Arrange - 按程序集禁用不会命中（使用不存在的程序集名），按名称禁用 Admin
         var options = new ControllerFilterOptions
         {
             DisabledAssemblies = ["NonExistent.Assembly"],
@@ -111,7 +111,7 @@ public class ConfigurationControllerFilterProviderTests
     [Fact]
     public void DisabledControllers_CaseInsensitive()
     {
-        // Arrange — 小写模式应匹配 PascalCase 的 Controller 名称
+        // Arrange - 小写模式应匹配 PascalCase 的 Controller 名称
         var options = new ControllerFilterOptions { DisabledControllers = ["*admin*"] };
         var provider = new ConfigurationControllerFilterProvider(options);
         var context = CreateContext(typeof(FooController), typeof(BarAdminController));

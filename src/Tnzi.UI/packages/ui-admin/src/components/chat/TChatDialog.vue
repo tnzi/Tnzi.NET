@@ -31,7 +31,7 @@ import { Icon } from '@iconify/vue'
 
 // Shared chrome for the chat pop-up dialogs (New Chat / Member Picker / Search
 // History). Gives every dialog the same compact header + close button, padding,
-// rounded surface and z-index so they read as one consistent family — instead of
+// rounded surface and z-index so they read as one consistent family - instead of
 // each rolling its own card. The body is a flex column so the consumer can give a
 // FIXED-height scroll area inside (the dialog footprint then never jumps with
 // content). z-index defaults above the chat NModal (~2000) so it always clears it.

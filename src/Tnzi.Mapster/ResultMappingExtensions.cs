@@ -38,21 +38,17 @@ public static class ResultMappingExtensions
             var mappedData = result.Data.MapTo<TTarget>();
             return Result<TTarget>.Success(mappedData, result.Message, result.Code);
         }
- #if DEBUG
-        catch (Exception)
-        {
-            throw;
-        }
-#else
         catch (Exception ex)
         {
+            // 无条件降级为失败结果：曾经用 #if DEBUG 在开发期直接 rethrow，
+            // 导致同一段代码在 Debug 抛异常、Release 返回 500 失败结果，
+            // 开发期永远观察不到生产行为。异常类型与原始消息放进 ErrorDetails 供排查。
             return Result<TTarget>.Failure(
                 $"Mapping failed: {ex.Message}",
                 500,
                 "MAPPING_ERROR",
                 new { ExceptionType = ex.GetType().Name, OriginalMessage = ex.Message });
         }
-#endif
     }
 
     /// <summary>
@@ -110,20 +106,14 @@ public static class ResultMappingExtensions
             var mappedData = await mapper(result.Data);
             return Result<TTarget>.Success(mappedData, result.Message, result.Code);
         }
- #if DEBUG
-        catch (Exception)
-        {
-            throw;
-        }
-#else
         catch (Exception ex)
         {
+            // 同 Map：不再按 Debug/Release 分叉，统一返回失败结果
             return Result<TTarget>.Failure(
                 $"Mapping failed: {ex.Message}",
                 500,
                 "MAPPING_ERROR",
                 new { ExceptionType = ex.GetType().Name, OriginalMessage = ex.Message });
         }
-#endif
     }
 }

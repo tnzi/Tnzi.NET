@@ -10,7 +10,7 @@ import { tryInjectDeepLinkConfig } from '../plugin/deepLinkConfig'
 // each other (the docs demand distinct keys, but nothing enforced it). Track
 // live registrations per `route.path::key` and warn on overlap. Dev builds
 // only; skipped under vitest (mounted test harnesses share mock paths).
-// (The package tsconfig carries no vite/client types — probe untyped.)
+// (The package tsconfig carries no vite/client types - probe untyped.)
 const metaEnv = (import.meta as unknown as { env?: { DEV?: boolean; VITEST?: unknown } }).env
 const IS_DEV_GUARD = !!metaEnv?.DEV && !metaEnv?.VITEST
 const liveDeepLinkKeys = new Map<string, number>()
@@ -22,7 +22,7 @@ function guardDeepLinkKey(path: string | undefined, key: string): void {
   liveDeepLinkKeys.set(id, count)
   if (count > 1) {
     console.warn(
-      `[tnzi-admin] Duplicate deep-link query key "${key}" on route "${path}" — ` +
+      `[tnzi-admin] Duplicate deep-link query key "${key}" on route "${path}" - ` +
         `two useDetail/section engines will clobber each other. Give each its own ` +
         `key via \`url: '<name>'\` / \`sectionUrl: '<name>'\`.`,
     )
@@ -47,7 +47,7 @@ export interface DetailSection {
 }
 
 /**
- * A record source for deep-link hydration — typically the surrounding CRUD
+ * A record source for deep-link hydration - typically the surrounding CRUD
  * list. Structurally compatible with a `useCrudPage` return value, so a page
  * can write `source: crud` and be done: a deep-linked `?roles=edit:<id>`
  * resolves from the already-loaded `items` (waiting for the first fetch via
@@ -73,12 +73,12 @@ export interface UseDetailOptions<T> {
    * Section to land on. Accepts a ref/getter. When OMITTED entirely, the first
    * section is auto-picked; when PROVIDED but currently nullish (e.g. an async
    * default not yet resolved), the nav DEFERS (no spurious lock onto a
-   * placeholder) until it resolves — mirrors {@link useSectionRoute}.
+   * placeholder) until it resolves - mirrors {@link useSectionRoute}.
    */
   defaultSection?: MaybeRefOrGetter<string | null | undefined>
   /**
    * Load a record when opened with an id (view/edit, page-mode deep links AND
-   * overlay deep links). May return `null` when the id can't be resolved — the
+   * overlay deep links). May return `null` when the id can't be resolved - the
    * overlay deep-link reconciler then drops the dangling URL key. Prefer
    * {@link UseDetailOptions.source} when the record lives in a loaded list.
    */
@@ -90,7 +90,7 @@ export interface UseDetailOptions<T> {
   /**
    * Keep the active section in a URL **query key** (deep-linkable + the
    * browser Back/Forward buttons step through sections). `true` uses the
-   * default key `'section'`; a string names the key — a modal/drawer detail
+   * default key `'section'`; a string names the key - a modal/drawer detail
    * opened ON TOP of a page detail MUST name its own key (e.g. `'edit'`) so
    * the two coexist in one URL (`?section=tools&edit=perms`) without
    * clobbering each other. Works in page, modal AND drawer mode.
@@ -101,7 +101,7 @@ export interface UseDetailOptions<T> {
    * query key (`?<key>=view:<id>` / `=edit:<id>` / `=new`) so an opened
    * modal/drawer is **deep-linkable, refresh-survivable and Back-closeable**.
    * `true` uses the default key `'detail'`; a string names the key (several
-   * overlays on one page each claim their own — e.g. `'roles'`,
+   * overlays on one page each claim their own - e.g. `'roles'`,
    * `'reset-pwd'`). Default off for a bare useDetail; `useCrudPage` turns it
    * on by default. Ignored in page mode (there the route IS the open-state).
    * No-ops without a router.
@@ -115,7 +115,7 @@ export interface UseDetailOptions<T> {
    */
   getId?: (data: T) => string | number
   /**
-   * Where deep-linked record ids resolve from — pass the surrounding CRUD
+   * Where deep-linked record ids resolve from - pass the surrounding CRUD
    * state (`source: crud`) or any `{ items, loading?, loadById? }`. Fills
    * `loadData` / `retryDeepLinkOn` / `busy` automatically; an explicitly
    * provided option always wins over the derived one.
@@ -123,7 +123,7 @@ export interface UseDetailOptions<T> {
   source?: DetailSource<T>
   /**
    * Advanced. A reactive getter re-attempted as a deep-link source when it
-   * changes — e.g. a list that loads after first paint. Derived from
+   * changes - e.g. a list that loads after first paint. Derived from
    * {@link source} automatically; only set it for exotic data flows.
    */
   retryDeepLinkOn?: () => unknown
@@ -150,7 +150,7 @@ export interface UseDetailReturn<T> {
   /**
    * The underlying form-modal primitive (`visible`/`mode`/`formData`/`open`/`close`).
    * Re-exposed so `useCrudPage` can delegate its public `formModal` to THIS single
-   * instance — the overlay open-state URL sync below operates on these refs, so a
+   * instance - the overlay open-state URL sync below operates on these refs, so a
    * delegating consumer gets deep-linking for free without a second engine.
    */
   form: UseFormModalReturn<T>
@@ -176,7 +176,7 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
 
   const router = tryGetRouter()
   // App-wide kill switch (`defineAdminApp({ deepLink })`). A disabled channel
-  // overrides the per-page `url` / `sectionUrl` options — built-in pages set
+  // overrides the per-page `url` / `sectionUrl` options - built-in pages set
   // those, so only a global gate lets a consumer opt the whole app out.
   const deepLink = tryInjectDeepLinkConfig()
 
@@ -214,8 +214,8 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
 
   // Section nav. With `sectionUrl`, two-way bind to a URL query key
   // (deep-linkable + the browser Back/Forward buttons step through sections,
-  // push history) in ANY mode — page, modal or drawer; otherwise a plain ref.
-  // The shared composable owns the URL read/write — no hand-wired router calls.
+  // push history) in ANY mode - page, modal or drawer; otherwise a plain ref.
+  // The shared composable owns the URL read/write - no hand-wired router calls.
   const activeSection = useSectionRoute({
     // Page sections sync whenever the page is mounted; an overlay's sections sync
     // only while it is OPEN, so a closed modal/drawer leaves no stale deep-link
@@ -286,7 +286,7 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
     if (options.submitData) {
       await options.submitData(form.mode.value, form.formData.value)
     } else if (form.mode.value !== 'view') {
-      // No persistence wired for an editable detail — do not fake success by
+      // No persistence wired for an editable detail - do not fake success by
       // closing. Surfaces a misconfiguration instead of silently discarding.
       return
     }
@@ -300,8 +300,8 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
   // ── Overlay open-state ⇄ URL query key ────────────────────────────────────
   // Mirror the overlay's (action + record id) into its own query key so an
   // opened modal/drawer is deep-linkable, refresh-survivable and
-  // Back-closeable — `?<key>=view:<id>` / `=edit:<id>` / `=new`. Non-invasive:
-  // open()/close() stay untouched — a watcher mirrors `form` → URL
+  // Back-closeable - `?<key>=view:<id>` / `=edit:<id>` / `=new`. Non-invasive:
+  // open()/close() stay untouched - a watcher mirrors `form` → URL
   // (any open/close path), a reconciler mirrors URL → `form` (Back/Forward/deep
   // link). Both are idempotent (each writes only when the other side differs), so
   // they can't loop. Disabled in page mode (the route IS the open-state) and when
@@ -396,7 +396,7 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
     }
     // Initial deep-link (`?<key>=view:<id>` on first paint). Give up on an
     // unresolvable id immediately UNLESS a deferred data source (`retryDeepLinkOn`,
-    // e.g. a list that loads after paint) might still resolve it — then defer and
+    // e.g. a list that loads after paint) might still resolve it - then defer and
     // let the retry watcher decide. With only `loadData` (awaited inline), the
     // first null resolution is definitive, so the dangling deep-link is dropped.
     reconcileOverlay(!retryDeepLinkOn)

@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
@@ -7,13 +8,13 @@ import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 /**
  * Workflow definition list config (sibling of Workflows.vue).
  *
- * Backend shape: `WorkflowDefinitionDto` from @tnzi/core/services/ai —
+ * Backend shape: `WorkflowDefinitionDto` from @tnzi/core/services/ai -
  * `{ id, name, description?, steps[], executionMode, isEnabled,
  *    creationTime, lastModificationTime? }`.
  *
  * The form is intentionally narrow (name + description + executionMode +
  * isEnabled). The actual `steps[]` editing happens on the dedicated
- * editor page (WorkflowEditor.vue) — list-page create only sets the
+ * editor page (WorkflowEditor.vue) - list-page create only sets the
  * scaffold, then bounces the user into the editor.
  */
 export const workflowColumns: ColumnDef[] = [
@@ -34,7 +35,7 @@ export const workflowColumns: ColumnDef[] = [
     width: 130,
     render: (row) => {
       // Backend serialises WorkflowExecutionMode as a numeric enum
-      // (Sequential=0, Parallel=1, Dag=2) on the wire — accept either
+      // (Sequential=0, Parallel=1, Dag=2) on the wire - accept either
       // the string name or the int and normalise to the string key the
       // mapping table uses.
       const raw = (row as { executionMode?: string | number }).executionMode
@@ -80,12 +81,12 @@ export const workflowColumns: ColumnDef[] = [
     render: (row) =>
       formatDateTime(
         (row as { lastModificationTime?: string | null }).lastModificationTime,
-        { fallback: '—' },
+        { fallback: EMPTY_DASH },
       ),
   },
 ]
 
-/** Minimal create-form schema — `steps` is edited on WorkflowEditor.vue. */
+/** Minimal create-form schema - `steps` is edited on WorkflowEditor.vue. */
 export const workflowFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },

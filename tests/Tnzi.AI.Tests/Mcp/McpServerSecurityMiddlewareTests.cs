@@ -10,7 +10,7 @@ namespace Tnzi.AI.Tests.Mcp;
 
 public class McpServerSecurityMiddlewareTests
 {
-    // ─── ExtractApiKey — source priority ─────────────────────────────────────
+    // ─── ExtractApiKey - source priority ─────────────────────────────────────
 
     [Fact]
     public void ExtractApiKey_XApiKeyHeader_WinsOverAuthorizationBearer()
@@ -68,7 +68,7 @@ public class McpServerSecurityMiddlewareTests
     [Fact]
     public void ExtractApiKey_QueryString_IgnoredByDefault()
     {
-        // AllowApiKeyInQuery 默认 false — query 凭据会泄漏到日志/代理，默认必须拒收
+        // AllowApiKeyInQuery 默认 false - query 凭据会泄漏到日志/代理，默认必须拒收
         var options = new McpServerOptions();
         options.AllowApiKeyInQuery.ShouldBeFalse();
 
@@ -110,7 +110,7 @@ public class McpServerSecurityMiddlewareTests
         middleware.ExtractApiKey(context.Request).ShouldBe("header-key");
     }
 
-    // ─── ExtractTenantId — header-only untrusted hint ────────────────────────
+    // ─── ExtractTenantId - header-only untrusted hint ────────────────────────
 
     [Fact]
     public void ExtractTenantId_Header_Returned()
@@ -125,7 +125,7 @@ public class McpServerSecurityMiddlewareTests
     [Fact]
     public void ExtractTenantId_QueryTenantId_Ignored()
     {
-        // 回归：query string 租户提取已删除 — 构造 URL 即可污染他租户限流分区的攻击面
+        // 回归：query string 租户提取已删除 - 构造 URL 即可污染他租户限流分区的攻击面
         var middleware = CreateMiddleware(new McpServerOptions());
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString("?tenantId=spoofed");
@@ -203,7 +203,7 @@ public class McpServerSecurityMiddlewareTests
         middleware.ValidateApiKey("secret").ShouldBeFalse();
     }
 
-    // ─── BuildClientKey — partition logic ────────────────────────────────────
+    // ─── BuildClientKey - partition logic ────────────────────────────────────
 
     [Fact]
     public void BuildClientKey_PerTenantOn_HeaderTenant_PartitionsByTenant()
@@ -283,7 +283,7 @@ public class McpServerSecurityMiddlewareTests
         key.ShouldNotContain("super-secret-raw-key");
     }
 
-    // ─── CheckRateLimit — sliding window ─────────────────────────────────────
+    // ─── CheckRateLimit - sliding window ─────────────────────────────────────
 
     [Fact]
     public void CheckRateLimit_UnderLimit_Allows_OverLimit_Rejects()
@@ -322,7 +322,7 @@ public class McpServerSecurityMiddlewareTests
     [Fact]
     public async Task CheckRateLimit_ConcurrentCalls_AllowExactlyLimit()
     {
-        // 滑动窗口计数器内部加锁 — 并发下不允许超发
+        // 滑动窗口计数器内部加锁 - 并发下不允许超发
         const int limit = 50;
         const int attempts = 200;
         var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerMinute = limit });

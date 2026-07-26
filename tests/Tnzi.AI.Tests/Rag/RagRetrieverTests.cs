@@ -4,7 +4,7 @@ using Tnzi.AI.Rag.Dtos;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// RagRetriever 单元测试 — 重点验证 query 向量与目标知识库嵌入配置（provider/model）的对齐：
+/// RagRetriever 单元测试 - 重点验证 query 向量与目标知识库嵌入配置（provider/model）的对齐：
 /// KB 范围检索按 per-KB 配置分组生成 query 向量；search-all 使用 RAG 全局默认配置。
 /// </summary>
 public class RagRetrieverTests

@@ -1,6 +1,6 @@
 <template>
   <!--
-    SignalRMonitor — surfaces /admin/signalr/{stats,online-users,...}.
+    SignalRMonitor - surfaces /admin/signalr/{stats,online-users,...}.
     Top: KPI strip (online users, total connections, timestamp). Body: a
     grouped table of online users + their connections (expandable rows
     showing per-connection IP/UA/Hub/groups). One destructive action per
@@ -19,8 +19,8 @@
     </template>
 
     <TKpiRow cols="1 s:2 m:4" class="t-signalr-page__kpis">
-      <TKpiCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? 0" icon="mdi:account-group" />
-      <TKpiCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? 0" icon="mdi:lan-connect" />
+      <TKpiCard :label="t('kpi.onlineUsers')" :value="stats?.onlineUserCount ?? null" icon="mdi:account-group" />
+      <TKpiCard :label="t('kpi.connections')" :value="stats?.totalConnectionCount ?? null" icon="mdi:lan-connect" />
       <TKpiCard :label="t('kpi.hubs')" :value="hubCount" icon="mdi:hub" />
       <TKpiCard :label="t('kpi.groups')" :value="groupCount" icon="mdi:account-group-outline" />
     </TKpiRow>
@@ -59,6 +59,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { type RowAction } from '../../headless/rowActions'
@@ -198,7 +199,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
     width: 200,
     render: (row) => {
       const conns = Array.isArray(row?.connections) ? row.connections : []
-      return conns.find((c) => c.userName)?.userName ?? '—'
+      return conns.find((c) => c.userName)?.userName ?? EMPTY_DASH
     },
   },
   {
@@ -209,7 +210,7 @@ const columns = computed<DataTableColumns<OnlineUserDto>>(() => [
   },
 ])
 
-// Declarative operation column — force-disconnect every connection for a user
+// Declarative operation column - force-disconnect every connection for a user
 // (confirm gated) via the existing disconnect handler.
 // 按钮级权限门控(fail-open,后端 [ApiAuthorize system.signalr.execute] 是真墙)
 const { can } = usePermissionGuard()
@@ -233,7 +234,7 @@ async function refresh(): Promise<void> {
       bridge.getOnlineUsers(),
     ])
     stats.value = s
-    // Defensive: bridge `?? []` only covers null/undefined — a 404 with a
+    // Defensive: bridge `?? []` only covers null/undefined - a 404 with a
     // non-array envelope (e.g. `{ success: false }`) would otherwise land
     // as `{}` and break iteration. Always normalise to a real array.
     users.value = Array.isArray(list) ? list : []
@@ -261,7 +262,7 @@ onMounted(() => { void refresh() })
    uses `flex-height` (set on the component) so its scrollable body fills
    the residual area and the table's built-in pagination stays anchored
    at the bottom. Naive UI's content wrapper class is `n-card-content`
-   (dash, NOT BEM `n-card__content`) — must be a flex column with
+   (dash, NOT BEM `n-card__content`) - must be a flex column with
    min-height: 0 for `flex-height` to compute correctly. Targeted by an
    explicit class so the TKpiCard NCards in the KPI strip stay untouched. */
 :deep(.t-signalr-page__list-card) {

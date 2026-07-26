@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TStatusBadge` — soybean-style status pill with semantic color mapping.
+ * `TStatusBadge` - soybean-style status pill with semantic color mapping.
  *
  * Accepts either a boolean (true=success/false=danger) or a string value
  * mapped via the `mapping` prop. Falls back to neutral color for unknown
@@ -49,19 +49,19 @@ const props = withDefaults(defineProps<Props>(), {
   translate: undefined,
 })
 
-// Boolean default — resolves through the shared status dictionary so the
+// Boolean default - resolves through the shared status dictionary so the
 // label tracks the active locale (`admin.shared.status.{enabled,disabled}`)
 // instead of being stuck on English "Enabled"/"Disabled".
 const DEFAULT_BOOL_MAPPING: Record<string, { type: StatusType; labelKey: string; fallback: string }> = {
   true: { type: 'success', labelKey: 'admin.shared.status.enabled', fallback: 'Enabled' },
-  // soybean parity — disabled rows render with the `warning` tone (orange)
+  // soybean parity - disabled rows render with the `warning` tone (orange)
   // rather than neutral grey so the negative state is visually obvious.
   false: { type: 'warning', labelKey: 'admin.shared.status.disabled', fallback: 'Disabled' },
 }
 
 // Humanise an i18n key into a readable last-segment fallback
 // (`admin.shared.status.featured` → `Featured`). Used when no translator
-// is supplied or the translator returns an empty string — better to
+// is supplied or the translator returns an empty string - better to
 // render *something* than an empty pill.
 function humaniseKey(key: string): string {
   const last = key.split('.').pop() ?? key
@@ -77,7 +77,7 @@ function resolveLabel(key: string | undefined, fallback: string): string {
 }
 
 const resolved = computed<{ type: StatusType; label: string }>(() => {
-  // Explicit label-key + type — short-circuit i18n resolution path.
+  // Explicit label-key + type - short-circuit i18n resolution path.
   if (props.type && props.labelKey) {
     return { type: props.type, label: resolveLabel(props.labelKey, props.label ?? '') }
   }
@@ -88,7 +88,7 @@ const resolved = computed<{ type: StatusType; label: string }>(() => {
   const isBool = typeof props.value === 'boolean'
   const boolEntry = isBool ? DEFAULT_BOOL_MAPPING[key] : undefined
 
-  // Resolve type — explicit prop > mapping > bool default > 'default'.
+  // Resolve type - explicit prop > mapping > bool default > 'default'.
   const finalType = props.type ?? fromMapping?.type ?? boolEntry?.type ?? 'default'
 
   // Resolve label with i18n priority chain:
@@ -104,7 +104,7 @@ const resolved = computed<{ type: StatusType; label: string }>(() => {
   } else if (fromMapping?.labelKey) {
     finalLabel = resolveLabel(fromMapping.labelKey, fromMapping.label ?? key)
   } else if (fromMapping?.label) {
-    // Explicit raw mapping label wins over the bool default — keeps
+    // Explicit raw mapping label wins over the bool default - keeps
     // back-compat for callers that intentionally use a non-standard label
     // (e.g. "Active" instead of "Enabled" for tenant rows).
     finalLabel = fromMapping.label

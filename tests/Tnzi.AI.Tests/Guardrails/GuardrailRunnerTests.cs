@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// GuardrailRunner 单元测试 — 验证 Guardrail 编排逻辑
+/// GuardrailRunner 单元测试 - 验证 Guardrail 编排逻辑
 /// </summary>
 public class GuardrailRunnerTests
 {
@@ -84,7 +84,7 @@ public class GuardrailRunnerTests
     [Fact]
     public async Task GuardrailThrowsException_PropagatesError()
     {
-        // Arrange: Mock 一个抛出异常的 guardrail — 顺序模式下异常应传播
+        // Arrange: Mock 一个抛出异常的 guardrail - 顺序模式下异常应传播
         var faultyGuardrail = new Mock<IInputGuardrail>();
         faultyGuardrail
             .Setup(g => g.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

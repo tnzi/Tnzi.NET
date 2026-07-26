@@ -1,4 +1,5 @@
-import { HubConnectionBuilder, LogLevel, type HubConnection } from '@microsoft/signalr';
+import type { HubConnection } from '@microsoft/signalr';
+import { createHubClient, type HubClientOptions } from '../signalr/hub-client';
 import type { ChatMessageDto, UserPresenceStatus } from './types';
 
 export interface NewMessagePayload {
@@ -25,25 +26,20 @@ export interface MessageReadPayload {
 
 export interface ConversationChangedPayload {
   conversationId: string;
-  /** Numeric ConversationChangeType — emitted via an explicit `(int)` cast, so
+  /** Numeric ConversationChangeType - emitted via an explicit `(int)` cast, so
    *  it is not string-serialized (unlike DTO enum fields). */
   changeType: number;
 }
 
 export interface PresenceChangedPayload {
   userId: string;
-  /** Effective UserPresenceStatus — pushed as a UserPresenceDto whose enum
+  /** Effective UserPresenceStatus - pushed as a UserPresenceDto whose enum
    *  field IS string-serialized by the global converter. */
   status: UserPresenceStatus;
   lastSeenAt?: string | null;
 }
 
-export interface ChatSignalRClientOptions {
-  /** Hub URL, e.g. '/hubs/chat' (relative — resolved against page origin / vite proxy). */
-  url: string;
-  /** Returns the current JWT (called on each (re)connect). */
-  accessTokenFactory: () => string;
-}
+export type ChatSignalRClientOptions = HubClientOptions;
 
 type ChatEvent = 'Chat.NewMessage' | 'Chat.MessageRead' | 'Chat.ConversationChanged' | 'Chat.PresenceChanged';
 
@@ -56,19 +52,10 @@ export interface ChatSignalRClient {
   readonly connection: HubConnection;
 }
 
+/**
+ * Client for the `/hubs/chat` hub. Connection plumbing (auto-reconnect,
+ * state-safe `start()`) lives in the shared {@link createHubClient} factory.
+ */
 export function createChatSignalRClient(opts: ChatSignalRClientOptions): ChatSignalRClient {
-  const connection = new HubConnectionBuilder()
-    .withUrl(opts.url, { accessTokenFactory: opts.accessTokenFactory })
-    .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-    .configureLogging(LogLevel.Warning)
-    .build();
-
-  return {
-    connection,
-    isConnected: () => (connection.state as unknown as string) === 'Connected',
-    async start() { if ((connection.state as unknown as string) !== 'Connected') await connection.start(); },
-    async stop() { await connection.stop(); },
-    on(event, handler) { connection.on(event, handler); },
-    off(event, handler) { connection.off(event, handler); },
-  };
+  return createHubClient<ChatEvent>(opts);
 }

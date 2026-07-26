@@ -17,7 +17,7 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
     private readonly ThinkingOptions? _thinking;
 
     /// <summary>
-    /// AsyncLocal channel writer — set by this decorator before making the HTTP call,
+    /// AsyncLocal channel writer - set by this decorator before making the HTTP call,
     /// written to by ReasoningCapturingHandler when it sees reasoning_content in SSE deltas.
     /// AsyncLocal values flow from parent to child async contexts, so the value set here
     /// is visible inside the DelegatingHandler that runs as part of the HTTP call.

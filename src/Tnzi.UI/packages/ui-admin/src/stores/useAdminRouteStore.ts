@@ -6,7 +6,6 @@ import { DEFAULT_ROUTE_ICONS } from '../router/routeIcons'
 import { humanise } from '../pages/_shared/translate'
 import { useAdminAppStore } from './useAdminAppStore'
 import { useAdminAuthStore } from './useAdminAuthStore'
-import type { MenuTreeNode } from '@tnzi/core/services/system'
 import { normalizeModuleName } from '../services/admin-shell-modules'
 
 /**
@@ -38,13 +37,13 @@ function resolveI18nKey(
   overrides?: Record<string, unknown>,
 ): string {
   if (!key) return key
-  // Bare labels (not dotted i18n keys) — return as-is.
+  // Bare labels (not dotted i18n keys) - return as-is.
   if (!key.startsWith('admin.') && !key.startsWith('tnzi.admin.')) {
     return key
   }
-  // Strip optional `tnzi.` prefix — bundled locales are rooted at `admin.*`.
+  // Strip optional `tnzi.` prefix - bundled locales are rooted at `admin.*`.
   const normalized = key.startsWith('tnzi.') ? key.slice(5) : key
-  // Consumer-supplied overrides win — host apps register their own
+  // Consumer-supplied overrides win - host apps register their own
   // `admin.modules.{module}.…` keys via `useAdminAppStore.extendLocaleMessages`
   // and we look those up before the bundled framework dictionary.
   if (overrides) {
@@ -54,7 +53,7 @@ function resolveI18nKey(
   const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
   const hit = lookupMessage(messages, normalized)
   if (hit !== undefined) return hit
-  // Phase I.7.10: missing-key fallback — humanise the last segment so
+  // Phase I.7.10: missing-key fallback - humanise the last segment so
   // users never see raw `tnzi.admin.…` strings in the sidebar / tabs /
   // breadcrumb (mirrors the same fallback in `TAdminAutoBreadcrumb` and
   // `TAdminTabs.renderTitle`).
@@ -109,7 +108,7 @@ export interface AdminRouteMeta {
    * sidebar's built-in-menus toggle: hiding built-ins leaves only the
    * consumer app's own menus (routes added via `addModules` stay
    * unstamped) plus neutral built-ins like the landing dashboard.
-   * Display-only — never consulted by guards.
+   * Display-only - never consulted by guards.
    */
   builtIn?: boolean
 }
@@ -133,65 +132,13 @@ export interface AdminMenuItem {
 }
 
 /**
- * Index a backend menu tree (`MenuTreeNode[]`) by `menuKey` so the 'merge' menu
- * source can override the matching route-derived entry. Walks children too.
- */
-function indexMenuOverrides(
-  nodes: MenuTreeNode[],
-  map: Map<string, MenuTreeNode> = new Map(),
-): Map<string, MenuTreeNode> {
-  for (const node of nodes) {
-    if (node.menuKey) map.set(node.menuKey, node)
-    if (node.children?.length) indexMenuOverrides(node.children, map)
-  }
-  return map
-}
-
-/**
- * Apply backend overrides onto the route-derived menu tree, keyed by route name.
- * The route table stays the source of truth for WHICH pages exist; a backend row
- * keyed by a route's name can retitle / re-icon / reorder / hide it without a
- * redeploy. Recurses into children; an override with `isHidden` drops the entry.
- * No-op for entries without a matching backend row.
- */
-function applyMenuOverrides(
-  items: AdminMenuItem[],
-  byKey: Map<string, MenuTreeNode>,
-): AdminMenuItem[] {
-  const result: AdminMenuItem[] = []
-  for (const item of items) {
-    const override = byKey.get(item.key)
-    if (override?.isHidden) continue
-    let next = item
-    if (override) {
-      next = {
-        ...item,
-        label: override.name?.trim() ? override.name : item.label,
-        icon: override.icon?.trim() ? override.icon : item.icon,
-        meta:
-          typeof override.sortOrder === 'number'
-            ? ({ ...item.meta, order: override.sortOrder } as AdminRouteMeta)
-            : item.meta,
-      }
-    }
-    if (next.children?.length) {
-      next = { ...next, children: applyMenuOverrides(next.children, byKey) }
-    }
-    result.push(next)
-  }
-  return result
-}
-
-/**
- * Admin route store — manages constant routes (always available), auth routes
+ * Admin route store - manages constant routes (always available), auth routes
  * (filtered by permissions), the derived menu tree, and the keepAlive cache list.
  */
 export const useAdminRouteStore = defineStore('admin-route', () => {
   const constantRoutes = ref<AdminRouteRecord[]>([])
   const authRoutes = ref<AdminRouteRecord[]>([])
   const routesLoaded = ref(false)
-  /** Backend Sys_Menu tree for the 'merge' source (overrides by menuKey). Empty = 'route' source. */
-  const backendMenuNodes = ref<MenuTreeNode[]>([])
   /**
    * Loaded framework module short names (normalized), from `GET /admin/shell/modules`.
    * `null` = signal unavailable / not yet fetched → module gating is OFF
@@ -211,6 +158,24 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    */
   const moduleSignalPending = ref(false)
 
+  /**
+   * Route names hidden from the menu at RUNTIME, contributed by features that
+   * decide visibility from live app state rather than from the route table.
+   *
+   * Distinct from `defineAdminApp({ hideRoutes })`, which strips entries once
+   * at assembly time: this set is reactive, so a feature can add/remove names
+   * as the user flips a control. Purely a menu-visibility gate - routes stay
+   * registered, so deep links, bookmarks and programmatic navigation keep
+   * working (mirroring `hideInMenu`, not the permission guard).
+   *
+   * First consumer: the Finance owner/accountant view mode, which hides the
+   * double-entry pages (journal entries, chart of accounts, trial balance)
+   * while the user is in the owner-facing layer.
+   */
+  const runtimeHiddenRouteNames = ref<Set<string>>(new Set())
+  /** Per-owner contributions behind `runtimeHiddenRouteNames` (plain, non-reactive). */
+  const runtimeHiddenOwners = new Map<string, readonly string[]>()
+
   const allRoutes = computed<AdminRouteRecord[]>(() => [
     ...constantRoutes.value,
     ...authRoutes.value,
@@ -225,7 +190,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const authStore = useAdminAuthStore()
     const locale = appStore.locale
     // Permission-driven visibility. Reading these reactive auth fields HERE is
-    // what finally wires the sidebar to real permissions — `menus` recomputes
+    // what finally wires the sidebar to real permissions - `menus` recomputes
     // the moment the user logs in / their permission list loads.
     //  • super-user  → see everything (the backend also returns the full code
     //    catalogue for super-admins, so this is belt-and-suspenders);
@@ -233,7 +198,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     //    the permission list is fetched, and apps that never wire permissions
     //    keep the historical behaviour;
     //  • otherwise   → keep entries whose singular `meta.permission` (the real
-    //    route-table field) — or any of plural `meta.permissions` (OR) — is
+    //    route-table field) - or any of plural `meta.permissions` (OR) - is
     //    granted; entries with no requirement are public.
     // Lowercased set → case-insensitive matching to mirror the backend
     // (StringComparer.OrdinalIgnoreCase). Codes are all lowercase today, but
@@ -241,7 +206,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const grantedPermissions = new Set(
       authStore.userPermissions.map((p) => p.toLowerCase()),
     )
-    // Role gate source — consumer routes only (no framework route sets
+    // Role gate source - consumer routes only (no framework route sets
     // `meta.roles`), so this is zero-impact for existing apps. Same OR /
     // super-user-bypass / fail-open semantics as the permission gate: it lets a
     // role-driven app (e.g. Contoso's Owner/Management-only Staff pages) declare
@@ -250,12 +215,12 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const grantedRoles = new Set(authStore.userRoles.map((r) => r.toLowerCase()))
     const permissionsLoaded = authStore.userInfo !== null
     // Fail-open ONLY while a SESSION IS ACTIVE (token present) but its permission
-    // list hasn't arrived yet — the async gap between setToken and setUserInfo on
+    // list hasn't arrived yet - the async gap between setToken and setUserInfo on
     // login / session-restore, and consumers that wire auth but never call
     // loadPermissions. When LOGGED OUT (no token) do NOT fail-open: filter
     // normally so the sidebar collapses to public entries instead of flashing
     // EVERY menu. `userInfo === null` is reached in two very different runtime
-    // states — "logged in, permissions still loading" (isLogin true → fail-open
+    // states - "logged in, permissions still loading" (isLogin true → fail-open
     // is right) and "logged out" (isLogin false). Treating them the same is what
     // (a) flashed the full menu for the 1-2s the backend logout call takes before
     // the login redirect, and (b) let a freshly-switched role transiently see the
@@ -279,7 +244,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
       if (roles && roles.length > 0 && !roles.some((r) => grantedRoles.has(r.toLowerCase()))) return false
       return true
     }
-    // Built-in-menus toggle (sidebar footer, super admin) — DISPLAY-ONLY,
+    // Built-in-menus toggle (sidebar footer, super admin) - DISPLAY-ONLY,
     // orthogonal to both the permission filter and module gating. When OFF,
     // top-level groups stamped `meta.builtIn` (the framework's preset admin
     // pages) hide, leaving only the consumer app's own menus plus neutral
@@ -298,7 +263,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     function passesBuiltInFilter(route: AdminRouteRecord): boolean {
       if (!hideBuiltIn) return true
       if (route.meta?.builtIn !== true) return true
-      // Neutral built-in subtree (no permission anywhere — the landing
+      // Neutral built-in subtree (no permission anywhere - the landing
       // dashboard) → always visible.
       return !subtreeHasAnyPermission(route)
     }
@@ -312,7 +277,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     /**
      * Build absolute paths during the tree walk. vue-router stores child
      * `route.path` as relative ("users") so a naive copy produces unrouteable
-     * menu items — AdminShellRoot's `router.push(menu.path)` then resolves
+     * menu items - AdminShellRoot's `router.push(menu.path)` then resolves
      * relative to the current page and silently fails.
      */
     function joinPath(parent: string, child: string): string {
@@ -323,7 +288,11 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     }
     function toMenuItem(route: AdminRouteRecord, parentPath: string): AdminMenuItem | null {
       if (route.meta?.hideInMenu) return null
-      // Module-availability gate — ORTHOGONAL to permissions, so it holds for
+      // Runtime visibility contributions (see `runtimeHiddenRouteNames`) - a
+      // pure menu gate, checked before the permission/module gates because it
+      // is the user's own display choice, not an authorization outcome.
+      if (runtimeHiddenRouteNames.value.has(route.name)) return null
+      // Module-availability gate - ORTHOGONAL to permissions, so it holds for
       // super users too (unlike isVisible below, which bypasses for them). When
       // the loaded-module signal is known (non-null) and this gated node's
       // module isn't loaded, drop it. Signal unknown (null) = fail-open.
@@ -355,31 +324,24 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
           item.children = children
         } else {
           // A directory whose children were all filtered out (permission /
-          // hideInMenu) would render as an empty, unclickable parent — drop it.
+          // hideInMenu) would render as an empty, unclickable parent - drop it.
           return null
         }
       }
       return item
     }
-    // Built-in filter runs at the TOP LEVEL only — a kept group renders all
+    // Built-in filter runs at the TOP LEVEL only - a kept group renders all
     // its leaves; consumer routes (unstamped) are never filtered here.
-    let items = allRoutes.value
+    const items = allRoutes.value
       .filter((r) => passesBuiltInFilter(r))
       .map((r) => toMenuItem(r, ''))
       .filter(Boolean) as AdminMenuItem[]
-    // 'merge' menu source: overlay backend Sys_Menu overrides (retitle / re-icon
-    // / reorder / hide) keyed by route name. Reading backendMenuNodes here keeps
-    // the menu reactive to it; empty (the default 'route' source) is a no-op.
-    const backendOverrides = backendMenuNodes.value
-    if (backendOverrides.length > 0) {
-      items = applyMenuOverrides(items, indexMenuOverrides(backendOverrides))
-    }
     items.sort((a, b) => (a.meta?.order ?? 999) - (b.meta?.order ?? 999))
     return items
   })
 
   /**
-   * Route names the current user is NOT allowed to open — the inverse of the
+   * Route names the current user is NOT allowed to open - the inverse of the
    * sidebar filter, computed over the FULL route table (hidden-in-menu routes
    * included). Feeds `useAdminTabStore.pruneTabs` so a persisted tab pointing at
    * a page the freshly-signed-in user can't access is dropped instead of
@@ -387,7 +349,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    * `isSuperUser` leak).
    *
    * Uses the SAME fail-open rules as `menus`: empty (deny nothing) for super
-   * users and before the permission list loads — the backend `[ApiAuthorize]`
+   * users and before the permission list loads - the backend `[ApiAuthorize]`
    * stays the real enforcement. A route with no `meta.permission` (and no plural
    * `permissions`) is public and never denied, so hidden utility routes
    * (user-center, settings, id-driven detail pages) survive.
@@ -424,12 +386,12 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
 
   /**
    * Route names unreachable because their FRAMEWORK MODULE isn't loaded by the
-   * backend — the module-availability twin of `deniedRouteNames`. Computed over
+   * backend - the module-availability twin of `deniedRouteNames`. Computed over
    * the FULL route table (a gated top-level node + ALL its descendants), so the
    * navigation guard can bounce a deep link / persisted tab into an unloaded
    * module to /403 and such tabs get pruned. ORTHOGONAL to permissions, so it
    * applies to super-admins too; empty when the loaded-module signal is
-   * unavailable (null) — fail-open, same as the menu layer.
+   * unavailable (null) - fail-open, same as the menu layer.
    */
   const unavailableRouteNames = computed<Set<string>>(() => {
     const denied = new Set<string>()
@@ -468,7 +430,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   }
 
   /**
-   * Register the application's auth routes. ALL routes are kept — vue-router and
+   * Register the application's auth routes. ALL routes are kept - vue-router and
    * the navigation guards still need them resolvable. Menu *visibility* is now
    * filtered reactively in the `menus` getter from the auth store, NOT here: the
    * historical install-time `filterRoutesByPermissions(routes, [])` ran before
@@ -488,11 +450,6 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     cacheRoutes.value = cacheRoutes.value.filter((n) => n !== routeName)
   }
 
-  /** Feed the backend Sys_Menu tree for the 'merge' source; [] reverts to 'route'. */
-  function setBackendMenus(nodes: MenuTreeNode[]): void {
-    backendMenuNodes.value = nodes
-  }
-
   /**
    * Set the loaded-module signal (from `GET /admin/shell/modules`). Pass a Set
    * of normalized module short names to enable module gating, or `null` to
@@ -506,18 +463,33 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   /**
    * Flip the "module signal in flight" flag. `defineAdminApp().install()` sets
    * it `true` when it starts the availability probe and `false` once the probe
-   * settles (fetched, failed, or timed out) — see {@link moduleSignalPending}.
+   * settles (fetched, failed, or timed out) - see {@link moduleSignalPending}.
    */
   function setModuleSignalPending(pending: boolean): void {
     moduleSignalPending.value = pending
   }
 
+  /**
+   * Replace the runtime-hidden route names contributed under `owner`.
+   *
+   * Namespaced by owner so independent features never clobber each other's
+   * contributions: passing an empty list withdraws only that owner's names.
+   */
+  function setRuntimeHiddenRoutes(owner: string, names: readonly string[]): void {
+    if (names.length === 0) runtimeHiddenOwners.delete(owner)
+    else runtimeHiddenOwners.set(owner, [...names])
+    // Rebuild into a NEW Set - mutating the existing one would not retrigger
+    // the `menus` computed (ref identity is the dependency, not Set contents).
+    runtimeHiddenRouteNames.value = new Set([...runtimeHiddenOwners.values()].flat())
+  }
+
   function clearRoutes(): void {
     constantRoutes.value = []
     authRoutes.value = []
-    backendMenuNodes.value = []
     availableModules.value = null
     moduleSignalPending.value = false
+    runtimeHiddenOwners.clear()
+    runtimeHiddenRouteNames.value = new Set()
     cacheRoutes.value = []
     routesLoaded.value = false
   }
@@ -527,18 +499,18 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     authRoutes,
     allRoutes,
     routesLoaded,
-    backendMenuNodes,
     availableModules,
     moduleSignalPending,
     menus,
     deniedRouteNames,
     unavailableRouteNames,
+    runtimeHiddenRouteNames,
     cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,
-    setBackendMenus,
     setAvailableModules,
     setModuleSignalPending,
+    setRuntimeHiddenRoutes,
     resetRouteCache,
     clearRoutes,
   }

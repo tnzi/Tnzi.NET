@@ -4,7 +4,7 @@ namespace Tnzi.Authorization.Permissions;
 /// Resolves which permission modules are FRAMEWORK built-ins from the running
 /// module graph. A framework business module is a <see cref="TnziApplicationModule"/>
 /// whose assembly starts with <c>Tnzi.</c>; its short name (assembly minus that
-/// prefix — <c>Identity</c>, <c>AI</c>, <c>Finance</c>) equals the permission
+/// prefix - <c>Identity</c>, <c>AI</c>, <c>Finance</c>) equals the permission
 /// group code it owns (<c>identity</c>, <c>ai</c>, <c>finance</c>), so
 /// classification is a plain case-insensitive lookup with no hardcoded map and
 /// it auto-adapts when framework modules are added or removed.
@@ -28,7 +28,7 @@ internal static class FrameworkModuleResolver
 
     /// <summary>
     /// Short names (assembly minus the <c>Tnzi.</c> prefix) of the loaded
-    /// framework business modules — the <see cref="TnziApplicationModule"/>s in
+    /// framework business modules - the <see cref="TnziApplicationModule"/>s in
     /// <c>Tnzi.*</c> assemblies. Case-insensitive so a lookup against a lowercase
     /// group code (<c>identity</c>) matches the short name (<c>Identity</c>).
     /// </summary>

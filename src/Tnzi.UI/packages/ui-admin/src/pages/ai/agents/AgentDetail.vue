@@ -9,7 +9,7 @@
     <template #title>
       <span class="t-agent-detail__head">
         <TSvgIcon icon="mdi:robot-happy-outline" :size="18" color="var(--tnzi-primary, #6d5ce7)" />
-        <span class="t-agent-detail__name">{{ agent?.name ?? '—' }}</span>
+        <span class="t-agent-detail__name">{{ agent?.name ?? EMPTY_DASH }}</span>
         <NTag
           v-if="agent"
           size="small"
@@ -24,16 +24,17 @@
       </span>
     </template>
 
-    <template #default="{ section }">
+    <template #default="{ section, sectionIcon }">
       <div class="t-agent-detail__panel">
         <NSpin :show="loading">
           <div v-if="loadError" class="t-agent-detail__error" role="alert">{{ loadError }}</div>
-          <div v-else-if="!agent" class="t-agent-detail__placeholder">—</div>
+          <div v-else-if="!agent" class="t-agent-detail__placeholder">{{ EMPTY_DASH }}</div>
           <template v-else>
-            <!-- Basic Info — identity + model & sampling + routing/capabilities (one page) -->
+            <!-- Basic Info - identity + model & sampling + routing/capabilities (one page) -->
             <TDetailSection
               v-if="section === 'basicInfo'"
               :title="t('detail.panels.basicInfo')"
+              :icon="sectionIcon"
               :hint="t('detail.basicInfo.hint')"
             >
               <NForm label-placement="left" label-width="120px">
@@ -109,21 +110,19 @@
               </template>
             </TDetailSection>
 
-            <!-- Persona — standalone rich page (library + AgentVersion history) -->
+            <!-- Persona - inline soul content editor (single persona per agent) -->
             <AgentPersonaPanel
               v-else-if="section === 'persona'"
-              :current-persona-id="agent?.personaId ?? null"
-              :personas="personas"
-              :versions="versions"
-              :versions-loading="versionsLoading"
-              @apply="applyPersona"
-              @rollback="handleRollback"
-              @personas-changed="reloadPersonas"
+              :icon="sectionIcon"
+              :persona="agent?.persona ?? null"
+              :saving="personaSaving"
+              @save="savePersona"
             />
 
-            <!-- Tools — rich resource picker (assign / remove, immediate persist) -->
+            <!-- Tools - rich resource picker (assign / remove, immediate persist) -->
             <AgentResourcePicker
               v-else-if="section === 'tools'"
+              :header-icon="sectionIcon"
               icon="mdi:wrench-outline"
               :title="t('detail.panels.tools')"
               :hint="t('detail.toolsHint')"
@@ -141,9 +140,10 @@
               @remove="removeTool"
             />
 
-            <!-- Knowledge — resource picker + retrieval test -->
+            <!-- Knowledge - resource picker + retrieval test -->
             <AgentResourcePicker
               v-else-if="section === 'knowledge'"
+              :header-icon="sectionIcon"
               icon="mdi:book-open-variant"
               :title="t('detail.panels.knowledge')"
               :hint="t('detail.knowledgeHint')"
@@ -191,9 +191,10 @@
               </template>
             </AgentResourcePicker>
 
-            <!-- Skills — rich resource picker -->
+            <!-- Skills - rich resource picker -->
             <AgentResourcePicker
               v-else-if="section === 'skills'"
+              :header-icon="sectionIcon"
               icon="mdi:puzzle-outline"
               :title="t('detail.panels.skills')"
               :hint="t('detail.skillsHint')"
@@ -212,7 +213,7 @@
             />
 
             <!-- Recent Runs -->
-            <TDetailSection v-else-if="section === 'runs'" :title="t('detail.panels.runs')" max-width="none">
+            <TDetailSection v-else-if="section === 'runs'" :title="t('detail.panels.runs')" :icon="sectionIcon" max-width="none">
               <div v-if="runsError" class="t-agent-detail__error">{{ runsError }}</div>
               <ul v-else-if="recentRuns.length" class="t-agent-detail__runs-list">
                 <li v-for="run in recentRuns" :key="run.id">
@@ -232,6 +233,7 @@
             <TDetailSection
               v-else-if="section === 'versions'"
               :title="t('detail.versions.title')"
+              :icon="sectionIcon"
               :hint="t('detail.versions.hint')"
               max-width="none"
             >
@@ -282,6 +284,7 @@
             <TDetailSection
               v-else-if="section === 'abtest'"
               :title="t('detail.abtest.title')"
+              :icon="sectionIcon"
               :hint="t('detail.abtest.hint')"
             >
               <NForm label-placement="left" label-width="140px">
@@ -336,6 +339,7 @@
             <TDetailSection
               v-else-if="section === 'validation'"
               :title="t('detail.health.title')"
+              :icon="sectionIcon"
               :hint="t('detail.health.hint')"
               max-width="none"
             >
@@ -379,6 +383,7 @@
             <TDetailSection
               v-else-if="section === 'memory'"
               :title="t('detail.panels.memory')"
+              :icon="sectionIcon"
               :hint="t('detail.memory.hint')"
               body-fill
             >
@@ -407,6 +412,7 @@
         </div>
 
         <!-- Memory create / edit modal -->
+        <TOverlayTheme>
         <NModal
           v-model:show="memoryModal.show"
           preset="card"
@@ -454,12 +460,14 @@
             </div>
           </template>
         </NModal>
+        </TOverlayTheme>
       </div>
     </template>
   </TDetailHost>
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, h, reactive, ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import {
@@ -471,6 +479,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TDetailSection from '../../../components/detail/TDetailSection.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
+import { TOverlayTheme } from '../../../components/overlay'
 import AgentResourcePicker, { type ResourcePickerItem } from './sections/AgentResourcePicker.vue'
 import AgentPersonaPanel from './sections/AgentPersonaPanel.vue'
 import { useDetail, type DetailSection } from '../../../headless/useDetail'
@@ -480,7 +489,7 @@ import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import type {
-  AgentDto, UpdateAgentDto, AgentRunDto, AgentPersonaDto,
+  AgentDto, UpdateAgentDto, AgentRunDto,
   AgentVersionDto, AgentValidationResultDto,
   ProviderOptionDto, KnowledgeBaseDto, SkillSummaryDto, ToolGroupDto, AgentMemoryDto, SearchResultDto,
 } from '@tnzi/core/services/ai'
@@ -491,7 +500,7 @@ const t = makePageTranslator('ai.agents')
 const { can } = usePermissionGuard()
 
 // ui-admin shells don't always wrap with NMessageProvider, so `useMessage()`
-// may throw — guard and fall back to the inline status panels each section
+// may throw - guard and fall back to the inline status panels each section
 // already renders.
 const message = (() => {
   try {
@@ -510,14 +519,14 @@ function toast(kind: 'ok' | 'err', text: string): void {
 // ---- Sections ----------------------------------------------------------------
 
 const sections: DetailSection[] = [
-  // Setup group — what the agent IS + the resources it can use
+  // Setup group - what the agent IS + the resources it can use
   { key: 'basicInfo', label: t('detail.panels.basicInfo'), icon: 'mdi:information-outline', group: t('detail.groups.setup') },
   { key: 'persona', label: t('detail.panels.persona'), icon: 'mdi:account-circle-outline', group: t('detail.groups.setup') },
   { key: 'skills', label: t('detail.panels.skills'), icon: 'mdi:puzzle-outline', group: t('detail.groups.setup') },
   { key: 'tools', label: t('detail.panels.tools'), icon: 'mdi:wrench-outline', group: t('detail.groups.setup') },
   { key: 'knowledge', label: t('detail.panels.knowledge'), icon: 'mdi:book-open-variant', group: t('detail.groups.setup') },
   { key: 'memory', label: t('detail.panels.memory'), icon: 'mdi:database-outline', group: t('detail.groups.setup') },
-  // Operations group — runtime + lifecycle
+  // Operations group - runtime + lifecycle
   { key: 'runs', label: t('detail.panels.runs'), icon: 'mdi:play-circle-outline', group: t('detail.groups.operations') },
   { key: 'versions', label: t('detail.versions.title'), icon: 'mdi:history', group: t('detail.groups.operations') },
   { key: 'abtest', label: t('detail.abtest.title'), icon: 'mdi:ab-testing', group: t('detail.groups.operations') },
@@ -526,7 +535,7 @@ const sections: DetailSection[] = [
 
 // The single detail engine, page mode. The active section is two-way bound to
 // the `?section=` query key (deep-linkable + the browser Back/Forward buttons
-// step through sections) — no hand-wired router.replace, `push` history so Back
+// step through sections) - no hand-wired router.replace, `push` history so Back
 // returns to the previously viewed section within this agent's tab.
 const detail = useDetail({
   mode: 'page',
@@ -543,15 +552,13 @@ watch(activeSection, (k) => {
 /**
  * Lazy-load the data a section needs the first time it becomes active.
  * Versions are paged & potentially large; validation runs an on-demand backend
- * check — neither should fire on the initial detail paint. The A/B section is a
+ * check - neither should fire on the initial detail paint. The A/B section is a
  * pure config form (no read), so it has nothing to lazy-load.
  */
 function maybeLoadSection(k: string | null): void {
   const id = currentRouteId()
   if (!id) return
-  // Persona panel reuses the agent's version history for its version pills, so
-  // load versions when landing on either section.
-  if ((k === 'versions' || k === 'persona') && !versionsLoaded.value && !versionsLoading.value) {
+  if (k === 'versions' && !versionsLoaded.value && !versionsLoading.value) {
     void loadVersions(id)
   } else if (k === 'validation' && !validation.value && !validating.value) {
     void runValidation()
@@ -566,7 +573,7 @@ const agent = ref<AgentDto | null>(null)
 // This detail route opens its own tab per agent id; surface the agent name as
 // the tab title so two open agent details are distinguishable (not both "Agent Detail").
 useTabTitle(() => agent.value?.name)
-const personas = ref<AgentPersonaDto[]>([])
+const personaSaving = ref(false)
 const recentRuns = ref<AgentRunDto[]>([])
 
 // ---- Resource pickers (provider/model/knowledge/skills/tools catalogs) -----
@@ -627,7 +634,7 @@ interface EditState {
   temperature: number | null
   maxTokens: number | null
   // Capabilities (part of the Basic Info page). Persona + resource assignments
-  // (skills/tools/knowledge) are NOT here — they persist immediately via the
+  // (skills/tools/knowledge) are NOT here - they persist immediately via the
   // Persona panel / resource pickers, not through this save-bar form.
   domains: string[]
   roles: string[]
@@ -667,13 +674,13 @@ const rolesModel = computed<string[]>({
   set: (next) => { edit.roles = [...next] },
 })
 
-// Provider dropdown (from API) — value is the provider Name (what Agent.provider stores).
+// Provider dropdown (from API) - value is the provider Name (what Agent.provider stores).
 const providerSelectOptions = computed(() =>
   providerOptionList.value.map((p) => ({ label: `${p.name} · ${p.providerType}`, value: p.name })),
 )
-// Model dropdown — live /v1/models + static fallback for the selected provider.
+// Model dropdown - live /v1/models + static fallback for the selected provider.
 const modelSelectOptions = computed(() => modelList.value.map((m) => ({ label: m, value: m })))
-// ---- Resource assignment (Skills / Tools / Knowledge) — immediate persist ----
+// ---- Resource assignment (Skills / Tools / Knowledge) - immediate persist ----
 // Picker items are derived from the agent's stored assignment (source of truth,
 // updated in place on each assign/remove) joined against the loaded catalogs.
 
@@ -755,7 +762,7 @@ const assignKnowledge = (id: string) =>
 const removeKnowledge = (id: string) =>
   persistResource({ knowledgeBaseIds: (agent.value?.knowledgeBaseIds ?? []).filter((x) => x !== id) }, t('detail.knowledge.removed'))
 
-// Knowledge retrieval test — exercise what this agent would retrieve from its
+// Knowledge retrieval test - exercise what this agent would retrieve from its
 // assigned knowledge bases (loops the per-KB search and merges by score).
 const kbTestQuery = ref('')
 const kbTestResults = ref<SearchResultDto[]>([])
@@ -916,22 +923,6 @@ async function loadToolGroups(): Promise<void> {
   }
 }
 
-async function loadPersonas(): Promise<void> {
-  try {
-    const result = await bridge.personas.fetch({
-      pageIndex: 1,
-      pageSize: 200,
-      sortField: 'name',
-      sortOrder: 'asc' as const,
-      searchText: '',
-      filters: {},
-    })
-    personas.value = result.items
-  } catch {
-    personas.value = []
-  }
-}
-
 async function loadRecentRuns(id: string): Promise<void> {
   runsError.value = null
   try {
@@ -978,7 +969,7 @@ const memoryColumns = computed<DataTableColumns<AgentMemoryDto>>(() => [
     key: 'category',
     title: t('detail.memory.category'),
     width: 120,
-    render: (row) => row.category || '—',
+    render: (row) => row.category || EMPTY_DASH,
   },
   {
     key: 'importance',
@@ -1123,7 +1114,7 @@ function formatSnapshot(snapshot: string | null | undefined): string {
   try {
     return JSON.stringify(JSON.parse(snapshot), null, 2)
   } catch {
-    // Not JSON — show the raw stored snapshot verbatim.
+    // Not JSON - show the raw stored snapshot verbatim.
     return snapshot
   }
 }
@@ -1249,20 +1240,15 @@ async function handleSave(): Promise<void> {
   }
 }
 
-async function applyPersona(personaId: string | null): Promise<void> {
+async function savePersona(content: string): Promise<void> {
   // Persona persists immediately (like resource assignments), not via the Basic
-  // Info save-bar. Guid.Empty is the backend's "clear" sentinel for null.
-  await persistResource(
-    { personaId: personaId ?? '00000000-0000-0000-0000-000000000000' },
-    t('detail.persona.applied'),
-  )
-  // The update auto-snapshots a new AgentVersion → refresh the panel's pills.
-  const id = currentRouteId()
-  if (id) void loadVersions(id)
-}
-
-async function reloadPersonas(): Promise<void> {
-  await loadPersonas()
+  // Info save-bar. Empty string clears the inline soul content.
+  personaSaving.value = true
+  try {
+    await persistResource({ persona: content }, t('detail.persona.saved'))
+  } finally {
+    personaSaving.value = false
+  }
 }
 
 function runStatusType(status: unknown): 'success' | 'error' | 'warning' | 'info' | 'default' {
@@ -1306,12 +1292,11 @@ onMounted(async () => {
     loadError.value = 'Missing agent id in route'
     return
   }
-  // Catalogs (providers/personas/knowledge/skills/tool-groups) don't depend on the
-  // agent — load in parallel with the agent fetch to keep first-paint snappy.
+  // Catalogs (providers/knowledge/skills/tool-groups) don't depend on the
+  // agent - load in parallel with the agent fetch to keep first-paint snappy.
   await Promise.all([
     loadAgent(id),
     loadProviderOptions(),
-    loadPersonas(),
     loadKnowledgeBases(),
     loadSkills(),
     loadToolGroups(),
@@ -1321,7 +1306,7 @@ onMounted(async () => {
     // Populate the model dropdown for the agent's current provider.
     void loadModels(agent.value.provider)
     // Deep-link landing directly on a lazy section (?section=versions|validation|memory)
-    // — the activeSection watcher only fires on change, so kick the loader once.
+    // - the activeSection watcher only fires on change, so kick the loader once.
     maybeLoadSection(activeSection.value)
   }
 })
@@ -1346,7 +1331,7 @@ watch(() => route.params?.id, async (next, prev) => {
   }
 })
 
-// Test affordance — mirror TDetailLayout's `defineExpose({ onSection })` so the
+// Test affordance - mirror TDetailLayout's `defineExpose({ onSection })` so the
 // integration test can drive section activation + the production-grade handlers
 // (rollback / A-B / validation) without simulating naive-ui's internal tab DOM.
 defineExpose({
@@ -1362,7 +1347,7 @@ defineExpose({
 </script>
 
 <style scoped>
-/* Right content panel — fills TDetailLayout's white (overflow:hidden) panel.
+/* Right content panel - fills TDetailLayout's white (overflow:hidden) panel.
    Mirrors UserCenter: the panel never scrolls; each section owns a fixed
    header bar (title + section actions) above a body that claims the residual
    height and scrolls. */
@@ -1380,7 +1365,7 @@ defineExpose({
   min-height: 0;
 }
 /* Section chrome (header bar + body + save bar) now lives in the shared
-   TDetailSection component — keeps every section pixel-identical and fixes the
+   TDetailSection component - keeps every section pixel-identical and fixes the
    scoped-CSS-doesn't-cross-components bug that broke the resource pickers. */
 /* Sub-group heading inside the Basic Info page (Identity / Model / Capabilities). */
 .t-agent-detail__subhead {
@@ -1420,7 +1405,7 @@ defineExpose({
   padding: 8px 10px;
   border: 1px solid var(--tnzi-border);
   border-radius: 6px;
-  background: var(--tnzi-container-bg, #fff);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
 }
 .t-agent-detail__kb-hit-head {
   display: flex;

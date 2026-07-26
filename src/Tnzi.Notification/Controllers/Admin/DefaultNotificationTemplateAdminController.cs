@@ -21,7 +21,7 @@ namespace Tnzi.Notification.Controllers.Admin;
 public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
 {
     /// <summary>
-    /// Module name pin — all notification templates live under this module in
+    /// Module name pin - all notification templates live under this module in
     /// the shared Template store, regardless of what the client sends.
     /// </summary>
     protected const string NotificationModuleName = "Notification";
@@ -156,7 +156,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
 
     /// <summary>
     /// Batch delete notification templates. Each id is scope-checked; any
-    /// non-notification id is silently skipped (keeps admin UX simple — the
+    /// non-notification id is silently skipped (keeps admin UX simple - the
     /// caller should never see foreign ids in the first place).
     /// </summary>
     [HttpDelete("batch")]

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Memory;
 
 /// <summary>
-/// LLM 实体抽取器 — 使用 LLM 从文本中提取命名实体
+/// LLM 实体抽取器 - 使用 LLM 从文本中提取命名实体
 /// </summary>
 public partial class LlmEntityExtractor
 {

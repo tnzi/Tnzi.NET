@@ -1,6 +1,6 @@
 <template>
   <!--
-    TEmpty — unified empty-state visual (icon + text, muted). Replaces the
+    TEmpty - unified empty-state visual (icon + text, muted). Replaces the
     three divergent empty states that grew across the package (Naive's
     default "No Data", TDataCardList's inline icon+text, TCardRenderer's
     own copy). Consumers pass already-translated `text` (typically
@@ -25,7 +25,7 @@ export interface TEmptyProps {
   text?: string
   /** mdi:* icon (default mdi:inbox-outline). */
   icon?: string
-  /** Visual scale — icon size + vertical padding. */
+  /** Visual scale - icon size + vertical padding. */
   size?: TEmptySize
 }
 

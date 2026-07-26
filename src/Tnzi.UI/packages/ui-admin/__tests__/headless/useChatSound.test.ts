@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ChatSoundEffect } from '@tnzi/core/services/chat'
 
-// jsdom has no real AudioContext — stub one whose oscillators report start().
+// jsdom has no real AudioContext - stub one whose oscillators report start().
 const startSpy = vi.fn()
 beforeEach(() => {
   startSpy.mockClear()

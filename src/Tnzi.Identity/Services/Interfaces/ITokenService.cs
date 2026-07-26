@@ -10,8 +10,9 @@ public interface ITokenService
     /// <summary>
     /// 生成JWT令牌
     /// </summary>
-    /// <param name="extraClaims">可选的自定义 claim（如桥接登录的 ai_roles/user_type 等）；与框架保留类型（subject/name/jti/role/tenant_id）冲突的项会被忽略</param>
-    string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null);
+    /// <param name="extraClaims">可选的自定义 claim（如桥接登录的 ai_roles/user_type 等）；与框架保留类型（subject/name/jti/role/tenant_id/session_id）冲突的项会被忽略</param>
+    /// <param name="sessionId">可选的登录会话ID；非空且非 <see cref="Guid.Empty"/> 时写入受保护的 <c>session_id</c> claim，供服务端每请求校验会话有效性（撤销即踢下线）</param>
+    string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null);
 
     /// <summary>
     /// 生成刷新令牌
@@ -27,7 +28,8 @@ public interface ITokenService
     /// 生成令牌结果
     /// </summary>
     /// <param name="extraClaims">可选的自定义 claim；与框架保留类型冲突的项会被忽略</param>
-    TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null);
+    /// <param name="sessionId">可选的登录会话ID；写入受保护的 <c>session_id</c> claim</param>
+    TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null);
 }
 
 /// <summary>

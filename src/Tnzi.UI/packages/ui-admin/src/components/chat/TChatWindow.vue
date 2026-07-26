@@ -112,7 +112,7 @@
     @created="onChatCreated"
   />
 
-  <!-- Hidden file input for media uploads (one picker — the message kind is
+  <!-- Hidden file input for media uploads (one picker - the message kind is
        derived from the chosen file's MIME type). -->
   <input
     ref="fileInputRef"
@@ -161,7 +161,7 @@ function onSendText(text: string): void {
       // A rejected send (the sender lost chat.use mid-session → 403, or a network
       // error) is now shown INLINE in the thread: the store keeps the attempted
       // message flagged failed and TMessageBubble renders a WeChat-style red retry
-      // marker + reason. No toast — the in-window bubble is the feedback.
+      // marker + reason. No toast - the in-window bubble is the feedback.
     })
 }
 
@@ -183,8 +183,8 @@ try {
 }
 
 // Client-side guard mirroring the Storage module default (`StorageOptions.
-// MaxFileSize` = 100 MB). The server is authoritative — a smaller deployment
-// limit is still caught by the upload-result error below — but this gives
+// MaxFileSize` = 100 MB). The server is authoritative - a smaller deployment
+// limit is still caught by the upload-result error below - but this gives
 // instant feedback for an obviously-oversized file instead of streaming it all
 // the way up only to be rejected.
 const MAX_FILE_SIZE = 100 * 1024 * 1024
@@ -241,7 +241,7 @@ function onToggleMaximize() {
 }
 
 // Closing the window resets transient view state so reopening is always a clean
-// centered, base-size window — and, crucially, the info panel never reopens in a
+// centered, base-size window - and, crucially, the info panel never reopens in a
 // stale blank state (its content only loads on a show→true / id-change watch).
 watch(
   () => props.show,
@@ -284,7 +284,7 @@ function onBack() {
 }
 
 // After TNewChatDialog creates a conversation (startDirect/createGroup already call
-// openConversation internally), only flip the mobile pane into view — do NOT call
+// openConversation internally), only flip the mobile pane into view - do NOT call
 // openConversation again (that would be a redundant double-open).
 function onChatCreated() {
   if (isSm.value) showPane.value = true
@@ -305,17 +305,17 @@ function onPickFile() {
   fileInputRef.value?.click()
 }
 
-// Upload a file and send it as a message — shared by the attachment picker and
+// Upload a file and send it as a message - shared by the attachment picker and
 // drag-and-drop. The message kind is derived from the file's MIME type (images
 // render as an inline preview bubble, everything else as a download chip).
 async function uploadAndSend(file: File) {
   if (!file || !store.activeId || !client) return
-  // Deployment gate — the entry points are hidden, but a stray drop can still
+  // Deployment gate - the entry points are hidden, but a stray drop can still
   // land here; the server rejects media messages regardless.
   if (!store.config.enableFileMessages) return
 
   // Reject an over-limit file up front with a clear message (previously the
-  // upload just failed silently — no progress, no error).
+  // upload just failed silently - no progress, no error).
   if (file.size > MAX_FILE_SIZE) {
     message?.error(interpolate(t('window.fileTooLarge'), { max: formatFileSize(MAX_FILE_SIZE) }))
     return
@@ -342,7 +342,7 @@ async function uploadAndSend(file: File) {
 
     // The upload succeeded; the SEND can still be rejected (sender lost chat.use
     // → 403). That failure is shown INLINE as a failed media bubble with a retry
-    // marker (the store keeps it), so swallow it here — only a genuine UPLOAD
+    // marker (the store keeps it), so swallow it here - only a genuine UPLOAD
     // failure (outer catch) still surfaces as a toast.
     try {
       await store.sendMedia(store.activeId, {
@@ -352,9 +352,9 @@ async function uploadAndSend(file: File) {
         fileSize: uploaded.size,
       })
       sound.playMessage()
-    } catch { /* send rejected — inline failed bubble + retry, no toast */ }
+    } catch { /* send rejected - inline failed bubble + retry, no toast */ }
   } catch (err: unknown) {
-    // Upload itself failed (network / storage error) — a toast is right here
+    // Upload itself failed (network / storage error) - a toast is right here
     // because no message was ever attempted.
     const reason = err instanceof Error ? err.message : ''
     message?.error(reason || t('window.uploadFailed'))
@@ -379,10 +379,12 @@ function onDroppedFile(file: File) {
 
 <style scoped>
 .t-chat-window {
-  /* Chat-scoped palette — derived from the admin theme tokens so the window
+  /* Chat-scoped palette - derived from the admin theme tokens so the window
      follows the active primary colour AND light/dark mode. Accents (Send button,
      active conversation) use the theme primary; surfaces/text/borders use the
-     functional tokens. Only the self-bubble keeps the signature WeChat green.
+     functional tokens. The self-bubble keeps the SIGNATURE WeChat green - a
+     deliberate brand identity that does NOT follow the theme accent (a consumer
+     that wants a different bubble color overrides `--chat-green` via style).
      Every value carries a light-mode fallback so the components still render
      standalone (e.g. in unit tests without the theme stylesheet). */
   --chat-green: #95ec69;
@@ -390,6 +392,10 @@ function onDroppedFile(file: File) {
   --chat-send: var(--tnzi-primary-600, #158278);
   --chat-send-hover: var(--tnzi-primary-700, #19665e);
   --chat-send-disabled: rgb(var(--tnzi-primary-rgb, 13 148 136) / 0.4);
+  /* Destructive actions (delete / retry / close-hover) - a fixed red (this was
+     previously an undefined token that every reference fell back to). Defining
+     it removes the latent undefined-var; a consumer can still override it. */
+  --chat-danger: #e64340;
   --chat-bg: var(--tnzi-bg-deep, #f5f6f8);
   --chat-list-bg: var(--tnzi-container-bg, #ffffff);
   --chat-surface: var(--tnzi-container-bg, #ffffff);
@@ -432,7 +438,7 @@ function onDroppedFile(file: File) {
   transition: none;
 }
 
-/* Maximized: near-full-viewport (desktop only — phones are already full-screen). */
+/* Maximized: near-full-viewport (desktop only - phones are already full-screen). */
 .t-chat-window--max {
   width: 96vw;
   height: 92vh;
@@ -483,7 +489,7 @@ function onDroppedFile(file: File) {
 }
 
 .t-chat-window__winbtn--close:hover {
-  background: #e64340;
+  background: var(--chat-danger, #e64340);
   color: #fff;
 }
 
@@ -493,7 +499,7 @@ function onDroppedFile(file: File) {
     grid-template-columns: 1fr;
     /* True full-screen on phones (was a 96vw/92vh centered card): reclaims the
        wasted margins, and `dvh` shrinks with the URL bar / keyboard so the
-       composer at the bottom is never pushed off-screen. No radius/shadow — it
+       composer at the bottom is never pushed off-screen. No radius/shadow - it
        reads as a native chat page, not a floating card. */
     width: 100vw;
     height: 100vh;

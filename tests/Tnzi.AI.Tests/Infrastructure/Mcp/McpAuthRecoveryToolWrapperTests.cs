@@ -68,7 +68,7 @@ public class McpAuthRecoveryToolWrapperTests
 
     #endregion
 
-    #region InvokeCoreAsync — Successful Call
+    #region InvokeCoreAsync - Successful Call
 
     [Fact]
     public async Task InvokeCoreAsync_SuccessfulCall_ReturnsResultWithoutRetry()
@@ -93,7 +93,7 @@ public class McpAuthRecoveryToolWrapperTests
 
     #endregion
 
-    #region InvokeCoreAsync — Auth Failure Recovery
+    #region InvokeCoreAsync - Auth Failure Recovery
 
     [Fact]
     public async Task InvokeCoreAsync_AuthFailure_InvalidatesTokenAndRetries()
@@ -134,7 +134,7 @@ public class McpAuthRecoveryToolWrapperTests
     [Fact]
     public async Task InvokeCoreAsync_AuthFailureThenRetryFails_ThrowsWithClearMessage()
     {
-        // Arrange — both calls fail with auth error
+        // Arrange - both calls fail with auth error
         var innerFunction = CreateMockFunction(() =>
         {
             throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized);
@@ -219,7 +219,7 @@ public class McpAuthRecoveryToolWrapperTests
     [Fact]
     public async Task InvokeCoreAsync_ClientInvalidationFails_StillRetries()
     {
-        // Arrange — client invalidation throws, but retry should still happen
+        // Arrange - client invalidation throws, but retry should still happen
         var callCount = 0;
         var innerFunction = CreateMockFunction(() =>
         {
@@ -244,7 +244,7 @@ public class McpAuthRecoveryToolWrapperTests
         // Act
         var result = await wrapper.InvokeAsync(new AIFunctionArguments());
 
-        // Assert — should still recover despite invalidation failure
+        // Assert - should still recover despite invalidation failure
         result?.ToString().ShouldBe("recovered");
         callCount.ShouldBe(2);
     }

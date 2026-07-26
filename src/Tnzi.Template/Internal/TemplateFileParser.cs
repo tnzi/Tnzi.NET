@@ -6,7 +6,6 @@ namespace Tnzi.Template.Internal;
 /// </summary>
 public class TemplateFileParser
 {
-    private const string FrontMatterDelimiter = "---";
     private static readonly Regex FrontMatterRegex = new(@"^---\s*(.*?)\s*---\s*(.*)$", RegexOptions.Singleline | RegexOptions.Compiled);
     private readonly IDeserializer _deserializer;
     private readonly ILogger<TemplateFileParser>? _logger;

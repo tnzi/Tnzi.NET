@@ -296,15 +296,15 @@ public static class BitmapExtensions
         {
             // 使用字体回退机制
             var fontFamily = GetFontFamily("Arial");
-            var font = fontFamily.CreateFont(fontSize, SixLabors.Fonts.FontStyle.Bold);
+            var font = fontFamily.CreateFont(fontSize, FontStyle.Bold);
 
             // 使用 TextMeasurer 计算实际文字渲染尺寸
             var textSize = TextMeasurer.MeasureSize(text, new RichTextOptions(font));
             var textOptions = new RichTextOptions(font)
             {
                 Origin = GetWatermarkPosition(image.Width, image.Height, position, (int)Math.Ceiling(textSize.Width), (int)Math.Ceiling(textSize.Height)),
-                HorizontalAlignment = SixLabors.Fonts.HorizontalAlignment.Left,
-                VerticalAlignment = SixLabors.Fonts.VerticalAlignment.Top
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top
             };
 
             // 应用透明度

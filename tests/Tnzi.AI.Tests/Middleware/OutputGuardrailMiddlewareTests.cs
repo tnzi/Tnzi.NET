@@ -93,7 +93,7 @@ public class OutputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_OutputPasses_ReturnsOriginalResult()
     {
-        // Arrange — Guardrail 通过
+        // Arrange - Guardrail 通过
         var guardrail = new Mock<IOutputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailResult.Allowed());
@@ -113,7 +113,7 @@ public class OutputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_OutputRejected_ReturnsGuardrailRejectedResult()
     {
-        // Arrange — Guardrail 拒绝输出
+        // Arrange - Guardrail 拒绝输出
         var guardrail = new Mock<IOutputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GuardrailResult.Rejected("ContentFilter", "Contains harmful content"));
@@ -137,7 +137,7 @@ public class OutputGuardrailMiddlewareTests
     [Fact]
     public async Task InvokeAsync_TripwireThrown_ReturnsGuardrailRejectedResult()
     {
-        // Arrange — Guardrail 抛出 TripwireGuardrailException
+        // Arrange - Guardrail 抛出 TripwireGuardrailException
         var guardrail = new Mock<IOutputGuardrail>();
         guardrail.Setup(x => x.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TripwireGuardrailException("ToxicContent", "Toxic content detected"));
@@ -190,7 +190,7 @@ public class OutputGuardrailMiddlewareTests
             chunks.Add(chunk);
         }
 
-        // Assert — 禁用时直接透传
+        // Assert - 禁用时直接透传
         chunks.Count.ShouldBe(2);
         chunks[0].Text.ShouldBe("Hello ");
         chunks[1].Text.ShouldBe("World");

@@ -138,6 +138,16 @@ public class SendQuickRegisterCodeDto
     /// 手机号（SMS快速注册时必填）
     /// </summary>
     public string? PhoneNumber { get; set; }
+
+    /// <summary>
+    /// 验证码ID（当启用注册图形验证码时必填，发送短信/邮箱验证码前先校验）
+    /// </summary>
+    public string? CaptchaId { get; set; }
+
+    /// <summary>
+    /// 验证码（当启用注册图形验证码时必填）
+    /// </summary>
+    public string? CaptchaCode { get; set; }
 }
 
 /// <summary>

@@ -19,17 +19,23 @@ public class BalanceSummaryService : ApplicationService, IBalanceSummaryService
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
     private readonly IRepository<AccountPeriodBalance, Guid> _bucketRepository;
     private readonly IRepository<DocumentSequence, Guid> _sequenceRepository;
+    private readonly ICurrentTenant? _currentTenant;
 
+    /// <param name="currentTenant">
+    /// 多租户未启用时可能未注册，故为可选构造注入（与 <see cref="BalanceSummaryMaintainer"/> 同源解析租户）。
+    /// </param>
     public BalanceSummaryService(
         IServiceProvider serviceProvider,
         IReadOnlyRepository<JournalLine, Guid> lineRepository,
         IRepository<AccountPeriodBalance, Guid> bucketRepository,
-        IRepository<DocumentSequence, Guid> sequenceRepository)
+        IRepository<DocumentSequence, Guid> sequenceRepository,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _lineRepository = Check.NotNull(lineRepository);
         _bucketRepository = Check.NotNull(bucketRepository);
         _sequenceRepository = Check.NotNull(sequenceRepository);
+        _currentTenant = currentTenant;
     }
 
     public async Task<Result<BalanceSummaryRebuildDto>> RebuildAsync(CancellationToken cancellationToken = default)
@@ -189,7 +195,7 @@ public class BalanceSummaryService : ApplicationService, IBalanceSummaryService
     }
 
     private Guid? ResolveTenant()
-        => ServiceProvider?.GetService<ICurrentTenant>()?.Id ?? CurrentUser?.TenantId;
+        => _currentTenant?.Id ?? CurrentUser?.TenantId;
 
     private sealed record ExpectedBucket(
         Guid AccountId, int Period, string Currency,

@@ -22,12 +22,12 @@ export default defineConfig({
         'src/embed/**',
         'src/themes/**',
         'src/styles/**',
-        // All 63 Vue business components under components/** are Naive UI /
-        // Vue SFCs that require real DOM + user interaction to meaningfully
-        // test. Covered by Playwright chat-themes spec in Task 6.6 — unit
-        // tests focus on composables + lib.
+        // The 61 SFCs under components/** need a real DOM plus user
+        // interaction to test meaningfully; unit tests target the composables
+        // and lib instead, and the SFCs are exercised through the playground
+        // and the Playwright chat-themes spec.
         'src/components/**',
-        'src/primitives/**',
+        'src/shell/**',
         'playground/**',
         '**/__tests__/**',
       ],

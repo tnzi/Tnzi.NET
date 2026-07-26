@@ -1,7 +1,7 @@
 namespace Tnzi.AI.A2A;
 
 /// <summary>
-/// A2A 客户端接口 — 用于与远程 Agent 通信
+/// A2A 客户端接口 - 用于与远程 Agent 通信
 /// </summary>
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public interface IA2AClient

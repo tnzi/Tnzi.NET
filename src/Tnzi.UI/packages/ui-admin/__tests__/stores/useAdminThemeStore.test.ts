@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAdminThemeStore } from '../../src/stores/useAdminThemeStore'
-import type { AdminThemeSnapshot } from '../../src/theme/admin-config'
 
 describe('useAdminThemeStore', () => {
   beforeEach(() => {
@@ -22,7 +22,7 @@ describe('useAdminThemeStore', () => {
   it('rejects invalid layout modes', () => {
     const store = useAdminThemeStore()
     store.setLayoutMode('horizontal')
-    // @ts-expect-error — testing runtime guard
+    // @ts-expect-error - testing runtime guard
     store.setLayoutMode('invalid')
     expect(store.layoutMode).toBe('horizontal')
   })
@@ -68,10 +68,10 @@ describe('useAdminThemeStore', () => {
   it('ignores the two removed hybrid layout modes', () => {
     const store = useAdminThemeStore()
     store.setLayoutMode('vertical')
-    // @ts-expect-error — removed modes are no longer part of AdminLayoutMode
+    // @ts-expect-error - removed modes are no longer part of AdminLayoutMode
     store.setLayoutMode('vertical-hybrid-header-first')
     expect(store.layoutMode).toBe('vertical')
-    // @ts-expect-error — removed modes are no longer part of AdminLayoutMode
+    // @ts-expect-error - removed modes are no longer part of AdminLayoutMode
     store.setLayoutMode('top-hybrid-sidebar-first')
     expect(store.layoutMode).toBe('vertical')
   })
@@ -109,7 +109,7 @@ describe('useAdminThemeStore', () => {
     expect(store.tabStyle).toBe('button')
     store.setTabStyle('chrome')
     expect(store.tabStyle).toBe('chrome')
-    // @ts-expect-error — invalid style ignored
+    // @ts-expect-error - invalid style ignored
     store.setTabStyle('invalid')
     expect(store.tabStyle).toBe('chrome')
   })
@@ -150,7 +150,7 @@ describe('useAdminThemeStore', () => {
     // Defaults aligned to the user-supplied ui-admin default config
     // (2026-05-17): siderWidth 220, siderCollapsedWidth 60 (replacing
     // the earlier 240/64 that tried to fit "Organization Management"
-    // — long English labels now wrap or use icons-only mode).
+    // - long English labels now wrap or use icons-only mode).
     const store = useAdminThemeStore()
     expect(store.siderWidth).toBe(220)
     expect(store.siderCollapsedWidth).toBe(60)
@@ -182,183 +182,200 @@ describe('useAdminThemeStore', () => {
   })
 })
 
-// ── Background color customization (siderBg / headerBg / contentBg / containerBg) ──────
-describe('useAdminThemeStore — background colors', () => {
+// ── Per-surface background customization (chrome + content-area containers) ──
+describe('useAdminThemeStore - background colors', () => {
+  const SURFACE_VARS = [
+    '--tnzi-admin-sider-bg',
+    '--tnzi-admin-header-bg',
+    '--tnzi-admin-tab-bg',
+    '--tnzi-admin-footer-bg',
+    '--tnzi-admin-content-bg',
+    '--tnzi-admin-page-header-bg',
+    '--tnzi-admin-card-bg',
+    '--tnzi-layout-bg',
+  ]
   beforeEach(() => {
     setActivePinia(createPinia())
-    // Reset any CSS vars written by previous tests
-    document.documentElement.style.removeProperty('--tnzi-admin-sider-bg')
-    document.documentElement.style.removeProperty('--tnzi-admin-header-bg')
-    document.documentElement.style.removeProperty('--tnzi-admin-content-bg')
-    document.documentElement.style.removeProperty('--tnzi-layout-bg')
-    document.documentElement.style.removeProperty('--tnzi-container-bg')
+    for (const v of SURFACE_VARS) document.documentElement.style.removeProperty(v)
   })
 
-  it('all 4 background fields default to null', () => {
+  it('all 7 surface background fields default to null', () => {
     const store = useAdminThemeStore()
     expect(store.siderBg).toBeNull()
     expect(store.headerBg).toBeNull()
+    expect(store.tabBg).toBeNull()
+    expect(store.footerBg).toBeNull()
     expect(store.contentBg).toBeNull()
-    expect(store.containerBg).toBeNull()
+    expect(store.pageHeaderBg).toBeNull()
+    expect(store.cardBg).toBeNull()
   })
 
-  it('setSiderBg sets the field and writes --tnzi-admin-sider-bg CSS var', () => {
+  it('each setter writes its own CSS var; reset clears it', () => {
     const store = useAdminThemeStore()
-    store.setSiderBg('#123456')
-    expect(store.siderBg).toBe('#123456')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('#123456')
+    const cases: Array<[(v: string | null) => void, () => void, () => string | null, string]> = [
+      [store.setSiderBg, store.resetSiderBg, () => store.siderBg, '--tnzi-admin-sider-bg'],
+      [store.setHeaderBg, store.resetHeaderBg, () => store.headerBg, '--tnzi-admin-header-bg'],
+      [store.setTabBg, store.resetTabBg, () => store.tabBg, '--tnzi-admin-tab-bg'],
+      [store.setFooterBg, store.resetFooterBg, () => store.footerBg, '--tnzi-admin-footer-bg'],
+      [store.setContentBg, store.resetContentBg, () => store.contentBg, '--tnzi-admin-content-bg'],
+      [store.setPageHeaderBg, store.resetPageHeaderBg, () => store.pageHeaderBg, '--tnzi-admin-page-header-bg'],
+      [store.setCardBg, store.resetCardBg, () => store.cardBg, '--tnzi-admin-card-bg'],
+    ]
+    for (const [set, reset, get, cssVar] of cases) {
+      set('#123456')
+      expect(get()).toBe('#123456')
+      expect(document.documentElement.style.getPropertyValue(cssVar)).toBe('#123456')
+      reset()
+      expect(get()).toBeNull()
+      expect(document.documentElement.style.getPropertyValue(cssVar)).toBe('')
+    }
   })
 
-  it('setSiderBg(null) removes the CSS var (resetSiderBg)', () => {
-    const store = useAdminThemeStore()
-    store.setSiderBg('#123456')
-    store.setSiderBg(null)
-    expect(store.siderBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('')
-  })
-
-  it('resetSiderBg sets field to null and removes CSS var', () => {
-    const store = useAdminThemeStore()
-    store.setSiderBg('#abcdef')
-    store.resetSiderBg()
-    expect(store.siderBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('')
-  })
-
-  it('setHeaderBg sets the field and writes --tnzi-admin-header-bg CSS var', () => {
-    const store = useAdminThemeStore()
-    store.setHeaderBg('#ff0000')
-    expect(store.headerBg).toBe('#ff0000')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-header-bg')).toBe('#ff0000')
-  })
-
-  it('resetHeaderBg restores default (null, removes CSS var)', () => {
-    const store = useAdminThemeStore()
-    store.setHeaderBg('#ff0000')
-    store.resetHeaderBg()
-    expect(store.headerBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-header-bg')).toBe('')
-  })
-
-  it('setContentBg writes BOTH --tnzi-admin-content-bg and --tnzi-layout-bg', () => {
+  it('setContentBg writes ONLY --tnzi-admin-content-bg (no longer hijacks --tnzi-layout-bg)', () => {
     const store = useAdminThemeStore()
     store.setContentBg('#f0f4f8')
-    expect(store.contentBg).toBe('#f0f4f8')
     expect(document.documentElement.style.getPropertyValue('--tnzi-admin-content-bg')).toBe('#f0f4f8')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-layout-bg')).toBe('#f0f4f8')
-  })
-
-  it('resetContentBg removes both CSS vars', () => {
-    const store = useAdminThemeStore()
-    store.setContentBg('#f0f4f8')
-    store.resetContentBg()
-    expect(store.contentBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-content-bg')).toBe('')
     expect(document.documentElement.style.getPropertyValue('--tnzi-layout-bg')).toBe('')
   })
 
-  it('setContainerBg writes --tnzi-container-bg', () => {
-    const store = useAdminThemeStore()
-    store.setContainerBg('#ffffff')
-    expect(store.containerBg).toBe('#ffffff')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-container-bg')).toBe('#ffffff')
-  })
-
-  it('resetContainerBg removes CSS var', () => {
-    const store = useAdminThemeStore()
-    store.setContainerBg('#ffffff')
-    store.resetContainerBg()
-    expect(store.containerBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-container-bg')).toBe('')
-  })
-
-  it('reset() sets all 4 bg fields back to null and removes CSS vars', () => {
+  it('reset() clears all 7 bg fields and their CSS vars', () => {
     const store = useAdminThemeStore()
     store.setSiderBg('#111')
     store.setHeaderBg('#222')
-    store.setContentBg('#333')
-    store.setContainerBg('#444')
+    store.setTabBg('#333')
+    store.setFooterBg('#444')
+    store.setContentBg('#555')
+    store.setPageHeaderBg('#666')
+    store.setCardBg('#777')
     store.reset()
     expect(store.siderBg).toBeNull()
     expect(store.headerBg).toBeNull()
+    expect(store.tabBg).toBeNull()
+    expect(store.footerBg).toBeNull()
     expect(store.contentBg).toBeNull()
-    expect(store.containerBg).toBeNull()
+    expect(store.pageHeaderBg).toBeNull()
+    expect(store.cardBg).toBeNull()
     expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-header-bg')).toBe('')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-content-bg')).toBe('')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-layout-bg')).toBe('')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-container-bg')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-tab-bg')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-footer-bg')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-page-header-bg')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-card-bg')).toBe('')
   })
 
-  it('snapshot export includes all 4 bg fields', () => {
+  it('page-header / card tones publish a root data-attribute; reset clears it', () => {
     const store = useAdminThemeStore()
-    store.setSiderBg('#aabbcc')
-    store.setHeaderBg('#ddeeff')
-    // contentBg + containerBg stay null
+    store.setCardBg('#0F172A') // dark card
+    expect(store.cardTone).toBe('dark')
+    expect(document.documentElement.getAttribute('data-tnzi-card-tone')).toBe('dark')
+    store.setPageHeaderBg('#FFFFFF') // light bar
+    expect(store.pageHeaderTone).toBe('light')
+    expect(document.documentElement.getAttribute('data-tnzi-ph-tone')).toBe('light')
+    store.reset()
+    expect(document.documentElement.getAttribute('data-tnzi-card-tone')).toBeNull()
+    expect(document.documentElement.getAttribute('data-tnzi-ph-tone')).toBeNull()
+  })
+})
 
-    // Simulate what TThemeDrawer.buildSnapshot() does for the new fields
-    const adminSnap = {
-      siderBg: store.siderBg,
-      headerBg: store.headerBg,
-      contentBg: store.contentBg,
-      containerBg: store.containerBg,
-    }
-    expect(adminSnap.siderBg).toBe('#aabbcc')
-    expect(adminSnap.headerBg).toBe('#ddeeff')
-    expect(adminSnap.contentBg).toBeNull()
-    expect(adminSnap.containerBg).toBeNull()
+// ── Surface tone (adaptive foreground) ──
+describe('useAdminThemeStore - surface tone', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.documentElement.style.removeProperty('--tnzi-admin-sider-fg')
+    document.documentElement.style.removeProperty('--tnzi-admin-header-fg')
   })
 
-  it('snapshot import with null values calls reset on those fields', () => {
+  it('tone is null when no override is set', () => {
     const store = useAdminThemeStore()
-    store.setSiderBg('#111')
-    store.setHeaderBg('#222')
-    store.setContentBg('#333')
-    store.setContainerBg('#444')
-
-    // Simulate applySnapshot with null bg values (older snapshot or cleared)
-    const siderBg: string | null = null
-    const headerBg: string | null = null
-    const contentBg: string | null = null
-    const containerBg: string | null = null
-
-    if (siderBg !== undefined) store.setSiderBg(siderBg)
-    if (headerBg !== undefined) store.setHeaderBg(headerBg)
-    if (contentBg !== undefined) store.setContentBg(contentBg)
-    if (containerBg !== undefined) store.setContainerBg(containerBg)
-
-    expect(store.siderBg).toBeNull()
-    expect(store.headerBg).toBeNull()
-    expect(store.contentBg).toBeNull()
-    expect(store.containerBg).toBeNull()
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-container-bg')).toBe('')
+    expect(store.siderTone).toBeNull()
+    expect(store.headerTone).toBeNull()
   })
 
-  it('snapshot import restores specific colors from snapshot', () => {
+  it('a dark color resolves to dark tone; a light color to light tone', () => {
     const store = useAdminThemeStore()
+    store.setSiderBg('#0F172A')
+    expect(store.siderTone).toBe('dark')
+    store.setSiderBg('#FFFFFF')
+    expect(store.siderTone).toBe('light')
+    store.setHeaderBg('#1E293B')
+    expect(store.headerTone).toBe('dark')
+    store.setTabBg('#F5F6F8')
+    expect(store.tabTone).toBe('light')
+    store.setFooterBg('#334155')
+    expect(store.footerTone).toBe('dark')
+  })
 
-    // Simulate applySnapshot for bg fields (as TThemeDrawer would)
-    const snapshot: Partial<AdminThemeSnapshot['admin']> = {
-      siderBg: '#abc123',
-      headerBg: '#def456',
-      contentBg: '#112233',
-      containerBg: '#aabbcc',
-    }
+  it('a custom text color forces the tone by its OWN luminance', () => {
+    const store = useAdminThemeStore()
+    store.setSiderBg('#FFFFFF') // light bg → auto = light surface (dark text)
+    expect(store.siderTone).toBe('light')
+    expect(store.siderTextColor).toBeNull()
+    store.setSiderTextColor('#FFFFFF') // light text → dark-surface token family
+    expect(store.siderTone).toBe('dark')
+    store.setSiderTextColor('#000000') // dark text → light-surface token family
+    expect(store.siderTone).toBe('light')
+    store.setSiderTextColor(null) // back to auto (luminance-derived)
+    expect(store.siderTone).toBe('light')
+  })
 
-    if (snapshot.siderBg !== undefined) store.setSiderBg(snapshot.siderBg)
-    if (snapshot.headerBg !== undefined) store.setHeaderBg(snapshot.headerBg)
-    if (snapshot.contentBg !== undefined) store.setContentBg(snapshot.contentBg)
-    if (snapshot.containerBg !== undefined) store.setContainerBg(snapshot.containerBg)
+  it('a custom text color writes --tnzi-admin-{surface}-fg; null clears it', () => {
+    const store = useAdminThemeStore()
+    store.setSiderTextColor('#ff0000')
+    expect(store.siderTextColor).toBe('#ff0000')
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-fg')).toBe('#ff0000')
+    store.setSiderTextColor(null)
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-fg')).toBe('')
+  })
 
-    expect(store.siderBg).toBe('#abc123')
-    expect(store.headerBg).toBe('#def456')
-    expect(store.contentBg).toBe('#112233')
-    expect(store.containerBg).toBe('#aabbcc')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-bg')).toBe('#abc123')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-header-bg')).toBe('#def456')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-content-bg')).toBe('#112233')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-layout-bg')).toBe('#112233')
-    expect(document.documentElement.style.getPropertyValue('--tnzi-container-bg')).toBe('#aabbcc')
+  it('a text color alone (no bg) drives the tone by its own luminance', () => {
+    const store = useAdminThemeStore()
+    expect(store.headerTone).toBeNull() // nothing set → follow global mode
+    store.setHeaderTextColor('#ffffff') // light text, no bg → dark-surface family
+    expect(store.headerTone).toBe('dark')
+    store.setHeaderTextColor('#111111') // dark text, no bg → light-surface family
+    expect(store.headerTone).toBe('light')
+    store.setHeaderTextColor(null)
+    expect(store.headerTone).toBeNull()
+  })
+
+  it('reset() clears all text-color overrides + their CSS vars', () => {
+    const store = useAdminThemeStore()
+    store.setSiderBg('#0F172A')
+    store.setSiderTextColor('#ff0000')
+    store.reset()
+    expect(store.siderTextColor).toBeNull()
+    expect(store.siderTone).toBeNull()
+    expect(document.documentElement.style.getPropertyValue('--tnzi-admin-sider-fg')).toBe('')
+  })
+})
+
+// ── Accessibility filters mutual exclusion ──
+describe('useAdminThemeStore - grayscale/colourWeakness exclusivity', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    document.documentElement.style.filter = ''
+  })
+
+  it('enabling one accessibility lens turns the other off', () => {
+    const store = useAdminThemeStore()
+    store.setColourWeakness(true)
+    expect(store.colourWeakness).toBe(true)
+    store.setGrayscale(true)
+    expect(store.grayscale).toBe(true)
+    expect(store.colourWeakness).toBe(false)
+    store.setColourWeakness(true)
+    expect(store.colourWeakness).toBe(true)
+    expect(store.grayscale).toBe(false)
+  })
+
+  it('re-applies the page filter when the flag changes WITHOUT the setter (persisted hydration path)', async () => {
+    const store = useAdminThemeStore()
+    // pinia-plugin-persistedstate writes refs directly, bypassing setGrayscale -
+    // the hydration watcher must still paint the filter after a reload.
+    store.grayscale = true
+    await nextTick()
+    expect(document.documentElement.style.filter).toContain('grayscale')
+    store.grayscale = false
+    await nextTick()
+    expect(document.documentElement.style.filter).not.toContain('grayscale')
   })
 })

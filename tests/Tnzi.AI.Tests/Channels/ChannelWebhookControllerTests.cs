@@ -7,7 +7,7 @@ using Tnzi.AI.Channels.Controllers;
 namespace Tnzi.AI.Tests.Channels;
 
 /// <summary>
-/// D2 — DefaultChannelWebhookController: routes to the matching platform adapter by name,
+/// D2 - DefaultChannelWebhookController: routes to the matching platform adapter by name,
 /// reads the raw body, returns the adapter's outcome as HTTP (challenge / 200 / 401),
 /// and 404 for unknown platforms.
 /// </summary>

@@ -97,6 +97,6 @@ const filtered = computed(() => {
 .t-skill-gallery__cat-badge--active {
   background-color: var(--tnzi-primary);
   border-color: var(--tnzi-primary);
-  color: #fff;
+  color: var(--tnzi-ai-on-accent);
 }
 </style>

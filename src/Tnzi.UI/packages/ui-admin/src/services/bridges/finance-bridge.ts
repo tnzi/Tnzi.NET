@@ -1,5 +1,5 @@
 /**
- * Finance bridge — thin adapter over `@tnzi/core`'s admin finance APIs
+ * Finance bridge - thin adapter over `@tnzi/core`'s admin finance APIs
  * (`/admin/finance/*` exposed by the Tnzi.Finance module's five
  * `DefaultFinance*AdminController`s: chart of accounts, journal entries,
  * exchange rates, fiscal years, and financial reports).
@@ -18,6 +18,10 @@ import {
   useAdminFinanceVendorApi,
   useAdminFinanceItemApi,
   useAdminFinanceTaxApi,
+  useAdminFinanceDocumentCollaborationApi,
+  useAdminFinanceBankRuleApi,
+  useAdminFinanceEstimateApi,
+  useAdminFinancePurchaseOrderApi,
   useAdminFinanceInvoiceApi,
   useAdminFinanceBillApi,
   useAdminFinanceExpenseApi,
@@ -34,6 +38,23 @@ import {
   useAdminFinanceEftBatchApi,
   useAdminFinanceReceiptApi,
   useAdminFinanceBalanceSummaryApi,
+  useAdminFinanceStatementApi,
+  useAdminFinanceTaxReturnApi,
+  useAdminFinanceRecurringApi,
+  type CustomerStatementDto,
+  type CustomerStatementQueryDto,
+  type StatementLineDto,
+  type TaxReturnLineDto,
+  type DunningCandidateDto,
+  type TaxReturnDto,
+  type TaxReturnFormDto,
+  type RecurringDocumentDto,
+  type CreateRecurringDocumentDto as CoreCreateRecurringDocumentDto,
+  type UpdateRecurringDocumentDto as CoreUpdateRecurringDocumentDto,
+  type RecurringRunDto,
+  type RecurringRunQueryDto,
+  type RecurrencePreviewDto,
+  type RecurringSweepResultDto,
   type AccountDto as CoreAccountDto,
   type AccountTreeDto as CoreAccountTreeDto,
   type AccountBalanceDto as CoreAccountBalanceDto,
@@ -46,6 +67,34 @@ import {
   type ExchangeRateDto as CoreExchangeRateDto,
   type UpsertExchangeRateDto as CoreUpsertExchangeRateDto,
   type FiscalYearDto as CoreFiscalYearDto,
+  type PartyLedgerSummaryDto as CorePartyLedgerSummaryDto,
+  type PartyLedgerEntryDto as CorePartyLedgerEntryDto,
+  type PartyLedgerQueryDto as CorePartyLedgerQueryDto,
+  type PartyLedgerQuery as CorePartyLedgerQuery,
+  type EstimateDto as CoreEstimateDto,
+  type CreateEstimateDto as CoreCreateEstimateDto,
+  type PurchaseOrderDto as CorePurchaseOrderDto,
+  type CreatePurchaseOrderDto as CoreCreatePurchaseOrderDto,
+  type OfferLineDto as CoreOfferLineDto,
+  type CreateOfferLineDto as CoreCreateOfferLineDto,
+  type ConvertOfferDto as CoreConvertOfferDto,
+  type ConvertOfferResultDto as CoreConvertOfferResultDto,
+  type BankRuleDto as CoreBankRuleDto,
+  type CreateBankRuleDto as CoreCreateBankRuleDto,
+  type BankRuleConditionDto as CoreBankRuleConditionDto,
+  type CreateBankRuleConditionDto as CoreCreateBankRuleConditionDto,
+  type BankRuleTestResultDto as CoreBankRuleTestResultDto,
+  type BankRuleTestRowDto as CoreBankRuleTestRowDto,
+  BankRuleField as CoreBankRuleField,
+  BankRuleOperator as CoreBankRuleOperator,
+  BankRuleMatchMode as CoreBankRuleMatchMode,
+  BankRuleDirection as CoreBankRuleDirection,
+  type DocumentAttachmentDto as CoreDocumentAttachmentDto,
+  type CreateDocumentAttachmentDto as CoreCreateDocumentAttachmentDto,
+  type DocumentCommentDto as CoreDocumentCommentDto,
+  FinanceOfferStatus as CoreFinanceOfferStatus,
+  type LedgerLockDto as CoreLedgerLockDto,
+  type SetLedgerLockDto as CoreSetLedgerLockDto,
   type CreateFiscalYearDto as CoreCreateFiscalYearDto,
   type TrialBalanceReportDto as CoreTrialBalanceReportDto,
   type TrialBalanceRowDto as CoreTrialBalanceRowDto,
@@ -88,6 +137,7 @@ import {
   type BatchPaymentDto as CoreBatchPaymentDto,
   type BatchPaymentResultDto as CoreBatchPaymentResultDto,
   type AgingReportDto as CoreAgingReportDto,
+  type AgingBucketsDto as CoreAgingBucketsDto,
   type AgingRowDto as CoreAgingRowDto,
   type TaxSummaryReportDto as CoreTaxSummaryReportDto,
   type TaxSummaryRowDto as CoreTaxSummaryRowDto,
@@ -155,6 +205,39 @@ export type ReverseJournalEntryDto = CoreReverseJournalEntryDto
 export type ExchangeRateDto = CoreExchangeRateDto
 export type UpsertExchangeRateDto = CoreUpsertExchangeRateDto
 export type FiscalYearDto = CoreFiscalYearDto
+export type PartyLedgerSummaryDto = CorePartyLedgerSummaryDto
+export type PartyLedgerEntryDto = CorePartyLedgerEntryDto
+export type PartyLedgerQueryDto = CorePartyLedgerQueryDto
+export type PartyLedgerQuery = CorePartyLedgerQuery
+export type EstimateDto = CoreEstimateDto
+export type CreateEstimateDto = CoreCreateEstimateDto
+export type PurchaseOrderDto = CorePurchaseOrderDto
+export type CreatePurchaseOrderDto = CoreCreatePurchaseOrderDto
+export type OfferLineDto = CoreOfferLineDto
+export type CreateOfferLineDto = CoreCreateOfferLineDto
+export type ConvertOfferDto = CoreConvertOfferDto
+export type ConvertOfferResultDto = CoreConvertOfferResultDto
+export type BankRuleDto = CoreBankRuleDto
+export type CreateBankRuleDto = CoreCreateBankRuleDto
+export type BankRuleConditionDto = CoreBankRuleConditionDto
+export type CreateBankRuleConditionDto = CoreCreateBankRuleConditionDto
+export type BankRuleTestResultDto = CoreBankRuleTestResultDto
+export type BankRuleTestRowDto = CoreBankRuleTestRowDto
+export const BankRuleField = CoreBankRuleField
+export type BankRuleField = CoreBankRuleField
+export const BankRuleOperator = CoreBankRuleOperator
+export type BankRuleOperator = CoreBankRuleOperator
+export const BankRuleMatchMode = CoreBankRuleMatchMode
+export type BankRuleMatchMode = CoreBankRuleMatchMode
+export const BankRuleDirection = CoreBankRuleDirection
+export type BankRuleDirection = CoreBankRuleDirection
+export type DocumentAttachmentDto = CoreDocumentAttachmentDto
+export type CreateDocumentAttachmentDto = CoreCreateDocumentAttachmentDto
+export type DocumentCommentDto = CoreDocumentCommentDto
+export const FinanceOfferStatus = CoreFinanceOfferStatus
+export type FinanceOfferStatus = CoreFinanceOfferStatus
+export type LedgerLockDto = CoreLedgerLockDto
+export type SetLedgerLockDto = CoreSetLedgerLockDto
 export type CreateFiscalYearDto = CoreCreateFiscalYearDto
 export type TrialBalanceReportDto = CoreTrialBalanceReportDto
 export type TrialBalanceRowDto = CoreTrialBalanceRowDto
@@ -163,6 +246,18 @@ export type BalanceSheetReportDto = CoreBalanceSheetReportDto
 export type ProfitAndLossReportDto = CoreProfitAndLossReportDto
 export type GeneralLedgerReportDto = CoreGeneralLedgerReportDto
 export type GeneralLedgerLineDto = CoreGeneralLedgerLineDto
+/**
+ * Optional general-ledger filter (mirrors the backend `GeneralLedgerFilterDto`).
+ * When any of `keyword` / `sourceType` is set the report comes back with
+ * `isFiltered = true` and zeroed balances - the presentation layer must hide
+ * the balance columns rather than render "0.00" as if it were an answer.
+ */
+export interface GeneralLedgerFilter {
+  keyword?: string
+  sourceType?: string
+  /** Newest-first (online-banking order). Row balances are unchanged. */
+  descending?: boolean
+}
 export type CustomerDto = CoreCustomerDto
 export type CreateCustomerDto = CoreCreateCustomerDto
 export type UpdateCustomerDto = CoreUpdateCustomerDto
@@ -197,6 +292,7 @@ export type OpenDocumentDto = CoreOpenDocumentDto
 export type BatchPaymentDto = CoreBatchPaymentDto
 export type BatchPaymentResultDto = CoreBatchPaymentResultDto
 export type AgingReportDto = CoreAgingReportDto
+export type AgingBucketsDto = CoreAgingBucketsDto
 export type AgingRowDto = CoreAgingRowDto
 export type TaxSummaryReportDto = CoreTaxSummaryReportDto
 export type TaxSummaryRowDto = CoreTaxSummaryRowDto
@@ -245,6 +341,23 @@ export type ReceiptConvertResultDto = CoreReceiptConvertResultDto
 export type BalanceSummaryRebuildDto = CoreBalanceSummaryRebuildDto
 export type BalanceSummaryVerifyDto = CoreBalanceSummaryVerifyDto
 export type BalanceSummaryDifferenceDto = CoreBalanceSummaryDifferenceDto
+// P4-5 / P4-6 / P4-7: statements, recurring templates, tax return forms
+export type {
+  CustomerStatementDto,
+  CustomerStatementQueryDto,
+  StatementLineDto,
+  TaxReturnLineDto,
+  DunningCandidateDto,
+  TaxReturnDto,
+  TaxReturnFormDto,
+  RecurringDocumentDto,
+  RecurringRunDto,
+  RecurringRunQueryDto,
+  RecurrencePreviewDto,
+  RecurringSweepResultDto,
+}
+export type CreateRecurringDocumentDto = CoreCreateRecurringDocumentDto
+export type UpdateRecurringDocumentDto = CoreUpdateRecurringDocumentDto
 
 export {
   AccountRootType,
@@ -320,12 +433,22 @@ export interface FinanceBridge {
     close(id: string): Promise<void>
     reopen(id: string): Promise<void>
     delete(ids: string[]): Promise<void>
+    /** Rolling closing date: orthogonal to fiscal-year close, same endpoint family. */
+    getClosingDate(): Promise<LedgerLockDto>
+    setClosingDate(data: CoreSetLedgerLockDto): Promise<LedgerLockDto>
   }
   reports: {
     trialBalance(from: string, to: string): Promise<TrialBalanceReportDto>
     balanceSheet(asOf: string): Promise<BalanceSheetReportDto>
     profitAndLoss(from: string, to: string): Promise<ProfitAndLossReportDto>
-    generalLedger(accountId: string, from: string, to: string, pageIndex?: number, pageSize?: number): Promise<GeneralLedgerReportDto>
+    generalLedger(
+      accountId: string,
+      from: string,
+      to: string,
+      pageIndex?: number,
+      pageSize?: number,
+      filter?: GeneralLedgerFilter,
+    ): Promise<GeneralLedgerReportDto>
     arAging(asOf: string): Promise<AgingReportDto>
     apAging(asOf: string): Promise<AgingReportDto>
     taxSummary(from: string, to: string): Promise<TaxSummaryReportDto>
@@ -344,12 +467,24 @@ export interface FinanceBridge {
     create(data: CoreCreateCustomerDto): Promise<CustomerDto>
     update(id: string, data: CoreUpdateCustomerDto): Promise<CustomerDto>
     delete(ids: string[]): Promise<void>
+    /** Single record, for the detail page (the list `fetch` cannot answer a deep link). */
+    get(id: string): Promise<CustomerDto>
+    /** Work-surface summary; ties out with the aging report by construction. */
+    summary(id: string, params?: { asOf?: string; from?: string; to?: string }): Promise<PartyLedgerSummaryDto>
+    /** Transaction ledger across document types, newest first. */
+    transactions(id: string, query?: PartyLedgerQuery): Promise<FinancePagedResult<PartyLedgerEntryDto>>
   }
   vendors: {
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<VendorDto>>
     create(data: CoreCreateVendorDto): Promise<VendorDto>
     update(id: string, data: CoreUpdateVendorDto): Promise<VendorDto>
     delete(ids: string[]): Promise<void>
+    /** Single record, for the detail page (the list `fetch` cannot answer a deep link). */
+    get(id: string): Promise<VendorDto>
+    /** Work-surface summary; ties out with the aging report by construction. */
+    summary(id: string, params?: { asOf?: string; from?: string; to?: string }): Promise<PartyLedgerSummaryDto>
+    /** Transaction ledger across document types, newest first. */
+    transactions(id: string, query?: PartyLedgerQuery): Promise<FinancePagedResult<PartyLedgerEntryDto>>
   }
   items: {
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<ItemDto>>
@@ -371,6 +506,57 @@ export interface FinanceBridge {
     updateCode(id: string, data: CoreUpsertTaxCodeDto): Promise<TaxCodeDto>
     deleteCode(id: string): Promise<void>
   }
+  /** Attachments + discussion on any document (polymorphic by source token). */
+  collaboration: {
+    attachments(docType: string, docId: string): Promise<DocumentAttachmentDto[]>
+    attach(docType: string, docId: string, data: CoreCreateDocumentAttachmentDto): Promise<DocumentAttachmentDto>
+    removeAttachment(id: string): Promise<void>
+    attachmentCounts(docType: string, docIds: string[]): Promise<Record<string, number>>
+    comments(docType: string, docId: string): Promise<DocumentCommentDto[]>
+    postComment(docType: string, docId: string, body: string): Promise<DocumentCommentDto>
+    deleteComment(id: string): Promise<void>
+  }
+  bankRules: {
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<BankRuleDto>>
+    getById(id: string): Promise<BankRuleDto | null>
+    create(data: CoreCreateBankRuleDto): Promise<BankRuleDto>
+    update(id: string, data: CoreCreateBankRuleDto): Promise<BankRuleDto>
+    delete(ids: string[]): Promise<void>
+    /** Rewrite priorities in the given order (first match wins, so order IS the rule). */
+    reorder(ruleIds: string[]): Promise<void>
+    /** Dry run against the pending lines; reports who actually wins each one. */
+    test(id: string, params?: { accountId?: string | null; sample?: number }): Promise<BankRuleTestResultDto>
+  }
+  /** Customer / vendor statements and the collections worklist (P4-5). */
+  statements: {
+    get(partyType: FinancePartyType, partyId: string, query?: CustomerStatementQueryDto): Promise<CustomerStatementDto>
+    /** Printable statement; rejects with 501 when no renderer is registered. */
+    download(partyType: FinancePartyType, partyId: string, query?: CustomerStatementQueryDto): Promise<Blob>
+    dunning(partyType: FinancePartyType, asOf?: string): Promise<DunningCandidateDto[]>
+  }
+  /** Tax filing forms (P4-7); empty forms list = no country pack loaded. */
+  taxReturns: {
+    forms(): Promise<TaxReturnFormDto[]>
+    get(country: string, formCode: string, from: string, to: string): Promise<TaxReturnDto>
+  }
+  /** Recurring document templates and their generation history (P4-6). */
+  recurring: {
+    fetch(query: FinancePagedQuery): Promise<FinancePagedResult<RecurringDocumentDto>>
+    getById(id: string): Promise<RecurringDocumentDto | null>
+    create(data: CoreCreateRecurringDocumentDto): Promise<RecurringDocumentDto>
+    update(id: string, data: CoreUpdateRecurringDocumentDto): Promise<RecurringDocumentDto>
+    delete(ids: string[]): Promise<void>
+    pause(id: string): Promise<RecurringDocumentDto>
+    resume(id: string): Promise<RecurringDocumentDto>
+    end(id: string): Promise<RecurringDocumentDto>
+    preview(id: string, count?: number): Promise<RecurrencePreviewDto>
+    previewSchedule(data: CoreCreateRecurringDocumentDto, count?: number): Promise<RecurrencePreviewDto>
+    runs(query?: RecurringRunQueryDto): Promise<FinancePagedResult<RecurringRunDto>>
+    run(id: string, asOf?: string): Promise<RecurringSweepResultDto>
+    runDue(asOf?: string): Promise<RecurringSweepResultDto>
+  }
+  estimates: FinanceOfferSection<EstimateDto, CoreCreateEstimateDto>
+  purchaseOrders: FinanceOfferSection<PurchaseOrderDto, CoreCreatePurchaseOrderDto>
   invoices: FinanceDocSection<InvoiceDto, CoreCreateInvoiceDto>
   bills: FinanceDocSection<BillDto, CoreCreateBillDto>
   expenses: FinanceDocSection<ExpenseDto, CoreCreateExpenseDto>
@@ -488,6 +674,25 @@ export interface FinanceBridge {
 }
 
 /** Shared shape for the five document sections (draft workflow + post + void). */
+/**
+ * Non-posting document section (estimate / purchase order).
+ *
+ * Business verbs, not `post` / `void`: these documents never reach the ledger.
+ * `convert` returns the DRAFT it created - posting stays a human decision.
+ */
+export interface FinanceOfferSection<TDto, TCreate> {
+  fetch(query: FinancePagedQuery): Promise<FinancePagedResult<TDto>>
+  getById(id: string): Promise<TDto | null>
+  createDraft(data: TCreate): Promise<TDto>
+  update(id: string, data: TCreate): Promise<TDto>
+  deleteDraft(id: string): Promise<void>
+  send(id: string): Promise<TDto>
+  accept(id: string): Promise<TDto>
+  decline(id: string): Promise<TDto>
+  close(id: string): Promise<TDto>
+  convert(id: string, data: ConvertOfferDto): Promise<ConvertOfferResultDto>
+}
+
 export interface FinanceDocSection<TDto, TCreate> {
   fetch(query: FinancePagedQuery): Promise<FinancePagedResult<TDto>>
   getById(id: string): Promise<TDto | null>
@@ -522,6 +727,13 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       customers: section as never,
       vendors: section as never,
       items: section as never,
+      collaboration: section as never,
+      bankRules: section as never,
+      statements: section as never,
+      taxReturns: section as never,
+      recurring: section as never,
+      estimates: section as never,
+      purchaseOrders: section as never,
       taxes: section as never,
       invoices: section as never,
       bills: section as never,
@@ -583,6 +795,44 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     }
   }
 
+  /** Non-posting document section over a core offer API. */
+  function offerSection<TDto, TCreate>(api: {
+    getList(params?: unknown): Promise<unknown>
+    get(id: string): Promise<unknown>
+    createDraft(data: TCreate): Promise<unknown>
+    update(id: string, data: TCreate): Promise<unknown>
+    deleteDraft(id: string): Promise<unknown>
+    send(id: string): Promise<unknown>
+    accept(id: string): Promise<unknown>
+    decline(id: string): Promise<unknown>
+    close(id: string): Promise<unknown>
+    convert(id: string, data: ConvertOfferDto): Promise<unknown>
+  }): FinanceOfferSection<TDto, TCreate> {
+    return {
+      fetch: async (query) => {
+        const filters = query.filters ?? {}
+        const result = unwrap<FinancePagedResult<TDto> | null>(
+          (await api.getList({
+            pageIndex: query.pageIndex,
+            pageSize: query.pageSize,
+            keyword: query.searchText || undefined,
+            ...filters,
+          })) as never,
+        )
+        return toPaged(result ?? {}, query)
+      },
+      getById: async (id) => unwrap<TDto | null>((await api.get(id)) as never),
+      createDraft: async (data) => unwrap<TDto>((await api.createDraft(data)) as never),
+      update: async (id, data) => unwrap<TDto>((await api.update(id, data)) as never),
+      deleteDraft: async (id) => { ensureOk((await api.deleteDraft(id)) as never) },
+      send: async (id) => unwrap<TDto>((await api.send(id)) as never),
+      accept: async (id) => unwrap<TDto>((await api.accept(id)) as never),
+      decline: async (id) => unwrap<TDto>((await api.decline(id)) as never),
+      close: async (id) => unwrap<TDto>((await api.close(id)) as never),
+      convert: async (id, data) => unwrap<ConvertOfferResultDto>((await api.convert(id, data)) as never),
+    }
+  }
+
   /** Document section (draft workflow + post + void) over a core document API. */
   function docSection<TDto, TCreate>(api: {
     getList(params?: unknown): Promise<unknown>
@@ -617,6 +867,8 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     }
   }
 
+  const collabApi = useAdminFinanceDocumentCollaborationApi(client)
+  const bankRuleApi = useAdminFinanceBankRuleApi(client)
   const paymentApi = useAdminFinancePaymentApi(client)
 
   return {
@@ -707,6 +959,8 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       reopen: async (id) => {
         ensureOk(await fiscalApi.reopen(id))
       },
+      getClosingDate: async () => unwrap<LedgerLockDto>(await fiscalApi.getClosingDate()),
+      setClosingDate: async (data) => unwrap<LedgerLockDto>(await fiscalApi.setClosingDate(data)),
       delete: async (ids) => {
         for (const id of ids) {
           ensureOk(await fiscalApi.delete(id))
@@ -721,8 +975,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         unwrap<BalanceSheetReportDto>(await reportApi.getBalanceSheet(asOf)),
       profitAndLoss: async (from, to) =>
         unwrap<ProfitAndLossReportDto>(await reportApi.getProfitAndLoss(from, to)),
-      generalLedger: async (accountId, from, to, pageIndex = 1, pageSize = 20) =>
-        unwrap<GeneralLedgerReportDto>(await reportApi.getGeneralLedger(accountId, from, to, pageIndex, pageSize)),
+      generalLedger: async (accountId, from, to, pageIndex = 1, pageSize = 20, filter) =>
+        unwrap<GeneralLedgerReportDto>(
+          await reportApi.getGeneralLedger(accountId, from, to, pageIndex, pageSize, filter),
+        ),
       arAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getArAging(asOf)),
       apAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getApAging(asOf)),
       taxSummary: async (from, to) =>
@@ -745,8 +1001,34 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         unwrap<Blob>(await reportApi.exportCashFlowCsv(from, to)),
     },
 
-    customers: crudSection<CustomerDto, CoreCreateCustomerDto, CoreUpdateCustomerDto>(customerApi),
-    vendors: crudSection<VendorDto, CoreCreateVendorDto, CoreUpdateVendorDto>(vendorApi),
+    customers: {
+      ...crudSection<CustomerDto, CoreCreateCustomerDto, CoreUpdateCustomerDto>(customerApi),
+      get: async (id) => unwrap<CustomerDto>((await customerApi.get(id)) as never),
+      summary: async (id, params) => unwrap<PartyLedgerSummaryDto>((await customerApi.getSummary(id, params)) as never),
+      transactions: async (id, query) => {
+        // An envelope can carry a null payload; `toPaged` would then read
+        // `.items` off undefined and the page would report a type error
+        // instead of "no transactions".
+        const result = unwrap<FinancePagedResult<PartyLedgerEntryDto> | null>(
+          (await customerApi.getTransactions(id, query)) as never,
+        )
+        return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
+      },
+    },
+    vendors: {
+      ...crudSection<VendorDto, CoreCreateVendorDto, CoreUpdateVendorDto>(vendorApi),
+      get: async (id) => unwrap<VendorDto>((await vendorApi.get(id)) as never),
+      summary: async (id, params) => unwrap<PartyLedgerSummaryDto>((await vendorApi.getSummary(id, params)) as never),
+      transactions: async (id, query) => {
+        // An envelope can carry a null payload; `toPaged` would then read
+        // `.items` off undefined and the page would report a type error
+        // instead of "no transactions".
+        const result = unwrap<FinancePagedResult<PartyLedgerEntryDto> | null>(
+          (await vendorApi.getTransactions(id, query)) as never,
+        )
+        return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
+      },
+    },
     items: crudSection<ItemDto, CoreCreateItemDto, CoreUpdateItemDto>(itemApi),
 
     taxes: {
@@ -770,6 +1052,92 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       },
     },
 
+    collaboration: {
+      attachments: async (docType, docId) => unwrap<DocumentAttachmentDto[] | null>((await collabApi.listAttachments(docType, docId)) as never) ?? [],
+      attach: async (docType, docId, data) => unwrap<DocumentAttachmentDto>((await collabApi.attach(docType, docId, data)) as never),
+      removeAttachment: async (id) => { ensureOk((await collabApi.removeAttachment(id)) as never) },
+      attachmentCounts: async (docType, docIds) =>
+        unwrap<Record<string, number> | null>((await collabApi.attachmentCounts(docType, docIds)) as never) ?? {},
+      comments: async (docType, docId) => unwrap<DocumentCommentDto[] | null>((await collabApi.listComments(docType, docId)) as never) ?? [],
+      postComment: async (docType, docId, body) => unwrap<DocumentCommentDto>((await collabApi.postComment(docType, docId, { body })) as never),
+      deleteComment: async (id) => { ensureOk((await collabApi.deleteComment(id)) as never) },
+    },
+    bankRules: {
+      fetch: async (query) => {
+        const filters = query.filters ?? {}
+        const result = unwrap<FinancePagedResult<BankRuleDto> | null>(
+          (await bankRuleApi.getList({
+            pageIndex: query.pageIndex,
+            pageSize: query.pageSize,
+            keyword: query.searchText || undefined,
+            ...filters,
+          })) as never,
+        )
+        return toPaged(result ?? {}, query)
+      },
+      getById: async (id) => unwrap<BankRuleDto | null>((await bankRuleApi.get(id)) as never),
+      create: async (data) => unwrap<BankRuleDto>((await bankRuleApi.create(data)) as never),
+      update: async (id, data) => unwrap<BankRuleDto>((await bankRuleApi.update(id, data)) as never),
+      delete: async (ids) => { for (const id of ids) ensureOk((await bankRuleApi.delete(id)) as never) },
+      reorder: async (ruleIds) => { ensureOk((await bankRuleApi.reorder({ ruleIds })) as never) },
+      test: async (id, params) => unwrap<BankRuleTestResultDto>(
+        (await bankRuleApi.test(id, { accountId: params?.accountId ?? null, sample: params?.sample ?? 20 })) as never,
+      ),
+    },
+    statements: (() => {
+      const api = useAdminFinanceStatementApi(client)
+      return {
+        get: async (partyType, partyId, query) =>
+          unwrap<CustomerStatementDto>((await api.get(partyType, partyId, query)) as never),
+        download: async (partyType, partyId, query) =>
+          unwrap<Blob>((await api.download(partyType, partyId, query)) as never),
+        dunning: async (partyType, asOf) =>
+          unwrap<DunningCandidateDto[] | null>((await api.dunning(partyType, asOf)) as never) ?? [],
+      }
+    })(),
+    taxReturns: (() => {
+      const api = useAdminFinanceTaxReturnApi(client)
+      return {
+        forms: async () => unwrap<TaxReturnFormDto[] | null>((await api.forms()) as never) ?? [],
+        get: async (country, formCode, from, to) =>
+          unwrap<TaxReturnDto>((await api.get(country, formCode, from, to)) as never),
+      }
+    })(),
+    recurring: (() => {
+      const api = useAdminFinanceRecurringApi(client)
+      return {
+        fetch: async (query) => {
+          const filters = query.filters ?? {}
+          const result = unwrap<FinancePagedResult<RecurringDocumentDto> | null>(
+            (await api.getList({
+              pageIndex: query.pageIndex,
+              pageSize: query.pageSize,
+              keyword: query.searchText || undefined,
+              ...filters,
+            } as never)) as never,
+          )
+          return toPaged(result ?? {}, query)
+        },
+        getById: async (id) => unwrap<RecurringDocumentDto | null>((await api.get(id)) as never),
+        create: async (data) => unwrap<RecurringDocumentDto>((await api.create(data)) as never),
+        update: async (id, data) => unwrap<RecurringDocumentDto>((await api.update(id, data)) as never),
+        delete: async (ids) => { for (const id of ids) ensureOk((await api.delete(id)) as never) },
+        pause: async (id) => unwrap<RecurringDocumentDto>((await api.pause(id)) as never),
+        resume: async (id) => unwrap<RecurringDocumentDto>((await api.resume(id)) as never),
+        end: async (id) => unwrap<RecurringDocumentDto>((await api.end(id)) as never),
+        preview: async (id, count) => unwrap<RecurrencePreviewDto>((await api.preview(id, count)) as never),
+        previewSchedule: async (data, count) =>
+          unwrap<RecurrencePreviewDto>((await api.previewSchedule(data, count)) as never),
+        runs: async (query) => {
+          const result = unwrap<FinancePagedResult<RecurringRunDto> | null>((await api.runs(query)) as never)
+          return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
+        },
+        run: async (id, asOf) => unwrap<RecurringSweepResultDto>((await api.run(id, asOf)) as never),
+        runDue: async (asOf) => unwrap<RecurringSweepResultDto>((await api.runDue(asOf)) as never),
+      }
+    })(),
+    estimates: offerSection<EstimateDto, CoreCreateEstimateDto>(useAdminFinanceEstimateApi(client)),
+    purchaseOrders: offerSection<PurchaseOrderDto, CoreCreatePurchaseOrderDto>(useAdminFinancePurchaseOrderApi(client)),
     invoices: docSection<InvoiceDto, CoreCreateInvoiceDto>(useAdminFinanceInvoiceApi(client)),
     bills: docSection<BillDto, CoreCreateBillDto>(useAdminFinanceBillApi(client)),
     expenses: docSection<ExpenseDto, CoreCreateExpenseDto>(useAdminFinanceExpenseApi(client)),

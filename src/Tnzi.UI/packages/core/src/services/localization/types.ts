@@ -1,5 +1,5 @@
 /**
- * Localization Module Types — mirrors `Tnzi.Localization.Dtos.*` on the .NET side.
+ * Localization Module Types - mirrors `Tnzi.Localization.Dtos.*` on the .NET side.
  *
  * Models the missing-translation tracker surface exposed by
  * `Tnzi.Localization/Controllers/Admin/DefaultLocalizationAdminController`

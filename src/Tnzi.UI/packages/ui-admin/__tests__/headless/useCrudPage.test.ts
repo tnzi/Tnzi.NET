@@ -78,7 +78,7 @@ describe('useCrudPage', () => {
 
   it('refetches when page index changes', async () => {
     // setPage auto-triggers refresh (NDataTable @update:page emit fires once
-    // per click — without the auto-refresh the table content stayed on
+    // per click - without the auto-refresh the table content stayed on
     // page 1 even though the pagination index moved).
     const { crud, bridge } = makeCrud()
     await crud.refresh()
@@ -459,5 +459,75 @@ describe('useCrudPage', () => {
     }
     expect(useCrudPage(base).detailMode.value).toBe('modal')
     expect(useCrudPage({ ...base, detailMode: 'drawer' as const }).detailMode.value).toBe('drawer')
+  })
+
+  // Regression: refresh() used to have no sequence token, so a slow earlier
+  // request could resolve last and repaint the list with stale rows while the
+  // pager already showed the newer page. Remove the token and this test fails.
+  it('ignores a slow earlier refresh once a newer one has started', async () => {
+    const resolvers: Array<(rows: { id: string; name: string }[]) => void> = []
+    const state = useCrudPage<User>({
+      pageId: 'test.race',
+      columns,
+      rowKey: (r) => r.id,
+      autoLoad: false,
+      fetchData: () =>
+        new Promise((resolve) => {
+          resolvers.push((rows) =>
+            resolve({ items: rows, totalCount: rows.length, pageIndex: 1, pageSize: 20 }),
+          )
+        }),
+    })
+
+    const first = state.refresh()
+    const second = state.refresh()
+
+    // The newer request answers first, then the stale one arrives late.
+    resolvers[1]([{ id: '2', name: 'newer' }])
+    resolvers[0]([{ id: '1', name: 'stale' }])
+    await Promise.all([first, second])
+
+    expect(state.items.value.map((r) => r.name)).toEqual(['newer'])
+    expect(state.loading.value).toBe(false)
+  })
+
+  // Regression: refresh() used to rethrow after exhausting retries, and every
+  // call site is `void refresh()`, so a failed load became an unhandled
+  // rejection on top of the error the page already surfaced properly.
+  it('reports a failed refresh through error state instead of rejecting', async () => {
+    const state = useCrudPage<User>({
+      pageId: 'test.fail',
+      columns,
+      rowKey: (r) => r.id,
+      autoLoad: false,
+      retry: { attempts: 0, baseMs: 0 },
+      fetchData: async () => {
+        throw new Error('backend gap')
+      },
+      onError: () => false, // suppress the toast in tests
+    })
+
+    await expect(state.refresh()).resolves.toBeUndefined()
+    expect(state.error.value?.message).toBe('backend gap')
+    expect(state.loading.value).toBe(false)
+  })
+
+  it('setSort refetches so server-side ordering actually takes effect', async () => {
+    const bridge = createFakeBridge()
+    const state = useCrudPage<User>({
+      pageId: 'test.sort.refetch',
+      columns,
+      rowKey: (r) => r.id,
+      autoLoad: false,
+      fetchData: bridge.fetchData,
+    })
+
+    state.setSort('name', 'desc')
+    await nextTick()
+    await Promise.resolve()
+
+    expect(bridge.fetchData).toHaveBeenCalledWith(
+      expect.objectContaining({ sortField: 'name', sortOrder: 'desc' }),
+    )
   })
 })

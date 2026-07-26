@@ -65,7 +65,7 @@ function mountShell(props: Record<string, unknown> = {}) {
       // when we add one; here we want a minimal mount.
       builtinSearch: false,
       // Phase H4 L6: TBackTop wraps NBackTop which uses scroll
-      // listeners — not needed for layout-structure assertions.
+      // listeners - not needed for layout-structure assertions.
       builtinBackTop: false,
       ...props,
     },
@@ -109,7 +109,7 @@ describe('TAdminShell', () => {
     const wrapper = mountShell({ mode: 'vertical-mix' })
     // Phase G follow-up #4: vertical-mix uses TAdminMixNavRail (custom
     // div-based rail ported from soybean's first-level-menu.vue) instead
-    // of TAdminSidebar — NMenu can't render the icon-on-top + label-below
+    // of TAdminSidebar - NMenu can't render the icon-on-top + label-below
     // geometry cleanly. So no TAdminSidebar instance is rendered in this
     // mode. The second-level drawer still lives as `.t-admin-shell__sub-sider`.
     const sidebars = wrapper.findAllComponents(TAdminSidebar)
@@ -202,7 +202,7 @@ describe('TAdminShell', () => {
     forceMobile(true)
     const app = useAdminAppStore()
     const wrapper = mountShell({ mode: 'vertical' })
-    // Open the drawer, then select a menu item — it should auto-dismiss.
+    // Open the drawer, then select a menu item - it should auto-dismiss.
     app.setSiderCollapse(false)
     const sidebar = wrapper.findComponent(TAdminSidebar)
     sidebar.vm.$emit('menuSelect', { key: 'users', label: 'Users' } as AdminMenuItem)

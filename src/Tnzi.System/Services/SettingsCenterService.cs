@@ -36,7 +36,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
         // settings group is guarded by its own `{group}.settings.{slug}.view`
         // code (super-admin passes automatically via IPermissionChecker). When
         // the Authorization module isn't loaded (PermissionChecker == null) the
-        // config center falls back to open — no fine-grained permission system.
+        // config center falls back to open - no fine-grained permission system.
         var visible = new List<SettingDefinitionGroup>();
         foreach (var group in CollectGroups())
         {
@@ -69,7 +69,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
             return Fail<SettingsCenterGroupDto>($"You do not have permission to modify settings group '{groupKey}'", 403);
 
         var fieldMap = group.Fields.ToDictionary(f => f.Key, StringComparer.OrdinalIgnoreCase);
-        // 校验同时把请求键规范化为定义里的 field.Key — 字段匹配大小写不敏感，
+        // 校验同时把请求键规范化为定义里的 field.Key - 字段匹配大小写不敏感，
         // 但持久化必须用规范键，否则大小写漂移的请求会在大小写敏感数据库
         //（如 PostgreSQL）里产生重复 Setting 行。
         var canonicalValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -121,7 +121,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
         }
 
         // 显式 flush：写经 ISettingService 可能滞留在 UoW change tracker（智能保存
-        // 在事务/环境 UoW 激活时推迟落库），而下面的回读是 AsNoTracking 直查数据库 —
+        // 在事务/环境 UoW 激活时推迟落库），而下面的回读是 AsNoTracking 直查数据库 -
         // 不 flush 则响应返回写之前的旧值（同事务内 SELECT 可见自己 flush 过的写）。
         await _settingRepository.SaveChangesAsync(cancellationToken);
 
@@ -271,7 +271,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
             return null;
 
         // 候选覆盖集与各类型无关，统一构建：null（删除覆盖）回退到排除覆盖层后的
-        // base 值；非 null 直接覆盖。加密字段不进 IConfiguration — 本次候选用请求明文，
+        // base 值；非 null 直接覆盖。加密字段不进 IConfiguration - 本次候选用请求明文，
         // 未变更但已存的用解密值注入，让 validator 看到与真实运行状态一致的实例
         //（明文仅在本方法栈内存活）。
         var overrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -351,7 +351,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
 
     private async Task<Dictionary<string, Setting>> LoadGlobalOverridesAsync(IEnumerable<string> keys, CancellationToken cancellationToken)
     {
-        // Setting 表是小表（运行时覆盖项），全量加载后内存过滤 —
+        // Setting 表是小表（运行时覆盖项），全量加载后内存过滤 -
         // 与既有测试基建（mock ToListAsync）兼容，避免 mock IQueryable 异步算子。
         var keySet = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
         var settings = await _settingRepository.ToListAsync(null, cancellationToken);
@@ -372,6 +372,7 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
             Description = group.Description,
             Icon = group.Icon,
             Order = group.Order,
+            IsBuiltIn = group.IsBuiltIn,
             Fields = group.Fields.Select(f => ToDto(f, overrides)).ToList(),
         };
     }

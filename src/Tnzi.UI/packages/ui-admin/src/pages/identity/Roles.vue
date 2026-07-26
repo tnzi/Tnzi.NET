@@ -19,7 +19,7 @@
     </template>
 
     <!--
-      Read-only role detail — opens from the row "Detail" action (the CRUD
+      Read-only role detail - opens from the row "Detail" action (the CRUD
       `view` open-state, deep-linkable for free). Three tabs:
         • Information (read-only basics + UserCount stat)
         • Members    (paged user list assigned to this role)
@@ -31,49 +31,49 @@
         <NTabs v-model:value="tab" type="line" animated>
           <NTabPane name="info" :tab="t('detail.tabs.info')">
             <div class="t-roles-page__detail-info">
-              <header class="t-roles-page__role-header">
-                <h3 class="t-roles-page__role-name">{{ roleDetail?.name ?? '—' }}</h3>
-                <NSpace size="small">
-                  <NTag v-if="roleDetail?.isDefault" type="info" size="small" :bordered="false">
-                    {{ t('detail.stats.defaultBadge') }}
-                  </NTag>
-                  <NTag v-if="roleDetail?.isSystem" type="warning" size="small" :bordered="false">
-                    {{ t('detail.stats.systemBadge') }}
-                  </NTag>
-                </NSpace>
-              </header>
+              <!-- Same identity band as every other record surface: the role's
+                   name, what kind of role it is, and the facts that identify
+                   it, before any body text. -->
+              <TRecordHeader
+                compact
+                :name="roleDetail?.name ?? EMPTY_DASH"
+                icon="mdi:account-key-outline"
+                :badges="roleBadges"
+                :facts="roleFacts"
+              />
               <p class="t-roles-page__role-desc">
-                {{ roleDetail?.description || '—' }}
+                {{ roleDetail?.description || EMPTY_DASH }}
               </p>
-              <div class="t-roles-page__stats">
-                <NStatistic
-                  :label="t('detail.stats.userCount')"
-                  :value="roleDetail?.userCount ?? 0"
-                />
-              </div>
             </div>
           </NTabPane>
 
           <NTabPane name="users" :tab="t('detail.tabs.users')">
             <p class="t-roles-page__hint">{{ t('detail.users.hint') }}</p>
-            <TResponsiveTable
-              :columns="userColumns"
-              :data="users.items"
-              :loading="users.loading"
-              :pagination="{
-                page: users.pageIndex,
-                pageSize: users.pageSize,
-                itemCount: users.totalCount,
-                onUpdatePage: (p: number) => { users.pageIndex = p; reloadUsers() },
-                onUpdatePageSize: (s: number) => { users.pageSize = s; users.pageIndex = 1; reloadUsers() },
-                showSizePicker: true,
-                pageSizes: [10, 20, 50],
-              }"
-              :bordered="false"
-              remote
-              size="small"
-              :row-key="(r: UserListItemDto) => r.id"
-            />
+            <!-- Members are PEOPLE: a face, a name, a way to reach them. A
+                 three-column grid of the same three fields made the roster
+                 read like a join table. -->
+            <NSpin :show="users.loading">
+              <TEmpty v-if="!users.loading && !users.items.length" :text="t('detail.users.empty')" size="small" />
+              <div v-else class="t-roles-page__members">
+                <TItemCard
+                  v-for="u in users.items"
+                  :key="u.id"
+                  :title="u.userName"
+                  :avatar="undefined"
+                  icon="mdi:account"
+                  :meta="memberMeta(u)"
+                />
+              </div>
+            </NSpin>
+            <div v-if="users.totalCount > users.pageSize" class="t-roles-page__pager">
+              <NPagination
+                :page="users.pageIndex"
+                :page-size="users.pageSize"
+                :item-count="users.totalCount"
+                size="small"
+                @update:page="(p: number) => { users.pageIndex = p; reloadUsers() }"
+              />
+            </div>
           </NTabPane>
 
           <NTabPane name="permissions" :tab="t('detail.tabs.permissions')">
@@ -90,21 +90,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref, watch } from 'vue'
+import { EMPTY_DASH } from '../../utils/placeholders'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  NButton,
-  NSpace,
-  NSpin,
-  NStatistic,
-  NTabPane,
-  NTabs,
-  NTag,
-} from 'naive-ui'
-import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import type { DataTableColumns } from 'naive-ui'
+import { NButton, NPagination, NSpin, NTabPane, NTabs } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
-import { TSvgIcon, TRelativeTime } from '@tnzi/ui'
+import TRecordHeader, { type RecordBadge, type RecordFact } from '../../components/detail/TRecordHeader.vue'
+import TItemCard, { type ItemCardMeta } from '../../components/data/TItemCard.vue'
+import TEmpty from '../../components/data/TEmpty.vue'
+import { TSvgIcon } from '@tnzi/ui'
+import { formatDateOnly } from '@tnzi/core/utils'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
 import { useBreakpoint } from '../../headless/useBreakpoint'
@@ -221,18 +216,28 @@ function goToPermissionEditor(): void {
   })
 }
 
-const userColumns: DataTableColumns<UserListItemDto> = [
-  { key: 'userName', title: t('detail.users.userName'), minWidth: 140 },
-  { key: 'email', title: t('detail.users.email'), minWidth: 200, ellipsis: { tooltip: true } },
+const roleBadges = computed<RecordBadge[]>(() => {
+  const out: RecordBadge[] = []
+  if (roleDetail.value?.isDefault) out.push({ label: t('detail.stats.defaultBadge'), type: 'info' })
+  if (roleDetail.value?.isSystem) out.push({ label: t('detail.stats.systemBadge'), type: 'warning' })
+  return out
+})
+
+const roleFacts = computed<RecordFact[]>(() => [
   {
-    key: 'creationTime',
-    title: t('detail.users.creationTime'),
-    width: 160,
-    // Match the main role/user tables: relative timestamp via TRelativeTime
-    // instead of a hand-rolled toLocaleDateString.
-    render: (row) => h(TRelativeTime, { value: row.creationTime }),
+    icon: 'mdi:account-group-outline',
+    label: t('detail.stats.userCount'),
+    value: String(roleDetail.value?.userCount ?? 0),
   },
-]
+])
+
+/** Member row facts: how to reach them, and when they joined the role. */
+function memberMeta(user: UserListItemDto): ItemCardMeta[] {
+  const out: ItemCardMeta[] = []
+  if (user.email) out.push({ icon: 'mdi:email-outline', text: user.email })
+  out.push({ icon: 'mdi:calendar-plus', text: formatDateOnly(user.creationTime) })
+  return out
+}
 </script>
 
 <style scoped>
@@ -242,29 +247,22 @@ const userColumns: DataTableColumns<UserListItemDto> = [
   gap: 12px;
   padding: 8px 0;
 }
-.t-roles-page__role-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.t-roles-page__role-name {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--tnzi-base-text);
-}
 .t-roles-page__role-desc {
   margin: 0;
   font-size: 13px;
+  line-height: 1.6;
   color: var(--tnzi-base-text-muted);
   white-space: pre-wrap;
 }
-.t-roles-page__stats {
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--tnzi-border);
+.t-roles-page__members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.t-roles-page__pager {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
 }
 .t-roles-page__hint {
   font-size: 12px;

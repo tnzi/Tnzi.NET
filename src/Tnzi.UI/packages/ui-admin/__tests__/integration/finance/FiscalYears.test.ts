@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Fiscal Years page — the backend returns a flat list (wrapped as a single
+ * Fiscal Years page - the backend returns a flat list (wrapped as a single
  * page); rows carry close/reopen lifecycle actions.
  */
 vi.mock('../../../src/plugin/client', () => ({

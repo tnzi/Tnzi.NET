@@ -3,7 +3,7 @@ using Tnzi.AI.Rag.FileExtractors;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// ImageContentExtractor 单元测试 — 验证图片内容提取和优雅降级
+/// ImageContentExtractor 单元测试 - 验证图片内容提取和优雅降级
 /// </summary>
 public class ImageContentExtractorTests
 {

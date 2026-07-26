@@ -53,6 +53,15 @@ public class ExceptionHandlingHubFilter : IHubFilter
                 hubName, methodName);
             throw new HubException("Access denied.");
         }
+        catch (BusinessException ex)
+        {
+            // 业务异常：message 本就是面向用户的（与 HTTP 路径的信封语义一致），
+            // 原样透传，不要退化成"发生了错误"把可执行的提示丢掉。
+            _logger.LogWarning(ex,
+                "Business error in hub method {HubName}.{MethodName}",
+                hubName, methodName);
+            throw new HubException(ex.Message);
+        }
         catch (ArgumentException ex)
         {
             // 参数异常

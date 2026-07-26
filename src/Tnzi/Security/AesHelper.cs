@@ -192,7 +192,9 @@ public class AesHelper
     private static byte[] GetKeyBytes(string key)
     {
         // 尝试作为Base64解码
-        if (key.Length == 44 && key.EndsWith("=")) // Base64编码的32字节
+        // 必须用 ordinal 比较：区域敏感的 EndsWith(string) 判定漂移会让同一密钥走上不同分支
+        // （Base64 解码 vs SHA256 派生），导致解密失败
+        if (key.Length == 44 && key.EndsWith('=')) // Base64编码的32字节
         {
             try
             {

@@ -30,6 +30,9 @@ public class JwtTokenService : ApplicationService, ITokenService
         JwtRegisteredClaimNames.Sub,  // "sub"
         JwtRegisteredClaimNames.Jti,  // "jti"
         "tenant_id",
+        // 会话ID 由框架内部按 sessionId 参数写入；禁止调用方经 extraClaims 伪造，
+        // 否则可把令牌绑定到他人的有效会话绕过撤销。
+        IdentityConstants.ClaimTypeNames.SessionId,
     };
 
     /// <summary>
@@ -65,7 +68,7 @@ public class JwtTokenService : ApplicationService, ITokenService
     /// <summary>
     /// 生成JWT令牌
     /// </summary>
-    public string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null)
+    public string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null)
     {
         var claims = new List<Claim>
         {
@@ -83,6 +86,13 @@ public class JwtTokenService : ApplicationService, ITokenService
         if (_multiTenancyEnabled && user.TenantId.HasValue)
         {
             claims.Add(new Claim("tenant_id", user.TenantId.Value.ToString()));
+        }
+
+        // 会话ID claim（框架内部写入，保留类型，extraClaims 无法伪造）：
+        // 供服务端每请求校验会话有效性，会话撤销/过期即令该令牌失效。
+        if (sessionId.HasValue && sessionId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim(IdentityConstants.ClaimTypeNames.SessionId, sessionId.Value.ToString()));
         }
 
         // 追加调用方自定义 claim，跳过框架自管的保留类型，
@@ -180,9 +190,9 @@ public class JwtTokenService : ApplicationService, ITokenService
     /// <summary>
     /// 生成令牌结果
     /// </summary>
-    public TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null)
+    public TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null)
     {
-        var accessToken = GenerateToken(user, roles, extraClaims);
+        var accessToken = GenerateToken(user, roles, extraClaims, sessionId);
         var refreshToken = GenerateRefreshToken();
         var expiresAt = DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes);
 

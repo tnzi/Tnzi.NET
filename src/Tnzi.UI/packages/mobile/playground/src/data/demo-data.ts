@@ -13,7 +13,7 @@ import type {
   IBreadcrumbItem,
 } from '@tnzi/core/types/shared-ui';
 
-// IUserCardProps and IStatCardProps are UI contracts — define locally for demo usage
+// IUserCardProps and IStatCardProps are UI contracts - define locally for demo usage
 interface IUserCardUser {
   id: string | number;
   name: string;

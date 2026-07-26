@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.ChatHistory;
 
 /// <summary>
-/// 链式历史压缩器 — 按顺序执行多个 IHistoryReducer（如 Prune → Summarize）
+/// 链式历史压缩器 - 按顺序执行多个 IHistoryReducer（如 Prune → Summarize）
 /// </summary>
 public class ChainedChatReducer : IHistoryReducer
 {

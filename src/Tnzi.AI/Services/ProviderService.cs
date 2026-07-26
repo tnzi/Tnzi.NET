@@ -16,19 +16,19 @@ namespace Tnzi.AI.Services;
 ///   （仅暴露 HasApiKey 布尔标志），密文也不会暴露。
 ///
 /// TestConnectionAsync 探针策略：
-///   默认采用 "shallow probe" — 仅校验记录基础信息（存在性、IsEnabled、Endpoint 解析）
+///   默认采用 "shallow probe" - 仅校验记录基础信息（存在性、IsEnabled、Endpoint 解析）
 ///   并测量内部解密/校验耗时。不发起真实 LLM 调用以避免计费和延迟波动。
 ///   未来若需要对接真实 IChatClientFactory 探针，可在此扩展。
 ///
 /// 可见性策略（ResourceScope）：
-///   Provider 有意不实现 IMultiTenant — 全局查询过滤器无共享行子句，System 行对真实租户不可见。
+///   Provider 有意不实现 IMultiTenant - 全局查询过滤器无共享行子句，System 行对真实租户不可见。
 ///   取而代之，每个 Provider 携带 Scope + TenantId，服务层联合过滤：
 ///     - 多租户模式（currentTenantId != null）：返回 Scope=System ∪ (Scope=Tenant &amp;&amp; TenantId==当前租户)
 ///     - 单租户模式（currentTenantId == null）：返回全部行（向后兼容）
 ///   此模式镜像 SkillEntity / DatabaseSkillStore 的实现。
 ///
 /// 双源列表（Database + Configuration）：
-///   admin 列表/详情/options 端点合并两类来源 — 数据库实体（可写）与 appsettings 的
+///   admin 列表/详情/options 端点合并两类来源 - 数据库实体（可写）与 appsettings 的
 ///   <c>AI:Providers</c> 配置条目（只读，<c>Source=Configuration</c>）。配置条目的处理逻辑
 ///   见 partial 文件 ProviderService.ConfigurationSource.cs。
 /// </remarks>
@@ -117,7 +117,7 @@ public partial class ProviderService : ApplicationService, IProviderService
                 .OrderByDescending(p => p.Priority)
                 .ThenByDescending(p => p.CreationTime);
 
-            // Configuration-defined providers (AI:Providers) — hidden when an enabled DB
+            // Configuration-defined providers (AI:Providers) - hidden when an enabled DB
             // entity shares the name, because at runtime ChatClientFactory resolves the DB
             // row first and the config entry no longer takes effect.
             var enabledDbNames = await ApplyVisibility(_repository.AsQueryable())
@@ -353,7 +353,7 @@ public partial class ProviderService : ApplicationService, IProviderService
                 return Fail<ProviderTestResultDto>("Provider not found", 404, ErrorCodes.ProviderNotFound);
             }
 
-            // Shallow probe — verify entity is enabled and credentials decrypt cleanly.
+            // Shallow probe - verify entity is enabled and credentials decrypt cleanly.
             // We do NOT issue a real LLM completion call (variable cost / latency / network).
             // Future enhancement: optionally invoke IChatClientFactory.GetChatClient and a
             // tiny ChatCompletionAsync ping when the factory is wired to the entity table.
@@ -391,7 +391,7 @@ public partial class ProviderService : ApplicationService, IProviderService
             return Ok(new ProviderTestResultDto
             {
                 Success = true,
-                Message = "Provider configuration is valid (shallow probe — no live LLM call)",
+                Message = "Provider configuration is valid (shallow probe - no live LLM call)",
                 LatencyMs = sw.ElapsedMilliseconds
             });
         }
@@ -451,7 +451,7 @@ public partial class ProviderService : ApplicationService, IProviderService
     public async Task<Result<ProviderModelsDto>> ListModelsAsync(Guid id, CancellationToken ct = default)
     {
         // Configuration-defined providers support model listing too: the probe reads
-        // BaseUrl/ApiKey straight from options (the key stays in memory — never serialized).
+        // BaseUrl/ApiKey straight from options (the key stays in memory - never serialized).
         if (TryGetConfigurationModelProbe(id, out var configProbe))
         {
             return Ok(await ListModelsCoreAsync(configProbe!, ct));
@@ -465,14 +465,14 @@ public partial class ProviderService : ApplicationService, IProviderService
         string? apiKey = null;
         if (!string.IsNullOrEmpty(entity.ApiKeyEncrypted))
         {
-            try { apiKey = GetProtector().Unprotect(entity.ApiKeyEncrypted); } catch { /* key rotated — proceed unauthenticated */ }
+            try { apiKey = GetProtector().Unprotect(entity.ApiKeyEncrypted); } catch { /* key rotated - proceed unauthenticated */ }
         }
 
         var probe = new ModelProbe(entity.Name, entity.ProviderType, entity.Endpoint, apiKey, entity.DefaultModel);
         return Ok(await ListModelsCoreAsync(probe, ct));
     }
 
-    /// <summary>模型列表探针参数 — 数据库实体与配置条目共用（ApiKey 为已解密明文，仅驻留内存）。</summary>
+    /// <summary>模型列表探针参数 - 数据库实体与配置条目共用（ApiKey 为已解密明文，仅驻留内存）。</summary>
     private sealed record ModelProbe(string Name, string ProviderType, string? Endpoint, string? ApiKey, string? DefaultModel);
 
     /// <summary>

@@ -1,10 +1,10 @@
 namespace Tnzi.AI.Dtos;
 
 /// <summary>
-/// Agent 授权投影 — 把三类 junction grant 实体（工具/技能/知识库）的<b>已启用</b>条目
+/// Agent 授权投影 - 把三类 junction grant 实体（工具/技能/知识库）的<b>已启用</b>条目
 /// 折叠成扁平的值列表，供 AgentResolver 与 DTO 消费（取代 Agent 上的 JSON 列）。
 /// 仅包含 <c>IsEnabled == true</c> 的授权；各列表按 Priority 降序、再按创建时间升序排列。
-/// Read-side projection of an Agent's grants — flattens the <b>enabled</b> entries of the three
+/// Read-side projection of an Agent's grants - flattens the <b>enabled</b> entries of the three
 /// junction grant entities (tool/skill/knowledge) into plain value lists for the resolver/DTO to
 /// consume (replacing the JSON columns on Agent). Only <c>IsEnabled == true</c> grants are included;
 /// each list is ordered by Priority descending, then by creation time ascending.

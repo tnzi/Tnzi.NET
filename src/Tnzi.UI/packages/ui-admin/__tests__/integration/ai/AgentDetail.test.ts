@@ -30,7 +30,7 @@ const AGENT_1 = {
   qualityTier: 2,
   latencyTier: 1,
   costTier: 2,
-  personaId: null,
+  persona: null,
   creationTime: '2026-04-01T00:00:00Z',
 }
 // loadAgent() now uses bridge.agents.getById(id) (exact lookup).
@@ -91,7 +91,7 @@ const rollbackMock = vi.fn(async (_id: string, version: number) => ({
   qualityTier: 2,
   latencyTier: 1,
   costTier: 2,
-  personaId: null,
+  persona: null,
   creationTime: '2026-04-01T00:00:00Z',
   _rolledBackTo: version,
 }))
@@ -116,7 +116,7 @@ const configureAbTestMock = vi.fn(async (_id: string, _data: unknown) => ({
   qualityTier: 2,
   latencyTier: 1,
   costTier: 2,
-  personaId: null,
+  persona: null,
   creationTime: '2026-04-01T00:00:00Z',
 }))
 
@@ -130,17 +130,8 @@ const stopAbTestMock = vi.fn(async (_id: string) => ({
   qualityTier: 2,
   latencyTier: 1,
   costTier: 2,
-  personaId: null,
+  persona: null,
   creationTime: '2026-04-01T00:00:00Z',
-}))
-
-const fetchPersonasMock = vi.fn(async () => ({
-  items: [
-    { id: 'persona-1', name: 'Sales rep', slug: 'sales-rep', content: 'You speak with empathy.', scope: 1 },
-  ],
-  totalCount: 1,
-  pageIndex: 1,
-  pageSize: 200,
 }))
 
 const fetchProvidersMock = vi.fn(async () => ({
@@ -192,12 +183,6 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       cancel: vi.fn(),
       tail: vi.fn(),
     },
-    personas: {
-      fetch: fetchPersonasMock,
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
     providers: {
       fetch: fetchProvidersMock,
       create: vi.fn(),
@@ -226,7 +211,6 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
     getByIdMock.mockClear()
     fetchAgentMock.mockClear()
     fetchRunsMock.mockClear()
-    fetchPersonasMock.mockClear()
     fetchProvidersMock.mockClear()
     updateMock.mockClear()
     routerReplaceMock.mockClear()
@@ -253,17 +237,16 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
     // Agent name appears in the #title slot
     expect(wrapper.text()).toContain('Writer')
 
-    // TDetailLayout renders tab panes — 5 sections total
+    // TDetailLayout renders tab panes - 5 sections total
     const tabs = wrapper.findAll('.n-tab-pane, [role="tab"]')
     // Section nav tabs are rendered by NTabs
     expect(wrapper.find('.t-detail-layout').exists()).toBe(true)
   })
 
-  it('loads provider options, personas, and recent runs in parallel', async () => {
+  it('loads provider options and recent runs in parallel', async () => {
     mount(AgentDetail)
     await flushPromises()
     expect(getOptionsMock).toHaveBeenCalledTimes(1)
-    expect(fetchPersonasMock).toHaveBeenCalledTimes(1)
     expect(fetchRunsMock).toHaveBeenCalledTimes(1)
     const runsQuery = fetchRunsMock.mock.calls[0]?.[0] as { filters: { agentId: string } }
     expect(runsQuery.filters.agentId).toBe('agent-1')
@@ -281,7 +264,7 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
   it('has the Setup/Operations sections incl. persona, knowledge, skills, memory', async () => {
     const wrapper = mount(AgentDetail)
     await flushPromises()
-    // The component exposes its `sections` config (layout-agnostic — the
+    // The component exposes its `sections` config (layout-agnostic - the
     // side/tabs/plain layouts all consume the same array). Verify the full set
     // of section keys rather than scraping the rendered nav, which differs by
     // layout (NMenu labels vs NTabPane names). Identity/Provider/Capabilities

@@ -1,7 +1,7 @@
 import { defineConfig, presetWind4, presetIcons, type Preset } from 'unocss';
 
 /**
- * Inline copy of @tnzi/ui's presetTnzi — exposes Tnzi CSS variables as
+ * Inline copy of @tnzi/ui's presetTnzi - exposes Tnzi CSS variables as
  * atomic utility classes (bg-primary, text-tnzi-base, border-tnzi, ...).
  * Mirrored here rather than imported from `@tnzi/ui/theme` because @tnzi/ui's
  * dist build does not emit a `theme` entry; wiring that up would require
@@ -39,7 +39,7 @@ function presetTnzi(): Preset {
  * UnoCSS configuration for @tnzi/ui-ai.
  *
  * Replaces the previous Tailwind CSS + shadcn color architecture. The AI
- * package now consumes the same UnoCSS ecosystem that @tnzi/ui provides —
+ * package now consumes the same UnoCSS ecosystem that @tnzi/ui provides -
  * presetWind4 for generic utilities, presetTnzi for Tnzi brand tokens, plus
  * a local theme layer that maps the legacy shadcn class names (text-foreground,
  * bg-accent, etc.) and AI-specific semantic colors onto --tnzi-* CSS variables.
@@ -63,7 +63,7 @@ export default defineConfig({
 
   theme: {
     colors: {
-      // Shadcn semantic color compat — maps legacy classes to --tnzi-* tokens.
+      // Shadcn semantic color compat - maps legacy classes to --tnzi-* tokens.
       // presetTnzi already provides `primary`, `info`, `success`, `warning`, `error`.
       border: 'var(--tnzi-border)',
       input: 'var(--tnzi-border)',
@@ -93,7 +93,7 @@ export default defineConfig({
       // Standalone `primary-foreground` (presetTnzi's primary is the token, foreground is white on-primary).
       'primary-foreground': '#ffffff',
       'secondary-foreground': 'var(--tnzi-base-text)',
-      // AI semantic colors — bind to --tnzi-ai-* tokens declared in src/styles/index.css.
+      // AI semantic colors - bind to --tnzi-ai-* tokens declared in src/styles/index.css.
       ai: {
         'user-bubble': 'var(--tnzi-ai-chat-user-bg)',
         'assistant-bubble': 'var(--tnzi-ai-chat-assistant-bg)',

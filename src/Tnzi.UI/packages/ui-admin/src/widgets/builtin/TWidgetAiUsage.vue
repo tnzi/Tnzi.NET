@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * `TWidgetAiUsage` — token / request / cost summary for AI agents.
+ * `TWidgetAiUsage` - token / request / cost summary for AI agents.
  *
  * Calls `ai-bridge.usage.summary({})` (last-N days, server defaults) and
  * surfaces the three headline metrics: total tokens, total cost (USD),
  * request count. Use alongside `TWidgetUsageDashboard` (full charts) on
  * larger workbenches.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { TCountTo } from '@tnzi/ui'
@@ -23,7 +24,7 @@ const bridge = createAiBridge({ client: useAdminClient() })
 
 useWidgetData(async () => {
   // Backend `UsageAnalyticsService.GetSummaryAsync` 400s on empty
-  // startTime/endTime strings — provide a 30-day window so the widget
+  // startTime/endTime strings - provide a 30-day window so the widget
   // shows real activity instead of falling through to zero on a
   // validation failure.
   const now = new Date()
@@ -57,7 +58,7 @@ function t(key: string, fallback: string): string {
         <span class="t-widget-ai-usage__label">{{ t('admin.widgets.aiUsage.tokens', 'Tokens') }}</span>
         <span class="t-widget-ai-usage__value">
           <TCountTo v-if="loaded" :end-value="tokens" :duration="1000" />
-          <template v-else>—</template>
+          <template v-else>{{ EMPTY_DASH }}</template>
         </span>
       </div>
     </div>
@@ -69,7 +70,7 @@ function t(key: string, fallback: string): string {
         <span class="t-widget-ai-usage__label">{{ t('admin.widgets.aiUsage.cost', 'Cost (USD)') }}</span>
         <span class="t-widget-ai-usage__value">
           <TCountTo v-if="loaded" :end-value="cost" :decimals="2" :duration="1000" />
-          <template v-else>—</template>
+          <template v-else>{{ EMPTY_DASH }}</template>
         </span>
       </div>
     </div>
@@ -81,7 +82,7 @@ function t(key: string, fallback: string): string {
         <span class="t-widget-ai-usage__label">{{ t('admin.widgets.aiUsage.requests', 'Requests') }}</span>
         <span class="t-widget-ai-usage__value">
           <TCountTo v-if="loaded" :end-value="requests" :duration="1000" />
-          <template v-else>—</template>
+          <template v-else>{{ EMPTY_DASH }}</template>
         </span>
       </div>
     </div>

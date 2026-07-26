@@ -1,7 +1,7 @@
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
-/// StorageOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
+/// StorageOptions 配置中心特性测试 - 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class StorageSettingDefinitionProviderTests
 {
@@ -33,13 +33,14 @@ public class StorageSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasSixFields()
+    public void Group_HasSevenFields()
     {
         // MaxFileSize + ImageCompressionQuality（原始）+ EnableMd5Validation / EnableFileReference /
         // AutoGenerateThumbnail / UrlPrefix（新暴露，均已接热消费者：FileStorageService/FileChunkUploadService
-        // 经 IOptionsMonitor.CurrentValue 热读，UrlPrefix 经 storage provider 可选 IOptionsMonitor 热读）。
+        // 经 IOptionsMonitor.CurrentValue 热读，UrlPrefix 经 storage provider 可选 IOptionsMonitor 热读）
+        // + AllowAnonymousRead（部署级匿名读开关，FileAccessAuthorizer 经 IOptionsMonitor.CurrentValue 热读）。
         // 缩略图宽高在嵌套 ThumbnailSizeOptions（独立 ConfigSection），不属于本组直接字段。
-        Assert.Equal(6, _group.Fields.Count);
+        Assert.Equal(7, _group.Fields.Count);
     }
 
     [Fact]
@@ -52,6 +53,7 @@ public class StorageSettingDefinitionProviderTests
         Assert.Contains(fields, f => f.Key == "Storage:EnableFileReference");
         Assert.Contains(fields, f => f.Key == "Storage:AutoGenerateThumbnail");
         Assert.Contains(fields, f => f.Key == "Storage:UrlPrefix");
+        Assert.Contains(fields, f => f.Key == "Storage:AllowAnonymousRead");
     }
 
     [Fact]

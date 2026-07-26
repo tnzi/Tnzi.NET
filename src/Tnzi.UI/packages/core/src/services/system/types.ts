@@ -3,7 +3,7 @@
  * Aligned with Tnzi.NET backend System module
  */
 
-import type { AuditedEntity, OrderedEntity } from '../../types/entities';
+import type { AuditedEntity } from '../../types/entities';
 import type { SortedPagedQueryDto } from '../../types/pagination';
 import { HealthStatus } from './metadata';
 import type { MenuBadgeType, FeatureRequirementType } from './metadata';
@@ -19,15 +19,6 @@ export type { MenuBadgeType, FeatureRequirementType };
 // response field serializes as its PascalCase member name (and input still
 // accepts both the name and the legacy integer). These enums use string member
 // values to match the wire shape exactly.
-
-/**
- * Menu type
- */
-export enum MenuType {
-  Directory = 'Directory',
-  Menu = 'Menu',
-  Button = 'Button',
-}
 
 /**
  * Setting value type
@@ -64,144 +55,6 @@ export enum TopEndpointSortBy {
   Hits = 'Hits',
   AverageResponseTime = 'AverageResponseTime',
   Errors = 'Errors',
-}
-
-// ============================================
-// Menu Types
-// ============================================
-
-/**
- * Menu info DTO
- */
-export interface MenuInfoDto extends OrderedEntity<string> {
-  parentId?: string | null;
-  /** Route name this row overrides (e.g. "identity.users"); null = custom node. */
-  menuKey?: string | null;
-  name: string;
-  displayName: string;
-  icon?: string | null;
-  path?: string | null;
-  component?: string | null;
-  redirect?: string | null;
-  isHidden: boolean;
-  isExternal: boolean;
-  permission?: string | null;
-  type: MenuType;
-  badge?: string | null;
-  badgeType?: MenuBadgeType | null;
-  query?: Record<string, string> | null;
-  meta?: MenuMetaDto | null;
-  children: MenuInfoDto[];
-  creationTime: Date | string;
-  lastModificationTime?: Date | string | null;
-}
-
-/**
- * Menu metadata
- */
-export interface MenuMetaDto {
-  title?: string;
-  icon?: string;
-  keepAlive?: boolean;
-  hideMenu?: boolean;
-  hideBreadcrumb?: boolean;
-  hideChildrenInMenu?: boolean;
-  currentActiveMenu?: string;
-  ignoreRoute?: boolean;
-  frameSrc?: string;
-  frameBlank?: boolean;
-}
-
-/**
- * Menu tree node (backend MenuTreeNode)
- */
-export interface MenuTreeNode {
-  id: string;
-  parentId?: string | null;
-  /** Route name this row overrides (e.g. "identity.users"); null = custom node. */
-  menuKey?: string | null;
-  name: string;
-  icon?: string | null;
-  path?: string | null;
-  component?: string | null;
-  sortOrder: number;
-  isHidden: boolean;
-  permission?: string | null;
-  type: MenuType;
-  children: MenuTreeNode[];
-}
-
-/**
- * Create menu request
- */
-export interface CreateMenuDto {
-  parentId?: string;
-  menuKey?: string;
-  name: string;
-  displayName?: string;
-  icon?: string;
-  path?: string;
-  component?: string;
-  redirect?: string;
-  sortOrder?: number;
-  isHidden?: boolean;
-  isExternal?: boolean;
-  permission?: string;
-  type?: MenuType;
-  badge?: string;
-  badgeType?: MenuBadgeType;
-  query?: Record<string, string>;
-  meta?: MenuMetaDto;
-}
-
-/**
- * Update menu request
- */
-export interface UpdateMenuDto {
-  parentId?: string;
-  menuKey?: string;
-  name?: string;
-  displayName?: string;
-  icon?: string;
-  path?: string;
-  component?: string;
-  redirect?: string;
-  sortOrder?: number;
-  isHidden?: boolean;
-  isExternal?: boolean;
-  permission?: string;
-  type?: MenuType;
-  badge?: string;
-  badgeType?: MenuBadgeType;
-  query?: Record<string, string>;
-  meta?: MenuMetaDto;
-}
-
-/**
- * Menu order update DTO
- */
-export interface MenuOrderDto {
-  id: string;
-  sortOrder: number;
-}
-
-/**
- * Menu seed result (backend MenuSeedResultDto). Seed upserts by menuKey:
- * inserts missing rows, skips existing ones (protects operator overrides).
- */
-export interface MenuSeedResultDto {
-  inserted: number;
-  skipped: number;
-}
-
-/**
- * Menu query parameters
- */
-export interface MenuQueryDto {
-  parentId?: string;
-  isHidden?: boolean;
-  permission?: string;
-  keyword?: string;
 }
 
 // ============================================
@@ -401,24 +254,35 @@ export interface SystemInfoDto {
 }
 
 /**
- * System health check result
+ * A single health-check entry, as written by `Tnzi.HealthChecks`
+ * (`HealthChecksModule.WriteDetailedResponseAsync`).
  */
-export interface HealthCheckResultDto {
+export interface HealthCheckEntryDto {
   name: string;
   status: HealthStatus;
-  description?: string | null;
+  /** Elapsed milliseconds for this individual check. */
   duration: number;
-  data?: Record<string, unknown>;
+  description?: string | null;
+  /** Check-specific payload; null when the check reported no data. */
+  data?: Record<string, unknown> | null;
+  /** Exception message when the check threw. */
   exception?: string | null;
 }
 
 /**
- * Overall health check response
+ * Detailed health-check payload served at the configured health path
+ * (`HealthChecks:Path`, default `/health`).
+ *
+ * NOTE: this endpoint is NOT an `ApiResult` envelope and does NOT live under
+ * the API base - it is mapped directly on the host via `MapHealthChecks`, and
+ * the HTTP status code alone carries success/failure. Fetch it directly rather
+ * than through `HttpClient`, which would try to normalize the envelope.
  */
 export interface HealthCheckResponseDto {
   status: HealthStatus;
+  /** Total elapsed milliseconds across every check. */
   totalDuration: number;
-  checks: HealthCheckResultDto[];
+  entries: HealthCheckEntryDto[];
 }
 
 // ============================================
@@ -509,6 +373,14 @@ export interface SettingsCenterGroupDto {
   description?: string | null;
   icon?: string | null;
   order: number;
+  /**
+   * Whether this is a framework built-in config group (from a `Tnzi.*` assembly).
+   * A consuming application's own `[RuntimeSetting]` group is `false`. The admin
+   * "Built-in menus" toggle hides only built-in groups; consumer config always
+   * stays. Defaults `false` (fail-open when the backend predates this field -
+   * an unknown group is treated as consumer config and never hidden).
+   */
+  isBuiltIn?: boolean;
   /**
    * Whether the current user may modify this group (holds
    * `{group}.settings.{slug}.update` or is super-admin). `false` = the user has

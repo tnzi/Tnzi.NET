@@ -1,5 +1,5 @@
 /**
- * Sandbox bridge — wraps `/admin/sandbox/status` exposed by
+ * Sandbox bridge - wraps `/admin/sandbox/status` exposed by
  * `Tnzi.AI.Sandbox.Controllers.Admin.DefaultSandboxAdminController`.
  *
  * The sandbox module currently exposes a single read-only status endpoint.

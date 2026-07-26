@@ -10,7 +10,7 @@ public class SkillMappingConfig : IMappingConfig
     public void Configure(IMappingConfigContext context)
     {
         // SkillDefinition → SkillSummaryDto
-        // Id, CreationTime, LastModificationTime are not in SkillDefinition — ignore them
+        // Id, CreationTime, LastModificationTime are not in SkillDefinition - ignore them
         context.NewConfig<SkillDefinition, SkillSummaryDto>()
             .Ignore(dest => dest.Id)
             .Ignore(dest => dest.CreationTime)

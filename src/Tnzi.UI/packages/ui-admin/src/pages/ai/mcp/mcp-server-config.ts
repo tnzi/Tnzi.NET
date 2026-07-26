@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
@@ -9,13 +10,13 @@ import type {
 } from '@tnzi/core/services/ai'
 
 /**
- * McpServers page config — EXTERNAL MCP server registrations (Tab 1 of the
+ * McpServers page config - EXTERNAL MCP server registrations (Tab 1 of the
  * rebuilt three-tab MCP page).
  *
  * Backed by entity-driven CRUD on AI_McpServerRegistration. Types come from
  * @tnzi/core/services/ai (McpServerRegistrationDto / Create… / Update…).
  *
- * SEMANTIC NOTE — these are EXTERNAL MCP servers Tnzi connects to as a
+ * SEMANTIC NOTE - these are EXTERNAL MCP servers Tnzi connects to as a
  * CLIENT. Tnzi's own self-hosted MCP server (exposing Tnzi's tools to external
  * MCP clients) is surfaced read-only in Tab 2 «This Server», driven by
  * bridge.mcp.getStatus(). The two are intentionally distinct.
@@ -53,14 +54,14 @@ export const mcpServerColumns: ColumnDef[] = [
     render: (row) =>
       formatDateTime(
         (row as { lastModificationTime?: string | null }).lastModificationTime,
-        { fallback: '—' },
+        { fallback: EMPTY_DASH },
       ),
   },
 ]
 
 /**
  * Allowed transports for runtime-registered servers. stdio is intentionally
- * absent — the backend rejects it (stdio = spawning a local process, which is
+ * absent - the backend rejects it (stdio = spawning a local process, which is
  * only allowed via deployment configuration AI:Mcp, never via the admin UI).
  */
 export const mcpTransportOptions: Array<{ label: string; value: string }> = [
@@ -96,7 +97,7 @@ export function mcpTransportIcon(transport: string | null | undefined): string {
 }
 
 /**
- * Form schema — HTTP-family transports only; the backend rejects stdio
+ * Form schema - HTTP-family transports only; the backend rejects stdio
  * registrations, so no command/arguments fields exist anymore.
  */
 export const mcpServerFormSchema: FormSchemaItem[] = [

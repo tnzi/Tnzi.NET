@@ -1,4 +1,6 @@
 using Tnzi.Imaging;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace Tnzi.Imaging.Tests;
 
@@ -107,6 +109,45 @@ public class ValidateCoderTests
     public void CreateImageBytes_EmptyCode_Throws()
     {
         Should.Throw<ArgumentException>(() => _coder.CreateImageBytes("", ValidateCodeType.Number));
+    }
+
+    [Fact]
+    public void CreateImage_CentersGlyphsVertically_NotClippedAtBottom()
+    {
+        // Regression: the glyph top used to be pinned at y = FontSize, pushing a
+        // FontSize-tall glyph past the (1.5 * FontSize) image height and clipping
+        // its bottom half. Glyphs must now be vertically centred and fully inside.
+        using var image = _coder.CreateImage("8888", ValidateCodeType.Number);
+        int h = image.Height;
+        int w = image.Width;
+        var bg = _coder.BgColor.ToPixel<Rgba32>();
+        int bgSum = bg.R + bg.G + bg.B;
+
+        long inkTotal = 0;
+        double weightedY = 0;
+        long bottomRowInk = 0;
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var p = row[x];
+                    // "ink" = noticeably darker than the light background.
+                    if (p.R + p.G + p.B < bgSum - 150)
+                    {
+                        inkTotal++;
+                        weightedY += y;
+                        if (y == h - 1) bottomRowInk++;
+                    }
+                }
+            }
+        });
+
+        inkTotal.ShouldBeGreaterThan(0);                 // the text was actually drawn
+        (weightedY / inkTotal).ShouldBeInRange(h * 0.25, h * 0.75); // centred, not sunk to the bottom
+        bottomRowInk.ShouldBe(0);                        // not clipped against the bottom edge
     }
 
     // ==================== Default Property Values Tests ====================

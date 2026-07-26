@@ -109,7 +109,7 @@ public class MailKitEmailSender : IEmailSender
             await client.ConnectAsync(_options.MailSender.SmtpServer, _options.MailSender.SmtpPort, _options.MailSender.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None, cancellationToken);
             await client.AuthenticateAsync(_options.MailSender.Username, _options.MailSender.Password, cancellationToken);
             
-            var response = await client.SendAsync(message, cancellationToken);
+            await client.SendAsync(message, cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
 
             // MailKit 不直接返回消息ID，使用时间戳和Guid生成唯一追踪ID

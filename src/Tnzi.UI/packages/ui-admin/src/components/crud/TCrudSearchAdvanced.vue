@@ -125,7 +125,7 @@ watch(
 )
 
 function renderSearchField(item: SearchFieldItem): unknown {
-  // Custom render escape hatch wins over the builtin type switch — lets a page
+  // Custom render escape hatch wins over the builtin type switch - lets a page
   // drop a daterange / cascader / bespoke control into advanced search.
   if (item.render) return item.render(searchModel)
   const value = searchModel[item.key]
@@ -199,7 +199,7 @@ defineExpose({ apply: onApplyAdvancedSearch, reset: resetAdvancedSearch })
 </script>
 
 <style scoped>
-/* No card chrome — the advanced grid is always embedded inside a parent
+/* No card chrome - the advanced grid is always embedded inside a parent
    container (TCrudSearch's collapse panel or TListShell's header card). */
 .t-crud-page__search-actions-cell {
   padding-right: 12px;

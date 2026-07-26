@@ -335,7 +335,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     public async Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
     {
         // Existence probe via GetAsync (DbSet.FindAsync). FindAsync consults the
-        // ChangeTracker first — a ChangeTracker hit returns the entity without issuing a
+        // ChangeTracker first - a ChangeTracker hit returns the entity without issuing a
         // SQL query (and therefore without applying global query filters). This matters
         // for streaming pipelines where the thread was InsertAsync'd within the SAME
         // UnitOfWork transaction and is not yet flushed to DB under
@@ -380,7 +380,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // the (ThreadId, Order) unique index.
         await _messageRepository.SaveChangesAsync(ct);
 
-        // 更新线程最后活动时间 — 同样跳过 query filter（见上方注释）
+        // 更新线程最后活动时间 - 同样跳过 query filter（见上方注释）
         await _repository.AsQueryable()
             .IgnoreQueryFilters()
             .Where(t => t.Id == threadId)

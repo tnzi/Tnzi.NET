@@ -1,5 +1,6 @@
 using Mapster;
 using MapsterMapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Tnzi.Domain.Entities;
@@ -56,6 +57,16 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<TaxRate>(services);
         AddRepo<TaxCode>(services);
         AddRepo<TaxCodeComponent>(services);
+        AddRepo<DocumentAttachment>(services);
+        AddRepo<DocumentComment>(services);
+        AddRepo<Estimate>(services);
+        AddRepo<EstimateLine>(services);
+        // 周期性单据（Tnzi.Finance.Recurring）
+        AddRepo<RecurringDocument>(services);
+        AddRepo<RecurringLine>(services);
+        AddRepo<RecurringRun>(services);
+        AddRepo<PurchaseOrder>(services);
+        AddRepo<PurchaseOrderLine>(services);
         AddRepo<Invoice>(services);
         AddRepo<InvoiceLine>(services);
         AddRepo<Bill>(services);
@@ -67,8 +78,11 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<PaymentEntry>(services);
         AddRepo<PaymentApplication>(services);
         AddRepo<Transfer>(services);
+        AddRepo<LedgerLock>(services);
         AddRepo<Reconciliation>(services);
         AddRepo<ReconciliationLine>(services);
+        AddRepo<BankRule>(services);
+        AddRepo<BankRuleCondition>(services);
         AddRepo<BankAccount>(services);
         AddRepo<PartyBankAccount>(services);
         AddRepo<BankTransaction>(services);
@@ -96,16 +110,21 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         services.AddScoped<IJournalEntryService, JournalEntryService>();
         services.AddScoped<ILedgerPostingService, LedgerPostingService>();
         services.AddScoped<IExchangeRateService, ExchangeRateService>();
+        services.AddScoped<ILedgerLockService, LedgerLockService>();
         services.AddScoped<IFiscalYearService, FiscalYearService>();
         services.AddScoped<IFinancialReportService, FinancialReportService>();
         services.AddScoped<LedgerPostingEngine>();
+        // 冲销 × 银行对账守卫（冲销漏斗与只读可冲销性查询共用）
+        services.AddScoped<ReversalGuard>();
         // 余额汇总（批次 F）
         services.AddScoped<BalanceSummaryMaintainer>();
         services.AddScoped<BalanceSummaryReader>();
+        services.AddScoped<GeneralLedgerReader>();
         services.AddScoped<IBalanceSummaryService, BalanceSummaryService>();
 
         // 主数据服务（P2a）
         services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<IPartyLedgerService, PartyLedgerService>();
         services.AddScoped<IVendorService, VendorService>();
         services.AddScoped<IItemService, ItemService>();
         services.AddScoped<ITaxService, TaxService>();
@@ -114,6 +133,18 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         // 业务单据服务（P2b）
         services.AddScoped<FinanceDocumentHelper>();
         services.AddScoped<PostingGuardRunner>();
+        services.AddScoped<ICustomerStatementService, CustomerStatementService>();
+        services.AddScoped<IDunningPolicy, DefaultDunningPolicy>();
+        services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
+        services.AddScoped<IDocumentCommentService, DocumentCommentService>();
+        services.AddScoped<OfferComposer>();
+        services.AddScoped<IEstimateService, EstimateService>();
+        // 周期性单据：排期契约可整体替换，测试里用默认公历实现
+        services.AddScoped<IRecurrenceSchedule, CalendarRecurrenceSchedule>();
+        services.AddScoped<RecurringDocumentBuilder>();
+        services.AddScoped<IRecurringDocumentService, RecurringDocumentService>();
+        services.AddScoped<IRecurringGeneratorService, RecurringGeneratorService>();
+        services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<IBillService, BillService>();
         services.AddScoped<IExpenseService, ExpenseService>();
@@ -128,23 +159,36 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         // 多币种深化：期末重估
         services.AddScoped<IRevaluationService, RevaluationService>();
 
-        // P3「输出与摄取」— 块 0 基建 + 块 1 银行流水导入
+        // P3「输出与摄取」- 块 0 基建 + 块 1 银行流水导入
         services.AddScoped<IFinanceDataProtector, FinanceDataProtector>();
+        services.AddScoped<IBankRuleService, BankRuleService>();
+        services.AddScoped<IBankRuleEvaluator, BankRuleEvaluator>();
         services.AddScoped<IBankAccountService, BankAccountService>();
         services.AddScoped<IPartyBankAccountService, PartyBankAccountService>();
         services.AddScoped<BankMatchEngine>();
+        // 银行域对会计内核两个契约的实现（把"内核 → 银行域"的反向依赖翻转过来）
+        services.AddScoped<IJournalLineHoldProvider, BankStatementHoldProvider>();
+        services.AddScoped<IGeneralLedgerSearchContributor, CheckNumberSearchContributor>();
+        services.AddScoped<BankDocumentDrafter>();
+        services.AddScoped<BankStatementIngestor>();
         services.AddScoped<IBankFeedService, BankFeedService>();
 
-        // P3「输出与摄取」— 块 2 支票打印
+        // P3「输出与摄取」- 块 2 支票打印
         services.AddScoped<CheckNumberAllocator>();
+        services.AddScoped<CheckBatchComposer>();
+        // 出票方身份解析：抬头取 System General（本测试宿主为空配置 → 抬头留空），签名取 FinanceOptions
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        services.AddScoped<CheckIssuerResolver>();
+        // 支票打印测试断言真实 PDF 输出，故显式绑定 PdfSharp 渲染器
+        // （生产默认是模板驱动的 TemplateCheckRenderer，需要模板存储，不在本基类的服务闭包内）
         services.AddScoped<ICheckDocumentRenderer, PdfSharpCheckRenderer>();
         services.AddScoped<ICheckService, CheckService>();
 
-        // P3「输出与摄取」— 块 3 EFT 输出
+        // P3「输出与摄取」- 块 3 EFT 输出
         services.AddScoped<IEftFileComposer, DefaultEftFileComposer>();
         services.AddScoped<IEftService, EftService>();
 
-        // P3「输出与摄取」— 块 4 收据采集（IReceiptExtractor 桩由测试按需注入）
+        // P3「输出与摄取」- 块 4 收据采集（IReceiptExtractor 桩由测试按需注入）
         services.AddScoped<IReceiptCaptureService, ReceiptCaptureService>();
     }
 

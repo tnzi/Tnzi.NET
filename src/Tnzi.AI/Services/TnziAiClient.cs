@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 嵌入式 AI 客户端实现 — 直接委托 IAgentRuntime + IAgentThreadService
+/// 嵌入式 AI 客户端实现 - 直接委托 IAgentRuntime + IAgentThreadService
 /// </summary>
 public class TnziAiClient : ITnziAiClient
 {

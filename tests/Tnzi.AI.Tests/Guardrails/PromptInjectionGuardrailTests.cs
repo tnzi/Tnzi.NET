@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// PromptInjectionGuardrail 单元测试 — 验证 Prompt 注入检测的各种模式
+/// PromptInjectionGuardrail 单元测试 - 验证 Prompt 注入检测的各种模式
 /// </summary>
 public class PromptInjectionGuardrailTests
 {
@@ -60,7 +60,7 @@ public class PromptInjectionGuardrailTests
     [Fact]
     public async Task PartialMatchInLegitimateText_ChecksBehavior()
     {
-        // Arrange: "ignore the noise" 不包含任何注入模式 — 应通过
+        // Arrange: "ignore the noise" 不包含任何注入模式 - 应通过
         // 注入模式是 "ignore previous instructions" / "ignore all previous" / "ignore the above"
         // "ignore the noise" 不匹配任何模式
         var guardrail = new PromptInjectionGuardrail(CreateOptions(g => g.EnablePromptInjectionDetection = true));
@@ -75,7 +75,7 @@ public class PromptInjectionGuardrailTests
     [Fact]
     public async Task MixedCaseInjectionAttempt_ReturnsRejected()
     {
-        // Arrange: 大小写混合注入 — 实现使用 ToLowerInvariant 匹配
+        // Arrange: 大小写混合注入 - 实现使用 ToLowerInvariant 匹配
         var guardrail = new PromptInjectionGuardrail(CreateOptions(g => g.EnablePromptInjectionDetection = true));
 
         // Act

@@ -49,7 +49,7 @@ public class GuardrailParallelTests
 
     #endregion
 
-    #region Parallel Mode — Input Guardrails
+    #region Parallel Mode - Input Guardrails
 
     [Fact]
     public async Task RunInputGuardrails_ParallelMode_AllGuardrailsExecute()
@@ -161,7 +161,7 @@ public class GuardrailParallelTests
 
     #endregion
 
-    #region Parallel Mode — Output Guardrails
+    #region Parallel Mode - Output Guardrails
 
     [Fact]
     public async Task RunOutputGuardrails_ParallelMode_Works()
@@ -236,7 +236,7 @@ public class GuardrailParallelTests
 
     #endregion
 
-    #region Disabled Guardrails — Parallel Mode Bypass
+    #region Disabled Guardrails - Parallel Mode Bypass
 
     [Fact]
     public async Task RunInputGuardrails_Disabled_BypassesParallelMode()
@@ -344,7 +344,7 @@ public class GuardrailParallelTests
     }
 
     /// <summary>
-    /// Tripwire 输入 Guardrail — 抛出 TripwireGuardrailException 立即中止
+    /// Tripwire 输入 Guardrail - 抛出 TripwireGuardrailException 立即中止
     /// </summary>
     private class TripwireInputGuardrail(string name, string reason) : IInputGuardrail
     {
@@ -355,7 +355,7 @@ public class GuardrailParallelTests
     }
 
     /// <summary>
-    /// Tripwire 输出 Guardrail — 抛出 TripwireGuardrailException 立即中止
+    /// Tripwire 输出 Guardrail - 抛出 TripwireGuardrailException 立即中止
     /// </summary>
     private class TripwireOutputGuardrail(string name, string reason) : IOutputGuardrail
     {

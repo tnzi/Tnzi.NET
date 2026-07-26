@@ -73,6 +73,7 @@ global using NpgsqlTypes;
 global using System.Diagnostics;
 global using System.Diagnostics.Metrics;
 global using System.Globalization;
+global using System.Runtime.CompilerServices;
 global using System.Security.Cryptography;
 global using System.Text.RegularExpressions;
 global using UglyToad.PdfPig;

@@ -101,7 +101,7 @@ describe('TAdminSidebar', () => {
     // load shows the active item without a click.
     //
     // The test mount doesn't install a router, so `useRoute()` returns
-    // null and the sidebar resolves `activeMenuKey` to "" — i.e. no
+    // null and the sidebar resolves `activeMenuKey` to "" - i.e. no
     // active item. We assert that explicitly to lock in the fallback.
     const routeStore = useAdminRouteStore()
     routeStore.setConstantRoutes(seedRoutes())
@@ -169,23 +169,23 @@ describe('built-in settings footer', () => {
 
   it('renders default settings entry when no footer slot', () => {
     const { wrapper } = mountWithRouter()
-    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(true)
+    expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(true)
   })
 
   it('navigates to settings route on click', async () => {
     const { wrapper, push } = mountWithRouter()
-    await wrapper.find('.t-admin-sidebar__settings').trigger('click')
+    await wrapper.find('.t-sidebar-settings-footer__btn').trigger('click')
     expect(push).toHaveBeenCalledWith({ name: 'settings' })
   })
 
   it('hides entry when settings route is absent', () => {
     const { wrapper } = mountWithRouter({ hasRoute: () => false })
-    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
+    expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(false)
   })
 
   it('hides entry when showSettingsEntry=false', () => {
     const { wrapper } = mountWithRouter({}, { showSettingsEntry: false })
-    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
+    expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(false)
   })
 
   it('footer slot overrides the default entry', () => {
@@ -199,6 +199,6 @@ describe('built-in settings footer', () => {
       },
     })
     expect(wrapper.find('.custom-footer').exists()).toBe(true)
-    expect(wrapper.find('.t-admin-sidebar__settings').exists()).toBe(false)
+    expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(false)
   })
 })

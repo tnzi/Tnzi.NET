@@ -29,7 +29,7 @@ public class GroupService : ApplicationService, IGroupService
         _chatAccess = chatAccess;
     }
 
-    // Sync — no await in body; using static avoids CS1998 warning.
+    // Sync - no await in body; using static avoids CS1998 warning.
     private static bool IsOwner(Conversation conv, Guid userId) => conv.OwnerId == userId;
 
     /// <summary>
@@ -50,7 +50,7 @@ public class GroupService : ApplicationService, IGroupService
     /// <summary>
     /// Drop ids that lack <c>chat.use</c>. The picker already hides them, but the
     /// member write paths take caller-supplied ids, so a disabled user could be
-    /// pulled into a group by passing its id directly — where every message to them
+    /// pulled into a group by passing its id directly - where every message to them
     /// would just be isolated. Silent (not 403), mirroring the super-admin rule.
     /// No-op when the gate is inactive (Authorization not loaded).
     /// </summary>
@@ -88,7 +88,7 @@ public class GroupService : ApplicationService, IGroupService
 
         var memberIds = (input.MemberIds ?? new List<Guid>()).Where(id => id != Guid.Empty && id != me).Distinct().ToList();
         // Never seed a business group with a super admin, nor with a user who can't
-        // use chat (no `chat.use`) — both are dropped silently even if passed directly.
+        // use chat (no `chat.use`) - both are dropped silently even if passed directly.
         memberIds = await ExcludeSuperAdminsAsync(memberIds);
         memberIds = await ExcludeDisabledAsync(memberIds);
         if (opts.MaxGroupMembers > 0 && memberIds.Count + 1 > opts.MaxGroupMembers)
@@ -132,7 +132,7 @@ public class GroupService : ApplicationService, IGroupService
 
         // Return a fully-enriched DTO consistent with ConversationService.MapConversationAsync
         // (Notice/IsSticky/IsMuted/MyRemark/MyAlias + member Status/LastSeenAt/Alias). The owner
-        // (me) is a member, so GetByIdAsync passes the membership check and reuses the mapper —
+        // (me) is a member, so GetByIdAsync passes the membership check and reuses the mapper -
         // avoids duplicating the enrichment logic.
         var enriched = await _conversationService.GetByIdAsync(conv.Id);
         return enriched.Succeeded ? Ok(enriched.Data!) : enriched;

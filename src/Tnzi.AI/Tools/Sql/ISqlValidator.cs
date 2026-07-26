@@ -11,7 +11,7 @@ public interface ISqlValidator
     /// Validates <paramref name="sql"/> against the supplied dialect.
     /// </summary>
     /// <param name="sql">The SQL text to validate.</param>
-    /// <param name="dialect">SQL dialect — selects the parsing strategy (AST for T-SQL, tokenizer for others).</param>
+    /// <param name="dialect">SQL dialect - selects the parsing strategy (AST for T-SQL, tokenizer for others).</param>
     SqlValidationResult Validate(string sql, SqlDialect dialect = SqlDialect.TSql);
 }
 

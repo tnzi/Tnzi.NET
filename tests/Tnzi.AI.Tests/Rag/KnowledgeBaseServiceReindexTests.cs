@@ -4,7 +4,7 @@ using Tnzi.AI.Rag.Dtos;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// KnowledgeBaseService.ReindexAsync 单元测试 — 验证完整重新向量化流程
+/// KnowledgeBaseService.ReindexAsync 单元测试 - 验证完整重新向量化流程
 /// </summary>
 public class KnowledgeBaseServiceReindexTests
 {

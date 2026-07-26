@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// 记忆 scope 解析器 — 统一构建用户/Agent/项目三级记忆范围。
+/// 记忆 scope 解析器 - 统一构建用户/Agent/项目三级记忆范围。
 /// </summary>
 [ExperimentalApi(Reason = "AI abstractions are evolving")]
 public static class MemoryScopeResolver
@@ -70,7 +70,7 @@ public static class MemoryScopeResolver
             ? "project"
             : projectSnapshotScopePrefix.Trim();
         var slug = CreateDirectorySlug(normalizedRoot);
-        var hash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
             normalizedRoot.ToLowerInvariant())))[..12].ToLowerInvariant();
 
         return $"{prefix}:{slug}:{hash}";
@@ -84,7 +84,7 @@ public static class MemoryScopeResolver
             directoryName = normalizedRoot.Replace(':', '_');
         }
 
-        var builder = new System.Text.StringBuilder(directoryName.Length);
+        var builder = new StringBuilder(directoryName.Length);
         foreach (var ch in directoryName.ToLowerInvariant())
         {
             if (char.IsLetterOrDigit(ch))
@@ -106,7 +106,7 @@ public static class MemoryScopeResolver
     }
 
     /// <summary>
-    /// 构建 Agent Type 级别的记忆 scope — 同一 type（如 "researcher", "coder"）
+    /// 构建 Agent Type 级别的记忆 scope - 同一 type（如 "researcher", "coder"）
     /// 的不同 agent 实例共享 type scope 记忆。
     /// </summary>
     /// <param name="agentType">Agent 类型名称（来自 SubAgentTypeDefinition.Name）</param>
@@ -119,7 +119,7 @@ public static class MemoryScopeResolver
     }
 
     /// <summary>
-    /// 构建带 local override 层的记忆 scope — 用户本地覆盖层，
+    /// 构建带 local override 层的记忆 scope - 用户本地覆盖层，
     /// 读取优先级: local override > project snapshot > system。
     /// </summary>
     /// <param name="userId">用户 ID</param>
@@ -193,7 +193,7 @@ public static class MemoryScopeResolver
         }
 
         var contentHash = Convert.ToHexString(SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(normalizedRoot.ToLowerInvariant()))).ToLowerInvariant();
+            Encoding.UTF8.GetBytes(normalizedRoot.ToLowerInvariant()))).ToLowerInvariant();
 
         // 检查 scope 名称中的 hash 部分与计算结果是否一致（标识是否为同一路径生成的 scope）
         var isOverridden = !scopeName.EndsWith(contentHash[..12], StringComparison.Ordinal);
@@ -202,7 +202,7 @@ public static class MemoryScopeResolver
     }
 
     /// <summary>
-    /// Asynchronously resolves snapshot sync metadata — delegates to <see cref="GetSnapshotMetadata"/>.
+    /// Asynchronously resolves snapshot sync metadata - delegates to <see cref="GetSnapshotMetadata"/>.
     /// </summary>
     public static Task<SnapshotSyncMetadata?> GetSnapshotMetadataAsync(
         string? scopeName, string? projectRoot, CancellationToken ct = default)

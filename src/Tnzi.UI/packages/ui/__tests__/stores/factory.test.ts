@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp } from 'vue'
 
-// Import the real module under test — other tests mock it, but this test
+// Import the real module under test - other tests mock it, but this test
 // deliberately exercises the actual implementation.
 import {
   initStoreRuntime,

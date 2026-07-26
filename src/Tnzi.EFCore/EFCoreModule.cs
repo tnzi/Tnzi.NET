@@ -20,7 +20,7 @@ public class EFCoreModule : TnziInfrastructureModule
         context.Services.Configure<DatabaseOptions>(configuration.GetSection("Database"));
 
         // 注册 EFCore 配置选项并启用启动时验证
-        context.Services.AddTnziOptions<Options.EFCoreOptions, Options.EFCoreOptionsValidator>(configuration);
+        context.Services.AddTnziOptions<EFCoreOptions, EFCoreOptionsValidator>(configuration);
 
         // 注册 Outbox 配置选项并启用启动时验证（section 路径由 [ConfigSection] 派生）
         context.Services.AddTnziOptions<OutboxOptions, OutboxOptionsValidator>(configuration);
@@ -61,12 +61,12 @@ public class EFCoreModule : TnziInfrastructureModule
         services.AddScoped<IDataFilterManager, Data.DataFilterManager>();
 
         // 注册当前租户服务
-        services.AddScoped<Tnzi.MultiTenancy.ICurrentTenant, Tnzi.MultiTenancy.CurrentTenant>();
+        services.AddScoped<ICurrentTenant, CurrentTenant>();
 
         // 如果 ICurrentUser 还没有注册，注册一个默认实现（用于 Design-Time 和早期初始化）
         // 注意：AspNetCoreModule 会注册 HttpContextCurrentUser，这里只是作为后备
         // 使用 TryAdd 确保不会覆盖 AspNetCoreModule 的注册
-        services.TryAddTransient<Tnzi.Security.Claims.ICurrentUser, DesignTimeCurrentUser>();
+        services.TryAddTransient<ICurrentUser, DesignTimeCurrentUser>();
 
         // 注册新的服务类
         services.AddSingleton<Services.IDbContextDiscoveryService, Services.DbContextDiscoveryService>();
@@ -168,22 +168,9 @@ public class EFCoreModule : TnziInfrastructureModule
                 }
             }
         }
-        else
-        {
-            // 手动模式（AutoDiscoverDbContexts = false）
-            // 如果配置了 DbContexts，仍然会从配置文件读取并注册
-            // 如果没有配置或配置无效，不会抛出异常（允许完全手动注册）
-            if (!result.Success)
-            {
-                if (options.DbContexts != null && options.DbContexts.Count > 0 && result.HasInvalidConfigurations)
-                {
-                    // 配置了但无效，记录警告但不抛出异常（允许用户在代码中手动注册）
-                    // 注意：这里无法记录日志，因为我们没有 logger
-                    // 运行时错误会在尝试使用 DbContext 时暴露
-                }
-                // 如果没有配置 DbContexts，不做任何事情，允许用户完全手动注册
-            }
-        }
+        // 手动模式（AutoDiscoverDbContexts = false）：有有效配置就注册（见下方），
+        // 配置缺失或无效时不抛异常，允许应用在代码中完全手动注册。
+        // 此阶段没有 logger 可用，无效配置的错误会在实际使用 DbContext 时暴露。
 
         // 如果从配置文件发现了有效的 DbContext，则注册它们
         // 这适用于两种模式：

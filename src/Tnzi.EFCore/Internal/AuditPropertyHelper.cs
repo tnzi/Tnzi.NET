@@ -39,11 +39,13 @@ internal static class AuditPropertyHelper
                     {
                         multiTenant.TenantId = currentTenant?.Id ?? currentUser?.TenantId;
                     }
-                    // 多租户启用时，IMultiTenant 实体的 TenantId 不应为 null（防止数据泄露）
+                    // 多租户启用时，IMultiTenant 实体的 TenantId 不应为 null（防止数据泄露）。
+                    // 刻意只写调试输出（不接 ILogger）：本方法在每次 SaveChanges 对每个跟踪实体执行，
+                    // 接日志会在批量操作中产生大量条目。注意 Debug.WriteLine 在 Release 构建中被编译移除，
+                    // 因此该提示仅在开发期可见。
                     if (multiTenancyEnabled && entry.Entity is IMultiTenant mtEntity && mtEntity.TenantId == null)
                     {
                         var entityType = entry.Entity.GetType().Name;
-                        // 使用 Trace 级别记录，避免在批量操作中产生大量日志
                         Debug.WriteLine($"[MultiTenancy] Warning: Entity '{entityType}' created without TenantId while multi-tenancy is enabled. This may cause data isolation issues.");
                     }
                     if (entry.Entity is IConcurrencyStamp addedConcurrency)

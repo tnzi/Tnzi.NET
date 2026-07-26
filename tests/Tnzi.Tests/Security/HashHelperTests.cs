@@ -301,4 +301,46 @@ public class HashHelperTests
     }
 
     #endregion
+
+    #region Password Hash Tests
+
+    [Fact]
+    public void VerifyPassword_WithMatchingPassword_ReturnsTrue()
+    {
+        var stored = HashHelper.HashPassword("correct horse battery staple");
+
+        Assert.True(HashHelper.VerifyPassword("correct horse battery staple", stored));
+        Assert.False(HashHelper.VerifyPassword("Correct horse battery staple", stored));
+    }
+
+    /// <summary>
+    /// 摘要段为空的存储串必须一律拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 派生长度取自存储的摘要，摘要为空时两侧都是零长数组，而
+    /// <c>FixedTimeEquals(空, 空)</c> 为真——任意口令都能通过。列被截断、手工改库、
+    /// 或写了一半的哈希都会落到这个形状上，而口令门恰恰用在封账日这类地方。
+    /// </remarks>
+    [Theory]
+    [InlineData("pbkdf2$sha256$210000$c2FsdA==$")]
+    [InlineData("pbkdf2$sha256$210000$$")]
+    public void VerifyPassword_WithDegenerateStoredHash_ReturnsFalse(string stored)
+    {
+        Assert.False(HashHelper.VerifyPassword("anything at all", stored));
+        Assert.False(HashHelper.VerifyPassword("", stored));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-hash")]
+    [InlineData("pbkdf2$sha512$210000$c2FsdA==$aGFzaA==")]
+    [InlineData("pbkdf2$sha256$0$c2FsdA==$aGFzaA==")]
+    [InlineData("pbkdf2$sha256$210000$!!!$aGFzaA==")]
+    public void VerifyPassword_WithUnusableStoredHash_ReturnsFalse(string? stored)
+    {
+        Assert.False(HashHelper.VerifyPassword("anything at all", stored));
+    }
+
+    #endregion
 }

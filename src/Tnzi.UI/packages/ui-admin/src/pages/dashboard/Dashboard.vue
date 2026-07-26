@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `Dashboard` — default landing page for the admin shell.
+ * `Dashboard` - default landing page for the admin shell.
  *
  * Phase J (0.2.71+): a thin consumer of the generic Workbench widget-grid
  * primitive (`TWorkbenchLayout` + bundled widgets). Three rendering paths:
@@ -26,13 +26,13 @@ const moduleAvailability = useModuleAvailability()
 
 // Two-dimensional widget deck filter:
 //
-// 1. MODULE availability (`WidgetDef.module`) — a widget whose data lives in a
+// 1. MODULE availability (`WidgetDef.module`) - a widget whose data lives in a
 //    framework module the backend never loaded is dropped for EVERYONE (no
 //    super-user bypass: the endpoints 404 for the super admin too). Uses
 //    `canActivate`, so module-tagged widgets defer while the availability
 //    probe is in flight instead of racing it with doomed fetches; once the
 //    signal settles they appear reactively (fail-open on old backends).
-// 2. PERMISSION (`WidgetDef.permission`) — the same model as the sidebar
+// 2. PERMISSION (`WidgetDef.permission`) - the same model as the sidebar
 //    filter: super users and the pre-permission-load window see everything
 //    (fail-open), otherwise a widget declaring a `permission` the user lacks
 //    is dropped and never mounts.

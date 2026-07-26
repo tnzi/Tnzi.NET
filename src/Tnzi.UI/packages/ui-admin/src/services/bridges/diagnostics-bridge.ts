@@ -1,5 +1,5 @@
 /**
- * Diagnostics bridge — delegates to `useAdminDiagnosticsApi`
+ * Diagnostics bridge - delegates to `useAdminDiagnosticsApi`
  * (from `@tnzi/core/services/diagnostics`) so admin pages get the standard
  * dependency-injection + single-mock-seam pattern other bridges use:
  *

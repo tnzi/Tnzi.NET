@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// 可编程的 Mock ChatClient Provider — 支持队列式响应预设
+/// 可编程的 Mock ChatClient Provider - 支持队列式响应预设
 /// </summary>
 public class MockChatClientProvider : IChatClientProvider
 {

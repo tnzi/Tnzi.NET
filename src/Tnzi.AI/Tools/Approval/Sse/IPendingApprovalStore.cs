@@ -10,20 +10,20 @@ public interface IPendingApprovalStore
     /// <summary>
     /// Registers a new pending approval request.
     /// </summary>
-    /// <param name="request">The request — <see cref="PendingApprovalRequest.UserId"/> MUST be non-empty.</param>
+    /// <param name="request">The request - <see cref="PendingApprovalRequest.UserId"/> MUST be non-empty.</param>
     /// <param name="ttl">Time after which the request is auto-resolved as a fail-closed timeout (default 5 minutes).</param>
     Task<Guid> RegisterAsync(PendingApprovalRequest request, TimeSpan? ttl = null, CancellationToken ct = default);
 
     /// <summary>
     /// Returns the request if it exists and the supplied user owns it (or <paramref name="currentUserId"/> is null
-    /// — admin contexts can pass null to bypass authz).
+    /// - admin contexts can pass null to bypass authz).
     /// </summary>
     Task<PendingApprovalRequest?> GetAsync(Guid id, string? currentUserId = null, CancellationToken ct = default);
 
     /// <summary>
     /// Resolves a pending request with a user decision.
     /// Returns <see cref="ResolveResult.NotAuthorized"/> when <paramref name="currentUserId"/> does not match the
-    /// request owner — never silently grants other users' approvals.
+    /// request owner - never silently grants other users' approvals.
     /// </summary>
     Task<ResolveResult> ResolveAsync(
         Guid id,
@@ -32,7 +32,7 @@ public interface IPendingApprovalStore
         CancellationToken ct = default);
 
     /// <summary>
-    /// Resolves a request without authorization checks — for trusted system callers
+    /// Resolves a request without authorization checks - for trusted system callers
     /// (HTTP disconnect cleanup, retention sweeps, shutdown). MUST NOT be exposed to
     /// unauthenticated user code; the framework only invokes this from infrastructure
     /// hooks that have already established the authority to bypass the user check.
@@ -60,7 +60,7 @@ public interface IPendingApprovalStore
 }
 
 /// <summary>
-/// Result of an attempted resolve. <see cref="bool"/> would conflate "not found" with "not authorized" —
+/// Result of an attempted resolve. <see cref="bool"/> would conflate "not found" with "not authorized" -
 /// the explicit enum lets the controller return precise error messages and metrics.
 /// </summary>
 public enum ResolveResult
@@ -80,7 +80,7 @@ public enum ResolveResult
 /// <param name="ToolName">The name of the tool being invoked.</param>
 /// <param name="Arguments">Tool arguments as a JSON-serialized string.</param>
 /// <param name="CreatedAt">When the request was registered.</param>
-/// <param name="UserId">The user who owns this approval request — MUST be non-empty.</param>
+/// <param name="UserId">The user who owns this approval request - MUST be non-empty.</param>
 public sealed record PendingApprovalRequest(
     Guid Id,
     string ToolName,

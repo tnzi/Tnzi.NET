@@ -1,5 +1,5 @@
 /**
- * useAgentExecution — Agent run state tracking
+ * useAgentExecution - Agent run state tracking
  *
  * Tracks the live execution state of an AI agent, including tool calls,
  * agent switches (Handoff), and reasoning deltas. Processes SSE events
@@ -36,7 +36,7 @@ export interface HandoffEntry {
 }
 
 export interface AgentExecutionEvent {
-  /** Event type — maps to SSE event types from the backend. */
+  /** Event type - maps to SSE event types from the backend. */
   type:
     | 'agent_switch'
     | 'tool_call_start'

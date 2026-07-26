@@ -59,7 +59,7 @@
           <section class="t-role-func-page__tree">
           <div v-if="!selectedRoleId" class="t-role-func-page__placeholder">
             <!-- Mobile hides the master rail, and the header's role switcher
-                 only renders once a role is selected — so without an entry
+                 only renders once a role is selected - so without an entry
                  point here a fresh phone visit is a dead end. Surface the
                  role picker as a CTA; desktop keeps the "pick on the left"
                  hint since its rail is visible. -->
@@ -280,6 +280,7 @@
     </NCard>
 
     <!-- Mobile role picker - bottom sheet listing the same roles as the rail. -->
+    <TOverlayTheme>
     <NDrawer v-model:show="rolePickerOpen" placement="bottom" height="60%">
       <NDrawerContent :title="t('selectRole')" closable>
         <ul class="t-role-func-page__role-list t-role-func-page__role-list--sheet">
@@ -307,9 +308,10 @@
         </ul>
       </NDrawerContent>
     </NDrawer>
+    </TOverlayTheme>
 
     <!--
-      Compare-roles overlay — three-column read-only diff, driven by the shared
+      Compare-roles overlay - three-column read-only diff, driven by the shared
       useDetail + TDetailHost renderer (modal mode) so it is deep-linkable via
       `?compare=new` and Back-closeable. Role A is the currently-selected role;
       role B is picked from the catalogue. The result comes from the backend
@@ -325,7 +327,7 @@
         <div class="t-role-func-page__compare-picker">
           <div class="t-role-func-page__compare-pair">
             <span class="t-role-func-page__compare-label">{{ t('compare.roleA') }}:</span>
-            <NTag :bordered="false">{{ selectedRole?.name ?? '—' }}</NTag>
+            <NTag :bordered="false">{{ selectedRole?.name ?? EMPTY_DASH }}</NTag>
           </div>
           <div class="t-role-func-page__compare-pair">
             <span class="t-role-func-page__compare-label">{{ t('compare.roleB') }}:</span>
@@ -386,7 +388,7 @@
     </TDetailHost>
 
     <!--
-      Clone-from-role overlay — pick a source role, call the backend clone
+      Clone-from-role overlay - pick a source role, call the backend clone
       endpoint, refresh the current role's assignment set. Deep-linkable via
       `?clone=new`. Idempotent on the backend (existing assignments are kept).
     -->
@@ -445,6 +447,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDialog } from 'naive-ui'
@@ -459,6 +462,7 @@ import TPermissionMatrix from '../../components/forms/TPermissionMatrix.vue'
 import { ZH_SURFACE_LABELS } from './surface-labels'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { TOverlayTheme } from '../../components/overlay'
 import { useDetail } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
@@ -488,7 +492,7 @@ const message = useSafeMessage()
 
 // Framework confirm dialog for the unsaved-changes role switch. Guarded so a
 // bare test mount (no <n-dialog-provider>) falls back to the native confirm
-// instead of throwing at setup — the confirmation gate is never skipped.
+// instead of throwing at setup - the confirmation gate is never skipped.
 const dialog = (() => {
   try {
     return useDialog()
@@ -710,7 +714,7 @@ async function loadAll(): Promise<void> {
     // reflects any external changes.
     await loadAssignedForRole(selectedRoleId.value)
   } else if (roles.value.length > 0) {
-    // Auto-select the first role so the matrix is populated on open — the right
+    // Auto-select the first role so the matrix is populated on open - the right
     // pane should never sit blank waiting for a click.
     await selectRole(roles.value[0]!.id)
   }
@@ -735,7 +739,7 @@ async function loadRoles(): Promise<void> {
       .map((r) => ({
         id: r.id,
         // RoleDto exposes normalizedName (uppercased system identifier) rather
-        // than a separate `code` — use that as the secondary line under the
+        // than a separate `code` - use that as the secondary line under the
         // display name; fall back to the name itself if empty.
         code: r.normalizedName ?? r.name,
         name: r.name,
@@ -791,7 +795,7 @@ async function loadAssignedForRole(roleId: string): Promise<void> {
 
 async function selectRole(roleId: string): Promise<void> {
   if (isDirty.value) {
-    // Guard against losing unsaved edits when switching roles — a framework
+    // Guard against losing unsaved edits when switching roles - a framework
     // warning dialog replaces the native confirm().
     const ok = await confirmSwitchDirty()
     if (!ok) return
@@ -865,7 +869,7 @@ const cloneSourceRoles = computed<Role[]>(() =>
 
 // Compare / Clone overlays run through the single useDetail + TDetailHost
 // renderer (modal mode). They are role-level operations (not per-record), so
-// each claims a static URL scope — `?compare=new` / `?clone=new` — which makes
+// each claims a static URL scope - `?compare=new` / `?clone=new` - which makes
 // opening deep-linkable and Back-closeable. The transient picker / result
 // state stays local to the page.
 const compareDetail = useDetail({ mode: 'modal', url: 'compare' })
@@ -878,8 +882,8 @@ const compare = reactive({
 const compareBuckets = computed(() => {
   const r = compare.result
   if (!r) return []
-  const roleAName = selectedRole.value?.name ?? '—'
-  const roleBName = roles.value.find((x) => x.id === compare.targetRoleId)?.name ?? '—'
+  const roleAName = selectedRole.value?.name ?? EMPTY_DASH
+  const roleBName = roles.value.find((x) => x.id === compare.targetRoleId)?.name ?? EMPTY_DASH
   return [
     {
       id: 'onlyIn1',
@@ -962,7 +966,7 @@ async function runClone(): Promise<void> {
   }
 }
 
-// Pre-select role from `?roleId=` query — used by Roles detail
+// Pre-select role from `?roleId=` query - used by Roles detail
 // drawer's "Open Permission Editor" deep-link. Wait for the role list to
 // load before selecting so the active highlight + tree render in one paint.
 const route = useRoute()
@@ -1337,7 +1341,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 10px 12px;
   margin-top: 8px;
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border-top: 1px solid var(--tnzi-border);
 }
 .t-role-func-page__savebar > .n-tag {
@@ -1377,7 +1381,7 @@ onMounted(async () => {
     margin-left: 0;
   }
   /* Phones scroll the whole page (the content-page fill region), so drop the
-     desktop 64vh scroll cap — a capped flex-column list otherwise crushes the
+     desktop 64vh scroll cap - a capped flex-column list otherwise crushes the
      collapsed module cards to slivers. */
   .t-role-func-page__matrix {
     max-height: none;
@@ -1390,7 +1394,7 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-/* Compare modal — three columns side by side on desktop, single column
+/* Compare modal - three columns side by side on desktop, single column
    on phones. Each column lists the functions in that bucket as compact
    tiles (name + monospaced code + optional module hint). */
 .t-role-func-page__compare-picker {

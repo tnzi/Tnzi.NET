@@ -20,7 +20,7 @@ export function typeKey(type: ConversationType): string {
       : 'system'
 }
 
-/** Advanced-search fields — align with backend `AdminConversationQueryDto`. */
+/** Advanced-search fields - align with backend `AdminConversationQueryDto`. */
 export const conversationSearchFields: FormSchemaItem[] = [
   {
     key: 'type',
@@ -62,7 +62,7 @@ const columns: ColumnDef<AdminConversationListItemDto>[] = [
 ]
 
 // Authored against the concrete DTO for render-time type safety, then widened
-// to the prop's `ColumnDef[]` (Record<string, unknown>) shape — the render
+// to the prop's `ColumnDef[]` (Record<string, unknown>) shape - the render
 // closures keep their typed row internally.
 export const conversationColumns = columns as unknown as ColumnDef[]
 

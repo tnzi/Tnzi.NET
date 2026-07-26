@@ -1,17 +1,10 @@
 /**
- * System Module API - Settings, menus, access logs, and system info
+ * System Module API - Settings, access logs, and system info
  */
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type {
-  MenuInfoDto,
-  MenuTreeNode,
-  CreateMenuDto,
-  UpdateMenuDto,
-  MenuOrderDto,
-  MenuSeedResultDto,
-  MenuQueryDto,
   SettingDto,
   CreateSettingDto,
   UpdateSettingDto,
@@ -28,73 +21,8 @@ import type {
 } from './types';
 import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
-const ADMIN_MENU_BASE = '/admin/menus';
 const ADMIN_SETTING_BASE = '/admin/settings';
 const ADMIN_ACCESS_LOG_BASE = '/admin/access-logs';
-
-/**
- * Admin Menu Management API
- */
-export function useAdminMenuApi(client: HttpClient) {
-  return {
-    /** Get all menus */
-    getList: (params?: MenuQueryDto) =>
-      client.get<MenuInfoDto[]>(ADMIN_MENU_BASE, { params }),
-
-    /** Get menu by ID */
-    getById: (id: string) =>
-      client.get<MenuInfoDto>(`${ADMIN_MENU_BASE}/${id}`),
-
-    /** Get user menu tree */
-    getUserTree: (userId: string) =>
-      client.get<MenuTreeNode[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
-
-    /** Create menu */
-    create: (data: CreateMenuDto) =>
-      client.post<MenuInfoDto>(ADMIN_MENU_BASE, data),
-
-    /** Update menu */
-    update: (id: string, data: UpdateMenuDto) =>
-      client.put<MenuInfoDto>(`${ADMIN_MENU_BASE}/${id}`, data),
-
-    /** Delete menu */
-    delete: (id: string) =>
-      client.delete<void>(`${ADMIN_MENU_BASE}/${id}`),
-
-    /** Batch delete menus */
-    batchDelete: (ids: string[]) =>
-      client.delete<void>(`${ADMIN_MENU_BASE}/batch`, { body: ids }),
-
-    /** Batch update menu orders */
-    batchUpdateOrders: (orders: MenuOrderDto[]) =>
-      client.put<void>(`${ADMIN_MENU_BASE}/batch/orders`, orders),
-
-    /** Move menu to new parent */
-    move: (id: string, newParentId?: string) =>
-      client.put<void>(`${ADMIN_MENU_BASE}/${id}/move`, undefined, {
-        params: { newParentId },
-      }),
-
-    /**
-     * Seed menus by menuKey (upsert: insert missing, skip existing). Used to
-     * mirror the front-end route-derived menu into editable Sys_Menu rows when
-     * first enabling the 'merge' menu source.
-     */
-    seed: (menus: CreateMenuDto[]) =>
-      client.post<MenuSeedResultDto>(`${ADMIN_MENU_BASE}/seed`, menus),
-  };
-}
-
-/**
- * User Menu API
- */
-export function useMenuApi(client: HttpClient) {
-  return {
-    /** Get user menu tree by user ID */
-    getUserTree: (userId: string) =>
-      client.get<MenuTreeNode[]>(`${ADMIN_MENU_BASE}/user/${userId}/tree`),
-  };
-}
 
 /**
  * Admin Setting Management API
@@ -140,7 +68,7 @@ export function useAdminSettingApi(client: HttpClient) {
 const ADMIN_SETTINGS_CENTER_BASE = '/admin/settings-center';
 
 /**
- * Admin Settings Center API — schema-driven module settings
+ * Admin Settings Center API - schema-driven module settings
  * (definitions + per-group save/reset).
  */
 export function useAdminSettingsCenterApi(client: HttpClient) {

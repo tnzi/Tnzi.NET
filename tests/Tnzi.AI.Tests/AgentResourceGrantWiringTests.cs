@@ -22,7 +22,7 @@ public class AgentResourceGrantWiringTests : IDisposable
     private readonly AgentGrantService _grantService;
     private readonly AgentService _agentService;
 
-    // resolver collaborators (mocked — we only care that grants reach the resolution)
+    // resolver collaborators (mocked - we only care that grants reach the resolution)
     private readonly Mock<IAgentFactory> _agentFactory = new();
     private readonly Mock<IToolRegistry> _toolRegistry = new();
     private readonly Mock<IPromptTemplateEngine> _templateEngine = new();
@@ -67,7 +67,7 @@ public class AgentResourceGrantWiringTests : IDisposable
 
         _agentService = new AgentService(agentRepo, versionRepo, Mock.Of<IAgentRuntime>(), _grantService, _serviceProvider);
 
-        // resolver wiring — factory returns a stub executor and captures the toolGroups argument
+        // resolver wiring - factory returns a stub executor and captures the toolGroups argument
         _versionRouter.Setup(v => v.RouteAsync(It.IsAny<Agent>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Agent a, CancellationToken _) => AgentVersionRouteResult.Passthrough(a));
         _templateEngine.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, string>>()))
@@ -294,7 +294,7 @@ public class AgentResourceGrantWiringTests : IDisposable
         var agentId = created.Data!.Id;
         _context.ChangeTracker.Clear();
 
-        // PATCH only the name — resource fields null → grants untouched.
+        // PATCH only the name - resource fields null → grants untouched.
         await _agentService.UpdateAsync(agentId, new UpdateAgentDto { Name = "patched" });
         _context.ChangeTracker.Clear();
 
@@ -369,7 +369,7 @@ public class AgentResourceGrantWiringTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — Agent + Provider + Persona + AgentVersion + 三类 grant 实体配置。
+/// 测试专用 DbContext - Agent + Provider + AgentVersion + 三类 grant 实体配置。
 /// AgentService 的版本快照需要 AgentVersion 配置；其余与 AgentGrantDbContext 一致。
 /// </summary>
 internal sealed class AgentGrantWiringDbContext : TnziDbContext<AgentGrantWiringDbContext>
@@ -385,7 +385,6 @@ internal sealed class AgentGrantWiringDbContext : TnziDbContext<AgentGrantWiring
     {
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new AgentVersionConfiguration());
         modelBuilder.ApplyConfiguration(new AgentToolGrantConfiguration());
         modelBuilder.ApplyConfiguration(new AgentSkillGrantConfiguration());

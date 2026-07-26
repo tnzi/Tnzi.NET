@@ -22,8 +22,12 @@ public class AuthTokenConfiguration : EntityTypeConfigurationBase<AuthToken, Gui
             .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
 
-        // 索引配置：同一用户的同一 Provider 和 Name 组合只能有一个有效 Token
-        builder.HasIndex(ut => new { ut.UserId, ut.LoginProvider, ut.Name })
+        // 索引配置：同一用户 + Provider + Name + 会话 组合唯一。
+        // 加入 SessionId 后，刷新令牌可按会话各存一条（多设备各自独立刷新）；
+        // 非会话绑定的令牌（SessionId=Guid.Empty，如 2FA 临时令牌）仍是每用户一行（upsert 语义不变）。
+        // 注意：AuthToken 刻意非软删（AuditedEntity），删除即物理移除，故此处无需（也不应加）
+        // IsDeleted=false 过滤器——不存在会占用唯一性的软删幽灵行。详见 AuthToken 实体注释。
+        builder.HasIndex(ut => new { ut.UserId, ut.LoginProvider, ut.Name, ut.SessionId })
             .IsUnique();
     }
 }

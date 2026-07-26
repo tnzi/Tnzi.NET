@@ -6,7 +6,7 @@ namespace Tnzi.AI.Dtos;
 /// `Source` + `IsReadOnly` provenance fields added so the admin UI's
 /// `TSourceBadge` + `TRowActions` infrastructure can render it uniformly.
 ///
-/// These rows are never editable through the admin — they're materialised
+/// These rows are never editable through the admin - they're materialised
 /// from `AGENT.md` files on disk (under <c>~/.tnzi/agents/</c> globally or
 /// the project's <c>.agents/</c> directory). Edits should happen by
 /// modifying the file on disk; the file watcher (when enabled) hot-reloads.
@@ -46,7 +46,7 @@ public class WorkspaceAgentDto
     /// <summary>Absolute file path of the AGENT.md.</summary>
     public string FilePath { get; set; } = string.Empty;
 
-    /// <summary>Where the file was found — "Global" (~/.tnzi/agents/) or "Project" (.agents/).</summary>
+    /// <summary>Where the file was found - "Global" (~/.tnzi/agents/) or "Project" (.agents/).</summary>
     public string WorkspaceScope { get; set; } = "Global";
 
     /// <summary>True when an accompanying PERSONA.md exists.</summary>
@@ -70,7 +70,7 @@ public class WorkspaceAgentDto
     /// <summary>Discriminator for the front-end `TSourceBadge`.</summary>
     public string Source { get; set; } = "Workspace";
 
-    /// <summary>Always true — workspace agents are file-backed and read-only.</summary>
+    /// <summary>Always true - workspace agents are file-backed and read-only.</summary>
     public bool IsReadOnly { get; set; } = true;
 }
 
@@ -95,7 +95,7 @@ public class WorkspacePersonaDto
     /// <summary>Absolute file path of the PERSONA.md.</summary>
     public string FilePath { get; set; } = string.Empty;
 
-    /// <summary>Where the file was found — "Global" or "Project".</summary>
+    /// <summary>Where the file was found - "Global" or "Project".</summary>
     public string WorkspaceScope { get; set; } = "Global";
 
     /// <summary>Discriminator for the front-end `TSourceBadge`.</summary>

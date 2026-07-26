@@ -30,7 +30,7 @@ function getFocusable(root: HTMLElement): HTMLElement[] {
  * fires `onEscape` when Escape is pressed, and restores focus to the previously focused
  * element when `active` becomes false.
  *
- * Consumers are responsible for wiring the returned activation state themselves — the
+ * Consumers are responsible for wiring the returned activation state themselves - the
  * composable only reacts to the `active` getter passed in.
  */
 export function useFocusTrap(

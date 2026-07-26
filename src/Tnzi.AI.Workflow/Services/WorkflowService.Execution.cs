@@ -19,7 +19,7 @@ public partial class WorkflowService
         // HITL guard: approval/interrupt-bearing nodes can only pause/resume in DAG mode
         // (checkpoint store wiring). In Sequential/Parallel mode such a node would set
         // AwaitingApproval=true and break out of the engine loop with no checkpoint to resume
-        // from — a silent hang. Fail fast instead of hanging.
+        // from - a silent hang. Fail fast instead of hanging.
         var hitlGuard = EnsureHitlNodesRunInDagMode<WorkflowExecutionResultDto>(workflowDef);
         if (hitlGuard != null) return hitlGuard;
 

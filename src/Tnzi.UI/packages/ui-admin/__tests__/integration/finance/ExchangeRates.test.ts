@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Exchange Rates page — TCrudPage where create/update both route through the
+ * Exchange Rates page - TCrudPage where create/update both route through the
  * idempotent upsert, plus a refresh-from-provider toolbar action.
  */
 vi.mock('../../../src/plugin/client', () => ({

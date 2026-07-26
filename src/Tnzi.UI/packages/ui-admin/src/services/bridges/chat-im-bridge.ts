@@ -1,5 +1,5 @@
 /**
- * Chat IM bridge — wraps `useChatImApi` (core) for the store layer.
+ * Chat IM bridge - wraps `useChatImApi` (core) for the store layer.
  *
  * Unwraps `ApiResult<T>` envelopes via `unwrapResult` from `../_mappers`
  * so callers receive plain data types. Void-returning methods (markRead,

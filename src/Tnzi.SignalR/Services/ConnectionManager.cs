@@ -71,8 +71,22 @@ public class ConnectionManager : IConnectionManager
     {
         Check.NotNullOrWhiteSpace(connectionId);
 
-        var connections = _userConnections.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>());
-        connections.TryAdd(connectionId, 0);
+        // 并发的"最后一个连接断开"清理会在集合变空时把它整条移出索引。若清理发生在
+        // GetOrAdd 之后、TryAdd 之前，新连接就被加进了一个已经脱离索引的孤立集合
+        // （用户显示离线却仍有活动连接，且后续断开无法清理）。因此加完后确认索引仍
+        // 指向本集合，不一致则重试 —— 重试必然重新登记，不会无限循环。
+        ConcurrentDictionary<string, byte> connections;
+        while (true)
+        {
+            connections = _userConnections.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>());
+            connections.TryAdd(connectionId, 0);
+
+            if (_userConnections.TryGetValue(userId, out var tracked) && ReferenceEquals(tracked, connections))
+            {
+                break;
+            }
+        }
+
         _connectionUsers.TryAdd(connectionId, userId);
 
         _logger.LogDebug(

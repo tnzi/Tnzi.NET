@@ -8,7 +8,7 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
-// Authorization bridge — supplies the module/permission/role-function set.
+// Authorization bridge - supplies the module/permission/role-function set.
 vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
     functionModules: {
@@ -42,7 +42,7 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
   }),
 }))
 
-// Identity bridge — supplies the role list rendered in the left sidebar.
+// Identity bridge - supplies the role list rendered in the left sidebar.
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
     roles: {
@@ -86,7 +86,7 @@ describe('RoleFunctions page (Tier 3: dual-pane assignment)', () => {
     await nextTick()
     await new Promise(r => setTimeout(r, 100))
     await nextTick()
-    // No "pick a role" placeholder — the first role is selected automatically.
+    // No "pick a role" placeholder - the first role is selected automatically.
     expect(wrapper.find('.t-role-func-page__placeholder').exists()).toBe(false)
     // First role in the rail is marked active and the matrix is rendered.
     const roles = wrapper.findAll('.t-role-func-page__role-item')

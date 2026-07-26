@@ -17,7 +17,7 @@ export interface ChatStreamOptions {
   body: ChatRequestDto;
   /** Additional headers (Authorization, etc.) */
   headers?: Record<string, string>;
-  /** Called for each text delta — append directly, DO NOT add newlines */
+  /** Called for each text delta - append directly, DO NOT add newlines */
   onDelta?: (text: string) => void;
   /** Called for each reasoning delta (thinking process) */
   onReasoningDelta?: (text: string) => void;
@@ -104,7 +104,7 @@ export async function streamChat(options: ChatStreamOptions): Promise<ChatStream
     }
 
     if (!response.body) {
-      const error = new Error('Response body is null — streaming not supported');
+      const error = new Error('Response body is null - streaming not supported');
       result.error = error;
       options.onError?.(error);
       return result;
@@ -114,87 +114,115 @@ export async function streamChat(options: ChatStreamOptions): Promise<ChatStream
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    /**
+     * Process one complete SSE frame. Returns true when the `[DONE]`
+     * termination signal was seen and the caller should stop reading.
+     */
+    const processFrame = (frame: string): boolean => {
+      // Each frame can have multiple lines (e.g., event: + data:)
+      // We only care about lines starting with "data: "
+      for (const line of frame.split('\n')) {
+        // Skip empty lines and comment lines (: heartbeat)
+        if (!line || line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
 
-      buffer += decoder.decode(value, { stream: true });
+        const data = line.slice(6);
 
-      // SSE frames are separated by \n\n. Split and process complete frames.
-      // Keep the last segment in buffer (it may be an incomplete frame).
-      const frames = buffer.split('\n\n');
-      buffer = frames.pop()!;
+        // [DONE] is the SSE termination signal
+        if (data === '[DONE]') return true;
 
-      for (const frame of frames) {
-        // Each frame can have multiple lines (e.g., event: + data:)
-        // We only care about lines starting with "data: "
-        for (const line of frame.split('\n')) {
-          // Skip empty lines and comment lines (: heartbeat)
-          if (!line || line.startsWith(':')) continue;
+        // Parse the JSON event
+        let event: ChatStreamEvent;
+        try {
+          event = JSON.parse(data) as ChatStreamEvent;
+        } catch {
+          // Malformed JSON - skip this event
+          continue;
+        }
 
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
+        // Track threadId from first event that has it
+        if (event.threadId && !result.threadId) {
+          result.threadId = event.threadId;
+        }
 
-            // [DONE] is the SSE termination signal
-            if (data === '[DONE]') {
-              result.completed = true;
-              return result;
-            }
+        // Dispatch callbacks based on event content
+        options.onEvent?.(event);
 
-            // Parse the JSON event
-            let event: ChatStreamEvent;
-            try {
-              event = JSON.parse(data) as ChatStreamEvent;
-            } catch {
-              // Malformed JSON — skip this event
-              continue;
-            }
+        if (event.delta) {
+          result.text += event.delta;
+          options.onDelta?.(event.delta);
+        }
 
-            // Track threadId from first event that has it
-            if (event.threadId && !result.threadId) {
-              result.threadId = event.threadId;
-            }
+        if (event.reasoningDelta) {
+          result.reasoning += event.reasoningDelta;
+          options.onReasoningDelta?.(event.reasoningDelta);
+        }
 
-            // Dispatch callbacks based on event content
-            options.onEvent?.(event);
+        if (event.isToolCall) {
+          options.onToolCall?.(event.toolCallNames ?? []);
+        }
 
-            if (event.delta) {
-              result.text += event.delta;
-              options.onDelta?.(event.delta);
-            }
+        if (event.agentName) {
+          options.onAgentSwitch?.(event.agentName);
+        }
 
-            if (event.reasoningDelta) {
-              result.reasoning += event.reasoningDelta;
-              options.onReasoningDelta?.(event.reasoningDelta);
-            }
+        if (event.isError) {
+          // Record it as well as announcing it: `result.error` is documented as
+          // "error if stream failed", and a caller that awaits the result
+          // instead of wiring onError used to see a clean, empty success.
+          result.error ??= new Error(event.errorMessage ?? 'Stream reported an error');
+          options.onError?.(event);
+        }
 
-            if (event.isToolCall) {
-              options.onToolCall?.(event.toolCallNames ?? []);
-            }
+        if (event.isDone) {
+          result.finalEvent = event;
+          result.threadId = event.threadId ?? result.threadId;
+          options.onDone?.(event);
+          // Don't return immediately - continue reading until [DONE] or stream end
+          // This allows the SSE connection to close cleanly
+        }
+      }
+      return false;
+    };
 
-            if (event.agentName) {
-              options.onAgentSwitch?.(event.agentName);
-            }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-            if (event.isError) {
-              options.onError?.(event);
-            }
+        buffer += decoder.decode(value, { stream: true });
 
-            if (event.isDone) {
-              result.finalEvent = event;
-              result.threadId = event.threadId ?? result.threadId;
-              options.onDone?.(event);
-              // Don't return immediately — continue reading until [DONE] or stream end
-              // This allows the SSE connection to close cleanly
-            }
+        // SSE frames are separated by \n\n. Split and process complete frames.
+        // Keep the last segment in buffer (it may be an incomplete frame).
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop()!;
+
+        for (const frame of frames) {
+          if (processFrame(frame)) {
+            result.completed = true;
+            return result;
           }
         }
       }
-    }
 
-    // Stream ended without [DONE] — still mark as completed if we got isDone
-    result.completed = result.finalEvent != null;
-    return result;
+      // Flush the decoder and whatever is left in the buffer: a server that
+      // closes without a trailing blank line leaves its LAST frame - typically
+      // the isDone event or [DONE] itself - parked here, and dropping it made
+      // the stream look truncated.
+      buffer += decoder.decode();
+      if (buffer.trim() && processFrame(buffer)) {
+        result.completed = true;
+        return result;
+      }
+
+      // Stream ended without [DONE] - still mark as completed if we got isDone
+      result.completed = result.finalEvent != null;
+      return result;
+    } finally {
+      // Release the body stream on every exit path. Returning early on [DONE]
+      // used to leave the reader locked and the connection un-recycled until GC.
+      reader.cancel().catch(() => {});
+    }
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     // AbortError is expected when signal is aborted

@@ -1,20 +1,15 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// Skill 安装安全验证器 — 验证 ZIP 包、frontmatter、名称、描述和路径安全性。
+/// Skill 安装安全验证器 - 验证 frontmatter 键、slug 名称与描述的安全性。
 /// </summary>
 /// <remarks>
-/// 防御向量包括：ZIP Bomb、符号链接、路径遍历、YAML 注入、名称注入。
-/// 所有验证均为静态方法，可独立使用。
+/// 防御向量：YAML 注入（未知 frontmatter 键一律拒绝）、名称注入（强制 kebab-case slug）、
+/// HTML/XML 注入（描述禁止尖括号）。所有验证均为静态方法，可独立使用。
+/// 由 <see cref="SkillMarkdownParser.Parse"/> 在解析每个 SKILL.md 时调用。
 /// </remarks>
 public static partial class SkillInstallationValidator
 {
-    /// <summary>最大解压大小 (512 MB)</summary>
-    private const long MaxUncompressedSize = 512 * 1024 * 1024;
-
-    /// <summary>最大压缩比（解压大小/压缩大小）</summary>
-    private const double MaxCompressionRatio = 100;
-
     /// <summary>Slug 最大长度</summary>
     private const int MaxSlugLength = 64;
 
@@ -44,7 +39,7 @@ public static partial class SkillInstallationValidator
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 验证 frontmatter 键安全性（YAML 注入防御 — 拒绝未知键）
+    /// 验证 frontmatter 键安全性（YAML 注入防御 - 拒绝未知键）
     /// </summary>
     public static InstallationValidationResult ValidateFrontmatter(Dictionary<string, string> frontmatter)
     {

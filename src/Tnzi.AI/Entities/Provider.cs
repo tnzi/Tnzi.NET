@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// AI Provider 实体 — 数据库驱动的提供商定义
+/// AI Provider 实体 - 数据库驱动的提供商定义
 /// </summary>
 /// <remarks>
 /// 该实体是 <see cref="Tnzi.AI.Options.ProviderOptions"/> 的数据库覆盖/补充层。
@@ -25,7 +25,7 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// Provider type — e.g. "OpenAI", "Anthropic", "Azure", "Ollama".
+    /// Provider type - e.g. "OpenAI", "Anthropic", "Azure", "Ollama".
     /// 用作 IChatClientFactory 选择 SDK 的 key
     /// </summary>
     public string ProviderType { get; set; } = string.Empty;
@@ -36,7 +36,7 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     public string? Endpoint { get; set; }
 
     /// <summary>
-    /// API key ciphertext — 由 IDataProtectionProvider 加密。
+    /// API key ciphertext - 由 IDataProtectionProvider 加密。
     /// [AuditIgnore]：虽为密文，仍不进实体级审计（审计查看者与 DataProtection
     /// key ring 宿主可能是不同信任级，密文外泄面越小越好）。
     /// </summary>
@@ -49,7 +49,7 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     public string? DefaultModel { get; set; }
 
     /// <summary>
-    /// Priority — 用于同类型多 Provider 排序
+    /// Priority - 用于同类型多 Provider 排序
     /// </summary>
     public int Priority { get; set; }
 
@@ -64,13 +64,13 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     public string? Description { get; set; }
 
     /// <summary>
-    /// 可见性作用域 — System（全局共享）或 Tenant（租户私有）。
+    /// 可见性作用域 - System（全局共享）或 Tenant（租户私有）。
     /// 实体有意不实现 IMultiTenant，可见性通过服务层联合过滤（System ∪ 当前租户）强制。
     /// </summary>
     public ResourceScope Scope { get; set; } = ResourceScope.System;
 
     /// <summary>
-    /// 所属租户 ID — Scope=Tenant 时非空；System 行为 null。
+    /// 所属租户 ID - Scope=Tenant 时非空；System 行为 null。
     /// </summary>
     public Guid? TenantId { get; set; }
 }

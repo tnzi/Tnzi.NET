@@ -3,15 +3,15 @@ import { getCurrentInstance, inject, type InjectionKey } from 'vue'
 /**
  * App-wide deep-link switch, set via `defineAdminApp({ deepLink })`.
  *
- * - `false` — kill switch: NO UI state enters the URL query anywhere in the
- *   app (built-in pages included) — neither overlay open-states
+ * - `false` - kill switch: NO UI state enters the URL query anywhere in the
+ *   app (built-in pages included) - neither overlay open-states
  *   (`?detail=` / `?roles=` / any custom key) nor active sections
  *   (`?section=`). Overrides per-page options, because the built-in pages'
  *   options are the framework's choice, not the consumer's.
- * - `{ detail?, section? }` — disable one channel only: `detail` covers every
+ * - `{ detail?, section? }` - disable one channel only: `detail` covers every
  *   overlay open-state key regardless of its name; `section` covers every
  *   section key.
- * - `true` / omitted — default: per-page options decide (CRUD overlays on by
+ * - `true` / omitted - default: per-page options decide (CRUD overlays on by
  *   default, everything else opt-in).
  */
 export type AdminDeepLinkConfig = boolean | { detail?: boolean; section?: boolean }

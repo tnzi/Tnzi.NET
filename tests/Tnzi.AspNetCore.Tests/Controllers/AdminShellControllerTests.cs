@@ -5,7 +5,7 @@ using Tnzi.Modules;
 namespace Tnzi.AspNetCore.Tests.Controllers;
 
 /// <summary>
-/// DefaultAdminShellController.GetModules 端点测试 — 验证只返回业务模块
+/// DefaultAdminShellController.GetModules 端点测试 - 验证只返回业务模块
 /// (TnziApplicationModule)、短名提取(去 Tnzi. 前缀)与 isEnabled 透传。
 /// 该端点是 admin 前端 module-availability gating 的权威信号,无类级权限码
 /// (任何已登录 admin 用户可读),所以对超管/权限豁免路径同样成立。
@@ -50,7 +50,7 @@ public class AdminShellControllerTests
         Assert.True(byName.ContainsKey("Tnzi"));
         Assert.False(byName["Tnzi"].IsEnabled);
 
-        // The non-application module is NOT reported — gating only cares about
+        // The non-application module is NOT reported - gating only cares about
         // business modules, which map to the front-end's top-level module routes.
         Assert.Equal(2, result.Data.Modules.Count);
     }
@@ -58,7 +58,7 @@ public class AdminShellControllerTests
     [Fact]
     public void GetModules_FoldsDuplicateShortNames_EnabledIfAny()
     {
-        // Two descriptors resolving to the same short name — the endpoint folds
+        // Two descriptors resolving to the same short name - the endpoint folds
         // them into one row (enabled wins).
         var modules = new List<IModuleDescriptor>
         {

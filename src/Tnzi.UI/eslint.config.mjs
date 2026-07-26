@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Phase 6.8 — Unified ESLint flat config for the @tnzi/* monorepo.
+ * Phase 6.8 - Unified ESLint flat config for the @tnzi/* monorepo.
  *
  * Covers core/ui/ui-admin/ui-ai/mobile packages. Rules are deliberately
  * conservative: error-level for unambiguous bugs, warn-level for stylistic
@@ -34,7 +34,7 @@ export default tseslint.config(
   // JavaScript base rules
   eslint.configs.recommended,
 
-  // TypeScript recommended (non-type-checked — full type-check is too slow
+  // TypeScript recommended (non-type-checked - full type-check is too slow
   // for monorepo-wide lint; typecheck runs separately via vue-tsc).
   ...tseslint.configs.recommended,
 
@@ -75,7 +75,7 @@ export default tseslint.config(
       'no-useless-assignment': 'off', // legitimate intermediate-value pattern
       'no-undef': 'off', // TypeScript handles this
 
-      // TypeScript rules — downgrade noisy ones to warn so the baseline is clean
+      // TypeScript rules - downgrade noisy ones to warn so the baseline is clean
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
@@ -101,13 +101,13 @@ export default tseslint.config(
       'vue/valid-v-for': 'warn',
       'vue/no-reserved-component-names': 'off', // test stubs legitimately use Button/Form/etc
       'vue/one-component-per-file': 'off', // playground + tests inline multiple stubs
-      // Pre-existing violations in Phase 3/5 pages — surfaced by Phase 6.8
+      // Pre-existing violations in Phase 3/5 pages - surfaced by Phase 6.8
       // baseline install. Downgraded to warn so lint is green; fixing
       // belongs to a dedicated code-quality backlog item.
       'vue/no-dupe-keys': 'warn',
       'vue/no-use-v-if-with-v-for': 'warn',
       // @tnzi/core deliberately imports from @vue/reactivity (headless,
-      // no SFC runtime) — this is the package's explicit design decision
+      // no SFC runtime) - this is the package's explicit design decision
       // documented in ui-architecture-v3.0.md.
       'vue/prefer-import-from-vue': 'off',
     },
@@ -139,7 +139,7 @@ export default tseslint.config(
   },
 
   // 0.2.72+ (B4): pages in ui-admin must never import values directly
-  // from `@tnzi/core/services/*` — they go through the matching
+  // from `@tnzi/core/services/*` - they go through the matching
   // bridge under `services/bridges/*-bridge.ts`. Type-only imports
   // are still allowed because they don't create a runtime dep edge.
   //

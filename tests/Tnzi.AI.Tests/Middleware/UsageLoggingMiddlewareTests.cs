@@ -116,7 +116,7 @@ public class UsageLoggingMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
 
-        // Assert — 无 Usage 时记录 0
+        // Assert - 无 Usage 时记录 0
         usageLogService.Verify(x => x.LogUsageAsync(
             AIOperationType.Chat,
             "Anthropic",

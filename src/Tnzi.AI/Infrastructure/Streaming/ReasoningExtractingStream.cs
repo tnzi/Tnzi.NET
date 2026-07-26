@@ -327,7 +327,7 @@ internal sealed class ReasoningExtractingStream : Stream
         {
             _cts.Cancel();
             _pipe.Writer.Complete();
-            // Do NOT block on _produceTask — ProduceAsync's finally already completes pipe and channel
+            // Do NOT block on _produceTask - ProduceAsync's finally already completes pipe and channel
             _inner.Dispose();
             _readerStream.Dispose();
             _cts.Dispose();

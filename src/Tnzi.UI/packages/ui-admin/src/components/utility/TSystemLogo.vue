@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TSystemLogo` — brand mark + (optional) caption. Used in admin sidebar,
+ * `TSystemLogo` - brand mark + (optional) caption. Used in admin sidebar,
  * mobile drawer, login page, and footer.
  *
  * Three rendering modes:
@@ -17,7 +17,7 @@ export type TSystemLogoLayout = 'full' | 'icon-only' | 'stacked'
 interface Props {
   /**
    * Iconify name. When `undefined` (default), TSystemLogo renders the
-   * built-in {@link TBrandMark} inline SVG — a 3-cube stacked motif
+   * built-in {@link TBrandMark} inline SVG - a 3-cube stacked motif
    * designed for ui-admin. Pass a string to override (e.g. consumers
    * configuring a custom brand via `defineAdminApp({ login: { brandIcon } })`).
    */

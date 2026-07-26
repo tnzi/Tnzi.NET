@@ -6,7 +6,7 @@ using OpenAI.Embeddings;
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// ChatClient 工厂 — 委托到 IChatClientProvider 创建客户端
+/// ChatClient 工厂 - 委托到 IChatClientProvider 创建客户端
 /// </summary>
 public class ChatClientFactory : IChatClientFactory
 {
@@ -138,12 +138,12 @@ public class ChatClientFactory : IChatClientFactory
     }
 
     /// <summary>
-    /// 解析并验证提供商配置 — DB 记录优先于 appsettings 配置（override/补充层语义）。
+    /// 解析并验证提供商配置 - DB 记录优先于 appsettings 配置（override/补充层语义）。
     /// </summary>
     /// <remarks>
     /// Resolution order:
     ///   1. If a Provider entity exists in DB with matching Name AND IsEnabled, use it
-    ///      (merged with matching config entry — DB fields override config fields).
+    ///      (merged with matching config entry - DB fields override config fields).
     ///   2. Otherwise fall back to appsettings.json `AI:Providers` configuration.
     /// This gives admins a way to add/override providers at runtime without restart.
     /// DB lookups are cached for <see cref="DbProviderCacheTtl"/> to avoid hot-path
@@ -202,7 +202,7 @@ public class ChatClientFactory : IChatClientFactory
                 return entry.Options;
             }
 
-            // Expired — evict and retry so the next caller re-runs the factory.
+            // Expired - evict and retry so the next caller re-runs the factory.
             _dbProviderCache.TryRemove(new KeyValuePair<string, Lazy<DbProviderCacheEntry>>(providerName, lazy));
         }
     }
@@ -240,7 +240,7 @@ public class ChatClientFactory : IChatClientFactory
                 }
                 catch (Exception ex)
                 {
-                    // Data protection key ring rotation is the common cause — re-saving
+                    // Data protection key ring rotation is the common cause - re-saving
                     // the provider re-encrypts with the current key. Fall back to config.
                     _logger.LogError(ex,
                         "Failed to decrypt ApiKey for Provider '{Name}' (id={Id}); falling back to configuration",

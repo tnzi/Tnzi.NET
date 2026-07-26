@@ -18,7 +18,7 @@ public class ReadOnlySqlExecutorTests : IDisposable
 
     public ReadOnlySqlExecutorTests()
     {
-        // Shared in-memory DB via named connection string — keep-alive conn holds it open
+        // Shared in-memory DB via named connection string - keep-alive conn holds it open
         _keepAlive = new SqliteConnection("Data Source=ExecutorTest;Mode=Memory;Cache=Shared");
         _keepAlive.Open();
         using var cmd = _keepAlive.CreateCommand();

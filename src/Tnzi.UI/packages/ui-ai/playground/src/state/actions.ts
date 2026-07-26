@@ -6,10 +6,10 @@ import { usePlaygroundStore } from './playground-store'
  * Builds the command palette action registry for the playground.
  *
  * Registered actions fall into four groups:
- *   - Scenario — jump to any of the 10 scenarios
- *   - Layout   — toggle sidebar modes
- *   - Settings — open settings modal at a given section
- *   - Theme    — toggle between light/dark
+ *   - Scenario - jump to any of the 10 scenarios
+ *   - Layout - toggle sidebar modes
+ *   - Settings - open settings modal at a given section
+ *   - Theme - toggle between light/dark
  */
 export function useCommandActions(): ComputedRef<readonly CommandAction[]> {
   const store = usePlaygroundStore()

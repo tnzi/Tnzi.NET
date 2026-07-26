@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 通用工作流中断描述 — 任何节点均可通过 CheckInterruptAsync 返回此对象暂停工作流
+/// 通用工作流中断描述 - 任何节点均可通过 CheckInterruptAsync 返回此对象暂停工作流
 /// </summary>
 /// <remarks>
 /// 灵感来源于 LangGraph 的 interrupt()/Command(resume=) 模式。

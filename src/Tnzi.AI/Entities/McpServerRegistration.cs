@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// MCP Server 注册实体 — 数据库驱动的外部 MCP Server 客户端注册条目
+/// MCP Server 注册实体 - 数据库驱动的外部 MCP Server 客户端注册条目
 /// </summary>
 /// <remarks>
 /// 该实体用于编录 Tnzi 可连接的外部 MCP Server（client-side registration），
@@ -13,7 +13,7 @@ namespace Tnzi.AI.Entities;
 /// 与 <c>AI:Mcp:Servers</c> 部署配置合并后供 MCP 客户端运行时消费（同名时 DB 条目优先）。
 ///
 /// 信任边界：注册表条目仅允许 HTTP 系 transport（sse / streamable-http / http）。
-/// stdio（本机子进程）只能通过部署配置（AI:Mcp options）声明 — 运行时录入
+/// stdio（本机子进程）只能通过部署配置（AI:Mcp options）声明 - 运行时录入
 /// 启动命令等价于远程命令执行，故注册表层面禁止。
 /// </remarks>
 public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
@@ -32,7 +32,7 @@ public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// MCP server endpoint URL — 远端 HTTP/SSE 端点（必须为绝对 http(s) URI）
+    /// MCP server endpoint URL - 远端 HTTP/SSE 端点（必须为绝对 http(s) URI）
     /// </summary>
     public string ServerUrl { get; set; } = string.Empty;
 
@@ -42,7 +42,7 @@ public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
     public string Transport { get; set; } = string.Empty;
 
     /// <summary>
-    /// Auth token / API key ciphertext — 由 IDataProtectionProvider 加密。
+    /// Auth token / API key ciphertext - 由 IDataProtectionProvider 加密。
     /// [AuditIgnore]：虽为密文，仍不进实体级审计（缩小密文外泄面）。
     /// </summary>
     [AuditIgnore]
@@ -54,7 +54,7 @@ public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
     public string? AuthType { get; set; }
 
     /// <summary>
-    /// Priority — 多个 MCP Server 暴露同名工具时的排序权重
+    /// Priority - 多个 MCP Server 暴露同名工具时的排序权重
     /// </summary>
     public int Priority { get; set; }
 
@@ -69,7 +69,7 @@ public class McpServerRegistration : MultiTenantAuditedEntity<Guid>
     public string? Description { get; set; }
 
     /// <summary>
-    /// Tags — JSON-serialized string array, used for categorization / filtering
+    /// Tags - JSON-serialized string array, used for categorization / filtering
     /// </summary>
     public string? Tags { get; set; }
 }

@@ -18,7 +18,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useTheme, type ThemeContext, type ThemeColors } from '@tnzi/ui'
+import { useTheme, THint, type ThemeContext, type ThemeColors } from '@tnzi/ui'
 import {
   useAdminThemeStore,
   type AdminLayoutMode,
@@ -34,6 +34,12 @@ import {
   type AdminThemeSnapshot,
 } from '../../theme/admin-config'
 import { applyThemeSnapshot, buildThemeSnapshot } from '../../theme/snapshot'
+import {
+  BUILTIN_APPEARANCE_PRESETS,
+  applyAppearancePreset,
+  type AdminThemePreset,
+} from '../../theme/appearancePresets'
+import { isDarkSurface } from '../../theme/surfaceTone'
 import type { GlobalThemeController } from '../../headless/useGlobalTheme'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 
@@ -48,6 +54,9 @@ interface Props {
   show: boolean
   themeContext?: ThemeContext
   presets?: ThemePreset[]
+  /** Full appearance presets shown in the Preset tab (colors + mode + layout
+   *  + backgrounds). Defaults to the built-in curated looks. */
+  appearancePresets?: AdminThemePreset[]
   translate?: (key: string) => string
   /**
    * Drawer variant.
@@ -70,6 +79,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   themeContext: undefined,
   presets: undefined,
+  appearancePresets: undefined,
   translate: undefined,
   mode: 'full',
   globalTheme: null,
@@ -78,26 +88,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:show': [value: boolean]
 }>()
-
-const PRESET_COLORS: string[] = [
-  '#2080F0', // Naive blue (default)
-  '#1677FF', // Ant blue
-  '#7C3AED', // Violet
-  '#06B6D4', // Cyan
-  '#10B981', // Emerald
-  '#22C55E', // Green
-  '#EAB308', // Yellow
-  '#F59E0B', // Amber
-  '#F97316', // Orange
-  '#EF4444', // Red
-  '#EC4899', // Pink
-  '#6B7280', // Gray
-]
-
-const DEFAULT_PRESETS: ThemePreset[] = PRESET_COLORS.map((c) => ({
-  name: c,
-  primary: c,
-}))
 
 const COLOR_ROLES: Array<{ role: keyof ThemeColors; key: string }> = [
   { role: 'primary', key: 'admin.theme.appearance.primaryColor' },
@@ -168,7 +158,7 @@ const drawerWidth = computed<number | string>(() => {
 
 // NOTE: the layout/preset grids are 3-col by default, dropping to 2-col on
 // phones. This is done via a scoped `@media` query rather than a v-bind CSS
-// var — NDrawer teleports its content to <body>, and Vue's `v-bind()` writes
+// var - NDrawer teleports its content to <body>, and Vue's `v-bind()` writes
 // the var onto the component root (which stays in place), so teleported nodes
 // can't resolve it and `repeat(var(--x), 1fr)` collapses to a single column.
 // Scoped data-v selectors DO follow teleported nodes, so a media query works.
@@ -185,16 +175,104 @@ const headerVisibilityForcedOn = computed(() =>
   HEADER_HOSTED_MODES.includes(themeStore.layoutMode),
 )
 
-// I.7.10 — 5-tab → 4-tab consolidation: watermark settings merged into the
+// I.7.10 - 5-tab → 4-tab consolidation: watermark settings merged into the
 // `general` tab (matches soybean's drawer layout).
 const activeTab = ref<'appearance' | 'layout' | 'general' | 'preset'>('appearance')
 const importBuffer = ref('')
 
-const resolvedPresets = computed<ThemePreset[]>(() => props.presets ?? DEFAULT_PRESETS)
-/** Hex string list fed to NColorPicker `:swatches`. Soybean's theme-color.vue
- *  uses the same pattern — putting preset colours INSIDE the picker is more
- *  discoverable than a separate row of buttons. */
-const presetSwatches = computed<string[]>(() => resolvedPresets.value.map((p) => p.primary))
+/** Full appearance presets (whole looks) - rendered in the admin's Preset tab
+ *  AND in the non-privileged users' preset drawer (they pick a whole look). */
+const resolvedAppearancePresets = computed<AdminThemePreset[]>(
+  () => props.appearancePresets ?? BUILTIN_APPEARANCE_PRESETS,
+)
+
+/** Resolved swatches a look's mini-preview renders - the real sider / header /
+ *  canvas colors the look would produce (accounting for mode + invert). */
+interface LookPreview {
+  sider: string
+  header: string
+  canvas: string
+  menu: string
+  menuActive: string
+  /** Header-hosted menu contrast (horizontal / hybrid put the menu in the header). */
+  headerMenu: string
+  headerMenuActive: string
+  card: string
+}
+function lookPreview(preset: AdminThemePreset): LookPreview {
+  const dark = preset.mode === 'dark'
+  const sider = preset.siderBg ?? (preset.invertSider ? '#0b1220' : dark ? '#1f1f1f' : '#ffffff')
+  const header = preset.headerBg ?? (dark ? '#1f1f1f' : '#ffffff')
+  const canvas = preset.contentBg ?? (dark ? '#121212' : '#f2f4f7')
+  const siderDark = isDarkSurface(sider)
+  const headerDark = isDarkSurface(header)
+  return {
+    sider,
+    header,
+    canvas,
+    menu: siderDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.22)',
+    menuActive: siderDark ? 'rgba(255,255,255,0.92)' : preset.primary,
+    headerMenu: headerDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.22)',
+    headerMenuActive: headerDark ? 'rgba(255,255,255,0.92)' : preset.primary,
+    // A look that paints its cards shows the REAL card color (dark elevated
+    // cards / warm paper cards are part of the look's identity); otherwise a
+    // subtle overlay hints "a card sits on the canvas here".
+    card: preset.cardBg ?? (dark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.05)'),
+  }
+}
+/** The current layout the preset previews should mock (presets are appearance-
+ *  only, so every card mirrors the live layout, not a per-preset one). */
+const previewLayout = computed<AdminLayoutMode>(() => themeStore.layoutMode)
+/** [{ preset, pv }] - `pv` is memoized per preset (static from the preset). */
+const appearanceLooks = computed(() =>
+  resolvedAppearancePresets.value.map((preset) => ({ preset, pv: lookPreview(preset) })),
+)
+
+function appearancePresetLabel(preset: AdminThemePreset): string {
+  return preset.label ?? translate(`admin.theme.preset.looks.${preset.name}`)
+}
+function applyLook(preset: AdminThemePreset): void {
+  // The "default" look IS the factory default - mirror the drawer's
+  // "Reset to default" (clear every surface + accent + radius + mode) so the
+  // two are guaranteed identical. Applying its literal fields instead would
+  // drift from the app-configured default primary / radius.
+  if (preset.name === 'default') {
+    ctx.reset()
+    themeStore.reset()
+    return
+  }
+  applyAppearancePreset(preset, themeStore, ctx)
+}
+/** Whether a look matches the live state - accent + mode + inverted shorthand +
+ *  all five surface overrides. Case-insensitive; treats null / '' alike. */
+function isLookActive(preset: AdminThemePreset): boolean {
+  const live = ctx.settings.value
+  const hexEq = (a?: string | null, b?: string | null): boolean =>
+    (a ?? '').toLowerCase() === (b ?? '').toLowerCase()
+  // "default" is the factory look - active when nothing is customised (no
+  // surface overrides + built-in sider + default radius). The primary is left
+  // out because the factory primary is app-configured, not the preset literal.
+  if (preset.name === 'default') {
+    return (
+      themeStore.siderBg == null && themeStore.headerBg == null && themeStore.tabBg == null &&
+      themeStore.footerBg == null && themeStore.contentBg == null &&
+      themeStore.pageHeaderBg == null && themeStore.cardBg == null &&
+      themeStore.invertSider === true && themeStore.themeRadius === 4
+    )
+  }
+  return (
+    hexEq(live.colors.primary, preset.primary) &&
+    (preset.mode == null || live.mode === preset.mode) &&
+    (preset.invertSider == null || themeStore.invertSider === preset.invertSider) &&
+    hexEq(themeStore.siderBg, preset.siderBg) &&
+    hexEq(themeStore.headerBg, preset.headerBg) &&
+    hexEq(themeStore.tabBg, preset.tabBg) &&
+    hexEq(themeStore.footerBg, preset.footerBg) &&
+    hexEq(themeStore.contentBg, preset.contentBg) &&
+    hexEq(themeStore.pageHeaderBg, preset.pageHeaderBg) &&
+    hexEq(themeStore.cardBg, preset.cardBg)
+  )
+}
 
 function translate(key: string): string {
   return props.translate ? props.translate(key) : key
@@ -205,7 +283,7 @@ function translate(key: string): string {
 function onSetColor(role: keyof ThemeColors, value: string | null): void {
   if (!value) return
   ctx.setColor(role, value)
-  // Phase F — when infoFollowPrimary is on, primary changes propagate to
+  // Phase F - when infoFollowPrimary is on, primary changes propagate to
   // info too (mirrors soybean's `theme-color.vue:67-69` "Info follows
   // primary" checkbox behaviour).
   if (role === 'primary' && themeStore.infoFollowPrimary) {
@@ -213,9 +291,67 @@ function onSetColor(role: keyof ThemeColors, value: string | null): void {
   }
 }
 
-function applyPresetColor(color: string): void {
-  ctx.setColor('primary', color)
+/** "Info color follows primary" toggle - turning it ON must sync info to the
+ *  CURRENT primary immediately (otherwise the switch looks inert until the next
+ *  primary change). Turning it off leaves the current info color in place. */
+function onToggleInfoFollowPrimary(v: boolean): void {
+  themeStore.setInfoFollowPrimary(v)
+  if (v) {
+    const primary = ctx.settings.value.colors.primary
+    if (primary) ctx.setColor('info' as keyof ThemeColors, primary)
+  }
 }
+
+/** Per-surface rows in the Appearance → Backgrounds group. Each row pairs a
+ *  background color picker with a text color picker: the text auto-adapts to
+ *  the chosen background, and the text picker (empty = Auto) freely overrides. */
+interface BgSurface {
+  key: string
+  labelKey: string
+  get: () => string | null
+  set: (v: string | null) => void
+  reset: () => void
+  fg: () => string | null
+  setFg: (v: string | null) => void
+  /** Layout-awareness - hide a surface row when the layout has no such element
+   *  (e.g. the sidebar in `horizontal`, the tab/footer bars when turned off). */
+  show?: () => boolean
+}
+const BG_SURFACES: BgSurface[] = [
+  { key: 'sider', labelKey: 'admin.theme.appearance.siderBg', get: () => themeStore.siderBg, set: (v) => themeStore.setSiderBg(v), reset: () => themeStore.resetSiderBg(), fg: () => themeStore.siderTextColor, setFg: (v) => themeStore.setSiderTextColor(v), show: () => themeStore.layoutMode !== 'horizontal' },
+  { key: 'header', labelKey: 'admin.theme.appearance.headerBg', get: () => themeStore.headerBg, set: (v) => themeStore.setHeaderBg(v), reset: () => themeStore.resetHeaderBg(), fg: () => themeStore.headerTextColor, setFg: (v) => themeStore.setHeaderTextColor(v) },
+  { key: 'tab', labelKey: 'admin.theme.appearance.tabBg', get: () => themeStore.tabBg, set: (v) => themeStore.setTabBg(v), reset: () => themeStore.resetTabBg(), fg: () => themeStore.tabTextColor, setFg: (v) => themeStore.setTabTextColor(v), show: () => themeStore.tabVisible },
+  { key: 'footer', labelKey: 'admin.theme.appearance.footerBg', get: () => themeStore.footerBg, set: (v) => themeStore.setFooterBg(v), reset: () => themeStore.resetFooterBg(), fg: () => themeStore.footerTextColor, setFg: (v) => themeStore.setFooterTextColor(v), show: () => themeStore.footerVisible },
+  { key: 'content', labelKey: 'admin.theme.appearance.contentBg', get: () => themeStore.contentBg, set: (v) => themeStore.setContentBg(v), reset: () => themeStore.resetContentBg(), fg: () => themeStore.contentTextColor, setFg: (v) => themeStore.setContentTextColor(v) },
+  { key: 'pageHeader', labelKey: 'admin.theme.appearance.pageHeaderBg', get: () => themeStore.pageHeaderBg, set: (v) => themeStore.setPageHeaderBg(v), reset: () => themeStore.resetPageHeaderBg(), fg: () => themeStore.pageHeaderTextColor, setFg: (v) => themeStore.setPageHeaderTextColor(v) },
+  { key: 'card', labelKey: 'admin.theme.appearance.cardBg', get: () => themeStore.cardBg, set: (v) => themeStore.setCardBg(v), reset: () => themeStore.resetCardBg(), fg: () => themeStore.cardTextColor, setFg: (v) => themeStore.setCardTextColor(v) },
+]
+/** Backgrounds rows filtered to the ones the current layout actually renders. */
+const visibleBgSurfaces = computed<BgSurface[]>(() => BG_SURFACES.filter((s) => (s.show ? s.show() : true)))
+// Preset swatch palettes shown at the bottom of the color pickers (same
+// affordance across all pickers). Naive lays swatches out 8-per-row, so each
+// palette is 24 colors = exactly 3 full rows.
+
+/** Accent (theme color) swatches - a vibrant hue spectrum (Tailwind 500/600). */
+const ACCENT_SWATCHES: string[] = [
+  '#EF4444', '#F97316', '#F59E0B', '#EAB308', '#84CC16', '#22C55E', '#10B981', '#14B8A6',
+  '#06B6D4', '#0EA5E9', '#3B82F6', '#2080F0', '#6366F1', '#8B5CF6', '#A855F7', '#D946EF',
+  '#EC4899', '#F43F5E', '#E11D48', '#DB2777', '#4F46E5', '#0891B2', '#0F766E', '#64748B',
+]
+/** Surface background swatches - light neutrals / tinted canvases, dark
+ *  neutrals (slate / zinc / stone), then saturated brand darks (read white). */
+const SURFACE_SWATCHES: string[] = [
+  '#FFFFFF', '#F8FAFC', '#F1F5F9', '#E5E7EB', '#FFF7ED', '#FEFCE8', '#F0FDF4', '#F0F9FF',
+  '#0F172A', '#1E293B', '#334155', '#18181B', '#27272A', '#171717', '#1C1917', '#292524',
+  '#0C4A6E', '#172554', '#1E1B4B', '#3B0764', '#4A044E', '#064E3B', '#14532D', '#4C0519',
+]
+/** Text (foreground) swatches - lights for dark surfaces, darks for light
+ *  surfaces, then a row of accent text colors. */
+const TEXT_SWATCHES: string[] = [
+  '#FFFFFF', '#F8FAFC', '#E5E7EB', '#CBD5E1', '#94A3B8', '#E0E7FF', '#FEF3C7', '#D1FAE5',
+  '#000000', '#0F172A', '#1E293B', '#334155', '#475569', '#64748B', '#111827', '#1F2937',
+  '#2563EB', '#7C3AED', '#DB2777', '#DC2626', '#EA580C', '#059669', '#0891B2', '#CA8A04',
+]
 
 function setMode(mode: 'light' | 'dark' | 'auto'): void {
   ctx.setMode(mode)
@@ -229,20 +365,37 @@ function selectLayoutMode(mode: AdminLayoutMode): void {
 
 // ─── User preset picker (presets mode) ────────────────────────────────────
 
-/** Record the user's own color-scheme choice (persisted locally). */
-function selectUserPreset(color: string): void {
-  themeStore.setUserPresetColor(color)
-}
-
 /**
- * Clear the personal choice and fall back to the global/default primary.
- * With a loaded global snapshot the exact colors come back; without one
- * (standalone / older backend) the current color simply stays until the
- * next reload.
+ * Non-privileged user picks a WHOLE appearance look (a coordinated preset -
+ * accent + mode + surfaces + radius, not just a color). The choice is a personal
+ * override: it applies live, persists locally (`userPresetLook`), and re-applies
+ * on top of the admin's global theme at boot (see overlayUserPreset).
+ *
+ * The "default" look means "follow the admin's global theme" - clear the
+ * personal override and re-apply the remote snapshot (or factory reset when no
+ * global theme exists).
  */
-function clearUserPreset(): void {
+function selectUserLook(preset: AdminThemePreset): void {
+  if (preset.name === 'default') {
+    themeStore.setUserPresetLook(null)
+    themeStore.setUserPresetColor(null)
+    if (props.globalTheme?.remote.value) {
+      props.globalTheme.applyRemote()
+    } else {
+      ctx.reset()
+      themeStore.reset()
+    }
+    return
+  }
+  applyAppearancePreset(preset, themeStore, ctx)
+  themeStore.setUserPresetLook(preset.name)
+  // A full look supersedes the legacy color-only overlay.
   themeStore.setUserPresetColor(null)
-  props.globalTheme?.applyRemote()
+}
+/** Which look the non-privileged user currently has (default = following global). */
+function isUserLookActive(preset: AdminThemePreset): boolean {
+  if (preset.name === 'default') return !themeStore.userPresetLook
+  return themeStore.userPresetLook === preset.name
 }
 
 // ─── Preset handlers ──────────────────────────────────────────────────────
@@ -372,64 +525,115 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
       closable
       :native-scrollbar="false"
     >
+      <!-- Presets mode: the "follows the admin's global theme" explainer rides
+           as a compact THint beside the title instead of a standing paragraph
+           (same convention as the User Center section hints). -->
+      <template v-if="mode === 'presets'" #header>
+        <span class="t-theme-drawer__title-row">
+          {{ translate('admin.theme.userPreset.title') }}
+          <THint type="help" :content="translate('admin.theme.userPreset.hint')" />
+        </span>
+      </template>
       <!-- ── Presets-only variant: what non-privileged users get. Their only
            theme knob is the color scheme (plus the header's dark-mode cycle
            button when the admin keeps it visible); everything else follows
            the global theme managed by the super admin. ── -->
       <template v-if="mode === 'presets'">
-        <p class="t-theme-drawer__hint">
-          {{ translate('admin.theme.userPreset.hint') }}
-        </p>
+        <!-- Whole coordinated looks - a non-privileged user picks a complete
+             appearance (accent + mode + surfaces + radius), not just a color.
+             The mini preview mirrors the current layout, same as the admin's
+             Preset tab. -->
         <div class="t-theme-drawer__preset-grid">
           <button
+            v-for="look in appearanceLooks"
+            :key="look.preset.name"
             type="button"
-            class="t-theme-drawer__preset-card"
-            :class="{ 't-theme-drawer__preset-card--active': !themeStore.userPresetColor }"
-            :aria-label="translate('admin.theme.userPreset.default')"
-            @click="clearUserPreset()"
-          >
-            <span class="t-theme-drawer__preset-color t-theme-drawer__preset-color--default">
-              <Icon
-                v-if="!themeStore.userPresetColor"
-                icon="mdi:check"
-                width="22"
-                height="22"
-              />
-            </span>
-            <span class="t-theme-drawer__preset-hex">{{ translate('admin.theme.userPreset.default') }}</span>
-          </button>
-          <button
-            v-for="preset in resolvedPresets"
-            :key="preset.name"
-            type="button"
-            class="t-theme-drawer__preset-card"
-            :class="{ 't-theme-drawer__preset-card--active': themeStore.userPresetColor === preset.primary }"
-            :aria-label="`Apply ${preset.primary}`"
-            @click="selectUserPreset(preset.primary)"
+            class="t-theme-drawer__look-card"
+            :class="{ 't-theme-drawer__look-card--active': isUserLookActive(look.preset) }"
+            :aria-label="appearancePresetLabel(look.preset)"
+            @click="selectUserLook(look.preset)"
           >
             <span
-              class="t-theme-drawer__preset-color"
-              :style="{ backgroundColor: preset.primary }"
+              class="t-theme-drawer__look-preview"
+              :class="`t-theme-drawer__look-preview--${previewLayout}`"
+              :style="{ background: look.pv.canvas }"
             >
+              <span
+                v-if="previewLayout === 'vertical'"
+                class="t-theme-drawer__look-sider"
+                :style="{ background: look.pv.sider }"
+              >
+                <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '78%' }" />
+                <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '62%' }" />
+                <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '70%' }" />
+              </span>
+              <template v-else-if="previewLayout === 'vertical-mix'">
+                <span class="t-theme-drawer__look-rail" :style="{ background: look.pv.sider }">
+                  <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menuActive }" />
+                  <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menu }" />
+                  <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menu }" />
+                </span>
+                <span class="t-theme-drawer__look-submenu" :style="{ background: look.pv.sider }">
+                  <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '80%' }" />
+                  <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '64%' }" />
+                </span>
+              </template>
+              <span class="t-theme-drawer__look-body">
+                <span class="t-theme-drawer__look-header" :style="{ background: look.pv.header }">
+                  <template v-if="previewLayout === 'horizontal' || previewLayout === 'top-hybrid-header-first'">
+                    <span class="t-theme-drawer__look-hmenu t-theme-drawer__look-hmenu--active" :style="{ background: look.pv.headerMenuActive }" />
+                    <span class="t-theme-drawer__look-hmenu" :style="{ background: look.pv.headerMenu }" />
+                    <span class="t-theme-drawer__look-hmenu" :style="{ background: look.pv.headerMenu }" />
+                  </template>
+                </span>
+                <span class="t-theme-drawer__look-lower">
+                  <span
+                    v-if="previewLayout === 'top-hybrid-header-first'"
+                    class="t-theme-drawer__look-subsider"
+                    :style="{ background: look.pv.sider }"
+                  >
+                    <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '72%' }" />
+                    <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '56%' }" />
+                  </span>
+                  <span class="t-theme-drawer__look-canvas" :style="{ background: look.pv.canvas }">
+                    <span class="t-theme-drawer__look-accent" :style="{ background: look.preset.primary }" />
+                    <span class="t-theme-drawer__look-card-hint" :style="{ background: look.pv.card }" />
+                  </span>
+                </span>
+              </span>
               <Icon
-                v-if="themeStore.userPresetColor === preset.primary"
-                icon="mdi:check"
-                width="22"
-                height="22"
+                v-if="isUserLookActive(look.preset)"
+                class="t-theme-drawer__look-check"
+                icon="mdi:check-circle"
+                width="18"
+                height="18"
               />
             </span>
-            <span class="t-theme-drawer__preset-hex">{{ preset.primary.toUpperCase() }}</span>
+            <span class="t-theme-drawer__look-name">{{ appearancePresetLabel(look.preset) }}</span>
           </button>
         </div>
+
+        <!-- Personal accessibility filters - a PER-USER preference every user
+             controls for themselves (persisted locally, never part of the super
+             admin's global theme). Non-privileged users get them here too. -->
+        <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.accessibility') }}</NDivider>
+        <section class="t-theme-drawer__row">
+          <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.grayscale') }}</span>
+          <NSwitch :value="themeStore.grayscale" @update:value="themeStore.setGrayscale" />
+        </section>
+        <section class="t-theme-drawer__row">
+          <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.colourWeakness') }}</span>
+          <NSwitch :value="themeStore.colourWeakness" @update:value="themeStore.setColourWeakness" />
+        </section>
       </template>
 
       <NTabs v-else v-model:value="activeTab" type="segment" justify-content="space-evenly">
-        <!-- ── Tab 1: Appearance — 3 NDivider groups (Scheme/Color/Radius) ── -->
+        <!-- ── Tab 1: Appearance - 3 NDivider groups (Scheme/Color/Radius) ── -->
         <NTabPane
           name="appearance"
           :tab="translate('admin.theme.tabs.appearance')"
         >
-          <!-- Group 1: Theme scheme — icon-only segmented tabs, horizontally
+          <!-- Group 1: Theme scheme - icon-only segmented tabs, horizontally
                centered. Mirrors soybean's theme-schema.vue (NTabs type=segment
                + SvgIcon per tab, w-214px center via `.i-flex-center`). -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.mode') }}</NDivider>
@@ -452,13 +656,24 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               </NTab>
             </NTabs>
           </section>
+          <!-- "Inverted sider" is the built-in dark-sider shorthand - it only
+               applies in light mode + a vertical-family layout, AND only when no
+               custom Sidebar background is set (a custom siderBg WINS over it, so
+               showing the toggle then would be inert). Hidden otherwise so it's
+               never a dead switch. -->
           <section
-            v-if="!ctx.isDark.value && themeStore.layoutMode.startsWith('vertical')"
+            v-if="!ctx.isDark.value && themeStore.layoutMode.startsWith('vertical') && !themeStore.siderBg"
             class="t-theme-drawer__row"
           >
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.invertSider') }}</span>
+            <span class="t-theme-drawer__row-label t-theme-drawer__row-label--hint">
+              {{ translate('admin.theme.layout.invertSider') }}
+              <THint type="info" :content="translate('admin.theme.layout.invertSiderHint')" />
+            </span>
             <NSwitch :value="themeStore.invertSider" @update:value="themeStore.toggleInvertSider" />
           </section>
+          <!-- Accessibility filters - a PERSONAL per-user preference (persisted
+               locally, NOT saved into the global theme). Shown to every user. -->
+          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.accessibility') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.grayscale') }}</span>
             <NSwitch :value="themeStore.grayscale" @update:value="themeStore.setGrayscale" />
@@ -474,10 +689,6 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                removes the duplicate "swatches block above + picker below"
                feel of the previous design. -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.themeColor') }}</NDivider>
-          <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.recommendColorOn') }}</span>
-            <NSwitch :value="themeStore.recommendColor" @update:value="themeStore.setRecommendColor" />
-          </section>
           <div class="t-theme-drawer__color-grid">
             <label
               v-for="role in COLOR_ROLES"
@@ -489,7 +700,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :value="ctx.settings.value.colors[role.role]"
                 :modes="['hex']"
                 :show-alpha="false"
-                :swatches="presetSwatches"
+                :swatches="ACCENT_SWATCHES"
                 size="small"
                 class="t-theme-drawer__color-picker"
                 @update:value="(v: string | null) => onSetColor(role.role, v)"
@@ -498,10 +709,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </div>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.infoFollowPrimary') }}</span>
-            <NSwitch :value="themeStore.infoFollowPrimary" @update:value="themeStore.setInfoFollowPrimary" />
+            <NSwitch :value="themeStore.infoFollowPrimary" @update:value="onToggleInfoFollowPrimary" />
           </section>
 
-          <!-- Group 3: Radius (number input — soybean parity) -->
+          <!-- Group 3: Radius (number input - soybean parity) -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.themeRadius') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.borderRadius') }}</span>
@@ -516,21 +727,32 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
 
-          <!-- Group 4: Background colors — 4 NColorPicker rows with per-row
-               reset button. Null value = default token fallback (picker shows
-               transparent / empty). -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.backgrounds') }}</NDivider>
+          <!-- Group 4: Per-surface backgrounds. Each surface adapts its
+               foreground to the chosen color (dark color → light text), so any
+               color stays readable. Null value = default token fallback. -->
+          <NDivider class="t-theme-drawer__divider">
+            <span class="t-theme-drawer__divider-title">
+              {{ translate('admin.theme.appearance.backgrounds') }}
+              <THint type="info" :content="translate('admin.theme.appearance.backgroundsHint')" />
+            </span>
+          </NDivider>
           <div class="t-theme-drawer__color-grid">
-            <label class="t-theme-drawer__color-row">
-              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.siderBg') }}</span>
-              <div class="t-theme-drawer__bg-control">
+            <div
+              v-for="s in visibleBgSurfaces"
+              :key="s.key"
+              class="t-theme-drawer__bg-surface"
+            >
+              <span class="t-theme-drawer__color-label">{{ translate(s.labelKey) }}</span>
+              <!-- Front: background color. Pass `null` (not `undefined`) when
+                   cleared so the picker stays controlled and repaints empty. -->
+              <div class="t-theme-drawer__bg-cell">
                 <NColorPicker
-                  :value="themeStore.siderBg ?? undefined"
+                  :value="s.get()"
                   :modes="['hex']"
                   :show-alpha="false"
+                  :swatches="SURFACE_SWATCHES"
                   size="small"
-                  class="t-theme-drawer__color-picker"
-                  @update:value="(v: string | null) => themeStore.setSiderBg(v)"
+                  @update:value="(v: string | null) => s.set(v)"
                 />
                 <NTooltip>
                   <template #trigger>
@@ -538,26 +760,31 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                       quaternary
                       size="tiny"
                       class="t-theme-drawer__bg-reset"
-                      :disabled="themeStore.siderBg === null"
-                      @click="themeStore.resetSiderBg()"
+                      :disabled="s.get() === null"
+                      @click="s.reset()"
                     >
-                      <Icon icon="mdi:restore" width="14" height="14" />
+                      <Icon icon="mdi:restore" width="13" height="13" />
                     </NButton>
                   </template>
                   {{ translate('admin.theme.appearance.resetBg') }}
                 </NTooltip>
               </div>
-            </label>
-            <label class="t-theme-drawer__color-row">
-              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.headerBg') }}</span>
-              <div class="t-theme-drawer__bg-control">
+              <!-- Back: text color. Empty picker = Auto (derives from the bg,
+                   or from the picked text color's own luminance). Always shown. -->
+              <div class="t-theme-drawer__bg-cell">
+                <NTooltip>
+                  <template #trigger>
+                    <Icon icon="mdi:format-color-text" class="t-theme-drawer__bg-text-icon" width="15" height="15" />
+                  </template>
+                  {{ translate('admin.theme.appearance.textColor') }}
+                </NTooltip>
                 <NColorPicker
-                  :value="themeStore.headerBg ?? undefined"
+                  :value="s.fg()"
                   :modes="['hex']"
                   :show-alpha="false"
+                  :swatches="TEXT_SWATCHES"
                   size="small"
-                  class="t-theme-drawer__color-picker"
-                  @update:value="(v: string | null) => themeStore.setHeaderBg(v)"
+                  @update:value="(v: string | null) => s.setFg(v)"
                 />
                 <NTooltip>
                   <template #trigger>
@@ -565,74 +792,20 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                       quaternary
                       size="tiny"
                       class="t-theme-drawer__bg-reset"
-                      :disabled="themeStore.headerBg === null"
-                      @click="themeStore.resetHeaderBg()"
+                      :disabled="s.fg() === null"
+                      @click="s.setFg(null)"
                     >
-                      <Icon icon="mdi:restore" width="14" height="14" />
+                      <Icon icon="mdi:restore" width="13" height="13" />
                     </NButton>
                   </template>
-                  {{ translate('admin.theme.appearance.resetBg') }}
+                  {{ translate('admin.theme.appearance.textAuto') }}
                 </NTooltip>
               </div>
-            </label>
-            <label class="t-theme-drawer__color-row">
-              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.contentBg') }}</span>
-              <div class="t-theme-drawer__bg-control">
-                <NColorPicker
-                  :value="themeStore.contentBg ?? undefined"
-                  :modes="['hex']"
-                  :show-alpha="false"
-                  size="small"
-                  class="t-theme-drawer__color-picker"
-                  @update:value="(v: string | null) => themeStore.setContentBg(v)"
-                />
-                <NTooltip>
-                  <template #trigger>
-                    <NButton
-                      quaternary
-                      size="tiny"
-                      class="t-theme-drawer__bg-reset"
-                      :disabled="themeStore.contentBg === null"
-                      @click="themeStore.resetContentBg()"
-                    >
-                      <Icon icon="mdi:restore" width="14" height="14" />
-                    </NButton>
-                  </template>
-                  {{ translate('admin.theme.appearance.resetBg') }}
-                </NTooltip>
-              </div>
-            </label>
-            <label class="t-theme-drawer__color-row">
-              <span class="t-theme-drawer__color-label">{{ translate('admin.theme.appearance.containerBg') }}</span>
-              <div class="t-theme-drawer__bg-control">
-                <NColorPicker
-                  :value="themeStore.containerBg ?? undefined"
-                  :modes="['hex']"
-                  :show-alpha="false"
-                  size="small"
-                  class="t-theme-drawer__color-picker"
-                  @update:value="(v: string | null) => themeStore.setContainerBg(v)"
-                />
-                <NTooltip>
-                  <template #trigger>
-                    <NButton
-                      quaternary
-                      size="tiny"
-                      class="t-theme-drawer__bg-reset"
-                      :disabled="themeStore.containerBg === null"
-                      @click="themeStore.resetContainerBg()"
-                    >
-                      <Icon icon="mdi:restore" width="14" height="14" />
-                    </NButton>
-                  </template>
-                  {{ translate('admin.theme.appearance.resetBg') }}
-                </NTooltip>
-              </div>
-            </label>
+            </div>
           </div>
         </NTabPane>
 
-        <!-- ── Tab 2: Layout — soybean parity (Mode/Sider/Header/Tab/Footer/Content) ── -->
+        <!-- ── Tab 2: Layout - soybean parity (Mode/Sider/Header/Tab/Footer/Content) ── -->
         <NTabPane
           name="layout"
           :tab="translate('admin.theme.tabs.layout')"
@@ -652,7 +825,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             </div>
           </section>
 
-          <!-- Group 2: Sider — hide entirely in horizontal mode (no sider exists) -->
+          <!-- Group 2: Sider - hide entirely in horizontal mode (no sider exists) -->
           <template v-if="themeStore.layoutMode !== 'horizontal'">
             <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.sider') }}</NDivider>
             <section v-if="themeStore.layoutMode === 'vertical'" class="t-theme-drawer__row">
@@ -736,7 +909,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             </section>
           </template>
 
-          <!-- Group 3: Header — "show header" toggle removed; in non-vertical
+          <!-- Group 3: Header - "show header" toggle removed; in non-vertical
                modes the header hosts the menu (hiding strands the user) and
                in vertical modes there's no reason to hide it. Footer/tab
                keep their visibility switches because they truly are
@@ -763,7 +936,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NSwitch :value="themeStore.breadcrumbShowIcon" @update:value="themeStore.setBreadcrumbShowIcon" />
           </section>
 
-          <!-- Group 4: Tab — sub-rows gated on `tabVisible` so disabled
+          <!-- Group 4: Tab - sub-rows gated on `tabVisible` so disabled
                knobs don't crowd the panel when the bar itself is off. -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.tab') }}</NDivider>
           <section class="t-theme-drawer__row">
@@ -873,12 +1046,12 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
         </NTabPane>
 
-        <!-- ── Tab 3: General — 2 NDivider groups (Global/Watermark) ── -->
+        <!-- ── Tab 3: General - 2 NDivider groups (Global/Watermark) ── -->
         <NTabPane
           name="general"
           :tab="translate('admin.theme.tabs.general')"
         >
-          <!-- Group 1: Global — header chrome visibility toggles. -->
+          <!-- Group 1: Global - header chrome visibility toggles. -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.global') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.multilingualVisible') }}</span>
@@ -926,7 +1099,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
 
-          <!-- Group 2: Watermark — sub-rows gated on `enabled` rather
+          <!-- Group 2: Watermark - sub-rows gated on `enabled` rather
                than disabled, so a turned-off watermark hides its
                configuration knobs entirely. -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.tabs.watermark') }}</NDivider>
@@ -989,39 +1162,91 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </template>
         </NTabPane>
 
-        <!-- ── Tab 4: Preset — palette cards + export/import ── -->
+        <!-- ── Tab 4: Preset - full appearance looks + export/import ── -->
         <NTabPane
           name="preset"
           :tab="translate('admin.theme.tabs.preset')"
         >
-          <!-- Palette cards: 3-col grid, each card carries a sizeable colour
-               swatch, hex code, and a check overlay on the active palette.
-               Hover lifts the card; active gets a primary-tinted border.
-               Replaces the previous tiny coloured-button row, which had no
-               typographic anchor and felt arbitrary. -->
+          <!-- Appearance looks: each card applies a COMPLETE look - accent
+               color + light/dark mode + layout + corner radius + tab style +
+               the per-surface background colors - not just a primary swatch.
+               The mini preview shows the sider/header/accent the look sets. -->
           <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.preset.palette') }}</NDivider>
           <div class="t-theme-drawer__preset-grid">
             <button
-              v-for="preset in resolvedPresets"
-              :key="preset.name"
+              v-for="look in appearanceLooks"
+              :key="look.preset.name"
               type="button"
-              class="t-theme-drawer__preset-card"
-              :class="{ 't-theme-drawer__preset-card--active': ctx.settings.value.colors.primary === preset.primary }"
-              :aria-label="`Apply ${preset.primary}`"
-              @click="applyPresetColor(preset.primary)"
+              class="t-theme-drawer__look-card"
+              :class="{ 't-theme-drawer__look-card--active': isLookActive(look.preset) }"
+              :aria-label="appearancePresetLabel(look.preset)"
+              @click="applyLook(look.preset)"
             >
+              <!-- Mini admin mockup - mirrors the CURRENT layout mode: full
+                   sider (vertical), narrow rail + submenu (vertical-mix), top
+                   menu only (horizontal), or top menu + sub-sider (hybrid).
+                   Colors are the REAL surfaces the look produces (mode/invert). -->
               <span
-                class="t-theme-drawer__preset-color"
-                :style="{ backgroundColor: preset.primary }"
+                class="t-theme-drawer__look-preview"
+                :class="`t-theme-drawer__look-preview--${previewLayout}`"
+                :style="{ background: look.pv.canvas }"
               >
+                <!-- Vertical: full sider -->
+                <span
+                  v-if="previewLayout === 'vertical'"
+                  class="t-theme-drawer__look-sider"
+                  :style="{ background: look.pv.sider }"
+                >
+                  <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '78%' }" />
+                  <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '62%' }" />
+                  <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '70%' }" />
+                </span>
+                <!-- Vertical-mix: narrow icon rail + submenu column -->
+                <template v-else-if="previewLayout === 'vertical-mix'">
+                  <span class="t-theme-drawer__look-rail" :style="{ background: look.pv.sider }">
+                    <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menuActive }" />
+                    <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menu }" />
+                    <span class="t-theme-drawer__look-dot" :style="{ background: look.pv.menu }" />
+                  </span>
+                  <span class="t-theme-drawer__look-submenu" :style="{ background: look.pv.sider }">
+                    <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '80%' }" />
+                    <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '64%' }" />
+                  </span>
+                </template>
+                <span class="t-theme-drawer__look-body">
+                  <!-- Header strip - hosts the menu in horizontal / hybrid. -->
+                  <span class="t-theme-drawer__look-header" :style="{ background: look.pv.header }">
+                    <template v-if="previewLayout === 'horizontal' || previewLayout === 'top-hybrid-header-first'">
+                      <span class="t-theme-drawer__look-hmenu t-theme-drawer__look-hmenu--active" :style="{ background: look.pv.headerMenuActive }" />
+                      <span class="t-theme-drawer__look-hmenu" :style="{ background: look.pv.headerMenu }" />
+                      <span class="t-theme-drawer__look-hmenu" :style="{ background: look.pv.headerMenu }" />
+                    </template>
+                  </span>
+                  <span class="t-theme-drawer__look-lower">
+                    <!-- Hybrid: a sub-sider sits left of the canvas, below the header. -->
+                    <span
+                      v-if="previewLayout === 'top-hybrid-header-first'"
+                      class="t-theme-drawer__look-subsider"
+                      :style="{ background: look.pv.sider }"
+                    >
+                      <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menuActive, width: '72%' }" />
+                      <span class="t-theme-drawer__look-line" :style="{ background: look.pv.menu, width: '56%' }" />
+                    </span>
+                    <span class="t-theme-drawer__look-canvas" :style="{ background: look.pv.canvas }">
+                      <span class="t-theme-drawer__look-accent" :style="{ background: look.preset.primary }" />
+                      <span class="t-theme-drawer__look-card-hint" :style="{ background: look.pv.card }" />
+                    </span>
+                  </span>
+                </span>
                 <Icon
-                  v-if="ctx.settings.value.colors.primary === preset.primary"
-                  icon="mdi:check"
-                  width="22"
-                  height="22"
+                  v-if="isLookActive(look.preset)"
+                  class="t-theme-drawer__look-check"
+                  icon="mdi:check-circle"
+                  width="18"
+                  height="18"
                 />
               </span>
-              <span class="t-theme-drawer__preset-hex">{{ preset.primary.toUpperCase() }}</span>
+              <span class="t-theme-drawer__look-name">{{ appearancePresetLabel(look.preset) }}</span>
             </button>
           </div>
 
@@ -1070,7 +1295,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 
           <!-- Phase D: reset/copy lifted into the drawer footer (visible
                from every tab). The Preset tab now only carries the
-               export/import surfaces — destructive + clipboard ops live
+               export/import surfaces - destructive + clipboard ops live
                in the persistent footer below. -->
         </NTabPane>
       </NTabs>
@@ -1112,7 +1337,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 </template>
 
 <style scoped>
-/* Group divider (with title) — naive's default `margin: 24px 0` leaves a
+/* Group divider (with title) - naive's default `margin: 24px 0` leaves a
    cavernous gap above and below each section title inside the drawer.
    Tighten it: a little breathing room above the title to separate groups,
    a small gap below before the group's controls. The scoped attribute
@@ -1122,13 +1347,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   margin-top: 14px;
   margin-bottom: 8px;
 }
-/* The first divider in a tab pane sits right under the tabs — no extra
+/* The first divider in a tab pane sits right under the tabs - no extra
    top gap needed. */
 .t-theme-drawer__divider:first-child {
   margin-top: 2px;
 }
 
-/* Group container — no border-bottom now that NDivider provides the
+/* Group container - no border-bottom now that NDivider provides the
    visual separator between groups. The old `border-bottom: 1px solid`
    stacked with the next NDivider and rendered as two parallel lines. */
 .t-theme-drawer__section {
@@ -1147,12 +1372,20 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   font-size: 12px;
   color: var(--tnzi-base-text-muted, #6b7280);
 }
+/* Presets-mode drawer title + its THint explainer (replaces the old standing
+   hint paragraph). Rendered inside naive's drawer header slot, so typography
+   is inherited from the drawer title styles. */
+.t-theme-drawer__title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .t-theme-drawer__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   /* Phase D: drop the dashed border between rows. soybean uses a flat
-     12px-gap stack — the dashes added visual noise and made the panel
+     12px-gap stack - the dashes added visual noise and made the panel
      look busier than it is. */
   padding: 8px 0;
   gap: 16px;
@@ -1200,36 +1433,68 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 .t-theme-drawer__color-picker {
   width: 140px;
 }
-/* Background color row — picker + reset icon button side by side */
-.t-theme-drawer__bg-control {
+/* Per-surface row - label + [bg picker | text picker] on one line. The text
+   cell (with its own picker + reset) only mounts once a background is set. */
+.t-theme-drawer__bg-surface {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--tnzi-border, #e5e7eb);
+}
+.t-theme-drawer__bg-surface:last-child {
+  border-bottom: none;
+}
+.t-theme-drawer__bg-surface .t-theme-drawer__color-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.t-theme-drawer__bg-cell {
+  display: flex;
+  align-items: center;
+  gap: 3px;
   flex-shrink: 0;
 }
-.t-theme-drawer__bg-control .t-theme-drawer__color-picker {
-  width: 120px;
+/* Size the picker via :deep on the rendered root - naive's NColorPicker does
+   not forward the `class` / scoped data-v onto its root, so a plain
+   `.t-theme-drawer__bg-picker { width }` rule never matches (the picker then
+   collapses to ~2px in the flex row). */
+.t-theme-drawer__bg-cell :deep(.n-color-picker) {
+  width: 76px;
+}
+.t-theme-drawer__bg-text-icon {
+  color: var(--tnzi-base-text-muted, #6b7280);
+  flex-shrink: 0;
 }
 .t-theme-drawer__bg-reset {
-  padding: 0 2px;
-  height: 22px;
-  width: 22px;
+  padding: 0;
+  height: 20px;
+  width: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+/* Divider title with an inline hint icon - gap keeps the ⓘ off the text. */
+.t-theme-drawer__divider-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .t-theme-drawer__row-actions {
   display: flex;
   gap: 8px;
 }
-/* Theme scheme tabs (light/dark/auto) — center the segmented control. */
+/* Theme scheme tabs (light/dark/auto) - center the segmented control. */
 .t-theme-drawer__mode-tabs {
   display: flex;
   justify-content: center;
 }
 /* 2026-06-27: with 4 layout modes (2 buggy ones removed earlier), the cards
-   fit a single row — `repeat(4, 1fr)` + a tight 8px gap. Cards flex to fill
+   fit a single row - `repeat(4, 1fr)` + a tight 8px gap. Cards flex to fill
    their cell (capped at the original 96px canvas) via TLayoutModeCard. */
 .t-theme-drawer__layout-grid {
   display: grid;
@@ -1237,7 +1502,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   column-gap: 8px;
   row-gap: 12px;
 }
-/* Phase D: .t-theme-drawer__reset deleted — reset moved to the persistent
+/* Phase D: .t-theme-drawer__reset deleted - reset moved to the persistent
    footer slot using NButton, no custom button styling needed. */
 
 /* Palette cards in the Preset tab.
@@ -1263,6 +1528,166 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   .t-theme-drawer__preset-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* Inline hint icon next to a row / divider label. */
+.t-theme-drawer__row-label--hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Appearance "look" cards - a mini admin mockup (sider + menu lines + header
+   strip + canvas with accent + content-card) above the look name. Applying a
+   card sets the whole appearance. */
+.t-theme-drawer__look-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px;
+  background: var(--tnzi-container-bg, #fff);
+  border: 1px solid var(--tnzi-border, #e5e7eb);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.t-theme-drawer__look-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+}
+.t-theme-drawer__look-card--active {
+  border-color: var(--tnzi-primary, #646cff);
+  box-shadow: 0 0 0 2px rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.2);
+}
+.t-theme-drawer__look-preview {
+  position: relative;
+  display: flex;
+  height: 52px;
+  border-radius: var(--tnzi-admin-radius-sm, 4px);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+}
+.t-theme-drawer__look-sider {
+  width: 32%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 5px;
+}
+.t-theme-drawer__look-line {
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.t-theme-drawer__look-header {
+  height: 30%;
+  border-bottom: 1px solid rgb(0 0 0 / 0.06);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+}
+/* Horizontal / hybrid: the header IS the primary nav band → a touch taller. */
+.t-theme-drawer__look-preview--horizontal .t-theme-drawer__look-header,
+.t-theme-drawer__look-preview--top-hybrid-header-first .t-theme-drawer__look-header {
+  height: 34%;
+}
+.t-theme-drawer__look-hmenu {
+  height: 3px;
+  width: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-hmenu--active {
+  width: 14px;
+}
+/* Lower area - a row so the hybrid sub-sider can sit beside the canvas. */
+.t-theme-drawer__look-lower {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+}
+.t-theme-drawer__look-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+}
+/* Vertical-mix: narrow icon rail + a submenu column. */
+.t-theme-drawer__look-rail {
+  width: 16%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-submenu {
+  width: 22%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 4px;
+  flex-shrink: 0;
+}
+/* Hybrid: sub-sider below the header, left of the canvas. */
+.t-theme-drawer__look-subsider {
+  width: 26%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 4px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-accent {
+  height: 5px;
+  width: 42%;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.t-theme-drawer__look-card-hint {
+  flex: 1 1 auto;
+  border-radius: 3px;
+  min-height: 8px;
+}
+.t-theme-drawer__look-check {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  color: var(--tnzi-primary, #646cff);
+  background: #fff;
+  border-radius: 50%;
+}
+.t-theme-drawer__look-name {
+  font-size: 11px;
+  text-align: center;
+  color: var(--tnzi-base-text, #374151);
+  text-transform: capitalize;
 }
 .t-theme-drawer__preset-card {
   display: flex;

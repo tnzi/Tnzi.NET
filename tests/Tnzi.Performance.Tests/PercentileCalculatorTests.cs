@@ -90,9 +90,9 @@ public class PercentileCalculatorTests
         var now = DateTime.UtcNow;
         var records = new[]
         {
-            CreateMetrics(500, now.AddMinutes(-10)), // Old — outside window
-            CreateMetrics(100, now.AddMinutes(-2)),  // Recent — inside window
-            CreateMetrics(200, now.AddMinutes(-1)),  // Recent — inside window
+            CreateMetrics(500, now.AddMinutes(-10)), // Old - outside window
+            CreateMetrics(100, now.AddMinutes(-2)),  // Recent - inside window
+            CreateMetrics(200, now.AddMinutes(-1)),  // Recent - inside window
         };
 
         var result = PercentileCalculator.Calculate(records, TimeSpan.FromMinutes(5));

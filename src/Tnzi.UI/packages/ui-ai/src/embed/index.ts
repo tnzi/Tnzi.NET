@@ -9,4 +9,8 @@ export { default as TFloatingChat } from './TFloatingChat.vue';
 export { default as TSidebarChat } from './TSidebarChat.vue';
 export { default as TInlineChat } from './TInlineChat.vue';
 export { createTnziChat } from './createTnziChat';
-export type { TnziChatOptions, TnziChatInstance } from './createTnziChat';
+export type {
+  TnziChatOptions,
+  TnziChatInstance,
+  TnziChatTransportApi,
+} from './createTnziChat';

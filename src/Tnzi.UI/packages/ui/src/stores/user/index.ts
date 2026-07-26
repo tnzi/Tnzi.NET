@@ -1,7 +1,7 @@
 /**
  * @tnzi/ui/stores/user
  *
- * User preferences and profile store — thin Pinia wrapper delegating to core
+ * User preferences and profile store - thin Pinia wrapper delegating to core
  * UserStateManager. All business logic (HTTP fetch, persistence, preferences)
  * lives in UserStateManager; this store only proxies reactive state.
  */

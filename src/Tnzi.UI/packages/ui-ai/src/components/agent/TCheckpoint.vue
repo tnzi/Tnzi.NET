@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TCheckpoint — Workflow checkpoint marker
+ * TCheckpoint - Workflow checkpoint marker
  */
 
 import { NButton, NTooltip, NDivider } from 'naive-ui';

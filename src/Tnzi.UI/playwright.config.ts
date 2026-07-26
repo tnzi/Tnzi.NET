@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * Phase 6.3 — Playwright config for @tnzi/* UI packages E2E tests.
+ * Phase 6.3 - Playwright config for @tnzi/* UI packages E2E tests.
  *
  * Runs against the @tnzi/ui playground dev server (Vite), auto-starting it
  * via Playwright's webServer option. Chromium-only for Phase 6 baseline;

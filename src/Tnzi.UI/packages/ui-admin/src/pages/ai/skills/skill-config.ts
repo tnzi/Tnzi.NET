@@ -2,16 +2,16 @@ import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 
 /**
- * Skills page config (sibling of Skills.vue) — production-grade card page.
+ * Skills page config (sibling of Skills.vue) - production-grade card page.
  *
  * Shapes derive from @tnzi/core/services/ai:
- *   SkillSummaryDto  — paged list rows (id/slug/scope/name/description/whenToUse/
+ *   SkillSummaryDto - paged list rows (id/slug/scope/name/description/whenToUse/
  *                      tags/priority/version/author/enabled/source/isReadOnly/filePath)
- *   SkillDetailDto   — adds `content` (the full SKILL.md body, lazy-loaded by slug)
- *   CreateSkillDto / UpdateSkillDto — write payloads
+ *   SkillDetailDto - adds `content` (the full SKILL.md body, lazy-loaded by slug)
+ *   CreateSkillDto / UpdateSkillDto - write payloads
  *
  * The page renders as a TCardPage grid; the card + drawer own presentation, so
- * `skillColumns` is no longer wired into a table — it is kept only for the
+ * `skillColumns` is no longer wired into a table - it is kept only for the
  * column-setting localStorage contract that useCrudPage initialises. The card
  * surfaces icon + name + scope/enabled/source badges + tags + description, and
  * the detail drawer lazy-loads the full content via bridge.skills.getBySlug.
@@ -25,7 +25,7 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  * back to `slug:${slug}` for those rows, and edit/delete are disabled for them.
  */
 
-/** Card-page column defs — kept for the useColumnSettings localStorage contract only. */
+/** Card-page column defs - kept for the useColumnSettings localStorage contract only. */
 export const skillColumns: ColumnDef[] = [
   { key: 'name', title: 'columns.name', width: 180 },
   { key: 'slug', title: 'columns.slug', width: 160 },
@@ -35,7 +35,7 @@ export const skillColumns: ColumnDef[] = [
   { key: 'source', title: 'columns.source', width: 110 },
 ]
 
-/** SkillScope { System=0, Tenant=1, User=2 } — create/edit select options. */
+/** SkillScope { System=0, Tenant=1, User=2 } - create/edit select options. */
 export const skillScopeOptions: Array<{ label: string; value: string }> = [
   { label: 'System', value: 'System' },
   { label: 'Tenant', value: 'Tenant' },
@@ -67,7 +67,7 @@ export function scopeBadgeType(scope: unknown): 'warning' | 'info' | 'success' {
   return 'success'
 }
 
-/** Create/edit form schema — TFormSchemaRenderer. `content` IS the SKILL.md body. */
+/** Create/edit form schema - TFormSchemaRenderer. `content` IS the SKILL.md body. */
 export const skillFormSchema: FormSchemaItem[] = [
   { key: 'slug', labelKey: 'form.slug', label: 'Slug', type: 'text', required: true },
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },

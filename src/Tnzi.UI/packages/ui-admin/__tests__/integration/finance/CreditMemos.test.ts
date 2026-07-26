@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Credit memos page — read-only list + #detail drawer + useDetail line editor.
+ * Credit memos page - read-only list + #detail drawer + useDetail line editor.
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),

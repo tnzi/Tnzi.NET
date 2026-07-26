@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Graph;
 
 /// <summary>
-/// 基于 LLM 的知识图谱实体关系提取器 — 使用 IAiUtility 调用 LLM 从文本中提取实体和关系
+/// 基于 LLM 的知识图谱实体关系提取器 - 使用 IAiUtility 调用 LLM 从文本中提取实体和关系
 /// </summary>
 public class LlmGraphExtractor : IGraphExtractor
 {
@@ -99,8 +99,21 @@ public class LlmGraphExtractor : IGraphExtractor
         // 持久化节点
         await _nodeRepository.InsertManyAsync(nodes, cancellationToken);
 
-        // 建立 name → node ID 映射，用于解析边的外键
-        var nodeIdMap = nodes.ToDictionary(n => n.Name, n => n.Id, StringComparer.OrdinalIgnoreCase);
+        // 主键由框架在 SaveChanges 时生成：存在环境事务（UnitOfWork）时 InsertMany 是延迟提交，
+        // 此刻 Id 仍为 Guid.Empty，边的外键会全部指向空 GUID（提交时外键违反）。显式 flush 让 Id 落定。
+        if (nodes.Exists(n => n.Id == Guid.Empty))
+        {
+            await _nodeRepository.SaveChangesAsync(cancellationToken);
+        }
+
+        // 建立 name → node ID 映射，用于解析边的外键。
+        // LLM 完全可能对同一实体重复输出（含仅大小写不同），故用 TryAdd 而非 ToDictionary
+        // （后者遇重复键直接抛 ArgumentException，节点已入库、整次抽取报废）。首次出现者胜出。
+        var nodeIdMap = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var node in nodes)
+        {
+            nodeIdMap.TryAdd(node.Name, node.Id);
+        }
 
         // 将原始边的 source/target name 映射为实际 node ID，过滤无效引用
         var validEdges = ResolveEdgeNodeIds(edges, nodeIdMap, knowledgeBaseId);
@@ -136,8 +149,10 @@ public class LlmGraphExtractor : IGraphExtractor
             {
                 foreach (var entity in entitiesElement.EnumerateArray())
                 {
-                    var name = entity.GetProperty("name").GetString();
-                    var type = entity.GetProperty("type").GetString();
+                    // 用 TryGetProperty 而非 GetProperty：字段整个缺失时 GetProperty 抛的是
+                    // KeyNotFoundException，不被下方 catch (JsonException) 捕获，一条畸形实体会让整次抽取失败。
+                    var name = ReadString(entity, "name");
+                    var type = ReadString(entity, "type");
 
                     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(type))
                         continue;
@@ -147,7 +162,7 @@ public class LlmGraphExtractor : IGraphExtractor
                         KnowledgeBaseId = knowledgeBaseId,
                         Name = name,
                         EntityType = type,
-                        Description = entity.TryGetProperty("description", out var desc) ? desc.GetString() : null
+                        Description = ReadString(entity, "description")
                     };
 
                     nodes.Add(node);
@@ -159,9 +174,9 @@ public class LlmGraphExtractor : IGraphExtractor
             {
                 foreach (var rel in relsElement.EnumerateArray())
                 {
-                    var source = rel.GetProperty("source").GetString();
-                    var target = rel.GetProperty("target").GetString();
-                    var relation = rel.GetProperty("relation").GetString();
+                    var source = ReadString(rel, "source");
+                    var target = ReadString(rel, "target");
+                    var relation = ReadString(rel, "relation");
 
                     if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(relation))
                         continue;
@@ -170,9 +185,7 @@ public class LlmGraphExtractor : IGraphExtractor
                         ? w.GetDouble()
                         : null;
 
-                    edges.Add(new RawEdge(source, target, relation,
-                        rel.TryGetProperty("description", out var edgeDesc) ? edgeDesc.GetString() : null,
-                        weight));
+                    edges.Add(new RawEdge(source, target, relation, ReadString(rel, "description"), weight));
                 }
             }
         }
@@ -183,6 +196,14 @@ public class LlmGraphExtractor : IGraphExtractor
 
         return (nodes, edges);
     }
+
+    /// <summary>
+    /// 读取字符串字段：字段缺失或不是字符串时返回 null（LLM 输出不可信，不能假定字段存在）
+    /// </summary>
+    private static string? ReadString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     /// <summary>
     /// 将原始边的 source/target name 映射为实际 node ID

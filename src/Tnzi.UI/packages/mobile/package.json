@@ -20,6 +20,10 @@
       "import": "./dist/stores/index.js"
     },
     "./primitive/*": null,
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js"
+    },
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
       "import": "./dist/adapters/*.js"
@@ -27,6 +31,10 @@
     "./headless": {
       "types": "./dist/headless/index.d.ts",
       "import": "./dist/headless/index.js"
+    },
+    "./composables": {
+      "types": "./dist/composables/index.d.ts",
+      "import": "./dist/composables/index.js"
     },
     "./hooks/*": null,
     "./style.css": {
@@ -57,8 +65,11 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.11",
+    "happy-dom": "^20.10.6",
     "pinia": "catalog:",
     "typescript": "^6.0.3",
+    "unocss": "^66.7.2",
     "vite": "^7.3.5",
     "vitest": "^4.1.9",
     "vue": "catalog:",

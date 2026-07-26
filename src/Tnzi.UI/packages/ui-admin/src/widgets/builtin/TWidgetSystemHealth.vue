@@ -1,22 +1,23 @@
 <script setup lang="ts">
 /**
- * `TWidgetSystemHealth` — system health snapshot.
+ * `TWidgetSystemHealth` - system health snapshot.
  *
  * Polls `/admin/diagnostics/exceptions/summary?minutes=60` and derives a
  * coarse status from the error count returned by `ExceptionStatisticsService`:
  *   - 0 errors in last hour     → `ok`
- *   - 1–9 errors in last hour   → `degraded`
+ *   - 1-9 errors in last hour   → `degraded`
  *   - ≥ 10 errors in last hour  → `down`
  *
  * The diagnostics endpoint ships with every `HostingModule` app, so this
  * widget works on any stack that loads `Tnzi.AspNetCore` (i.e. all of them).
  * Environment + endpoint stay client-derived from `window.location` because
- * they're inherent to the page that already loaded — no extra round-trip
+ * they're inherent to the page that already loaded - no extra round-trip
  * for data the browser already has.
  *
  * Mark this widget's `permission` as `'system.health.view'` if you need to
  * gate it.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -61,7 +62,7 @@ useWidgetData(async () => {
       : res) as ExceptionSummaryDto | undefined
     errors = summary?.totalCount ?? 0
   } catch {
-    // Module not loaded or permission denied — fall back to "unknown",
+    // Module not loaded or permission denied - fall back to "unknown",
     // which we encode as `degraded` (not `ok`, since we can't confirm
     // healthy state).
     errors = -1
@@ -73,7 +74,7 @@ useWidgetData(async () => {
     environment: typeof window !== 'undefined' && window.location.hostname.includes('localhost')
       ? 'Development'
       : 'Production',
-    endpoint: typeof window !== 'undefined' ? window.location.host : '—',
+    endpoint: typeof window !== 'undefined' ? window.location.host : EMPTY_DASH,
   }
 })
 

@@ -86,11 +86,20 @@ public class LocalStorage : IFileStorage
         Check.NotNullOrEmpty(fileName);
         Check.NotNull(stream);
 
+        // 存储键只接受叶子文件名。调用方传入的名字可能来自客户端（分片上传会话的 FileName、
+        // 压缩包名、压缩包内条目名），带目录分隔符或盘符时 Path.Combine 会写到 base 目录之外，
+        // 因此统一取叶子名后再拼接。
+        var safeFileName = Path.GetFileName(fileName);
+        if (string.IsNullOrEmpty(safeFileName))
+        {
+            throw new FileUploadException("Invalid file name.", fileName);
+        }
+
         // 按日期分目录：yyyy/MM/dd（使用 UTC 时间确保一致性）
         var now = DateTime.UtcNow;
         var datePath = $"{now:yyyy}/{now:MM}/{now:dd}";
-        var relativePath = Path.Combine(datePath, fileName).Replace('\\', '/');
-        var fullPath = Path.Combine(_basePath, datePath, fileName);
+        var relativePath = Path.Combine(datePath, safeFileName).Replace('\\', '/');
+        var fullPath = ResolvePhysicalPath(relativePath);
 
         var directory = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -115,8 +124,8 @@ public class LocalStorage : IFileStorage
     {
         Check.NotNullOrEmpty(filePath);
 
-        // filePath可能是相对路径（包含日期目录），直接拼接
-        var fullPath = Path.Combine(_basePath, filePath);
+        // filePath 是相对路径（包含日期目录），解析时校验其仍落在 base 目录内
+        var fullPath = ResolvePhysicalPath(filePath);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException($"File not found: {filePath}");
@@ -132,10 +141,9 @@ public class LocalStorage : IFileStorage
     /// <returns>是否删除成功</returns>
     public Task<bool> DeleteAsync(string filePath)
     {
-        if (string.IsNullOrEmpty(filePath))
+        if (string.IsNullOrEmpty(filePath) || !TryResolvePhysicalPath(filePath, out var fullPath))
             return Task.FromResult(false);
 
-        var fullPath = Path.Combine(_basePath, filePath);
         if (!File.Exists(fullPath))
         {
             return Task.FromResult(false);
@@ -162,10 +170,9 @@ public class LocalStorage : IFileStorage
     /// <returns>是否存在</returns>
     public Task<bool> ExistsAsync(string filePath)
     {
-        if (string.IsNullOrEmpty(filePath))
+        if (string.IsNullOrEmpty(filePath) || !TryResolvePhysicalPath(filePath, out var fullPath))
             return Task.FromResult(false);
 
-        var fullPath = Path.Combine(_basePath, filePath);
         return Task.FromResult(File.Exists(fullPath));
     }
 
@@ -201,10 +208,9 @@ public class LocalStorage : IFileStorage
     /// <returns>文件大小（字节）</returns>
     public Task<long> GetFileSizeAsync(string filePath)
     {
-        if (string.IsNullOrEmpty(filePath))
+        if (string.IsNullOrEmpty(filePath) || !TryResolvePhysicalPath(filePath, out var fullPath))
             return Task.FromResult(0L);
 
-        var fullPath = Path.Combine(_basePath, filePath);
         if (!File.Exists(fullPath))
         {
             return Task.FromResult(0L);
@@ -228,7 +234,7 @@ public class LocalStorage : IFileStorage
     {
         Check.NotNullOrEmpty(filePath);
 
-        var fullPath = Path.Combine(_basePath, filePath);
+        var fullPath = ResolvePhysicalPath(filePath);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException($"File not found: {filePath}");
@@ -262,6 +268,56 @@ public class LocalStorage : IFileStorage
         // 返回范围流（需要包装以限制读取长度）
         var rangeStream = new RangeStream(rangeFileStream, start, end - start + 1);
         return Task.FromResult<(Stream, long, long, long)>((rangeStream, start, end, totalLength));
+    }
+
+    /// <summary>
+    /// 把存储键解析为 base 目录内的物理路径；越界即抛出。
+    /// 键本应由本模块生成（yyyy/MM/dd/文件名），此处是兜底防线：
+    /// 含 ".." 或盘符/根路径的键会被 Path.Combine 解析到 base 目录之外，一律拒绝。
+    /// </summary>
+    private string ResolvePhysicalPath(string relativeKey)
+    {
+        if (!TryResolvePhysicalPath(relativeKey, out var fullPath))
+        {
+            throw new StorageException("Invalid file path.", relativeKey);
+        }
+
+        return fullPath;
+    }
+
+    /// <summary>
+    /// 尝试解析存储键；越界或键本身非法时返回 false（供 Delete/Exists 等容错方法使用）。
+    /// </summary>
+    private bool TryResolvePhysicalPath(string relativeKey, out string fullPath)
+    {
+        fullPath = string.Empty;
+
+        try
+        {
+            var root = Path.GetFullPath(_basePath);
+            var resolved = Path.GetFullPath(Path.Combine(root, relativeKey));
+
+            var rootPrefix = root.EndsWith(Path.DirectorySeparatorChar)
+                ? root
+                : root + Path.DirectorySeparatorChar;
+
+            if (!resolved.StartsWith(rootPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            fullPath = resolved;
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            // 键含非法字符：视为无效路径，交由调用方按各自语义处理
+            return false;
+        }
+        catch (PathTooLongException)
+        {
+            return false;
+        }
     }
 }
 

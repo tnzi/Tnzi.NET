@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// 会话绑定输入上下文 — 提供给 DefaultSessionBinder 的请求信息
+/// 会话绑定输入上下文 - 提供给 DefaultSessionBinder 的请求信息
 /// </summary>
 public class SessionBindingContext
 {

@@ -4,6 +4,8 @@
  * Platform-agnostic toast/message adapter.
  */
 
+import { createAdapterSingleton } from './singleton';
+
 export interface MessageOptions {
   duration?: number;
   closable?: boolean;
@@ -40,17 +42,16 @@ class ConsoleMessageAdapter implements MessageAdapter {
 // Singleton
 // ============================================
 
-const _fallback: MessageAdapter = new ConsoleMessageAdapter();
-let _active: MessageAdapter | null = null;
+const _slot = createAdapterSingleton<MessageAdapter>('message', () => new ConsoleMessageAdapter());
 
 export function setMessageAdapter(adapter: MessageAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useMessage(): MessageAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetMessageAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

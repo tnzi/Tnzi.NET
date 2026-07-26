@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// InMemoryVectorStore 多租户隔离测试 — 验证 upsert 时租户标记、搜索时租户过滤、
+/// InMemoryVectorStore 多租户隔离测试 - 验证 upsert 时租户标记、搜索时租户过滤、
 /// 以及 MT 启用 + host 上下文（无租户）时跨库 search-all 的 fail-closed 行为。
 /// 语义与 PgVectorStore raw-SQL 路径（RagTenantSqlFilter）对齐。
 /// </summary>
@@ -15,7 +15,7 @@ public class InMemoryVectorStoreTenantTests
     private readonly StubCurrentTenant _currentTenant = new();
 
     /// <summary>
-    /// 可变租户桩 — 注册为单例，使 store 在新 scope 中解析到同一实例，
+    /// 可变租户桩 - 注册为单例，使 store 在新 scope 中解析到同一实例，
     /// 测试间通过 Id 属性切换当前租户。
     /// </summary>
     private sealed class StubCurrentTenant : Tnzi.MultiTenancy.ICurrentTenant

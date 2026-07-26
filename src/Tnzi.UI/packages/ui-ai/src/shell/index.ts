@@ -1,7 +1,7 @@
 /**
- * @tnzi/ui-ai/shell — shell components for composing a chat application
+ * @tnzi/ui-ai/shell - shell components for composing a chat application
  *
- * All exports marked @experimental — surface may iterate until 0.3.0.
+ * All exports marked @experimental - surface may iterate until 0.3.0.
  * Components are slot-driven chrome; state is owned by consumer composables.
  */
 export { default as TCollapsibleSidebar } from './TCollapsibleSidebar.vue'

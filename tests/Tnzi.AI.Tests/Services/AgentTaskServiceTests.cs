@@ -24,7 +24,7 @@ public class AgentTaskServiceTests
     private AgentTaskService CreateService() => new(_serviceProvider, _repository.Object);
 
     // -------------------------------------------------------------------------
-    // SyncFromTodosAsync — 新增
+    // SyncFromTodosAsync - 新增
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -57,7 +57,7 @@ public class AgentTaskServiceTests
     }
 
     // -------------------------------------------------------------------------
-    // SyncFromTodosAsync — 更新已有
+    // SyncFromTodosAsync - 更新已有
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -85,7 +85,7 @@ public class AgentTaskServiceTests
         // Act
         await CreateService().SyncFromTodosAsync(runId, todos);
 
-        // Assert — batch update
+        // Assert - batch update
         _repository.Verify(r => r.UpdateManyAsync(
             It.Is<IEnumerable<AgentTask>>(tasks =>
                 tasks.Count() == 1 &&
@@ -97,7 +97,7 @@ public class AgentTaskServiceTests
     }
 
     // -------------------------------------------------------------------------
-    // SyncFromTodosAsync — CompletedAt 设置
+    // SyncFromTodosAsync - CompletedAt 设置
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -126,7 +126,7 @@ public class AgentTaskServiceTests
         // Act
         await CreateService().SyncFromTodosAsync(runId, todos);
 
-        // Assert — batch update with CompletedAt set
+        // Assert - batch update with CompletedAt set
         _repository.Verify(r => r.UpdateManyAsync(
             It.Is<IEnumerable<AgentTask>>(tasks =>
                 tasks.Count() == 1 &&

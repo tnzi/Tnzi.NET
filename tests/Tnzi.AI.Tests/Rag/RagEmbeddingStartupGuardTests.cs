@@ -5,7 +5,7 @@ using Tnzi.Modules;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// C10: AIRagModule.OnApplicationInitializationAsync 启动探测 — 验证嵌入提供商不可解析时 LogWarning（不 throw），
+/// C10: AIRagModule.OnApplicationInitializationAsync 启动探测 - 验证嵌入提供商不可解析时 LogWarning（不 throw），
 /// 未配置 DefaultEmbeddingProvider 时静默跳过。
 /// </summary>
 public class RagEmbeddingStartupGuardTests
@@ -93,7 +93,7 @@ public class RagEmbeddingStartupGuardTests
     }
 
     /// <summary>
-    /// 轻量日志捕获器 — 记录各级别日志条数，用于断言 LogWarning 行为
+    /// 轻量日志捕获器 - 记录各级别日志条数，用于断言 LogWarning 行为
     /// </summary>
     private sealed class CapturingLogger<T> : ILogger<T>
     {

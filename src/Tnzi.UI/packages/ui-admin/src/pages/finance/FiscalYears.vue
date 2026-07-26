@@ -1,5 +1,11 @@
 <template>
   <TCrudPage :state="crud" :all-columns="fiscalYearColumns" :title="title" :row-actions="rowActions" :translate="t">
+    <!-- The rolling closing date sits above the year list: same operator
+         question ("can this period still be touched?"), two orthogonal locks. -->
+    <template #kpis>
+      <ClosingDatePanel ref="closingPanel" :bridge="bridge" :can-edit="canEditLock" :t="t" @changed="crud.refresh()" />
+    </template>
+
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="fiscalYearFormSchema"
@@ -12,7 +18,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import ClosingDatePanel from './components/ClosingDatePanel.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { deleteAction, type RowAction } from '../../headless/rowActions'
@@ -30,6 +38,11 @@ const t = makePageTranslator('finance.fiscalYears')
 const message = useSafeMessage()
 const { can } = usePermissionGuard()
 
+// Changing the closing date is authorized separately from opening/closing a
+// fiscal year: it decides whether already-filed figures can still move.
+const canEditLock = computed(() => can('finance.ledgerLock.update'))
+const closingPanel = ref<{ reload: () => Promise<void> } | null>(null)
+
 const fiscalYearColumns = buildFiscalYearColumns(t)
 
 function toPayload(d: Record<string, unknown>) {
@@ -46,7 +59,7 @@ const crud = useCrudPage<FiscalYearRow>({
   permission: 'finance.fiscalYear',
   columns: fiscalYearColumns,
   rowKey: (r) => String(r.id ?? ''),
-  // The backend returns the full (small) list — wrap it as a single page.
+  // The backend returns the full (small) list - wrap it as a single page.
   fetchData: async (q) => {
     const items = await bridge.fiscalYears.list()
     return pagedResult({ items, totalCount: items.length, pageIndex: q.pageIndex, pageSize: Math.max(q.pageSize, items.length || 1) })
@@ -61,7 +74,7 @@ async function closeYear(row: FiscalYearRow) {
   try {
     await bridge.fiscalYears.close(String(row.id ?? ''))
     message.success(t('closeSuccess'))
-    await crud.refresh()
+    await Promise.all([crud.refresh(), closingPanel.value?.reload()])
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   }
@@ -71,7 +84,7 @@ async function reopenYear(row: FiscalYearRow) {
   try {
     await bridge.fiscalYears.reopen(String(row.id ?? ''))
     message.success(t('reopenSuccess'))
-    await crud.refresh()
+    await Promise.all([crud.refresh(), closingPanel.value?.reload()])
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   }

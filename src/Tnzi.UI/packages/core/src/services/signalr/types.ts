@@ -1,9 +1,9 @@
 /**
- * SignalR Module Types — mirrors `Tnzi.SignalR.Dtos.*` on the .NET side.
+ * SignalR Module Types - mirrors `Tnzi.SignalR.Dtos.*` on the .NET side.
  *
  * Models the connection/presence surface exposed by
  * `Tnzi.SignalR/Controllers/DefaultSignalRAdminController`
- * (`/admin/signalr/*`). `Tnzi.SignalR` is optional — every endpoint returns
+ * (`/admin/signalr/*`). `Tnzi.SignalR` is optional - every endpoint returns
  * 404 when the host app doesn't load it.
  */
 

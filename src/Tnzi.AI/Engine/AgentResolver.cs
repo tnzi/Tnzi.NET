@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// Agent 解析器实现 — Agent 解析和消息构建逻辑
+/// Agent 解析器实现 - Agent 解析和消息构建逻辑
 /// </summary>
 public class AgentResolver : IAgentResolver
 {
@@ -64,7 +64,7 @@ public class AgentResolver : IAgentResolver
                         // Honor workspace AGENT.md frontmatter `executionMode: Handoff|AgentAsTools|Router|Single`.
                         // Unknown / missing values fall back to Single (default for DB agents).
                         var wsExecutionMode = ParseExecutionMode(wsAgent.ExecutionMode);
-                        // wsAgent.Temperature is float? but the factory takes double? — widen safely.
+                        // wsAgent.Temperature is float? but the factory takes double? - widen safely.
                         var wsTemperature = wsAgent.Temperature.HasValue ? (double?)wsAgent.Temperature.Value : null;
                         var wsExecutor = await _agentFactory.CreateAgentAsync(
                             wsProvider, wsModel, wsInstructions, wsAgent.Name,
@@ -103,7 +103,7 @@ public class AgentResolver : IAgentResolver
             var entityToolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
             // per-tool 授权（GrantType=Tool）：展开为单工具，与工具组并行流入 factory。
             var entityToolNames = grants.ToolNames.Count > 0 ? grants.ToolNames.ToList() : null;
-            // null-when-empty (load-bearing): SkillSlugs/KnowledgeBaseIds MUST be null — not [] — when there are
+            // null-when-empty (load-bearing): SkillSlugs/KnowledgeBaseIds MUST be null - not [] - when there are
             // no grants. An empty list ≠ null downstream: a populated skill list = whitelist; null =
             // "no per-agent whitelist → fall back to SkillDefinition.Agents name-wildcard filtering"; [] = "whitelist
             // of nothing". So collapse empty → null here.
@@ -133,7 +133,7 @@ public class AgentResolver : IAgentResolver
                 agentId: entity.Id,
                 ct: ct);
             var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions, entityToolNames);
-            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaId: entity.PersonaId, knowledgeBaseIds: knowledgeBaseIds, skillSlugs: skillSlugs);
+            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaContent: string.IsNullOrWhiteSpace(entity.Persona) ? null : entity.Persona, knowledgeBaseIds: knowledgeBaseIds, skillSlugs: skillSlugs);
         }
 
         // 2. 使用 ToolGroups / ToolNames（无 AgentId 但有工具组或 per-request 单工具覆盖）

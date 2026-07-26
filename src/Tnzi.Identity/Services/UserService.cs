@@ -200,7 +200,7 @@ public class UserService : ApplicationService, IUserService
 
         // Snapshot current role IDs BEFORE deletion so the cache-invalidation
         // event has the full removed list. We map role-names → IDs via
-        // RoleManager — `UserManager.GetRolesAsync` returns names only.
+        // RoleManager - `UserManager.GetRolesAsync` returns names only.
         // Defensive null coalesce: mocked UserManagers in tests may return
         // null from GetRolesAsync when not stubbed (real ASP.NET Identity
         // returns an empty IList<string>, never null, but Moq's loose mocks
@@ -711,7 +711,7 @@ public class UserService : ApplicationService, IUserService
         LogInformation("Roles removed from user: {UserId}, Roles: {RoleNames}",
             userId, string.Join(", ", roles.Select(r => r.Name)));
 
-        // Critical: removal must publish (more so than assignment) — a stale
+        // Critical: removal must publish (more so than assignment) - a stale
         // cache after a revocation is a permission-retention security gap.
         await PublishUserRolesChangedAsync(
             user,
@@ -723,9 +723,10 @@ public class UserService : ApplicationService, IUserService
     }
 
     /// <summary>
-    /// Publish <see cref="UserRolesChangedEvent"/>. Auxiliary — failures here
-    /// must not break the main role-change flow (matches the framework's
-    /// event-handler convention: catch + log warning, never bubble).
+    /// Publish <see cref="UserRolesChangedEvent"/>. Auxiliary: a failed publish
+    /// must not break the main role-change flow, so it is caught and logged here
+    /// on the PUBLISHER side. (Handlers are the opposite: they must let exceptions
+    /// bubble so the bus can retry / dead-letter. See docs/coding-standards/events.md.)
     /// </summary>
     private async Task PublishUserRolesChangedAsync(
         User user,

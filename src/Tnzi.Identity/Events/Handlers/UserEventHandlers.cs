@@ -3,35 +3,27 @@ using LoginStatus = Tnzi.Identity.Entities.LoginStatus;
 namespace Tnzi.Identity.Events.Handlers;
 
 /// <summary>
-/// 用户登录事件处理器
-/// 处理登录日志记录、会话创建等辅助操作
+/// 用户登录事件处理器 —— 只负责登录日志记录（辅助副作用）。
+/// 会话创建已移至同步路径（<see cref="Tnzi.Identity.Services.ILoginSessionCoordinator"/>），
+/// 因为会话ID要在**签发令牌之前**拿到并写入 access token 的 session_id claim、绑定刷新令牌；
+/// 事件处理器是异步后台执行，无法满足这一时序（且会与多登录策略判定产生竞态）。
 /// Runs as background handler: gets an independent scope (and independent DbContext)
-/// via Task.Run so DB writes (SessionService.CreateSessionAsync etc.) do not race
-/// with the request-scope DbContext that is still busy completing the login response.
+/// via Task.Run so the login-log DB write does not race with the request-scope DbContext.
 /// </summary>
 [BackgroundEventHandler]
 public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
 {
     private readonly ILoginLogInternalService? _loginLogInternalService;
-    private readonly ISessionService? _sessionService;
-    private readonly IUserAgentParserService? _userAgentParser;
 
-    public UserLoggedInEventHandler(
-        ILoginLogInternalService? loginLogInternalService = null,
-        ISessionService? sessionService = null,
-        IUserAgentParserService? userAgentParser = null)
+    public UserLoggedInEventHandler(ILoginLogInternalService? loginLogInternalService = null)
     {
         _loginLogInternalService = loginLogInternalService;
-        _sessionService = sessionService;
-        _userAgentParser = userAgentParser;
     }
 
     public async Task HandleAsync(UserLoggedInEvent @event, CancellationToken cancellationToken = default)
     {
-        // 不吞异常：登录日志/会话创建是持久化副作用，失败必须冒泡给总线做隔离/重试/DLQ
+        // 不吞异常：登录日志是持久化副作用，失败必须冒泡给总线做隔离/重试/DLQ
         // （后台处理器分发在 LocalEventBus 已统一 LogError 观测）。此前的空 catch 会连日志都吞掉。
-
-        // 处理登录日志记录
         if (_loginLogInternalService != null)
         {
             await _loginLogInternalService.LogAsync(
@@ -42,36 +34,6 @@ public class UserLoggedInEventHandler : IEventHandler<UserLoggedInEvent>
                 LoginStatus.Success,
                 null);
         }
-
-        // 处理会话创建：deviceInfo 从 UserAgent 解析（供会话统计 Top device 聚合）
-        if (_sessionService != null)
-        {
-            await _sessionService.CreateSessionAsync(
-                @event.UserId,
-                BuildDeviceInfo(@event.UserAgent),
-                @event.IpAddress,
-                @event.UserAgent);
-        }
-    }
-
-    /// <summary>
-    /// 从 UserAgent 提取简短设备描述（如 "Chrome on Windows"），
-    /// 解析器缺失或 UA 不可识别时返回 null（统计端会忽略空值）。
-    /// </summary>
-    private string? BuildDeviceInfo(string? userAgent)
-    {
-        if (_userAgentParser == null || string.IsNullOrWhiteSpace(userAgent))
-        {
-            return null;
-        }
-
-        var info = _userAgentParser.Parse(userAgent);
-        if (!string.IsNullOrEmpty(info.Browser) && !string.IsNullOrEmpty(info.OperatingSystem))
-        {
-            return $"{info.Browser} on {info.OperatingSystem}";
-        }
-
-        return info.Browser ?? info.OperatingSystem ?? info.DeviceType;
     }
 }
 

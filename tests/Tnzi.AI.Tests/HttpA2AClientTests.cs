@@ -4,7 +4,7 @@ using System.Net.Http;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// HttpA2AClient 单元测试 — 验证 SSRF 防护：私有端点在发送 HTTP 前返回错误结果，
+/// HttpA2AClient 单元测试 - 验证 SSRF 防护：私有端点在发送 HTTP 前返回错误结果，
 /// 以及 302 重定向不被跟随（防止通过 Location 头绕过 EgressGuard）
 /// </summary>
 public class HttpA2AClientTests
@@ -40,12 +40,12 @@ public class HttpA2AClientTests
     [InlineData("http://192.168.1.1/")]
     public async Task SendTaskAsync_PrivateEndpoint_ReturnsErrorWithoutSendingRequest(string endpoint)
     {
-        // Arrange — HttpClientFactory that asserts it is never called
+        // Arrange - HttpClientFactory that asserts it is never called
         var factory = CreateNeverCalledFactory();
         var client = new HttpA2AClient(factory, NullLogger<HttpA2AClient>.Instance);
         var request = new A2ATaskRequest { Input = "test" };
 
-        // Act — must not throw; must return failed status
+        // Act - must not throw; must return failed status
         var result = await client.SendTaskAsync(endpoint, request);
 
         // Assert
@@ -70,7 +70,7 @@ public class HttpA2AClientTests
     }
 
     // ------------------------------------------------------------------
-    // FIX 1: SSRF redirect-follow prevention — 302 must not be followed
+    // FIX 1: SSRF redirect-follow prevention - 302 must not be followed
     // ------------------------------------------------------------------
 
     [Fact]
@@ -84,7 +84,7 @@ public class HttpA2AClientTests
         var a2aClient = new HttpA2AClient(factory, NullLogger<HttpA2AClient>.Instance);
         var request = new A2ATaskRequest { Input = "test" };
 
-        // Act — endpoint is a public-looking host (passes EgressGuard for initial check)
+        // Act - endpoint is a public-looking host (passes EgressGuard for initial check)
         var result = await a2aClient.SendTaskAsync("https://8.8.8.8", request);
 
         // Assert: failure returned, redirect NOT followed
@@ -92,7 +92,7 @@ public class HttpA2AClientTests
         result.Error.ShouldNotBeNull();
         result.Error.ShouldContain("redirect");
 
-        // Only ONE request was made (to the original endpoint) — no second request to the private IP
+        // Only ONE request was made (to the original endpoint) - no second request to the private IP
         capturedUris.Count.ShouldBe(1);
         capturedUris[0].Host.ShouldBe("8.8.8.8");
     }

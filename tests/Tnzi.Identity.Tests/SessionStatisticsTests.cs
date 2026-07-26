@@ -2,7 +2,7 @@
 namespace Tnzi.Identity.Tests;
 
 /// <summary>
-/// 会话统计测试（GetSessionStatisticsAsync）— Top device 聚合：
+/// 会话统计测试（GetSessionStatisticsAsync）- Top device 聚合：
 /// 忽略 null/空 DeviceInfo、排除已撤销会话、按出现次数倒序。
 /// </summary>
 public class SessionStatisticsTests

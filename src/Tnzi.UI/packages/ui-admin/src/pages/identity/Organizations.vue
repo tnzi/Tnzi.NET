@@ -88,11 +88,11 @@
             </div>
 
             <!--
-              Organization members panel — paged user list scoped to the
+              Organization members panel - paged user list scoped to the
               selected org. The `includeChildren` toggle expands the
               backend query to every descendant unit. The "Remove" row
               action calls `users.removeFromOrganization(userId)` which
-              detaches the user without deleting them — the user just
+              detaches the user without deleting them - the user just
               ends up orphaned and an admin can reassign via the user
               page or by adding them to a different org.
             -->
@@ -136,7 +136,7 @@
       </template>
     </TMasterDetailLayout>
 
-    <!-- Create overlay — works for both root and child create. useDetail owns
+    <!-- Create overlay - works for both root and child create. useDetail owns
          the open-state + `?create=new` deep link; TDetailHost renders the modal
          chrome (auto-fullscreen on narrow viewports via TModalShell). -->
     <TDetailHost
@@ -179,6 +179,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref, h, onMounted, watch } from 'vue'
 import type { DataTableColumns, TreeOption } from 'naive-ui'
 import {
@@ -429,18 +430,18 @@ const memberColumns = computed<DataTableColumns<OrgMemberRow>>(() => [
   { key: 'email', title: t('members.email'), minWidth: 180, ellipsis: { tooltip: true } },
   { key: 'phoneNumber', title: t('members.phoneNumber'), width: 140 },
   // When includeChildren=true the user's actual org may differ from the
-  // selected node — surface it so admins can tell who lives in which
+  // selected node - surface it so admins can tell who lives in which
   // sub-unit without exporting.
   {
     key: 'organizationName',
     title: t('members.organization'),
     minWidth: 160,
     ellipsis: { tooltip: true },
-    render: (row) => row.organizationName ?? '—',
+    render: (row) => row.organizationName ?? EMPTY_DASH,
   },
 ])
 
-// Declarative operation column for the members sub-table — "Remove" detaches
+// Declarative operation column for the members sub-table - "Remove" detaches
 // the user from the org (confirm gated) via the existing removeMember handler.
 const memberRowActions: RowAction<OrgMemberRow>[] = [
   {
@@ -499,7 +500,7 @@ onMounted(() => {
   padding: 24px 8px;
   font-size: 13px;
 }
-/* Members panel — visually separated from the edit form by a top border
+/* Members panel - visually separated from the edit form by a top border
    so the two zones don't run together. The panel itself doesn't claim
    flex-grow; TContentPage body handles overflow. */
 .t-org-page__members {

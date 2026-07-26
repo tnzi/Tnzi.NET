@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TRelativeTime` — render a timestamp as a human relative phrase
+ * `TRelativeTime` - render a timestamp as a human relative phrase
  * ("3 minutes ago", "in 2 days"). Falls back to absolute date for
  * values older than 30 days.
  *
@@ -8,9 +8,10 @@
  */
 import { computed } from 'vue'
 import { NTooltip } from 'naive-ui'
+import { EMPTY_DASH } from '../../utils/placeholders'
 
 interface Props {
-  /** ISO 8601 string, epoch millis, or Date. `null`/`undefined`/`''` renders an em-dash. */
+  /** ISO 8601 string, epoch millis, or Date. `null`/`undefined`/`''` renders {@link EMPTY_DASH}. */
   value: string | number | Date | null | undefined
   /** Override locale (defaults to navigator.language). */
   locale?: string
@@ -42,7 +43,7 @@ const RTF_UNITS: Array<{ unit: Intl.RelativeTimeFormatUnit; ms: number }> = [
 const parsed = computed(() => parseValue(props.value))
 
 const relative = computed<string>(() => {
-  if (!parsed.value) return '—'
+  if (!parsed.value) return '-'
   const now = Date.now()
   const diff = parsed.value.getTime() - now
   const absDiff = Math.abs(diff)
@@ -65,7 +66,7 @@ const relative = computed<string>(() => {
 })
 
 const absoluteValue = computed<string>(() => {
-  if (!parsed.value) return '—'
+  if (!parsed.value) return '-'
   if (props.absoluteFormat === 'iso') {
     return parsed.value.toISOString()
   }
@@ -91,7 +92,7 @@ const absoluteValue = computed<string>(() => {
     </template>
     {{ absoluteValue }}
   </NTooltip>
-  <span v-else class="t-relative-time t-relative-time--empty">—</span>
+  <span v-else class="t-relative-time t-relative-time--empty">{{ EMPTY_DASH }}</span>
 </template>
 
 <style scoped>

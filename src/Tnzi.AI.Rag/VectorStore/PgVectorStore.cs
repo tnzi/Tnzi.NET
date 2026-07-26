@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.VectorStore;
 
 /// <summary>
-/// pgvector 向量存储适配器 — 基于 Npgsql 直接操作 PostgreSQL pgvector 扩展
+/// pgvector 向量存储适配器 - 基于 Npgsql 直接操作 PostgreSQL pgvector 扩展
 /// </summary>
 /// <remarks>
 /// <para>
@@ -189,7 +189,7 @@ public class PgVectorStore : IVectorStore
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(ct);
 
-        // INSERT ... ON CONFLICT DO UPDATE — 对已有 chunk 进行更新
+        // INSERT ... ON CONFLICT DO UPDATE - 对已有 chunk 进行更新
         var sql = $"""
             INSERT INTO "{_chunkTable}" ("Id", "Embedding", "DocumentId", "KnowledgeBaseId", "Content", "ChunkIndex", "Metadata")
             VALUES (@id, @embedding::vector, @docId, @kbId, @content, @chunkIndex, @metadata)

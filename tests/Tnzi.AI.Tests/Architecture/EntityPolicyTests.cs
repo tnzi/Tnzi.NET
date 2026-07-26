@@ -47,11 +47,11 @@ public class EntityPolicyTests : IDisposable
     }
 
     // =====================================================================
-    // Assertion A — IScopedResource 与 IMultiTenant 互斥
+    // Assertion A - IScopedResource 与 IMultiTenant 互斥
     // =====================================================================
 
     /// <summary>
-    /// A1: Provider 和 AgentPersona 必须实现 IScopedResource，且不实现 IMultiTenant。
+    /// A1: Provider 必须实现 IScopedResource，且不实现 IMultiTenant。
     /// </summary>
     [Fact]
     public void ScopedResourceEntities_ImplementIScopedResource_And_DoNotImplementIMultiTenant()
@@ -59,10 +59,6 @@ public class EntityPolicyTests : IDisposable
         // Provider: FullAuditedEntity (有 IsDeleted) + IScopedResource
         typeof(Provider).Should_ImplementIScopedResource();
         typeof(Provider).Should_NotImplementIMultiTenant();
-
-        // AgentPersona: FullAuditedEntity (软删除，与 Provider 对齐) + IScopedResource
-        typeof(AgentPersona).Should_ImplementIScopedResource();
-        typeof(AgentPersona).Should_NotImplementIMultiTenant();
     }
 
     /// <summary>
@@ -78,12 +74,12 @@ public class EntityPolicyTests : IDisposable
                         && typeof(IScopedResource).IsAssignableFrom(t))
             .ToList();
 
-        // 必须有已知的 scoped resource 类型（至少 Provider + AgentPersona + SkillEntity）
+        // 必须有已知的 scoped resource 类型（至少 Provider + SkillEntity）
         scopedResourceTypes.ShouldNotBeEmpty("There should be at least one IScopedResource implementation");
 
         // 证明扫描穿透到子程序集：SkillEntity 位于 Tnzi.AI.Skills，必须被发现。
         scopedResourceTypes.ShouldContain(typeof(SkillEntity),
-            "AllIScopedResourceTypes_DoNotImplementIMultiTenant must reach sub-assemblies — " +
+            "AllIScopedResourceTypes_DoNotImplementIMultiTenant must reach sub-assemblies - " +
             "SkillEntity (Tnzi.AI.Skills) implements IScopedResource and should be discovered. " +
             "If it is missing, the assembly anchor set is incomplete or SkillEntity lost its marker.");
 
@@ -95,11 +91,11 @@ public class EntityPolicyTests : IDisposable
         violators.ShouldBeEmpty(
             $"The following types implement both IScopedResource and IMultiTenant (mutually exclusive): " +
             $"{string.Join(", ", violators)}. " +
-            "IScopedResource entities must NOT implement IMultiTenant — the global query filter hides System rows (TenantId=null) from all real tenants.");
+            "IScopedResource entities must NOT implement IMultiTenant - the global query filter hides System rows (TenantId=null) from all real tenants.");
     }
 
     // =====================================================================
-    // Assertion C — 全量实体分类表（锁定多租户审计结果，防止 MT/软删除/Scope 漂移）
+    // Assertion C - 全量实体分类表（锁定多租户审计结果，防止 MT/软删除/Scope 漂移）
     // =====================================================================
 
     /// <summary>
@@ -116,10 +112,10 @@ public class EntityPolicyTests : IDisposable
     ];
 
     /// <summary>
-    /// 审计分类表（事实来源）：33 个实体 → (IsMultiTenant, IsSoftDelete, IsSharedResource)。
+    /// 审计分类表（事实来源）：32 个实体 → (IsMultiTenant, IsSoftDelete, IsSharedResource)。
     /// <para>
     /// SharedResource(SR) 精确等价于"实现 IScopedResource"——经过 SkillEntity 标记后，
-    /// 三个共享资源 (Provider/AgentPersona/SkillEntity) 全部实现该标记接口，于是不变式很清晰：
+    /// 两个共享资源 (Provider/SkillEntity) 全部实现该标记接口，于是不变式很清晰：
     /// SR 实体 == IScopedResource 实现集，且它们一律 NOT IMultiTenant。
     /// </para>
     /// <para>
@@ -148,8 +144,7 @@ public class EntityPolicyTests : IDisposable
         [typeof(SubAgentType)] = (true, false, false),
         [typeof(ToolPermissionRuleEntity)] = (true, false, false),
         [typeof(Provider)] = (false, true, true),
-        [typeof(AgentPersona)] = (false, true, true),
-        // ---- Tnzi.AI (core) — Agent resource grant junctions ----
+        // ---- Tnzi.AI (core) - Agent resource grant junctions ----
         // 租户级软删除结合实体，FK 仅指向同程序集的 Agent。资源（工具组/技能/知识库）
         // 按值引用，故 MT=true, SD=true, SR=false（不是共享资源，不实现 IScopedResource）。
         [typeof(AgentToolGrant)] = (true, true, false),
@@ -196,7 +191,7 @@ public class EntityPolicyTests : IDisposable
             .Distinct()
             .ToList();
 
-        discovered.ShouldNotBeEmpty("No AI entity types were discovered — the assembly anchor set is broken.");
+        discovered.ShouldNotBeEmpty("No AI entity types were discovered - the assembly anchor set is broken.");
 
         var mismatches = new List<string>();
 
@@ -219,7 +214,7 @@ public class EntityPolicyTests : IDisposable
             if (actualMt != expected.MultiTenant || actualSd != expected.SoftDelete || actualSr != expected.SharedResource)
             {
                 mismatches.Add(
-                    $"Entity '{type.Name}' classification drift — " +
+                    $"Entity '{type.Name}' classification drift - " +
                     $"expected (MT={expected.MultiTenant}, SD={expected.SoftDelete}, SR={expected.SharedResource}) " +
                     $"but live type is (MT={actualMt}, SD={actualSd}, SR={actualSr}).");
             }
@@ -232,7 +227,7 @@ public class EntityPolicyTests : IDisposable
             if (!discoveredSet.Contains(key))
             {
                 mismatches.Add(
-                    $"Stale classification entry '{key.FullName}' — no matching discovered entity. " +
+                    $"Stale classification entry '{key.FullName}' - no matching discovered entity. " +
                     "Remove it from ExpectedClassification or fix the type reference.");
             }
         }
@@ -279,12 +274,12 @@ public class EntityPolicyTests : IDisposable
     }
 
     // =====================================================================
-    // Assertion B — IsDeleted 过滤索引要求实体实现 ISoftDelete (C1 捕获器)
+    // Assertion B - IsDeleted 过滤索引要求实体实现 ISoftDelete (C1 捕获器)
     // =====================================================================
 
     /// <summary>
     /// B1: EF 模型中，任何带有 "IsDeleted" 过滤条件的索引，其对应实体必须实现 ISoftDelete。
-    /// 这是 C1 (AgentPersonaConfiguration 误用 IndexFilterFactory.GetIsDeletedFalse 导致 DDL 崩溃) 的持续守卫。
+    /// 这是防止过滤索引误用 IndexFilterFactory.GetIsDeletedFalse 导致 DDL 崩溃的持续守卫。
     /// </summary>
     [Fact]
     public void AllIndexesWithIsDeletedFilter_RequireISoftDeleteOnEntity()
@@ -324,11 +319,11 @@ public class EntityPolicyTests : IDisposable
 }
 
 // =====================================================================
-// 测试专用 DbContext — 注册所有 AI 核心实体（同 AiIntegrationDbContext）
+// 测试专用 DbContext - 注册所有 AI 核心实体（同 AiIntegrationDbContext）
 // =====================================================================
 
 /// <summary>
-/// 架构测试专用 DbContext，覆盖 Provider/AgentPersona 所在的主 AI 核心实体集。
+/// 架构测试专用 DbContext，覆盖 Provider 等主 AI 核心实体集。
 /// </summary>
 internal sealed class EntityPolicyDbContext : TnziDbContext<EntityPolicyDbContext>
 {
@@ -341,7 +336,7 @@ internal sealed class EntityPolicyDbContext : TnziDbContext<EntityPolicyDbContex
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // 注册所有 AI 核心实体配置（覆盖 Provider、AgentPersona 及其他核心实体）
+        // 注册所有 AI 核心实体配置（覆盖 Provider 及其他核心实体）
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new AgentThreadConfiguration());
         modelBuilder.ApplyConfiguration(new AgentThreadMessageConfiguration());
@@ -353,7 +348,6 @@ internal sealed class EntityPolicyDbContext : TnziDbContext<EntityPolicyDbContex
         modelBuilder.ApplyConfiguration(new UserQuotaConfiguration());
         modelBuilder.ApplyConfiguration(new MemoryEntryConfiguration());
         modelBuilder.ApplyConfiguration(new EntityMemoryConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new AgentArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new EvaluationRunConfiguration());
@@ -389,6 +383,6 @@ file static class TypeAssertionExtensions
         typeof(IMultiTenant).IsAssignableFrom(type)
             .ShouldBeFalse(
                 $"Expected '{type.Name}' NOT to implement IMultiTenant (it uses IScopedResource pattern instead), " +
-                "but it does. Remove IMultiTenant — the global query filter hides System rows from all real tenants.");
+                "but it does. Remove IMultiTenant - the global query filter hides System rows from all real tenants.");
     }
 }

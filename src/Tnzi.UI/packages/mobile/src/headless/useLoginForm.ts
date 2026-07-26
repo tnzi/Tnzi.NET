@@ -1,4 +1,5 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 export interface LoginCredentials {
   userName: string
@@ -10,7 +11,6 @@ export interface LoginCredentials {
 
 export interface UseLoginFormOptions {
   showCaptcha?: boolean
-  showRememberMe?: boolean
   captchaId?: string
   onSubmit?: (credentials: LoginCredentials) => Promise<void>
   onForgotPassword?: () => void
@@ -36,6 +36,8 @@ export interface UseLoginFormReturn {
 }
 
 export function useLoginForm(options: UseLoginFormOptions = {}): UseLoginFormReturn {
+  const { t } = useI18n()
+
   const username = ref('')
   const password = ref('')
   const rememberMe = ref(false)
@@ -53,10 +55,10 @@ export function useLoginForm(options: UseLoginFormOptions = {}): UseLoginFormRet
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {}
-    if (!username.value) newErrors.username = 'Username is required'
-    if (!password.value) newErrors.password = 'Password is required'
+    if (!username.value) newErrors.username = t('auth.pleaseEnter', { field: t('auth.username') })
+    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
     if (options.showCaptcha && !captchaCode.value) {
-      newErrors.captchaCode = 'Captcha is required'
+      newErrors.captchaCode = t('auth.pleaseEnter', { field: t('auth.verificationCode') })
     }
     errors.value = newErrors
     return Object.keys(newErrors).length === 0

@@ -83,6 +83,49 @@ public class ProfitAndLossReportDto
 }
 
 /// <summary>
+/// 总账明细筛选（全部可选；全部下推数据库，不做内存过滤）
+/// </summary>
+/// <remarks>
+/// 分页发生在数据库侧，所以筛选也必须在数据库侧：呈现端只拿得到分页后的一页，
+/// 在客户端过滤等于"只过滤当前这一页"，行数与总数都会是错的。
+/// <para>
+/// 任一条件生效即触发 <see cref="GeneralLedgerReportDto.IsFiltered"/>，届时全部余额字段不再成立，
+/// 契约见该属性的说明。
+/// </para>
+/// </remarks>
+public class GeneralLedgerFilterDto
+{
+    /// <summary>
+    /// 关键字（大小写不敏感的包含匹配）。匹配范围：凭证摘要 / 分录行摘要 / 凭证号，
+    /// 以及来源为收付款单（<see cref="Metadata.FinanceSourceTypes.PaymentEntry"/>）的行所关联的
+    /// 付款参考号、已开具支票的支票号、往来方（客户/供应商）名称
+    /// </summary>
+    public string? Keyword { get; set; }
+
+    /// <summary>
+    /// 按来源单据类型过滤（取值为 <see cref="Metadata.FinanceSourceTypes"/> 的 token，精确匹配；
+    /// 消费应用编程式过账的自定义 token 同样可用）
+    /// </summary>
+    public string? SourceType { get; set; }
+
+    /// <summary>
+    /// 是否倒序（最新在最上，像网银流水）。默认 <c>false</c>（正序：按时间由旧到新）。
+    /// </summary>
+    /// <remarks>
+    /// 为 <c>true</c> 时行序是正序稳定全序（<c>PostingDate → 凭证号 → 行号</c>）的<b>精确反向</b>：
+    /// 第 1 页返回期间内最新的一页，最新一行显示 <see cref="GeneralLedgerReportDto.ClosingBalance"/>。
+    /// <para>
+    /// 只改<b>显示顺序与分页落点</b>，不改任何一行的“值”：每行 <see cref="GeneralLedgerLineDto.RunningBalance"/>
+    /// 仍是按时间的“该笔交易后的余额”，与正序视图对应行完全相同；
+    /// <see cref="GeneralLedgerReportDto.OpeningBalance"/>/<see cref="GeneralLedgerReportDto.ClosingBalance"/>
+    /// 与总行数（TotalCount）均不受影响。筛选生效（<see cref="GeneralLedgerReportDto.IsFiltered"/>）时同样套用倒序行序，
+    /// 但余额仍按该契约置 0。
+    /// </para>
+    /// </remarks>
+    public bool Descending { get; set; }
+}
+
+/// <summary>
 /// 总账明细（单科目）
 /// </summary>
 public class GeneralLedgerReportDto
@@ -94,10 +137,23 @@ public class GeneralLedgerReportDto
     public DateTime To { get; set; }
     public string BaseCurrency { get; set; } = string.Empty;
 
-    /// <summary>期初余额（有符号：借方为正）</summary>
+    /// <summary>
+    /// 本次结果是否被筛选过（<see cref="GeneralLedgerFilterDto"/> 中任一条件生效即为 true）。
+    /// </summary>
+    /// <remarks>
+    /// <b>契约（固定，呈现端可依赖）</b>：为 true 时期初/期末/运行余额<b>全部不适用</b>——
+    /// 累计余额是按科目全部行逐行累加出来的，筛掉中间的行链条就断了，任何"筛选后的余额"都是错的。
+    /// 此时 <see cref="OpeningBalance"/>、<see cref="ClosingBalance"/> 与每行的
+    /// <see cref="GeneralLedgerLineDto.RunningBalance"/> 一律置 <c>0</c>（不是"余额为零"，是"没有答案"），
+    /// 呈现端应据本标志隐藏余额列而不是显示 0。
+    /// 为 false 时三者语义与未筛选时完全一致。
+    /// </remarks>
+    public bool IsFiltered { get; set; }
+
+    /// <summary>期初余额（有符号：借方为正）。<see cref="IsFiltered"/> 为 true 时恒为 0 且不适用</summary>
     public decimal OpeningBalance { get; set; }
 
-    /// <summary>期末余额（有符号：借方为正）</summary>
+    /// <summary>期末余额（有符号：借方为正）。<see cref="IsFiltered"/> 为 true 时恒为 0 且不适用</summary>
     public decimal ClosingBalance { get; set; }
 
     public IPagedList<GeneralLedgerLineDto> Lines { get; set; } = null!;
@@ -125,7 +181,8 @@ public class GeneralLedgerLineDto
 
     /// <summary>
     /// 运行余额（有符号：借方为正；= 期初余额 + 截至本行的期间借贷净额。
-    /// 跨页连续：第 N 页起点 = 期初余额 + 页首之前所有行的净额）
+    /// 跨页连续：第 N 页起点 = 期初余额 + 页首之前所有行的净额）。
+    /// <see cref="GeneralLedgerReportDto.IsFiltered"/> 为 true 时恒为 0 且不适用
     /// </summary>
     public decimal RunningBalance { get; set; }
 }

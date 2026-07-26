@@ -459,7 +459,7 @@ public class RestoreWorkflowVersionRequestDto
 }
 
 /// <summary>
-/// 工作流中断信息 DTO — 描述等待中的中断
+/// 工作流中断信息 DTO - 描述等待中的中断
 /// </summary>
 [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
 public class WorkflowInterruptDto

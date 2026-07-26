@@ -4,7 +4,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// 中间件管道集成测试 — 验证跨中间件协作行为
+/// 中间件管道集成测试 - 验证跨中间件协作行为
 /// </summary>
 public class MiddlewarePipelineIntegrationTests
 {
@@ -128,7 +128,7 @@ public class MiddlewarePipelineIntegrationTests
 
             services.AddSingleton(_quotaServiceMock.Object);
             services.AddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
-            // Budget service mock — always allow
+            // Budget service mock - always allow
             var budgetMock = new Mock<IBudgetService>();
             budgetMock.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new BudgetCheckResult { IsAllowed = true, Status = BudgetStatus.WithinBudget });
@@ -376,7 +376,7 @@ public class MiddlewarePipelineIntegrationTests
 
             var request = CreateRequest("What's the weather?");
 
-            // Act — 执行第一次（tool call + final response）
+            // Act - 执行第一次（tool call + final response）
             var result1 = await Runtime.RunAsync(request);
 
             // LoopDetection 在 After 阶段基于 context.Messages 中最后的 assistant tool call 检测
@@ -434,7 +434,7 @@ public class MiddlewarePipelineIntegrationTests
     #region 5. Middleware Ordering
 
     /// <summary>
-    /// 测试中间件执行顺序 — 验证 Quota 在 History 之前执行，ToolGuardrail 仍位于工具恢复前
+    /// 测试中间件执行顺序 - 验证 Quota 在 History 之前执行，ToolGuardrail 仍位于工具恢复前
     /// </summary>
     public class MiddlewareOrderingTests : AiIntegrationTestBase
     {
@@ -548,7 +548,7 @@ public class MiddlewarePipelineIntegrationTests
 
             services.AddSingleton(_quotaServiceMock.Object);
             services.AddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
-            // Budget service mock — always allow
+            // Budget service mock - always allow
             var budgetMock = new Mock<IBudgetService>();
             budgetMock.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new BudgetCheckResult { IsAllowed = true, Status = BudgetStatus.WithinBudget });

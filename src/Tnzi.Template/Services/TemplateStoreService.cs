@@ -192,7 +192,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         request.MapTo(existing);
         // Service-managed revision counter: bumped on every successful update
         // so consumers can detect concurrent edits. Intentionally NOT part of
-        // UpdateTemplateRequest — callers cannot overwrite it.
+        // UpdateTemplateRequest - callers cannot overwrite it.
         existing.Version++;
         await _repository.UpdateAsync(existing, cancellationToken);
         LogInformation("Template updated: {TemplateName}, Module: {Module}, Category: {Category}, Version: {Version}", existing.TemplateName, existing.Module, existing.Category, existing.Version);
@@ -306,7 +306,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         }
 
         var fileItems = await ScanFileSystemTemplatesAsync(request, cancellationToken);
-        // De-duplicate by (Module, Category, TemplateName) — DB wins because
+        // De-duplicate by (Module, Category, TemplateName) - DB wins because
         // those rows are editable and represent the canonical override.
         var seen = new HashSet<string>(
             dbItems.Select(d => $"{d.Module}::{d.Category}::{d.TemplateName}"),
@@ -338,7 +338,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
     ///
     /// File-source rows also surface `SubjectTemplate` + `ContentTemplate`
     /// inline (via <see cref="TemplateFileParser"/>) so the admin view
-    /// modal can render the template body without a follow-up call —
+    /// modal can render the template body without a follow-up call -
     /// file-source rows have no DB id so they can't be hydrated via
     /// `getById`. Template count is bounded by how many .cshtml files
     /// the host ships, so reading them all on list is acceptable.
@@ -381,7 +381,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
                     var fi = new FileInfo(path);
                     // Read the actual template content so the admin view modal
                     // can render Subject + Content fields. Parser returns null
-                    // for files without YAML frontmatter — we fall back to
+                    // for files without YAML frontmatter - we fall back to
                     // the raw file content in that case.
                     string? subjectTemplate = null;
                     string? contentTemplate = null;

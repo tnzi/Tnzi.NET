@@ -1,71 +1,50 @@
+using Tnzi.Identity.Entities;
 using Tnzi.Identity.Events;
 using Tnzi.Identity.Events.Handlers;
-using Tnzi.Services;
+using Tnzi.Identity.Services;
 
 namespace Tnzi.Identity.Tests;
 
 /// <summary>
-/// UserLoggedInEventHandler 测试 — 会话创建时从 UserAgent 解析 DeviceInfo
-/// （供 Sessions 统计 Top device 聚合），解析器缺失或 UA 为空时回退 null。
+/// UserLoggedInEventHandler 测试 —— 处理器现在只负责登录日志记录。
+/// 会话创建已移至同步路径（LoginSessionCoordinator），因为会话ID要在签发令牌前拿到
+/// 写入 session_id claim 并绑定刷新令牌；处理器不再触碰会话服务。
 /// </summary>
 public class UserLoggedInEventHandlerTests
 {
-    private const string ChromeWindowsUa =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
-
-    private readonly Mock<ISessionService> _sessionServiceMock;
-
-    public UserLoggedInEventHandlerTests()
-    {
-        _sessionServiceMock = new Mock<ISessionService>();
-        _sessionServiceMock
-            .Setup(s => s.CreateSessionAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
-            .ReturnsAsync(Guid.NewGuid());
-    }
-
-    private static UserLoggedInEvent CreateEvent(string? userAgent) => new()
+    private static UserLoggedInEvent CreateEvent() => new()
     {
         UserId = Guid.NewGuid(),
         UserName = "tester",
         LoginTime = DateTime.UtcNow,
         IpAddress = "127.0.0.1",
-        UserAgent = userAgent
+        UserAgent = "Test Browser"
     };
 
     [Fact]
-    public async Task HandleAsync_WithParser_DerivesDeviceInfoFromUserAgent()
+    public async Task HandleAsync_WritesSuccessLoginLog()
     {
-        var handler = new UserLoggedInEventHandler(
-            sessionService: _sessionServiceMock.Object,
-            userAgentParser: new UserAgentParserService());
+        var logMock = new Mock<ILoginLogInternalService>();
+        var handler = new UserLoggedInEventHandler(logMock.Object);
+        var @event = CreateEvent();
 
-        await handler.HandleAsync(CreateEvent(ChromeWindowsUa));
+        await handler.HandleAsync(@event);
 
-        _sessionServiceMock.Verify(s => s.CreateSessionAsync(
-            It.IsAny<Guid>(), "Chrome on Windows", "127.0.0.1", ChromeWindowsUa), Times.Once);
+        logMock.Verify(x => x.LogAsync(
+            @event.UserId,
+            @event.UserName,
+            @event.IpAddress,
+            @event.UserAgent,
+            Tnzi.Identity.Entities.LoginStatus.Success,
+            null), Times.Once);
     }
 
     [Fact]
-    public async Task HandleAsync_WithoutParser_PassesNullDeviceInfo()
+    public async Task HandleAsync_WithoutLogService_DoesNotThrow()
     {
-        var handler = new UserLoggedInEventHandler(sessionService: _sessionServiceMock.Object);
+        var handler = new UserLoggedInEventHandler();
 
-        await handler.HandleAsync(CreateEvent(ChromeWindowsUa));
-
-        _sessionServiceMock.Verify(s => s.CreateSessionAsync(
-            It.IsAny<Guid>(), null, "127.0.0.1", ChromeWindowsUa), Times.Once);
-    }
-
-    [Fact]
-    public async Task HandleAsync_WithBlankUserAgent_PassesNullDeviceInfo()
-    {
-        var handler = new UserLoggedInEventHandler(
-            sessionService: _sessionServiceMock.Object,
-            userAgentParser: new UserAgentParserService());
-
-        await handler.HandleAsync(CreateEvent("   "));
-
-        _sessionServiceMock.Verify(s => s.CreateSessionAsync(
-            It.IsAny<Guid>(), null, "127.0.0.1", "   "), Times.Once);
+        // No log service registered → handler is a no-op, must not throw.
+        await handler.HandleAsync(CreateEvent());
     }
 }

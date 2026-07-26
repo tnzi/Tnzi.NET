@@ -60,6 +60,10 @@ public class StorageModule : TnziApplicationModule
             return StorageProviderFactory.Create(ctx);
         });
 
+        // 文件访问策略。TryAdd:消费方可注册自己的实现整体替换默认的
+        // "归属 + 权限码 + 显式公开" 策略。
+        services.TryAddScoped<IFileAccessAuthorizer, FileAccessAuthorizer>();
+
         // 注册文件存储服务
         services.AddScoped<IFileStorageService, FileStorageService>();
 

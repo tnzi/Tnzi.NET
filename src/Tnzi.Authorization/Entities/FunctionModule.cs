@@ -34,7 +34,7 @@ public class FunctionModule : FullAuditedEntity<Guid>
     /// True when this row is owned by code (an
     /// <see cref="Permissions.IPermissionDefinitionProvider"/> registered it
     /// at startup). System-managed rows are protected from rename/delete
-    /// through the admin UI — only the declaring module can change them.
+    /// through the admin UI - only the declaring module can change them.
     /// </summary>
     /// <remarks>
     /// User-created rows have this flag <c>false</c>. Admin can freely edit

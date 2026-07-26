@@ -1,5 +1,5 @@
 /**
- * useAutoScroll — Stick-to-bottom behavior for chat containers
+ * useAutoScroll - Stick-to-bottom behavior for chat containers
  *
  * Automatically scrolls to bottom when new content appears, unless the user
  * has scrolled up. Re-attaches when user scrolls back to bottom.
@@ -37,6 +37,11 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
 
   let observer: MutationObserver | null = null;
   let rafId: number | null = null;
+  /* The element is captured at setup time rather than re-read from
+     `containerRef` during cleanup: Vue nulls template refs before
+     onUnmounted runs, so reading the ref there would skip
+     removeEventListener entirely and leak the scroll handler. */
+  let attachedEl: HTMLElement | null = null;
 
   function checkIsAtBottom(): boolean {
     const el = containerRef.value;
@@ -70,6 +75,7 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
     const el = containerRef.value;
     if (!el) return;
 
+    attachedEl = el;
     el.addEventListener('scroll', handleScroll, { passive: true });
 
     observer = new MutationObserver(handleMutation);
@@ -77,9 +83,9 @@ export function useAutoScroll(options: UseAutoScrollOptions = {}): UseAutoScroll
   }
 
   function cleanup(): void {
-    const el = containerRef.value;
-    if (el) {
-      el.removeEventListener('scroll', handleScroll);
+    if (attachedEl) {
+      attachedEl.removeEventListener('scroll', handleScroll);
+      attachedEl = null;
     }
     if (observer) {
       observer.disconnect();

@@ -3,7 +3,7 @@ using SmartReader;
 namespace Tnzi.AI.Infrastructure.Readability;
 
 /// <summary>
-/// 基于 SmartReader 的可读性提取器 — Mozilla Readability 的 .NET 实现
+/// 基于 SmartReader 的可读性提取器 - Mozilla Readability 的 .NET 实现
 /// </summary>
 public partial class SmartReaderExtractor : IReadabilityExtractor
 {

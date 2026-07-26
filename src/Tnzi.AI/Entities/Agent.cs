@@ -91,13 +91,15 @@ public class Agent : MultiTenantAuditedEntity<Guid>
     /// <summary>YAML 定义文件的 SHA256 哈希（用于变更检测）</summary>
     public string? DefinitionHash { get; set; }
 
-    // === 人格关联 ===
+    // === 人格（Soul）===
 
-    /// <summary>关联的人格 ID（可选）</summary>
-    public Guid? PersonaId { get; set; }
-
-    /// <summary>关联的人格</summary>
-    public virtual AgentPersona? Persona { get; set; }
+    /// <summary>
+    /// 人格内容（Markdown 格式的 Soul 描述，可选）。内联在 Agent 上——
+    /// <see cref="Middleware.ContextInjectionMiddleware"/> 直接注入 &lt;soul&gt; 块。
+    /// 与 <see cref="Instructions"/> 对称（同为 Agent 自有的提示词文本），
+    /// 不再是指向共享人格池的外键。需要跨 Agent 复用人格库的消费应用自行实现。
+    /// </summary>
+    public string? Persona { get; set; }
 
     // === 资源关联 ===
     // 工具组/技能/知识库的分配现在由 junction grant 实体（AgentToolGrant/AgentSkillGrant/

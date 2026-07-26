@@ -1,7 +1,7 @@
 /**
  * @tnzi/mobile/stores/user
  *
- * User store — thin Pinia wrapper delegating to core UserStateManager.
+ * User store - thin Pinia wrapper delegating to core UserStateManager.
  * All business logic lives in UserStateManager; this store only proxies reactive state.
  */
 

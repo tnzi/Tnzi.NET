@@ -95,6 +95,47 @@ public class UnitOfWorkManagerNestedTests : IDisposable
     }
 
     [Fact]
+    public async Task SequentialTransactions_InSameScope_BothPersist()
+    {
+        // 回归：同一 DI 作用域内**顺序**发生的两个独立事务。工作单元实例在作用域内复用，
+        // 第一个事务提交后留下的 _hasCommitted 标志曾让第二次 CommitTransactionAsync
+        // 直接早退——不 SaveChanges、不提交、不抛异常，第二段写入被静默丢弃。
+        // 现实触发路径：一个服务顺序调用两个各自带事务的服务
+        // （银行流水的「建单据 → 过账 → 确认匹配」）。
+        _manager.EnableTransaction();
+        _dbContext.Users.Add(new TestUser { UserName = "seq-1", Email = "s1@t.test" });
+        await _manager.CommitTransactionAsync();
+        Assert.Equal(0, _manager.TransactionDepth);
+
+        _manager.EnableTransaction();
+        _dbContext.Users.Add(new TestUser { UserName = "seq-2", Email = "s2@t.test" });
+        await _manager.CommitTransactionAsync();
+
+        _dbContext.ChangeTracker.Clear();
+        Assert.NotNull(await _dbContext.Users.FirstOrDefaultAsync(u => u.UserName == "seq-1"));
+        Assert.NotNull(await _dbContext.Users.FirstOrDefaultAsync(u => u.UserName == "seq-2"));
+        Assert.Equal(0, _manager.TransactionDepth);
+    }
+
+    [Fact]
+    public async Task SecondTransaction_AfterCommittedFirst_CanStillRollBack()
+    {
+        // 同一毒化标志也让 RollbackTransactionAsync 早退：第一个事务提交后，
+        // 第二个事务变得既提交不了也回滚不了。
+        _manager.EnableTransaction();
+        _dbContext.Users.Add(new TestUser { UserName = "keep-me", Email = "k@t.test" });
+        await _manager.CommitTransactionAsync();
+
+        _manager.EnableTransaction();
+        _dbContext.Users.Add(new TestUser { UserName = "discard-me", Email = "d@t.test" });
+        await _manager.RollbackTransactionAsync();
+
+        _dbContext.ChangeTracker.Clear();
+        Assert.NotNull(await _dbContext.Users.FirstOrDefaultAsync(u => u.UserName == "keep-me"));
+        Assert.Null(await _dbContext.Users.FirstOrDefaultAsync(u => u.UserName == "discard-me"));
+    }
+
+    [Fact]
     public async Task CommitAtEachLevel_ShouldOnlyCommitPhysicallyAtOutermost()
     {
         _manager.EnableTransaction();

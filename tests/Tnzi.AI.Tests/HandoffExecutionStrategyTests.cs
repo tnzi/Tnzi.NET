@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// HandoffExecutionStrategy 单元测试 — 验证 Agent 转接编排
+/// HandoffExecutionStrategy 单元测试 - 验证 Agent 转接编排
 /// </summary>
 public class HandoffExecutionStrategyTests
 {
@@ -202,7 +202,7 @@ public class HandoffExecutionStrategyTests
     }
 
     // ------------------------------------------------------------------
-    // Helper — create AgentExecutor that triggers transfer_to_agent
+    // Helper - create AgentExecutor that triggers transfer_to_agent
     // ------------------------------------------------------------------
 
     /// <summary>
@@ -363,7 +363,7 @@ public class HandoffExecutionStrategyTests
 
         var result = await strategy.ExecuteAsync(agentA, messages, context, CancellationToken.None);
 
-        // Target not found — strategy should return current agent's last response
+        // Target not found - strategy should return current agent's last response
         result.FinalAgentName.ShouldBe("AgentA");
         result.HandoffPath.ShouldNotBeNull();
         result.HandoffPath.ShouldContain("AgentA");
@@ -426,7 +426,7 @@ public class HandoffExecutionStrategyTests
 
         var result = await strategy.ExecuteAsync(agentA, messages, context, CancellationToken.None);
 
-        // Target not in allowed list — source agent's response is returned
+        // Target not in allowed list - source agent's response is returned
         result.FinalAgentName.ShouldBe("AgentA");
         var handoffPath = result.HandoffPath;
         handoffPath.ShouldNotBeNull();
@@ -440,7 +440,7 @@ public class HandoffExecutionStrategyTests
         var agentBId = Guid.NewGuid();
         var agentAId = Guid.NewGuid();
 
-        // MaxHandoffs=3: AgentA hands off to AgentB each hop — factory creates a fresh agent per call
+        // MaxHandoffs=3: AgentA hands off to AgentB each hop - factory creates a fresh agent per call
         var config = new HandoffConfiguration
         {
             Targets = new Dictionary<string, Guid> { ["AgentB"] = agentBId },
@@ -611,7 +611,7 @@ public class HandoffExecutionStrategyTests
     [Fact]
     public async Task ExecuteAsync_HandoffToSelf_NotInTargets_RemainsAtSource()
     {
-        // AgentA tries to hand off to itself (not in targets) — should remain at AgentA
+        // AgentA tries to hand off to itself (not in targets) - should remain at AgentA
         var config = new HandoffConfiguration
         {
             Targets = new Dictionary<string, Guid> { ["AgentB"] = Guid.NewGuid() },

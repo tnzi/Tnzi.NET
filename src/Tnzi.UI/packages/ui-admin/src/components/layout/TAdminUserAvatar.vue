@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * `TAdminUserAvatar` — header user avatar + dropdown.
+ * `TAdminUserAvatar` - header user avatar + dropdown.
  *
  * Mirrors `soybean-admin-example/src/layouts/modules/global-header/components/user-avatar.vue`:
  * shows the user's display name next to an avatar icon, with a click
  * dropdown for "User Center" / "Logout".
  *
  * The component is intentionally stateless about *which* auth store it
- * reads — consumers pass `userName` and `onLogout` (and optionally
+ * reads - consumers pass `userName` and `onLogout` (and optionally
  * `onUserCenter`) as props. `AdminShellRoot` wires the defaults from
  * `useAdminLoginConfig().userMenu` so the common case (Acme et al.)
  * is one-config-line away.
@@ -25,7 +25,7 @@ interface Props {
   userName?: string
   /**
    * Resolved avatar image URL. When present (and it loads) the header shows
-   * the real picture; on a load error — or when absent — it falls back to the
+   * the real picture; on a load error - or when absent - it falls back to the
    * name initial, then to `avatarIcon`. Resolve via `resolveAvatarUrl()` in
    * the container so this component stays stateless about storage/DTO shapes.
    */
@@ -50,7 +50,7 @@ interface Props {
   presence?: UserPresenceStatus | null
   /** Called when the user picks a new presence status from the dropdown. */
   onSetPresence?: (status: UserPresenceStatus) => void | Promise<void>
-  /** Deployment toggle — false drops "Invisible" from the status submenu. */
+  /** Deployment toggle - false drops "Invisible" from the status submenu. */
   allowInvisible?: boolean
 }
 
@@ -135,7 +135,7 @@ const options = computed<DropdownOption[]>(() => {
 function handleSelect(key: string | number): void {
   if (typeof key === 'string' && key.startsWith('presence:')) {
     // UserPresenceStatus is now a string enum (member name = value), so the
-    // dropdown key is `presence:Online` etc — slice off the prefix, don't Number() it.
+    // dropdown key is `presence:Online` etc - slice off the prefix, don't Number() it.
     const status = key.slice('presence:'.length) as UserPresenceStatus
     void props.onSetPresence?.(status)
     return
@@ -157,7 +157,7 @@ function confirmLogout(): void {
     negativeText: t('admin.common.cancel', 'Cancel'),
     // Force the confirm button onto the theme's PRIMARY colour. A naive
     // `dialog.info` otherwise colours its positive button with the `info`
-    // semantic (a fixed blue, `palettes.info` — independent of `primaryColor`),
+    // semantic (a fixed blue, `palettes.info` - independent of `primaryColor`),
     // so the button stayed blue no matter what primary the admin themed. The
     // info icon stays as the neutral question indicator.
     positiveButtonProps: { type: 'primary' },
@@ -217,7 +217,7 @@ function confirmLogout(): void {
 .t-admin-user-avatar:hover {
   background-color: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.06);
 }
-/* Presence dot rendered in TAvatar's #badge slot — border matches the header
+/* Presence dot rendered in TAvatar's #badge slot - border matches the header
    surface so the dot reads as an overlay badge. */
 .t-admin-user-avatar__dot {
   border-color: var(--tnzi-container-bg, #fff);

@@ -249,4 +249,113 @@ describe('useChat', () => {
     chat.setStreaming(false);
     expect(chat.isStreaming.value).toBe(false);
   });
+  // -------------------------------------------------------------------------
+  // Regressions
+  // -------------------------------------------------------------------------
+
+  it('merges several same-frame updates for one message instead of keeping only the last', async () => {
+    const chat = useChat();
+    chat.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: 'hi',
+      createdAt: '2026-01-01T00:00:00Z',
+      isStreaming: true,
+    });
+
+    // Streaming routinely emits status then usage inside a single frame; the
+    // old single-slot buffer dropped everything but the final call.
+    chat.updateMessage('a1', { status: 'done' });
+    chat.updateMessage('a1', {
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        totalTokens: 3,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+      },
+    });
+
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(chat.messages.value[0]?.status).toBe('done');
+    expect(chat.messages.value[0]?.usage?.totalTokens).toBe(3);
+  });
+
+  it('applies same-frame updates to two different messages', async () => {
+    const chat = useChat();
+    chat.addMessage({ id: 'm1', role: 'assistant', content: '', createdAt: 'x' });
+    chat.addMessage({ id: 'm2', role: 'assistant', content: '', createdAt: 'x' });
+
+    chat.updateMessage('m1', { content: 'first' });
+    chat.updateMessage('m2', { content: 'second' });
+
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    expect(chat.messages.value[0]?.content).toBe('first');
+    expect(chat.messages.value[1]?.content).toBe('second');
+  });
+
+  it('exposes an AbortSignal for the in-flight turn', () => {
+    const chat = useChat();
+    expect(chat.signal.value).toBeNull();
+
+    chat.send('Hello');
+    const signal = chat.signal.value;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
+  });
+
+  it('aborts the exposed signal on abort()', () => {
+    const chat = useChat();
+    chat.send('Hello');
+    const signal = chat.signal.value;
+
+    chat.abort();
+    expect(signal?.aborted).toBe(true);
+    expect(chat.signal.value).toBeNull();
+  });
+
+  it('aborts the exposed signal on dispose()', () => {
+    const chat = useChat();
+    chat.send('Hello');
+    const signal = chat.signal.value;
+
+    chat.dispose();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('aborts the exposed signal when the thread is cleared or reloaded', () => {
+    const chat = useChat();
+    chat.send('Hello');
+    const first = chat.signal.value;
+    chat.clearThread();
+    expect(first?.aborted).toBe(true);
+
+    chat.send('Again');
+    const second = chat.signal.value;
+    chat.loadThread('t1', []);
+    expect(second?.aborted).toBe(true);
+  });
+
+  it('records errors and notifies onError', () => {
+    const onError = vi.fn();
+    const chat = useChat({ onError });
+    const err = new Error('stream failed');
+
+    chat.setError(err);
+    expect(chat.error.value).toBe(err);
+    expect(onError).toHaveBeenCalledWith(err);
+
+    chat.setError(null);
+    expect(chat.error.value).toBeNull();
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps new assistant placeholders with the current agent name', () => {
+    const chat = useChat();
+    chat.setAgentName('Researcher');
+    expect(chat.currentAgentName.value).toBe('Researcher');
+
+    chat.send('Hello');
+    expect(chat.messages.value[1]?.agentName).toBe('Researcher');
+  });
 });

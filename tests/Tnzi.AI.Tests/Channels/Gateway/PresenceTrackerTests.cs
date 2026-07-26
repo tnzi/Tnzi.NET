@@ -102,7 +102,7 @@ public class PresenceTrackerTests
     [Fact]
     public void GetConnections_ThreadSafe()
     {
-        // Act — add 100 connections in parallel
+        // Act - add 100 connections in parallel
         Parallel.For(0, 100, i =>
         {
             _tracker.TrackConnection(CreateConnection($"conn-{i}"));

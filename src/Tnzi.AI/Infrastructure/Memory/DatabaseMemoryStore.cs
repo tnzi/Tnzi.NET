@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Memory;
 
 /// <summary>
-/// 数据库记忆存储 — 使用 EF Core 持久化记忆
+/// 数据库记忆存储 - 使用 EF Core 持久化记忆
 /// </summary>
 /// <remarks>
 /// 支持混合搜索模式：当 IEmbeddingService 可用时，使用 70% 向量相似度 + 30% 关键词匹配的融合评分；
@@ -738,7 +738,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
     private static partial Regex WhitespaceCollapseRegex();
 
     /// <summary>
-    /// 正规化内容用于去重比较 — 折叠空白字符
+    /// 正规化内容用于去重比较 - 折叠空白字符
     /// </summary>
     public static string NormalizeForDedup(string? content)
     {

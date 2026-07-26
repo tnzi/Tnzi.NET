@@ -1,8 +1,8 @@
 namespace Tnzi.AI.Skills.Entities;
 
 /// <summary>
-/// 技能实体 — 存储租户级和用户级自定义技能。
-/// 不使用 MultiTenantAuditedEntity 以避免全局多租户查询过滤器干扰 —
+/// 技能实体 - 存储租户级和用户级自定义技能。
+/// 不使用 MultiTenantAuditedEntity 以避免全局多租户查询过滤器干扰 -
 /// 技能需要同时支持 Tenant scope（按 TenantId 过滤）和 User scope（按 OwnerUserId 过滤），
 /// DatabaseSkillStore 已有显式联合过滤逻辑。
 /// </summary>
@@ -65,7 +65,7 @@ public class SkillEntity : FullAuditedEntity<Guid>, IScopedResource
     public DateTime? LastActivatedAt { get; set; }
 
     /// <summary>
-    /// <see cref="IScopedResource.Scope"/> 的显式实现 — 把领域 <see cref="SkillScope"/>
+    /// <see cref="IScopedResource.Scope"/> 的显式实现 - 把领域 <see cref="SkillScope"/>
     /// 投影为框架统一的 <see cref="ResourceScope"/>（两者底层值一致: System=0/Tenant=1/User=2）。
     /// 仅为标记接口提供契约视图，非 EF 映射属性（不生成数据库列），持久化仍走 <see cref="Scope"/>。
     /// </summary>

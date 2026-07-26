@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -6,8 +7,7 @@ import {
   type BankTransactionDto,
 } from '../../services/bridges/finance-bridge'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { amountCell, fmtMoney } from './money'
-import { formatDateOnly } from '@tnzi/core'
+import { amountCell, fmtMoney, fmtDate } from './money'
 
 /** All-optional row shape (house pattern) so ColumnDef stays assignable. */
 export type BankTransactionRow = Partial<BankTransactionDto>
@@ -28,22 +28,22 @@ function amountCellFor(r: BankTransactionRow) {
 
 /** Suggestion badge: match rule + confidence percentage (only for suggested rows). */
 function suggestionCell(t: (key: string) => string, r: BankTransactionRow) {
-  if (!r.suggestedJournalLineId || !r.matchRule) return '—'
+  if (!r.suggestedJournalLineId || !r.matchRule) return EMPTY_DASH
   const confidence = r.matchConfidence != null ? ` ${Math.round(r.matchConfidence * 100)}%` : ''
   return h(TStatusBadge, { value: r.matchRule, type: 'info', label: `${r.matchRule}${confidence}` })
 }
 
 export function buildBankTransactionColumns(t: (key: string) => string): ColumnDef<BankTransactionRow>[] {
   return [
-    { key: 'txnDate', title: t('columns.date'), width: 110, render: (r) => formatDateOnly(r.txnDate, { utc: true }) },
+    { key: 'txnDate', title: t('columns.date'), width: 110, render: (r) => fmtDate(r.txnDate) },
     {
       key: 'description',
       title: t('columns.description'),
       minWidth: 200,
       primary: true,
-      render: (r) => r.description ?? r.payee ?? '—',
+      render: (r) => r.description ?? r.payee ?? EMPTY_DASH,
     },
-    { key: 'reference', title: t('columns.reference'), minWidth: 120, mobileHidden: true, render: (r) => r.reference ?? '—' },
+    { key: 'reference', title: t('columns.reference'), minWidth: 120, mobileHidden: true, render: (r) => r.reference ?? EMPTY_DASH },
     { key: 'amount', title: t('columns.amount'), width: 140, render: (r) => amountCellFor(r) },
     {
       key: 'status',
@@ -77,7 +77,7 @@ export const csvParseFormSchema: FormSchemaItem[] = [
 /**
  * Which column is which. Values stay 0-based indexes on the wire (that is what
  * `CsvMappingDto` carries), but they are picked BY NAME from the previewed
- * header row — the `finance-csv-column` renderer supplies the options.
+ * header row - the `finance-csv-column` renderer supplies the options.
  *
  * Use a single signed `amountColumn` OR the `debitColumn` + `creditColumn` pair;
  * `guessColumns` resolves which shape a file uses. The page persists the last

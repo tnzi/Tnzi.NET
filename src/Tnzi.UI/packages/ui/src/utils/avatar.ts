@@ -1,5 +1,5 @@
 /**
- * Avatar helpers — deterministic colour + initial derivation shared by
+ * Avatar helpers - deterministic colour + initial derivation shared by
  * `TAvatar` and any consumer that needs to render an identity glyph without
  * the full component (e.g. inside a naive-ui `render` function).
  *

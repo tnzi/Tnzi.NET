@@ -1,5 +1,5 @@
 /**
- * Tool Permission API wrappers — session-rule inspection, evaluation debugging,
+ * Tool Permission API wrappers - session-rule inspection, evaluation debugging,
  * and persisted-rule CRUD.
  *
  * Mirrors `Tnzi.AI/Controllers/Admin/DefaultPermissionAdminController` (route
@@ -14,19 +14,27 @@ import type { HttpClient } from '../../http/http';
 // Enums (mirror backend Tnzi.AI.Security)
 // ---------------------------------------------------------------------------
 
-/** Permission decision behavior (no explicit values on the C# enum: Allow=0, Ask=1, Deny=2). */
+/**
+ * Permission decision behavior. String enum (member name = value): the backend
+ * registers a global `JsonStringEnumConverter`, so `PermissionRuleItemDto.behavior`
+ * and `PermissionEvaluateResultDto.behavior` arrive as PascalCase names.
+ * Backend: `Tnzi.AI/Security/ToolPermissionDecision.cs`.
+ */
 export enum PermissionBehavior {
-  Allow = 0,
-  Ask = 1,
-  Deny = 2,
+  Allow = 'Allow',
+  Ask = 'Ask',
+  Deny = 'Deny',
 }
 
-/** Permission rule source scope (conflict resolution weight: Session > User > Project > System). */
+/**
+ * Permission rule source scope (conflict resolution weight: Session > User >
+ * Project > System). String enum - same wire contract as {@link PermissionBehavior}.
+ */
 export enum ToolPermissionScope {
-  System = 0,
-  Project = 1,
-  User = 2,
-  Session = 3,
+  System = 'System',
+  Project = 'Project',
+  User = 'User',
+  Session = 'Session',
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +67,7 @@ export interface PermissionRulesDto {
   sessionRules: PermissionRuleItemDto[];
 }
 
-/** Evaluation test request — supplies a context and returns the matched decision (debug). */
+/** Evaluation test request - supplies a context and returns the matched decision (debug). */
 export interface PermissionEvaluateRequestDto {
   toolName?: string | null;
   toolGroup?: string | null;
@@ -77,7 +85,7 @@ export interface PermissionEvaluateRequestDto {
   arguments?: Record<string, unknown> | null;
 }
 
-/** Evaluation result — the decision that would be taken for the supplied context. */
+/** Evaluation result - the decision that would be taken for the supplied context. */
 export interface PermissionEvaluateResultDto {
   toolName: string;
   behavior: PermissionBehavior;

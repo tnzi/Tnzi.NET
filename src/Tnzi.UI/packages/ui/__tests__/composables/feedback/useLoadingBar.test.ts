@@ -22,10 +22,10 @@ describe('useLoadingBar', () => {
     start()
     expect(visible.value).toBe(true)
     expect(progress.value).toBe(0)
-    // Tick once — progress should advance but not immediately overshoot
+    // Tick once - progress should advance but not immediately overshoot
     vi.advanceTimersByTime(200)
     expect(progress.value).toBeGreaterThan(0)
-    // Saturate — each tick guards "if progress < 90", so once past 90 no further growth
+    // Saturate - each tick guards "if progress < 90", so once past 90 no further growth
     for (let i = 0; i < 50; i++) vi.advanceTimersByTime(200)
     // Invariant: growth halted near 90 (not exact because last tick can cross threshold)
     const saturated = progress.value
@@ -34,7 +34,7 @@ describe('useLoadingBar', () => {
     rand.mockRestore()
   })
 
-  it('start() is idempotent — calling again clears prior timer and resets progress', () => {
+  it('start() is idempotent - calling again clears prior timer and resets progress', () => {
     const { progress, start } = useLoadingBar()
     start()
     vi.advanceTimersByTime(400)

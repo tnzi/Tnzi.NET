@@ -1,5 +1,4 @@
-using System.IO;
-using PdfSharp;
+﻿using PdfSharp;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 
@@ -45,7 +44,7 @@ public class PdfSharpCheckRenderer : ICheckDocumentRenderer
 
             for (var i = 0; i < request.Checks.Count; i += perPage)
             {
-                var page = NewPage(document, request);
+                var page = NewPage(document);
                 using var gfx = XGraphics.FromPdfPage(page);
                 ApplyOffset(gfx, request);
 
@@ -85,7 +84,7 @@ public class PdfSharpCheckRenderer : ICheckDocumentRenderer
         try
         {
             using var document = new PdfDocument();
-            var page = NewPage(document, request);
+            var page = NewPage(document);
             using var gfx = XGraphics.FromPdfPage(page);
             ApplyOffset(gfx, request);
 
@@ -138,7 +137,8 @@ public class PdfSharpCheckRenderer : ICheckDocumentRenderer
     private static Result<byte[]> NoFontFailure()
         => Result<byte[]>.Failure("No system sans font is available for check rendering. Install a TrueType font or configure a font path.", 500);
 
-    private static PdfPage NewPage(PdfDocument document, CheckRenderRequest request)
+    /// <summary>新建一页（版式与偏移不改变纸张：一律 US Letter，偏移经 <see cref="ApplyOffset"/> 平移）。</summary>
+    private static PdfPage NewPage(PdfDocument document)
     {
         var page = document.AddPage();
         page.Size = PageSize.Letter;

@@ -18,7 +18,7 @@ public class UserSessionDto
     public Guid UserId { get; set; }
 
     /// <summary>
-    /// 用户名 — 全局会话列表（GetSessionsAsync）批量关联用户表填充；
+    /// 用户名 - 全局会话列表（GetSessionsAsync）批量关联用户表填充；
     /// 按用户查询的旧路径（GetUserSessionsAsync）不填充（调用方已知用户）。
     /// </summary>
     public string? UserName { get; set; }
@@ -49,6 +49,11 @@ public class UserSessionDto
     public DateTime LastActivityTime { get; set; }
 
     /// <summary>
+    /// 会话硬过期时间（到期后不计入并发数、令牌校验/刷新拒绝）。null 表示不过期（遗留会话）。
+    /// </summary>
+    public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>
     /// 是否已撤销
     /// </summary>
     public bool IsRevoked { get; set; }
@@ -60,12 +65,12 @@ public class UserSessionDto
 }
 
 /// <summary>
-/// 会话分页查询 DTO — userId 可选；不传时分页列出全部会话（按最后活动时间倒序）
+/// 会话分页查询 DTO - userId 可选；不传时分页列出全部会话（按最后活动时间倒序）
 /// </summary>
 public class SessionQueryDto : PagedQueryDto
 {
     /// <summary>
-    /// 用户ID（可选）— 传入时仅返回该用户的会话
+    /// 用户ID（可选）- 传入时仅返回该用户的会话
     /// </summary>
     public Guid? UserId { get; set; }
 
@@ -113,7 +118,7 @@ public class DeviceStatItem
 }
 
 /// <summary>
-/// 活跃用户摘要 DTO — 用于会话管理页面的"活跃用户"下拉，避免暴露完整 user list
+/// 活跃用户摘要 DTO - 用于会话管理页面的"活跃用户"下拉，避免暴露完整 user list
 /// </summary>
 public class ActiveUserSummaryDto
 {

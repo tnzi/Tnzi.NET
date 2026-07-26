@@ -35,14 +35,25 @@ public class DateTimeTools : IAIToolProvider
                 var tz = TimeZoneInfo.FindSystemTimeZoneById(timezone);
                 now = TimeZoneInfo.ConvertTimeFromUtc(now, tz);
             }
-            catch (TimeZoneNotFoundException)
+            catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
             {
                 // Fall back to UTC
             }
         }
 
         format ??= "yyyy-MM-dd HH:mm:ss";
-        return Task.FromResult(now.ToString(format));
+
+        // format 由 LLM 提供：非法格式串会抛 FormatException 并中断 Agent 执行流，
+        // 按工具约定返回错误文本而不是抛出。固定 InvariantCulture，避免当前请求区域
+        // 使用非公历日历（如 th-TH）导致年份错乱。
+        try
+        {
+            return Task.FromResult(now.ToString(format, CultureInfo.InvariantCulture));
+        }
+        catch (FormatException)
+        {
+            return Task.FromResult($"Invalid format string '{format}'. Use a .NET date/time format such as 'yyyy-MM-dd HH:mm:ss'.");
+        }
     }
 
     /// <summary>
@@ -58,12 +69,14 @@ public class DateTimeTools : IAIToolProvider
     {
         _logger.LogDebug("Calculating date difference between {StartDate} and {EndDate}", startDate, endDate);
 
-        if (!DateTime.TryParse(startDate, out var start))
+        // 文档约定入参是 yyyy-MM-dd，用 InvariantCulture 解析，
+        // 避免当前请求区域的日历/分隔符差异把同一字符串解析成不同日期。
+        if (!DateTime.TryParse(startDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start))
         {
             return Task.FromResult<object>(new { error = $"Invalid start date format: {startDate}" });
         }
 
-        if (!DateTime.TryParse(endDate, out var end))
+        if (!DateTime.TryParse(endDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var end))
         {
             return Task.FromResult<object>(new { error = $"Invalid end date format: {endDate}" });
         }

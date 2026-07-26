@@ -78,6 +78,8 @@ Tnzi.Settings.SettingFieldDefinition.Subsection.init -> void
 Tnzi.Settings.SettingFieldType.Duration = 8 -> Tnzi.Settings.SettingFieldType
 Tnzi.Settings.SettingDefinitionGroup.OptionsTypes.get -> System.Collections.Generic.IReadOnlyList<System.Type!>?
 Tnzi.Settings.SettingDefinitionGroup.OptionsTypes.init -> void
+Tnzi.Settings.SettingDefinitionGroup.IsBuiltIn.get -> bool
+Tnzi.Settings.SettingDefinitionGroup.IsBuiltIn.init -> void
 Tnzi.Settings.SettingFieldDefinition.Pattern.get -> string?
 Tnzi.Settings.SettingFieldDefinition.Pattern.init -> void
 Tnzi.Settings.RuntimeSettingGroupAttribute.PermissionGroup.get -> string?
@@ -179,3 +181,14 @@ Tnzi.TnziOptions.ShouldApplyMigrations(bool isProduction) -> bool
 Tnzi.TnziOptions.ShouldSeed(bool isProduction) -> bool
 Tnzi.Data.IPostMigrationStartupTask
 Tnzi.Data.IPostMigrationStartupTask.ExecuteAsync(System.IServiceProvider! serviceProvider, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_SESSION_ALREADY_ACTIVE = "IDENTITY_SESSION_ALREADY_ACTIVE" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_SESSION_LIMIT_REACHED = "IDENTITY_SESSION_LIMIT_REACHED" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_SESSION_REVOKED = "IDENTITY_SESSION_REVOKED" -> string!
+const Tnzi.Security.HashHelper.DefaultPasswordIterations = 210000 -> int
+static Tnzi.Security.HashHelper.HashPassword(string! password, int iterations = 210000) -> string!
+static Tnzi.Security.HashHelper.VerifyPassword(string! password, string? storedHash) -> bool
+Tnzi.Security.Claims.IUserDisplayNameProvider
+Tnzi.Security.Claims.IUserDisplayNameProvider.GetDisplayNamesAsync(System.Collections.Generic.IReadOnlyCollection<System.Guid>! userIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<System.Guid, string!>!>!
+static Tnzi.Utilities.CsvBuilder.Money(decimal? value, int decimals = 2) -> decimal?
+static Tnzi.Extensions.StringExtensions.HtmlToPlainText(this string? str) -> string!

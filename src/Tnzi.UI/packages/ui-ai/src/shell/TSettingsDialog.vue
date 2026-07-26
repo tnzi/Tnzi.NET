@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TSettingsDialog — two-column modal with section list + content slot.
+ * TSettingsDialog - two-column modal with section list + content slot.
  *
  * Consumer provides a section list and slots named after each section id.
- * Base component is pure chrome — no persistence, no content assumptions.
+ * Base component is pure chrome - no persistence, no content assumptions.
  */
-import { computed, toRef, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import { Icon } from '@iconify/vue'
+import { useFocusTrap } from '@tnzi/ui'
 import { useSettingsDialog, type SettingsSection } from '@/composables/useSettingsDialog'
+import { useBodyScrollLock } from '@/composables/useBodyScrollLock'
 
 const props = withDefaults(
   defineProps<{
@@ -56,15 +58,16 @@ watch(
 
 const currentSlotName = computed(() => dialog.activeSection.value)
 
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && dialog.open.value) {
-    event.preventDefault()
-    dialog.hide()
-  }
-}
+const dialogEl = ref<HTMLElement | null>(null)
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+/* Keeps Tab inside the `aria-modal` dialog, focuses its first control on open,
+   restores focus to whatever opened it on close, and owns Escape (which used
+   to be a hand-rolled window listener here). */
+useFocusTrap(dialogEl, () => dialog.open.value, {
+  onEscape: () => dialog.hide(),
+})
+
+useBodyScrollLock(() => dialog.open.value)
 </script>
 
 <template>
@@ -78,7 +81,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         :aria-label="title"
         @click.self="dialog.hide()"
       >
-        <div class="t-settings">
+        <div ref="dialogEl" class="t-settings">
           <button
             type="button"
             class="t-settings__close"

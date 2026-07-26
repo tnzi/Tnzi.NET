@@ -7,7 +7,7 @@ namespace Tnzi.Notification.Controllers.Admin;
 /// adjust any user's opt-in/out state per channel + category.
 ///
 /// This is the backend side of the Phase 3 'NotificationSubscription' admin
-/// page — the Preference entity IS the subscription model, just with a richer
+/// page - the Preference entity IS the subscription model, just with a richer
 /// name (it also carries quiet-hours and rate-limit fields).
 /// </summary>
 [DefaultController]

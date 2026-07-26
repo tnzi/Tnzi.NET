@@ -3,7 +3,7 @@ import { useRoute } from 'vue-router'
 import { useAdminTabStore, isMultiInstanceRoute, multiInstanceKey } from '../stores/useAdminTabStore'
 
 /**
- * Set the CURRENT tab's display title from a reactive source — typically the
+ * Set the CURRENT tab's display title from a reactive source - typically the
  * loaded record's name on a detail page.
  *
  * Why it exists: multi-instance detail routes (`/agents/:id`) open one tab per

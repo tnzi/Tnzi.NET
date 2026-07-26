@@ -23,7 +23,7 @@ public class ContextProvidersOptions
     /// <remarks>
     /// 当所有 ContextProvider 的注入内容总 token 超过此预算时，
     /// 后续 Provider 的注入将被跳过。设为 0 则不进行 token 限制。
-    /// 推荐范围：仅记忆/Skill 场景用 4096–8192；RAG 为主用 8192–16384；全功能场景用 16384–32768。
+    /// 推荐范围：仅记忆/Skill 场景用 4096-8192；RAG 为主用 8192-16384；全功能场景用 16384-32768。
     /// </remarks>
     public int MaxTokenBudget { get; set; } = 16_384;
 
@@ -231,7 +231,7 @@ public class MemoryOptions
     public bool EnablePiiProtection { get; set; } = true;
 
     /// <summary>
-    /// 记忆条目数阈值 — 超过此值时切换为检索式注入（索引 + SearchAsync top-K）。默认 20。
+    /// 记忆条目数阈值 - 超过此值时切换为检索式注入（索引 + SearchAsync top-K）。默认 20。
     /// </summary>
     public int RetrievalModeThreshold { get; set; } = 20;
 
@@ -404,10 +404,10 @@ public class SkillsOptions
     /// </summary>
     /// <remarks>
     /// <para>目录结构（多租户可选）：</para>
-    /// <para>  {DataPath}/skills/skill-slug/ — System scope</para>
-    /// <para>  {DataPath}/skills/tenants/{tenantId}/skill-slug/ — Tenant scope</para>
-    /// <para>  {DataPath}/skills/users/{userId}/skill-slug/ — User scope（单租户/无租户）</para>
-    /// <para>  {DataPath}/skills/tenants/{tenantId}/users/{userId}/skill-slug/ — User scope（多租户隔离）</para>
+    /// <para>  {DataPath}/skills/skill-slug/ - System scope</para>
+    /// <para>  {DataPath}/skills/tenants/{tenantId}/skill-slug/ - Tenant scope</para>
+    /// <para>  {DataPath}/skills/users/{userId}/skill-slug/ - User scope（单租户/无租户）</para>
+    /// <para>  {DataPath}/skills/tenants/{tenantId}/users/{userId}/skill-slug/ - User scope（多租户隔离）</para>
     /// <para>支持相对路径（相对于 ContentRoot）和绝对路径。默认为 "App_Data/AI"。</para>
     /// </remarks>
     public string DataPath { get; set; } = "App_Data/AI";

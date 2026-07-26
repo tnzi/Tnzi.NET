@@ -25,7 +25,7 @@
         </TMemberPopover>
       </template>
 
-      <!-- Add button — always the last cell, same row (never wraps onto its own
+      <!-- Add button - always the last cell, same row (never wraps onto its own
            line): in collapsed mode it sits as the final cell of the last row. -->
       <div v-if="canAdd" class="t-member-grid__cell t-member-grid__add-cell" @click="emit('add')">
         <div class="t-member-grid__add">
@@ -66,9 +66,9 @@ const props = withDefaults(
     canAdd: boolean
     /** Owner-only: expose "remove from group" on every member except myId. */
     canRemove?: boolean
-    /** Current user id — the owner can never remove themselves. */
+    /** Current user id - the owner can never remove themselves. */
     myId?: string
-    /** Grid columns — narrower avatars + more columns fill the 250px panel width
+    /** Grid columns - narrower avatars + more columns fill the 250px panel width
      *  (avoids the right-side whitespace of the old 3-per-row layout). */
     columns?: number
     /** Max rows shown while collapsed (the Add cell counts toward the last row). */

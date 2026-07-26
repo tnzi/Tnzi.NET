@@ -498,7 +498,7 @@ const props = withDefaults(
     /**
      * Read-only display: every permission renders as granted (checked) and
      * locked (no toggle). Used for a super-admin role, which bypasses every
-     * check and effectively holds the whole catalogue — so an explicit,
+     * check and effectively holds the whole catalogue - so an explicit,
      * editable row set is meaningless. Browsing (expand/collapse, search) stays.
      */
     readonly?: boolean
@@ -665,7 +665,7 @@ const groups = computed<ModuleGroup[]>(() => {
       origin: module.isBuiltIn === true ? 'builtin' : 'app',
     })
   }
-  // A consumer application's own modules first, framework built-ins after —
+  // A consumer application's own modules first, framework built-ins after -
   // stable within each origin so the order/name ordering above is kept. When
   // the backend does not flag origins (older backend → every module is `app`)
   // this is a no-op reorder.
@@ -680,7 +680,7 @@ function originRank(origin: 'app' | 'builtin'): number {
 /**
  * Mark the first group of each origin so the render can emit a section
  * sub-header ("Application" / "Built-in"). Only sections when BOTH origins are
- * present — a base framework with no consumer permissions (or a keyword filter
+ * present - a base framework with no consumer permissions (or a keyword filter
  * that leaves one origin) behaves exactly as before, with no lone header.
  */
 function decorateSections(list: ModuleGroup[]): ModuleGroup[] {
@@ -923,7 +923,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
 /* ── Module section header ─────────────────────────────────────────────── */
 .t-perm-matrix__module-row td {
   padding: 8px 10px;
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border-top: 1px solid var(--tnzi-border);
   border-bottom: 1px solid var(--tnzi-border);
   cursor: pointer;
@@ -941,7 +941,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   gap: 4px;
 }
 /* Desktop module row: the name/code/badge and the progress bar + count share
-   ONE row — the bar is shoved to the right with margin-left:auto. (Mobile cards
+   ONE row - the bar is shoved to the right with margin-left:auto. (Mobile cards
    use `mcard-body` instead and keep the stacked layout.) */
 .t-perm-matrix__module-body {
   display: flex;
@@ -1110,7 +1110,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
 }
 /* Grantable special (execute / assign / use) renders as a LABELLED checkbox so
    granted vs not is obvious from the checkmark, not colour alone. execute and
-   assign keep a warning-toned label — they are the powerful grants. */
+   assign keep a warning-toned label - they are the powerful grants. */
 .t-perm-matrix__special-check {
   font-size: 12.5px;
 }
@@ -1153,7 +1153,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
 .t-perm-matrix__mcard {
   border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   overflow: hidden;
   /* Never let a height-capped flex-column parent shrink a collapsed card.
      `overflow: hidden` above makes the card's flex `min-height: auto` resolve

@@ -64,7 +64,7 @@ public class PostMigrationStartupTaskTests
             s.AddSingleton<IPostMigrationStartupTask>(good);
         });
 
-        // A throwing task must not bubble up — startup continues.
+        // A throwing task must not bubble up - startup continues.
         await app.RunPostMigrationStartupTasksAsync();
 
         Assert.True(good.Ran);

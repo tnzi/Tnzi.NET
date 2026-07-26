@@ -4,7 +4,7 @@
       <NButton size="small" @click="loadAll">{{ t('refresh') }}</NButton>
     </template>
 
-    <!-- Matrix mode — pick an entity, edit role×operation cells. -->
+    <!-- Matrix mode - pick an entity, edit role×operation cells. -->
     <template #matrix>
           <div class="t-entity-role-page__toolbar">
             <NSpace align="center" :wrap="false">
@@ -71,7 +71,7 @@
     </template>
 
     <!--
-      Inspect-user tab — read-only view of a user's effective data
+      Inspect-user tab - read-only view of a user's effective data
       permissions. The admin picks a user + clicks "Look up". Useful for
       diagnosing "why can / can't user X do operation Y?" without flipping
       between the user, role, and entity-role pages.
@@ -119,6 +119,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, reactive, ref, onMounted, watch } from 'vue'
 import {
   NSpace, NButton, NSelect, NTag, NCheckbox, NSpin,
@@ -151,7 +152,7 @@ const message = useSafeMessage()
 
 const operations: DataAuthOperation[] = ['Query', 'Update', 'Delete', 'All']
 
-// Primary tabs — TTabsPage owns `?section=` deep-linking + Back/Forward.
+// Primary tabs - TTabsPage owns `?section=` deep-linking + Back/Forward.
 // Both panes own their vertical scroll (matrix table + inspect list).
 const sections = computed(() => [
   { name: 'matrix', label: t('tabs.matrix'), scroll: true },
@@ -234,7 +235,7 @@ async function loadRoles(): Promise<void> {
 }
 
 /**
- * Monotonic token guarding concurrent loadAssignments() calls — when the user
+ * Monotonic token guarding concurrent loadAssignments() calls - when the user
  * flicks between entities the older request can still be in flight; without
  * this guard its late resolve would overwrite the newer entity's data.
  */
@@ -273,7 +274,7 @@ async function onToggle(roleId: string, op: DataAuthOperation, value: boolean): 
       operation: op,
       enable: value,
     })
-    // Refresh just the row's assignments — small payload, keeps the matrix accurate.
+    // Refresh just the row's assignments - small payload, keeps the matrix accurate.
     await loadAssignments()
     message.success(value ? t('toggleOnSuccess') : t('toggleOffSuccess'))
   } catch (e) {
@@ -310,7 +311,7 @@ const entityNameById = computed(() => {
   return m
 })
 
-// Inspect-user picker fetcher (reuses the shared TUserSelector) — remote search
+// Inspect-user picker fetcher (reuses the shared TUserSelector) - remote search
 // users by keyword so admins pick a user instead of pasting a raw userId.
 const userFetcher = async (keyword: string): Promise<SelectorOption[]> => {
   try {
@@ -383,7 +384,7 @@ const inspectColumns = computed<DataTableColumns<EntityRoleDto>>(() => [
             { class: 'tnzi-mono text-11px' },
             row.filter,
           )
-        : '—',
+        : EMPTY_DASH,
   },
   {
     title: t('inspect.cols.enabled'),

@@ -164,7 +164,7 @@ describe('TPermissionMatrix', () => {
   })
 
   it('sorts consumer modules before built-in and renders origin sections', () => {
-    // Built-in listed FIRST in input + a lower order number — the matrix must
+    // Built-in listed FIRST in input + a lower order number - the matrix must
     // still surface the consumer module first and split the two behind section
     // sub-headers driven by the backend `isBuiltIn` flag.
     const builtin: FunctionModuleDto = {
@@ -223,7 +223,7 @@ describe('TPermissionMatrix', () => {
       .findAll('.t-perm-matrix__surface-row')
       .find((r) => r.text().includes('ai.sql'))!
     // Special actions (execute/assign/use) render as a checkbox with a visible
-    // label so granted vs not is obvious at a glance — the old bare pill is gone.
+    // label so granted vs not is obvious at a glance - the old bare pill is gone.
     const special = sqlRow.find('.t-perm-matrix__special-check')
     expect(special.exists()).toBe(true)
     expect(special.classes()).toContain('is-execute')

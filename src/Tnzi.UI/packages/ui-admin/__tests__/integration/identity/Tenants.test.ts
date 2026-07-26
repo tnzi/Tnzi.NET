@@ -50,22 +50,28 @@ const stubs = {
   VueDraggable: { template: '<div><slot /></div>' },
 }
 
-describe('Tenants (Phase 3 page)', () => {
+describe('Tenants page', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
-  it('mounts and fetches tenants on load', async () => {
+  // The page renders a card per tenant, not a data table: a deployment has a
+  // handful of tenants and the questions asked of the list ("who is on here,
+  // are they live, when do they lapse") are per-record, not column comparisons.
+  it('mounts and renders one card per tenant', async () => {
     const wrapper = mount(Tenants, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
+    expect(wrapper.findAll('.tenant-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Acme Corp')
+    expect(wrapper.text()).toContain('BETA')
   })
 
   it('opens form modal when Create button is clicked', async () => {
     const wrapper = mount(Tenants, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    await wrapper.find('.t-crud-page__create').trigger('click')
+    // Card/row pages use the shell's own create button; only TCrudPage adds
+    // the legacy `t-crud-page__create` alias on top of it.
+    await wrapper.find('.t-list-shell__create').trigger('click')
     expect(wrapper.find('form').exists()).toBe(true)
   })
 })

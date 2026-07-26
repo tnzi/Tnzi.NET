@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TSettingItem` — single drawer/list row with a left label, optional
+ * `TSettingItem` - single drawer/list row with a left label, optional
  * help-tooltip icon, and a right slot for the control. Direct port of
  * soybean's `setting-item.vue`.
  *

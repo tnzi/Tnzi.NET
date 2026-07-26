@@ -81,9 +81,16 @@ public static class DateTimeExtensions
         return dateTime.StartOfWeek(startOfWeek).AddDays(7).AddTicks(-1);
     }
 
+    /// <summary>
+    /// 当月第一天 00:00:00，保留原值的 <see cref="DateTimeKind"/>。
+    /// </summary>
+    /// <remarks>
+    /// 必须显式传 Kind：<c>new DateTime(y, m, d)</c> 产出 <see cref="DateTimeKind.Unspecified"/>，
+    /// 会把 UTC 输入降级为 Unspecified，随后 Npgsql 拒绝写入 timestamptz 列。
+    /// </remarks>
     public static DateTime StartOfMonth(this DateTime dateTime)
     {
-        return new DateTime(dateTime.Year, dateTime.Month, 1);
+        return new DateTime(dateTime.Year, dateTime.Month, 1, 0, 0, 0, dateTime.Kind);
     }
 
     public static DateTime EndOfMonth(this DateTime dateTime)

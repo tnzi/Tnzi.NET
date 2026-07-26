@@ -16,11 +16,11 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// <para>
 /// This handler doesn't *fix* the problem (we can't safely auto-rewrite
 /// appsettings.json from a server process), but it surfaces the issue
-/// in the application log at the moment the rename happens — far easier
+/// in the application log at the moment the rename happens - far easier
 /// than diagnosing "admin can't access X anymore" three days later.
 /// </para>
 /// <para>
-/// Cache invalidation is *not* this handler's job — the broader
+/// Cache invalidation is *not* this handler's job - the broader
 /// <c>RoleFunctionsChangedEvent</c> + <c>UserRolesChangedEvent</c> wiring
 /// already covers cache lifetime. This handler is diagnostic only.
 /// </para>

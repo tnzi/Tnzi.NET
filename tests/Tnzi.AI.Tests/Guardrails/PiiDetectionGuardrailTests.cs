@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// PiiDetectionGuardrail 单元测试 — 验证 PII（个人身份信息）检测
+/// PiiDetectionGuardrail 单元测试 - 验证 PII（个人身份信息）检测
 /// </summary>
 /// <remarks>
 /// 注意：当前实现使用 Rejected 模式（拒绝包含 PII 的输入），而非 Modified 模式（脱敏后放行）。
@@ -84,7 +84,7 @@ public class PiiDetectionGuardrailTests
     [Fact]
     public async Task MultiplePiiTypes_RejectsOnFirstMatch()
     {
-        // Arrange: 包含多种 PII — 实现按顺序检查，第一个匹配即拒绝
+        // Arrange: 包含多种 PII - 实现按顺序检查，第一个匹配即拒绝
         var guardrail = new PiiDetectionGuardrail(CreateOptions(g => g.EnablePiiDetection = true));
 
         // Act: email 在 PiiPatterns 中排第一

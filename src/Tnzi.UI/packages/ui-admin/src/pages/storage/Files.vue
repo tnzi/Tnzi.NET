@@ -163,7 +163,7 @@
           @upload-drop="onUploadDrop"
         />
 
-        <!-- List view — folders + files unified in one table (Explorer-style):
+        <!-- List view - folders + files unified in one table (Explorer-style):
              folders sort first, double-click a folder row to drill in. -->
         <div
           v-else
@@ -227,7 +227,7 @@
       :download-url="bridge.files.downloadUrl"
     />
 
-    <!-- Create / rename folder overlay — useDetail(modal) + TDetailHost
+    <!-- Create / rename folder overlay - useDetail(modal) + TDetailHost
          (deep-linkable `?folder=new` / `?folder=edit:<id>`, Back-to-close). -->
     <TDetailHost :state="folderDetail" :title="folderModalTitle" :width="460" :translate="t">
       <template #default>
@@ -251,7 +251,7 @@
       </template>
     </TDetailHost>
 
-    <!-- Tags overlay — useDetail(modal) + TDetailHost (deep-linkable `?tags=edit:<id>`). -->
+    <!-- Tags overlay - useDetail(modal) + TDetailHost (deep-linkable `?tags=edit:<id>`). -->
     <TDetailHost :state="tagsDetail" :title="t('tags.title')" :width="460" :translate="t">
       <template #default>
         <p class="text-13px text-muted mb-8px">{{ tagsFileName }}</p>
@@ -263,7 +263,7 @@
       </template>
     </TDetailHost>
 
-    <!-- Metadata overlay — useDetail(modal) + TDetailHost (deep-linkable `?meta=edit:<id>`). -->
+    <!-- Metadata overlay - useDetail(modal) + TDetailHost (deep-linkable `?meta=edit:<id>`). -->
     <TDetailHost :state="metadataDetail" :title="t('metadata.title')" :width="460" :translate="t">
       <template #default>
         <p class="text-13px text-muted mb-8px">{{ metadataFileName }}</p>
@@ -290,7 +290,7 @@
       </template>
     </TDetailHost>
 
-    <!-- File detail drawer (right) — opened by a file row's "View" action.
+    <!-- File detail drawer (right) - opened by a file row's "View" action.
          Standalone useDetail(drawer) rendered by TDetailHost: deep-linkable
          (`#detail:view:<id>`) + Back-to-close, no hand-rolled open-state. -->
     <TDetailHost
@@ -309,10 +309,10 @@
             <NDescriptionsItem :label="t('detail.type')">{{ viewedFile.contentType }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.storage')">{{ viewedFile.provider }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.uploader')">
-              {{ viewedFile.creatorName || viewedFile.creatorId || '—' }}
+              {{ viewedFile.creatorName || viewedFile.creatorId || EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.createdAt')">
-              {{ viewedFile.creationTime ? new Date(viewedFile.creationTime).toLocaleString() : '—' }}
+              {{ viewedFile.creationTime ? new Date(viewedFile.creationTime).toLocaleString() : EMPTY_DASH }}
             </NDescriptionsItem>
             <!-- MD5 已从对外 FileRecordDto 收窄剔除(内部字段);按需完整性校验走 More → Verify(bridge.integrity.verifyOne)。 -->
           </NDescriptions>
@@ -355,6 +355,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, reactive, ref, watch, onMounted } from 'vue'
 import type { Component } from 'vue'
 import type { DataTableColumns, DropdownOption } from 'naive-ui'
@@ -446,7 +447,7 @@ const ctx = reactive({
 })
 const preview = reactive({ show: false, file: null as FileRecordDto | null })
 
-/** Right-side detail drawer — opened from a file row's primary "View" action.
+/** Right-side detail drawer - opened from a file row's primary "View" action.
  *  Files isn't a `useCrudPage` page, so its read-only detail runs a standalone
  *  `useDetail(mode:'drawer')` (rendered by `TDetailHost`): one engine, free
  *  deep-link (`?detail=view:<id>`) + Back-to-close. Only the async references
@@ -459,7 +460,7 @@ const fileDetail = useDetail<FileRecordDto>({
 const viewedFile = computed(() => fileDetail.data.value)
 const fileReferences = ref<FileReferenceDto[]>([])
 const loadingRefs = ref(false)
-// Backend serializes `tags` as a single comma-separated string — split it into
+// Backend serializes `tags` as a single comma-separated string - split it into
 // individual tags for the detail chips (was reading it as an array → always empty).
 const detailFileTags = computed<string[]>(() => splitTags(viewedFile.value?.tags))
 watch(viewedFile, (f) => {
@@ -473,7 +474,7 @@ watch(viewedFile, (f) => {
     .finally(() => { loadingRefs.value = false })
 })
 
-// Flat id→folder lookup over the tree — defined here (before the folder overlay)
+// Flat id→folder lookup over the tree - defined here (before the folder overlay)
 // so the overlay's deep-link `source` can resolve a `?folder=edit:<id>` cold link.
 const flatFolders = computed(() => {
   const map = new Map<string, FileFolderDto>()
@@ -488,7 +489,7 @@ const flatFolders = computed(() => {
 })
 
 /**
- * Folder create / rename overlay — a `useDetail(modal)` (URL key `folder`) +
+ * Folder create / rename overlay - a `useDetail(modal)` (URL key `folder`) +
  * `TDetailHost` instead of a hand-rolled `NModal` + `ref(false)`. `create` opens
  * a blank form (parent from `openCreateFolder`, or root on a `?folder=new` deep
  * link); `edit` binds a folder resolved from the loaded tree. The working form
@@ -523,7 +524,7 @@ watch(
   },
 )
 
-/** File-tags overlay (URL key `tags`) — working tag list seeded from the file's
+/** File-tags overlay (URL key `tags`) - working tag list seeded from the file's
  *  comma-separated `tags` string on (re)bind. */
 const tagsDetail = useDetail<FileRecordDto>({ mode: 'modal', url: 'tags', source: { items: files } })
 const tagsWorking = ref<string[]>([])
@@ -533,7 +534,7 @@ watch(() => tagsDetail.data.value, (file) => {
   tagsWorking.value = file ? splitTags(file.tags) : []
 })
 
-/** File-metadata overlay (URL key `meta`) — rows lazy-loaded from the backend on
+/** File-metadata overlay (URL key `meta`) - rows lazy-loaded from the backend on
  *  (re)bind (covers in-session open AND deep-link / refresh). */
 const metadataDetail = useDetail<FileRecordDto>({ mode: 'modal', url: 'meta', source: { items: files } })
 const metadataRows = ref<Array<{ key: string; value: string }>>([])
@@ -590,7 +591,7 @@ function canDeleteFolder(f: FileFolderDto | null): boolean {
 }
 
 /**
- * Unified list-view row model — sub-folders and files share one table so
+ * Unified list-view row model - sub-folders and files share one table so
  * folders appear as rows (Explorer-style) instead of a separate strip.
  * Folders sort first; double-click a folder row drills in (see `rowProps`).
  */
@@ -618,7 +619,7 @@ const contentTypeOptions = [
   { label: 'Archive', value: 'application/zip' },
 ]
 
-/** Name cell — icon (folder glyph or file-type glyph) + label. `min-w-0` on
+/** Name cell - icon (folder glyph or file-type glyph) + label. `min-w-0` on
  *  both the flex row and the label lets it truncate inside the table cell. The
  *  label is clickable (`onClick`): a file name previews, a folder name opens. */
 function renderNameCell(icon: string, color: string, label: string, onClick: () => void) {
@@ -713,7 +714,7 @@ const columns = computed<DataTableColumns<ExplorerRow>>(() => [
   },
 ])
 
-/** Row interactions — double-click drills into a folder / previews a file;
+/** Row interactions - double-click drills into a folder / previews a file;
  *  right-click opens the matching context menu. Only files are selectable. */
 function rowProps(row: ExplorerRow) {
   return {
@@ -877,7 +878,7 @@ function onPageSizeChange(next: number): void {
 
 // ---- file actions ----
 function downloadFile(row: FileRecordDto): void {
-  // Deployment-prefix-aware URL via the bridge (resolveUrl) — no hardcoded /api.
+  // Deployment-prefix-aware URL via the bridge (resolveUrl) - no hardcoded /api.
   window.open(bridge.files.downloadUrl(row.id), '_blank')
 }
 
@@ -1179,7 +1180,7 @@ onMounted(async () => {
   flex-direction: column;
   /* Fill the layout's height so the flex-height table inside resolves to a
      real height (a flex-column child collapses to content height without
-     `flex: 1` — the former grid cell got this stretch for free). */
+     `flex: 1` - the former grid cell got this stretch for free). */
   flex: 1;
   min-height: 0;
   /* Allow the pane to shrink below the table's intrinsic min-width (NDataTable

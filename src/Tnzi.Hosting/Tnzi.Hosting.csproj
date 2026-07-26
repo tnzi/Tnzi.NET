@@ -20,6 +20,7 @@
 
     <!-- 可选模块编译时引用（[OptionalDependsOn] + 事件处理器需要）— 不传递给 NuGet 消费者 -->
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Identity.Presence\Tnzi.Identity.Presence.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.System\Tnzi.System.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Authorization\Tnzi.Authorization.csproj" PrivateAssets="all" />
@@ -37,7 +38,10 @@
     <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Finance.Ai\Tnzi.Finance.Ai.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Finance.Documents\Tnzi.Finance.Documents.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Finance.Tax.Ca\Tnzi.Finance.Tax.Ca.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" PrivateAssets="all" />

@@ -6,6 +6,9 @@ namespace Tnzi.Audit.Middleware;
 /// </summary>
 public class AuditMiddleware
 {
+    /// <summary>AuditOperation.RequestBody 列的长度上限（与 AuditOperationConfiguration 保持一致）。</summary>
+    private const int RequestBodyColumnMaxLength = 8192;
+
     private readonly RequestDelegate _next;
     private readonly ILogger<AuditMiddleware> _logger;
     private readonly IAuditSender _auditSender;
@@ -99,7 +102,11 @@ public class AuditMiddleware
         try
         {
             var maxSize = Options.MaxRequestBodySize;
-            request.EnableBuffering(bufferLimit: maxSize);
+
+            // 不能传 bufferLimit：那是「请求体总大小上限」，超过即在读取时抛 IOException。
+            // 用 MaxRequestBodySize 当上限会让所有大于该值的请求在下游模型绑定时 500 ——
+            // 而本配置的语义是「审计只记录前 N 字节，超出部分截断」，不是拒绝请求。
+            request.EnableBuffering();
 
             var buffer = new byte[Math.Min(request.ContentLength ?? maxSize, maxSize)];
             var bytesRead = await request.Body.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false);
@@ -120,7 +127,12 @@ public class AuditMiddleware
                 body = _redactor.Redact(body, Options.SensitiveFields);
             }
 
-            return body;
+            // 按存储列宽二次截断：MaxRequestBodySize 允许配到 64KB，而 RequestBody 列是
+            // 8192（见 AuditOperationConfiguration）——不截断会让整批审计 INSERT 失败，
+            // 后台服务只记一条错误日志，本批审计全部丢失。
+            return body.Length <= RequestBodyColumnMaxLength
+                ? body
+                : body[..RequestBodyColumnMaxLength];
         }
         catch (Exception ex)
         {

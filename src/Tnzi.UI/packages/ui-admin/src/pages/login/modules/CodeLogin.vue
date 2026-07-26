@@ -1,20 +1,21 @@
 <script setup lang="ts">
 /**
- * `CodeLogin` — phone/email + verification code login module.
+ * `CodeLogin` - phone/email + verification code login module.
  *
  * Soybean reference: `src/views/_builtin/login/modules/code-login.vue` (66 lines).
  * Endpoints (Tnzi.Identity.DefaultAuthController):
- *   - `POST /auth/code-login/send-code` — `SendCodeLoginCodeDto` → triggers the verification code
- *   - `POST /auth/code-login`           — `CodeLoginDto` → `CodeLoginResultDto`
+ *   - `POST /auth/code-login/send-code` - `SendCodeLoginCodeDto` → triggers the verification code
+ *   - `POST /auth/code-login` - `CodeLoginDto` → `CodeLoginResultDto`
  *
  * Wired via `useLoginContext().callbacks.sendCode` + `callbacks.codeLogin`.
- * The single account field accepts email OR phone — the rule + label adapt to
+ * The single account field accepts email OR phone - the rule + label adapt to
  * the backend-enabled channels (`features.codeChannels`) and the `type` is
  * auto-detected per submit so the consumer's callback can route to the right
  * channel.
  */
 import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
 import { useCaptcha } from '../../../headless/useCaptcha'
 import { useLoginAccountField } from '../../../headless/useLoginAccountField'
@@ -54,17 +55,24 @@ async function handleSendCode(): Promise<void> {
   } catch {
     return
   }
+  const sendCode = callbacks.sendCode
+  if (!sendCode) {
+    submitError.value = translate(
+      'admin.login.errorMissingCallback',
+      'Send-code is not configured. Pass `defineAdminApp({ login: { callbacks: { sendCode } } })`.',
+    )
+    return
+  }
   submitError.value = ''
-  await getCaptcha(async () => {
-    if (!callbacks.sendCode) {
-      submitError.value = translate(
-        'admin.login.errorMissingCallback',
-        'Send-code is not configured. Pass `defineAdminApp({ login: { callbacks: { sendCode } } })`.',
-      )
-      throw new Error('sendCode callback missing')
-    }
-    await callbacks.sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'code-login' })
-  })
+  try {
+    await getCaptcha(async () => {
+      await sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'code-login' })
+    })
+  } catch (err) {
+    // Surface backend rejections (e.g. 429 "sent too frequently") in the UI -
+    // getCaptcha re-throws so the countdown never starts on failure.
+    submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Request failed')
+  }
 }
 
 async function handleSubmit(): Promise<void> {
@@ -103,9 +111,15 @@ async function handleSubmit(): Promise<void> {
     </NFormItem>
     <NSpace vertical :size="18" class="w-full">
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
+        <template #icon>
+          <TSvgIcon icon="mdi:login-variant" :size="18" />
+        </template>
         {{ translate('admin.login.submit', 'Sign in') }}
       </NButton>
       <NButton size="large" :round="ui.pill" block @click="toggleLoginModule('pwd-login')">
+        <template #icon>
+          <TSvgIcon icon="mdi:arrow-left" :size="18" />
+        </template>
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>

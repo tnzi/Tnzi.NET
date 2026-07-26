@@ -1,6 +1,6 @@
 <template>
   <!--
-    Conversations — global conversation management (TCrudPage, read-only list +
+    Conversations - global conversation management (TCrudPage, read-only list +
     dissolve). Filter by type / participant / keyword; the row "view" action
     opens a right drawer with metadata + member table + message list, where an
     admin can force-recall any message. Backend: /admin/chat/conversations/*.
@@ -11,7 +11,7 @@
     (block, flex-grow:0) collapses the table body to header height. `contents`
     makes TCrudPage a direct flex child of the content page, like single-root
     CRUD pages. The dialog teleports to <body> so it is unaffected. (The detail
-    view drawer is owned by TCrudPage now — its `#detail` slot.)
+    view drawer is owned by TCrudPage now - its `#detail` slot.)
   -->
   <div class="t-conversations-host">
     <TCrudPage
@@ -31,7 +31,7 @@
         </NButton>
       </template>
 
-      <!-- Read-only detail — metadata + member table + recallable message list
+      <!-- Read-only detail - metadata + member table + recallable message list
            (loaded by `onView`). Rides the CRUD `view` open-state, deep-linkable. -->
       <template #detail>
         <NSpin :show="detailLoading">
@@ -170,7 +170,7 @@ function downloadUrl(fileId: string): string {
 }
 
 // Loaded by `onView` when the CRUD `view` open-state opens (row click or a
-// deep-link cold reload) — the drawer chrome + open-state are the engine's.
+// deep-link cold reload) - the drawer chrome + open-state are the engine's.
 async function loadConversation(id: string): Promise<void> {
   detailLoading.value = true
   detail.value = null

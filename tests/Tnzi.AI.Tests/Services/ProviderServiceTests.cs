@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// ProviderService 单元测试 — 覆盖 CRUD、加密、HasApiKey 暴露语义、TestConnection 探针
+/// ProviderService 单元测试 - 覆盖 CRUD、加密、HasApiKey 暴露语义、TestConnection 探针
 /// 以及 ResourceScope 多租户可见性合并逻辑。
 /// </summary>
 public class ProviderServiceTests
@@ -34,7 +34,7 @@ public class ProviderServiceTests
         _repository.As<IQueryable<Provider>>().Setup(q => q.Expression).Returns(mock.Expression);
         _repository.As<IQueryable<Provider>>().Setup(q => q.ElementType).Returns(mock.ElementType);
         _repository.As<IQueryable<Provider>>().Setup(q => q.GetEnumerator()).Returns(mock.GetEnumerator());
-        // ProviderService uses _repository.AsQueryable(...) explicitly — return the same mock.
+        // ProviderService uses _repository.AsQueryable(...) explicitly - return the same mock.
         _repository.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(mock);
     }
 
@@ -101,7 +101,7 @@ public class ProviderServiceTests
             MakeProvider("tenant-b", scope: ResourceScope.Tenant, tenantId: tenantB),
         });
 
-        // No ICurrentTenant injected — single-tenant mode, return all
+        // No ICurrentTenant injected - single-tenant mode, return all
         var svc = CreateService(currentTenant: null);
 
         var result = await svc.GetPagedListAsync(new ProviderQueryDto { PageIndex = 1, PageSize = 10 });
@@ -226,7 +226,7 @@ public class ProviderServiceTests
         result.Succeeded.ShouldBeTrue();
         var dto = result.Data!.Items[0];
         dto.HasApiKey.ShouldBeTrue();
-        // ProviderDto has no ApiKey/ApiKeyEncrypted property — verify by serialization
+        // ProviderDto has no ApiKey/ApiKeyEncrypted property - verify by serialization
         var json = JsonSerializer.Serialize(dto);
         json.ShouldNotContain("sk-secret");
         json.ShouldNotContain(fakeCipher);
@@ -399,7 +399,7 @@ public class ProviderServiceTests
         _repository.Setup(r => r.UpdateAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // No ICurrentTenant — single-tenant mode, no guard applies
+        // No ICurrentTenant - single-tenant mode, no guard applies
         var svc = CreateService(currentTenant: null);
 
         var result = await svc.UpdateAsync(systemProvider.Id, new UpdateProviderDto { Description = "admin update" });
@@ -413,7 +413,7 @@ public class ProviderServiceTests
         var systemProvider = MakeProvider("global-system", scope: ResourceScope.System);
         SetupQueryable(new List<Provider> { systemProvider });
 
-        // No ICurrentTenant — single-tenant mode, no guard applies
+        // No ICurrentTenant - single-tenant mode, no guard applies
         var svc = CreateService(currentTenant: null);
 
         var result = await svc.DeleteAsync(systemProvider.Id);
@@ -494,7 +494,7 @@ public class ProviderServiceTests
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Stub IDataProtectionProvider — wraps plaintext with a marker prefix so tests can
+    /// Stub IDataProtectionProvider - wraps plaintext with a marker prefix so tests can
     /// assert ciphertext shape without depending on real DataProtection key infrastructure.
     /// </summary>
     private sealed class StubDataProtectionProvider : IDataProtectionProvider
@@ -517,7 +517,7 @@ public class ProviderServiceTests
     }
 
     /// <summary>
-    /// Stub ICurrentTenant — 返回固定租户 ID。
+    /// Stub ICurrentTenant - 返回固定租户 ID。
     /// </summary>
     private sealed class StubCurrentTenant : ICurrentTenant
     {

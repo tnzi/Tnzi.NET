@@ -18,7 +18,7 @@ public class ThreadTitleGenerationHandlerTests
 
     /// <summary>
     /// Builds a real <see cref="IServiceScopeFactory"/> backed by an in-memory container so the
-    /// handler — which now isolates work in a child scope — can resolve its dependencies from
+    /// handler - which now isolates work in a child scope - can resolve its dependencies from
     /// the supplied mocks. Optional services may be passed as <c>null</c> to simulate "service
     /// not registered" scenarios such as HostingLite.
     /// </summary>

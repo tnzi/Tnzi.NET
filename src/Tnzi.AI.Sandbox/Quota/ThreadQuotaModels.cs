@@ -12,7 +12,7 @@ public class ThreadQuotaUsage
     /// <summary>
     /// Total non-rejected <c>bash</c> invocations admitted in the current window.
     /// Counts every command that passed the quota pre-flight (reserved a slot),
-    /// including ones that later exit non-zero — only quota/blacklist-denied
+    /// including ones that later exit non-zero - only quota/blacklist-denied
     /// commands are excluded.
     /// </summary>
     public long CommandCount { get; init; }
@@ -25,7 +25,7 @@ public class ThreadQuotaUsage
 }
 
 /// <summary>
-/// Outcome of a <see cref="IThreadResourceQuota.CheckAsync"/> probe — communicates
+/// Outcome of a <see cref="IThreadResourceQuota.CheckAsync"/> probe - communicates
 /// whether the next sandbox command is permitted, and how much room is left.
 /// </summary>
 public class ThreadQuotaCheckResult

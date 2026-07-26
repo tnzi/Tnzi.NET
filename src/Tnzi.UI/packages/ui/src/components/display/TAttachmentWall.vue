@@ -3,7 +3,7 @@
     Inline attachment grid: image thumbnails open in a shared lightbox
     (NImageGroup), non-image files render as a type-glyph chip linking to the
     file, with optional per-tile remove and a trailing add tile. For embedding
-    receipts / attachments in a form or card — lighter than the Storage explorer.
+    receipts / attachments in a form or card - lighter than the Storage explorer.
   -->
   <div class="t-attachment-wall">
     <n-image-group>
@@ -74,7 +74,7 @@ const tileStyle = computed(() => ({ width: `${props.size}px`, height: `${props.s
 const keyOf = (att: Attachment, index: number): string | number => props.itemKey?.(att, index) ?? att.url
 
 /**
- * Guard a caller-supplied file URL used in `<a :href>` — Vue does not sanitize
+ * Guard a caller-supplied file URL used in `<a :href>` - Vue does not sanitize
  * `:href`, so a `javascript:` / `vbscript:` / `data:text/html` scheme would run
  * on click. Everything else (http/https, relative, blob:, data: media) passes.
  */

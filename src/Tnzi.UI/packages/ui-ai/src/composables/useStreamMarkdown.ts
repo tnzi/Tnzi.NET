@@ -1,5 +1,5 @@
 /**
- * useStreamMarkdown — Streaming markdown rendering composable
+ * useStreamMarkdown - Streaming markdown rendering composable
  *
  * Incrementally parses markdown chunks and produces reactive HTML output.
  * Uses a shared markdown-it singleton with sensible defaults (html, linkify, typographer).
@@ -11,7 +11,7 @@ import type { Highlighter } from 'shiki';
 import { scheduleFrame } from '@/lib/scheduleFrame';
 
 // ---------------------------------------------------------------------------
-// Shiki syntax highlighter — lazily loaded once, shared across all instances.
+// Shiki syntax highlighter - lazily loaded once, shared across all instances.
 // markdown-it's fence renderer is synchronous, so we preload a highlighter
 // (async) and re-render once it's ready. Until then code blocks fall back to
 // escaped <pre>.
@@ -56,7 +56,7 @@ export interface UseStreamMarkdownOptions {
   /** Custom markdown-it instance (overrides built-in shared singleton). */
   markdownIt?: MarkdownIt;
   /**
-   * Allow raw HTML passthrough. Default false — raw `<tags>` in the markdown
+   * Allow raw HTML passthrough. Default false - raw `<tags>` in the markdown
    * source are escaped (`&lt;`), neutralising XSS from LLM/RAG output. Markdown
    * syntax (tables, code, lists, emphasis) still renders normally. Only set
    * true if you sanitize the input yourself.
@@ -92,7 +92,7 @@ function createMarkdownIt(allowHtml = false): MarkdownIt {
     typographer: true,
   });
 
-  // Custom fence renderer — wraps each code block in a header bar (language +
+  // Custom fence renderer - wraps each code block in a header bar (language +
   // copy button) and syntax-highlights via shiki once the shared highlighter is
   // ready. Copy is handled by event delegation in StreamMarkdown.vue.
   md.renderer.rules.fence = (tokens, idx) => {
@@ -168,7 +168,7 @@ export function useStreamMarkdown(options: UseStreamMarkdownOptions = {}): UseSt
       if (rawText.value) render();
     })
     .catch(() => {
-      /* shiki unavailable — fenced code stays as escaped <pre> */
+      /* shiki unavailable - fenced code stays as escaped <pre> */
     });
 
   function append(chunk: string): void {

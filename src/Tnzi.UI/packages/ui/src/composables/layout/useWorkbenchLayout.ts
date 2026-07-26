@@ -1,5 +1,5 @@
 /**
- * `useWorkbenchLayout` — drag-to-reorder + localStorage persistence for
+ * `useWorkbenchLayout` - drag-to-reorder + localStorage persistence for
  * the Workbench widget list.
  *
  * `TWorkbenchLayout` consumes this hook to keep the user-customised
@@ -14,7 +14,7 @@
  *     order (so additions always become visible without a localStorage
  *     wipe).
  *
- * `persistKey` accepts either a plain string or a `Ref` — when the prop
+ * `persistKey` accepts either a plain string or a `Ref` - when the prop
  * changes (e.g. a tab-scoped workbench id swaps), the hook re-reads
  * persistedOrder from the new key.
  *
@@ -69,7 +69,7 @@ function writePersisted(key: string, value: string[]): void {
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
   } catch {
-    // Quota exceeded / private browsing — fall back to in-memory only.
+    // Quota exceeded / private browsing - fall back to in-memory only.
   }
 }
 
@@ -117,7 +117,7 @@ export function useWorkbenchLayout(
   const persistedOrder = ref<string[] | null>(readPersisted(resolvedKey.value))
 
   // When the persistKey changes, re-hydrate from the new bucket. The old
-  // bucket is left untouched — callers needing to migrate data between
+  // bucket is left untouched - callers needing to migrate data between
   // keys should orchestrate that explicitly.
   watch(resolvedKey, (key) => {
     persistedOrder.value = readPersisted(key)

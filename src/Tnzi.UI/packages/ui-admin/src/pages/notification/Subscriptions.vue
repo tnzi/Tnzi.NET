@@ -1,6 +1,6 @@
 <template>
   <!--
-    Subscriptions page — wired 2026-04-14 to the canonical paged
+    Subscriptions page - wired 2026-04-14 to the canonical paged
     GET /admin/notification-preferences endpoint. The Preference entity IS
     the subscription model in Tnzi.Notification (userId × channel × category).
     Create/update both upsert via PUT /user/{userId}.

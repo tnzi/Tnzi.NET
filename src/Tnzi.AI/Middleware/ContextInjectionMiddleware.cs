@@ -1,31 +1,16 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 上下文注入中间件 — Before only: 注入 Memory/RAG/Skills 上下文 + Persona Soul + User Profile
+/// 上下文注入中间件 - Before only: 注入 Memory/RAG/Skills 上下文 + Persona Soul + User Profile
 /// </summary>
 public class ContextInjectionMiddleware : IAiMiddleware
 {
     private static readonly ConcurrentDictionary<string, bool> _contextDisabledCache = new();
-    /// <summary>
-    /// Persona content cache, keyed by (TenantId, PersonaId). TenantId is included so the
-    /// cache cannot leak content across tenants if a SuperAdmin / no-tenant code path ever
-    /// populates the cache for a tenant-scoped persona. Cache eviction happens on TTL
-    /// (5 minutes) AND on explicit invalidation via <see cref="InvalidatePersona(Guid)"/>
-    /// (driven by AgentPersonaUpdatedEvent / AgentPersonaDeletedEvent).
-    /// </summary>
-    private static readonly ConcurrentDictionary<(Guid? TenantId, Guid PersonaId), (string Content, DateTime CachedAt)> _personaContentCache = new();
-    /// <summary>
-    /// Per-key SemaphoreSlim used to coalesce concurrent cold-start cache misses
-    /// for the same (TenantId, PersonaId) — without this, N parallel requests for the
-    /// same uncached persona each issue a separate DB roundtrip.
-    /// </summary>
-    private static readonly ConcurrentDictionary<(Guid? TenantId, Guid PersonaId), SemaphoreSlim> _personaLoadLocks = new();
 
     private const string SoulOpenTag = "<soul>";
     private const string SoulCloseTag = "</soul>";
     private const string UserProfileOpenTag = "<user_profile>";
     private const string UserProfileCloseTag = "</user_profile>";
-    private static readonly TimeSpan PersonaCacheTtl = TimeSpan.FromMinutes(5);
 
     private readonly CompositeContextProviderFactory _providerFactory;
     private readonly ILogger<ContextInjectionMiddleware> _logger;
@@ -47,32 +32,11 @@ public class ContextInjectionMiddleware : IAiMiddleware
     internal const string ContextProviderKey = "__ContextInjectionMiddleware.Provider";
 
     /// <summary>
-    /// Evict all cached content for the given persona across every tenant key in the cache.
-    /// Called by <c>AgentPersonaCacheInvalidationHandler</c> on AgentPersona update / delete
-    /// so admin edits become visible immediately rather than at the next 5-minute TTL boundary.
-    /// </summary>
-    public static void InvalidatePersona(Guid personaId)
-    {
-        // ConcurrentDictionary.Keys is a snapshot — safe to iterate while removing.
-        foreach (var key in _personaContentCache.Keys)
-        {
-            if (key.PersonaId == personaId)
-            {
-                _personaContentCache.TryRemove(key, out _);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Test-only escape hatch: clear every internal cache so tests can isolate state.
-    /// Not intended for production use — admin-driven invalidation should flow through
-    /// <see cref="InvalidatePersona(Guid)"/> instead.
+    /// Test-only escape hatch: clear the context-disabled cache so tests can isolate state.
     /// </summary>
     public static void ClearAllCachesForTesting()
     {
-        _personaContentCache.Clear();
         _contextDisabledCache.Clear();
-        _personaLoadLocks.Clear();
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
@@ -90,7 +54,7 @@ public class ContextInjectionMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 流式路径 — Before: 注入上下文后再委托给下游
+    /// 流式路径 - Before: 注入上下文后再委托给下游
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -130,9 +94,9 @@ public class ContextInjectionMiddleware : IAiMiddleware
     /// <summary>
     /// 共享的上下文注入逻辑。
     ///
-    /// Persona (Soul) 和 User Profile 注入与 <c>disableContextProviders</c> 开关解耦 —
+    /// Persona (Soul) 和 User Profile 注入与 <c>disableContextProviders</c> 开关解耦 -
     /// 该开关只控制 Memory/RAG/Skills 等动态上下文提供者，而 Persona/Profile 是 Agent 的
-    /// 静态身份/用户身份信息，应当始终生效（除非显式删除 PersonaId 或 UserId）。
+    /// 静态身份/用户身份信息，应当始终生效（除非 Agent 无 Persona 内容或无 UserId）。
     /// </summary>
     private async Task InjectContextAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
     {
@@ -148,7 +112,7 @@ public class ContextInjectionMiddleware : IAiMiddleware
         }
 
         // Per-agent context provider control via Agent.Configuration JSON:
-        // { "disableContextProviders": true } — skip Memory/RAG/Skills only.
+        // { "disableContextProviders": true } - skip Memory/RAG/Skills only.
         // Persona soul and user profile are deliberately injected outside this guard.
         if (!IsContextDisabledForAgent(context))
         {
@@ -211,10 +175,10 @@ public class ContextInjectionMiddleware : IAiMiddleware
             _logger.LogDebug("Memory/RAG/Skills context injection disabled for agent {AgentId} via Configuration (persona/profile still apply)", context.Agent.AgentId);
         }
 
-        // 注入 Agent Persona（Soul）— 独立于 disableContextProviders 开关
+        // 注入 Agent Persona（Soul）- 独立于 disableContextProviders 开关
         await InjectPersonaAsync(context, cancellationToken);
 
-        // 注入 User Profile — 独立于 disableContextProviders 开关
+        // 注入 User Profile - 独立于 disableContextProviders 开关
         await InjectUserProfileAsync(context, cancellationToken);
 
         // Mark injection as done so retries do not duplicate context.
@@ -222,95 +186,25 @@ public class ContextInjectionMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 注入 Agent 人格（Soul）到系统消息。
-    ///
-    /// 优先级（任一命中即注入）：
-    ///   1. AgentResolution.PersonaContent — 内联内容（workspace PERSONA.md 等场景，无需 DB）
-    ///   2. AgentResolution.PersonaId — DB Persona FK，走 IAgentPersonaService（带 5min TTL 缓存 + 事件失效）
+    /// 注入 Agent 人格（Soul）到系统消息。内容来自 <see cref="AgentResolution.PersonaContent"/> -
+    /// DB agent 的内联 <see cref="Entities.Agent.Persona"/> 列，或 workspace PERSONA.md 正文。
+    /// 内容随 Agent 一起解析，无 DB 二次查询、无缓存、无事件失效。
     /// </summary>
-    private async Task InjectPersonaAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
+    private Task InjectPersonaAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
     {
         try
         {
-            // 1. Inline content — workspace PERSONA.md path: short-circuit, no DB lookup
-            var inlineContent = context.Agent.PersonaContent;
-            if (!string.IsNullOrWhiteSpace(inlineContent))
-            {
-                context.Messages.Insert(0, new ChatMessage(ChatRole.System, BuildBlock(SoulOpenTag, SoulCloseTag, inlineContent)));
-                _logger.LogDebug("Injected inline persona soul for agent {AgentId}", context.Agent.AgentId);
-                return;
-            }
-
-            // 2. PersonaId from AgentResolution — the canonical DB path.
-            // Treat Guid.Empty as "unset" — legacy snapshot rows / pre-normalization Clone
-            // paths can carry Guid.Empty which would otherwise produce N wasted DB roundtrips.
-            var personaId = context.Agent.PersonaId;
-            if (personaId == null || personaId == Guid.Empty) return;
-
-            var personaService = context.ServiceProvider.GetService<IAgentPersonaService>();
-            if (personaService == null) return;
-
-            var tenantId = context.ServiceProvider.GetService<ICurrentTenant>()?.Id;
-            var content = await ResolvePersonaContentAsync(personaService, tenantId, personaId.Value, cancellationToken);
-            if (string.IsNullOrWhiteSpace(content)) return;
+            var content = context.Agent.PersonaContent;
+            if (string.IsNullOrWhiteSpace(content)) return Task.CompletedTask;
 
             context.Messages.Insert(0, new ChatMessage(ChatRole.System, BuildBlock(SoulOpenTag, SoulCloseTag, content)));
-            _logger.LogDebug("Injected persona soul for agent {AgentId} (personaId={PersonaId})", context.Agent.AgentId, personaId);
+            _logger.LogDebug("Injected persona soul for agent {AgentId}", context.Agent.AgentId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to inject persona, continuing without soul");
         }
-    }
-
-    /// <summary>
-    /// Load persona content via IAgentPersonaService with a 5-minute TTL cache
-    /// keyed by (TenantId, PersonaId). Concurrent cache misses are coalesced via
-    /// a per-key SemaphoreSlim so only one DB roundtrip happens per stale-cache
-    /// window, regardless of inbound request concurrency.
-    /// </summary>
-    private static async Task<string?> ResolvePersonaContentAsync(
-        IAgentPersonaService personaService, Guid? tenantId, Guid personaId, CancellationToken cancellationToken)
-    {
-        var key = (tenantId, personaId);
-
-        // Fast path: cache hit within TTL
-        if (TryGetFresh(key, out var fast))
-            return fast;
-
-        // Slow path: serialize concurrent misses on the same key
-        var sem = _personaLoadLocks.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync(cancellationToken);
-        try
-        {
-            // Double-check: another caller may have populated the cache while we waited
-            if (TryGetFresh(key, out var doubled))
-                return doubled;
-
-            var personaResult = await personaService.GetByIdAsync(personaId, cancellationToken);
-            if (personaResult.Succeeded && !string.IsNullOrWhiteSpace(personaResult.Data?.Content))
-            {
-                _personaContentCache[key] = (personaResult.Data.Content, DateTime.UtcNow);
-                return personaResult.Data.Content;
-            }
-            return null;
-        }
-        finally
-        {
-            sem.Release();
-        }
-    }
-
-    private static bool TryGetFresh((Guid? TenantId, Guid PersonaId) key, out string? content)
-    {
-        if (_personaContentCache.TryGetValue(key, out var cached)
-            && (DateTime.UtcNow - cached.CachedAt) < PersonaCacheTtl)
-        {
-            content = cached.Content;
-            return true;
-        }
-        content = null;
-        return false;
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -356,7 +250,7 @@ public class ContextInjectionMiddleware : IAiMiddleware
     /// </summary>
     /// <remarks>
     /// 支持的 Configuration JSON 字段：
-    /// - "disableContextProviders": true — 禁用 Memory/RAG/Skills 等动态上下文 (Persona/Profile 不受影响)
+    /// - "disableContextProviders": true - 禁用 Memory/RAG/Skills 等动态上下文 (Persona/Profile 不受影响)
     /// 适用于纯工具型 Agent（如翻译、格式转换）不需要记忆和知识注入的场景。
     /// </remarks>
     private static bool IsContextDisabledForAgent(AiMiddlewareContext context)
@@ -386,7 +280,7 @@ public class ContextInjectionMiddleware : IAiMiddleware
     ///
     /// Replacement strategy inserts a single space inside each tag
     /// (<c>&lt;soul&gt;</c> → <c>&lt; soul&gt;</c>, <c>&lt;/soul&gt;</c> → <c>&lt;/ soul&gt;</c>)
-    /// — visually similar for the LLM when consumed as plain text, but no longer matches
+    /// - visually similar for the LLM when consumed as plain text, but no longer matches
     /// the boundary token an attacker would use to forge a sibling system block.
     /// </summary>
     private static string BuildBlock(string openTag, string closeTag, string content)

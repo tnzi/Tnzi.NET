@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Events;
 
 /// <summary>
-/// Skill activated event — published when a skill is activated via API or on-demand tool.
+/// Skill activated event - published when a skill is activated via API or on-demand tool.
 /// Applications can handle this event for usage tracking and analytics.
 /// </summary>
 public class SkillActivatedEvent : EventBase

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 消息级反馈服务 — 管理 ThreadMessage 上的 👍/👎 反馈
+/// 消息级反馈服务 - 管理 ThreadMessage 上的 👍/👎 反馈
 /// </summary>
 public interface IMessageFeedbackService
 {

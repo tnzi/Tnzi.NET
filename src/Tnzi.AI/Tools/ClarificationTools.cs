@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// 澄清请求工具 — AI Agent 用于向用户提问以获取缺失信息
+/// 澄清请求工具 - AI Agent 用于向用户提问以获取缺失信息
 /// </summary>
 [AIToolGroup("clarification")]
 public class ClarificationTools

@@ -1,6 +1,6 @@
 <template>
   <!--
-    AgentResourcePicker — the shared "assigned cards + Add browse modal" surface
+    AgentResourcePicker - the shared "assigned cards + Add browse modal" surface
     for per-agent resource assignment (Skills / Tools / Knowledge). Presentational
     only: the parent owns the data + persistence and reacts to `assign`/`remove`.
     Renders inside the shared TDetailSection chrome so it matches every other
@@ -8,7 +8,7 @@
     AgentDetail's scoped classes, which don't cross the component boundary →
     unstyled header). Immediate model: assign = enabled, remove = disabled.
   -->
-  <TDetailSection :title="title" :hint="hint" max-width="none">
+  <TDetailSection :title="title" :icon="headerIcon" :hint="hint" max-width="none">
     <template #actions>
       <NButton size="small" type="primary" :disabled="available.length === 0" @click="showAdd = true">
         <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
@@ -44,6 +44,7 @@
       </div>
     </NSpin>
 
+    <TOverlayTheme>
     <NModal v-model:show="showAdd" preset="card" size="small" :title="addLabel" class="w-680px max-w-92vw">
       <NInput v-model:value="search" clearable :placeholder="searchPlaceholder" class="mb-12px" />
       <div class="t-resource-picker__available">
@@ -58,6 +59,7 @@
         </div>
       </div>
     </NModal>
+    </TOverlayTheme>
   </TDetailSection>
 </template>
 
@@ -67,6 +69,7 @@ import { NButton, NInput, NModal, NPopconfirm, NSpin, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TDetailSection from '../../../../components/detail/TDetailSection.vue'
 import TEntityCard from '../../../../components/data/TEntityCard.vue'
+import { TOverlayTheme } from '../../../../components/overlay'
 
 /** A renderable resource item (skill / tool group / knowledge base). */
 export interface ResourcePickerItem {
@@ -88,13 +91,16 @@ interface Props {
   emptyText: string
   allAssignedText: string
   searchPlaceholder: string
+  /** Per-item icon shown on each resource row. */
   icon?: string
+  /** Section-header icon (mirrors the active nav item's icon). */
+  headerIcon?: string
   loading?: boolean
   assigned: ResourcePickerItem[]
   available: ResourcePickerItem[]
 }
 
-const props = withDefaults(defineProps<Props>(), { loading: false, icon: undefined })
+const props = withDefaults(defineProps<Props>(), { loading: false, icon: undefined, headerIcon: undefined })
 
 const emit = defineEmits<{ assign: [value: string]; remove: [value: string] }>()
 

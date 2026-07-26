@@ -1,7 +1,7 @@
 import type { FormSchemaItem } from '../_shared/form-schema'
 
 /**
- * Column shape only — the page (`FunctionModules.vue`) builds its column array
+ * Column shape only - the page (`FunctionModules.vue`) builds its column array
  * inline so it can inject the `parentId → parentName` lookup and the enabled
  * status renderer; this file is just the row type for now. Keep it small.
  */
@@ -25,7 +25,7 @@ export interface FunctionModuleRow {
 
 /**
  * Create/edit form schema. The text/parent fields use page-supplied custom
- * renderers (`fm-text` / `fm-textarea` / `fm-parent` — see
+ * renderers (`fm-text` / `fm-textarea` / `fm-parent` - see
  * `FunctionModules.vue` `fieldRenderers`) so they can: (a) lock when the row is
  * code-managed (`isSystemManaged`), and (b) carry the runtime-built, indented
  * parent-module options the static schema can't express. `order` is a plain

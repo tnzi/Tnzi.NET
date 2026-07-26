@@ -7,7 +7,7 @@
 /// AIModule's tool scanner (<c>AIModule.OnApplicationInitializationAsync</c>) intentionally
 /// skips all <c>Tnzi.*</c> assemblies, so each sub-module must register its own tools during
 /// application initialization. <see cref="IToolScanner"/>/<see cref="IToolRegistry"/> are
-/// registered by <c>AIModule</c> — when it is not loaded, tool registration is skipped
+/// registered by <c>AIModule</c> - when it is not loaded, tool registration is skipped
 /// with a warning (there is no runtime to consume tools anyway).
 /// </remarks>
 public static class AIToolRegistration

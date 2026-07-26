@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * `TThemeSchemaSwitch` — three-state toggle (Light / Dark / Auto) that drives
+ * `TThemeSchemaSwitch` - three-state toggle (Light / Dark / Auto) that drives
  * the document's `dark` class and emits `change` so consumers can persist or
  * notify their own theme stores.
  *
- * Pure presentational — keeps zero coupling to any specific store so it can
+ * Pure presentational - keeps zero coupling to any specific store so it can
  * live in headers, settings panels, login pages, etc.
  */
 import { computed, ref, watch } from 'vue'

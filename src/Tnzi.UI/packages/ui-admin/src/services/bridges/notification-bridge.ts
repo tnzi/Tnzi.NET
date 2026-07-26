@@ -1,5 +1,5 @@
 /**
- * Notification bridge — full implementation (Phase 3 Task 3.24).
+ * Notification bridge - full implementation (Phase 3 Task 3.24).
  *
  * Adapts the notification backend API to BridgeCrudContract shapes used by
  * TCrudPage-based notification pages.
@@ -64,7 +64,7 @@ export interface NotificationTemplatePreviewRequest {
   subject?: string | null
   content?: string | null
   variables?: Record<string, unknown> | null
-  /** Used only by sendTest — leave empty for preview-only. */
+  /** Used only by sendTest - leave empty for preview-only. */
   recipientAddress?: string | null
 }
 
@@ -77,7 +77,7 @@ export interface NotificationTemplatePreviewResult {
   isHtml: boolean
 }
 
-/** templates sub-contract — full CRUD against /admin/notification-templates plus preview + test-send. */
+/** templates sub-contract - full CRUD against /admin/notification-templates plus preview + test-send. */
 export interface NotificationTemplateContract extends BridgeCrudContract<TemplateInfoDto> {
   /**
    * Preview notification rendering. Sends a CreateNotificationRequest to
@@ -89,7 +89,7 @@ export interface NotificationTemplateContract extends BridgeCrudContract<Templat
   /**
    * Send a test notification using the template. Creates and dispatches
    * a real notification (POST /admin/notifications/create-and-send) to
-   * the supplied recipient — use with throwaway addresses only.
+   * the supplied recipient - use with throwaway addresses only.
    */
   sendTest(request: NotificationTemplatePreviewRequest): Promise<void>
 }
@@ -106,7 +106,7 @@ export interface NotificationBridge {
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
-  Promise.reject(new Error(`notification-bridge: ${name} — backend gap, no endpoint available`))
+  Promise.reject(new Error(`notification-bridge: ${name} - backend gap, no endpoint available`))
 
 export function createNotificationBridge(deps: NotificationBridgeDeps = {}): NotificationBridge {
   const notificationApi = deps.notificationApi ?? (deps.client ? useAdminNotificationApi(deps.client) : null)
@@ -158,16 +158,16 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
 
   const messages: NotificationMessageContract = {
     fetch: fetchMessages,
-    // Messages are sent notifications — create/update are not supported from admin.
-    create: backendGapReject('messages.create — notifications are sent, not CRUDed; use send/createAndSend'),
-    update: backendGapReject('messages.update — notifications are immutable once created'),
+    // Messages are sent notifications - create/update are not supported from admin.
+    create: backendGapReject('messages.create - notifications are sent, not CRUDed; use send/createAndSend'),
+    update: backendGapReject('messages.update - notifications are immutable once created'),
     delete: (ids: string[]) => api.batchDelete(ids).then((res) => ensureOk(res)),
     send: (id: string) => api.send(id).then((res) => ensureOk(res)),
   }
 
   // /admin/notification-templates CRUD (2026-04-14 unstub). Uses the shared
   // HttpClient directly because @tnzi/core does not yet expose a dedicated
-  // useAdminNotificationTemplateApi factory — the endpoint is a thin
+  // useAdminNotificationTemplateApi factory - the endpoint is a thin
   // notification-scoped view over the generic template store and pins
   // Module="Notification" server-side, so the bridge only has to forward
   // the standard TemplateDto shapes.
@@ -231,7 +231,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             isHtml: (result as { isHtml?: boolean }).isHtml ?? false,
           }
         },
-        // Test-send creates and dispatches a real notification — use a
+        // Test-send creates and dispatches a real notification - use a
         // throwaway recipient address. Pin templateName + variables on the
         // CreateNotificationRequest so the backend renders + delivers
         // exactly the template the admin clicked.
@@ -250,10 +250,10 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
       }
     : {
-        fetch: backendGapReject('templates.fetch — no HttpClient (deps.client) provided') as never,
-        create: backendGapReject('templates.create — no HttpClient (deps.client) provided'),
-        update: backendGapReject('templates.update — no HttpClient (deps.client) provided'),
-        delete: backendGapReject('templates.delete — no HttpClient (deps.client) provided'),
+        fetch: backendGapReject('templates.fetch - no HttpClient (deps.client) provided') as never,
+        create: backendGapReject('templates.create - no HttpClient (deps.client) provided'),
+        update: backendGapReject('templates.update - no HttpClient (deps.client) provided'),
+        delete: backendGapReject('templates.delete - no HttpClient (deps.client) provided'),
         preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
           const result = unwrap(
             await api.preview({
@@ -292,7 +292,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
   // tests that only inject `notificationApi` still pass.
   //
   // Create/update both upsert via PUT /user/{userId} because the backend key
-  // is (userId, channel, category) rather than a synthetic id — we still
+  // is (userId, channel, category) rather than a synthetic id - we still
   // expose a BridgeCrudContract shape so TCrudPage can consume it uniformly.
   const subscriptions: BridgeCrudContract<NotificationPreferenceDto> = prefApi
     ? {
@@ -351,10 +351,10 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
       }
     : {
-        fetch: backendGapReject('subscriptions.fetch — no preferenceApi provided') as never,
-        create: backendGapReject('subscriptions.create — no preferenceApi provided'),
-        update: backendGapReject('subscriptions.update — no preferenceApi provided'),
-        delete: backendGapReject('subscriptions.delete — no preferenceApi provided'),
+        fetch: backendGapReject('subscriptions.fetch - no preferenceApi provided') as never,
+        create: backendGapReject('subscriptions.create - no preferenceApi provided'),
+        update: backendGapReject('subscriptions.update - no preferenceApi provided'),
+        delete: backendGapReject('subscriptions.delete - no preferenceApi provided'),
       }
 
   return { messages, templates, subscriptions }

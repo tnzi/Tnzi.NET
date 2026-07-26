@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Mcp.Options;
 
 /// <summary>
-/// MCP Server 配置选项 — 将 Tnzi.AI Agent 暴露为 MCP Server 供外部客户端调用
+/// MCP Server 配置选项 - 将 Tnzi.AI Agent 暴露为 MCP Server 供外部客户端调用
 /// </summary>
 [ConfigSection("AI:McpServer")]
 [RuntimeSettingGroup(Key = "ai-mcp-server", Module = "AI", DisplayName = "MCP Server",
@@ -44,7 +44,7 @@ public class McpServerOptions
     /// 速率限制键（client key）中，使各租户拥有独立的速率限制配额。
     /// </para>
     /// <para>
-    /// <b>注意 — 此选项仅做限流分区，不做执行隔离：</b> Agent 调用运行在根 DI 容器创建的
+    /// <b>注意 - 此选项仅做限流分区，不做执行隔离：</b> Agent 调用运行在根 DI 容器创建的
     /// scope 中，没有 <c>ICurrentTenant.Change</c>，因此 MCP Server 对 Agent 执行而言是
     /// 单租户的。若需要真正的按租户执行隔离，须在应用层另行实现（此字段不提供该能力，
     /// 故命名为 RateLimitPerTenant 而非 TenantIsolation 以免误导）。
@@ -91,7 +91,7 @@ public class McpServerOptions
     /// <summary>
     /// Allow API key in query string (?apiKey=...). Default: false.
     /// Query strings commonly leak into access logs, proxy caches, browser history,
-    /// and referrer headers — they are NOT a safe place for credentials. Enable this
+    /// and referrer headers - they are NOT a safe place for credentials. Enable this
     /// flag ONLY for transitional compatibility with legacy clients; prefer the
     /// X-Api-Key header or Authorization: Bearer. Every query-string key extraction
     /// emits a warning log entry when this is enabled.

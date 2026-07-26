@@ -1,7 +1,7 @@
 namespace Tnzi.Results;
 
 /// <summary>
-/// Result.Try — 将可能抛异常的操作安全转换为 Result
+/// Result.Try - 将可能抛异常的操作安全转换为 Result
 /// </summary>
 public static class ResultTryExtensions
 {

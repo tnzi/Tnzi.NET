@@ -97,7 +97,7 @@
         </template>
       </TMasterDetailLayout>
 
-      <!-- New run modal — uses TFormModal so width auto-adapts on
+      <!-- New run modal - uses TFormModal so width auto-adapts on
            narrow viewports (Phase 1 responsive). -->
       <TFormModal
         :state="newRunModal as unknown as UseFormModalReturn<unknown>"
@@ -157,6 +157,7 @@
       </TFormModal>
 
       <!-- ===================== Batch evaluation editor ===================== -->
+      <TOverlayTheme>
       <NDrawer v-model:show="batchVisible" :width="batchDrawerWidth" placement="right">
         <NDrawerContent :title="t('batch.title')" closable data-test="batch-drawer">
           <p class="t-eval-page__note">{{ t('batch.note') }}</p>
@@ -292,8 +293,10 @@
           </template>
         </NDrawerContent>
       </NDrawer>
+      </TOverlayTheme>
 
       <!-- ===================== Score trend ===================== -->
+      <TOverlayTheme>
       <NDrawer v-model:show="trendVisible" :width="trendDrawerWidth" placement="right">
         <NDrawerContent :title="t('trend.title')" closable data-test="trend-drawer">
           <p class="t-eval-page__note">{{ t('trend.note') }}</p>
@@ -367,8 +370,10 @@
           </NSpin>
         </NDrawerContent>
       </NDrawer>
+      </TOverlayTheme>
 
       <!-- ===================== Version comparison ===================== -->
+      <TOverlayTheme>
       <NDrawer v-model:show="compareVisible" :width="compareDrawerWidth" placement="right">
         <NDrawerContent :title="t('compare.title')" closable data-test="compare-drawer">
           <p class="t-eval-page__note">{{ t('compare.note') }}</p>
@@ -470,6 +475,7 @@
           </NSpin>
         </NDrawerContent>
       </NDrawer>
+      </TOverlayTheme>
     </template>
   </TContentPage>
 </template>
@@ -489,6 +495,7 @@ import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import TFormModal from '../../../components/crud/TFormModal.vue'
 import TChartPanel from '../../../components/display/TChartPanel.vue'
+import { TOverlayTheme } from '../../../components/overlay'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
@@ -567,7 +574,7 @@ async function loadAgents(): Promise<void> {
   }
 }
 
-// Responsive drawer widths — full-width on phones, fixed on desktop.
+// Responsive drawer widths - full-width on phones, fixed on desktop.
 const batchDrawerWidth = computed(() => (isSm.value ? '100%' : 640))
 const trendDrawerWidth = computed(() => (isSm.value ? '100%' : 560))
 const compareDrawerWidth = computed(() => (isSm.value ? '100%' : 620))

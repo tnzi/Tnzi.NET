@@ -190,7 +190,7 @@ describe('createPermissionGuard', () => {
     const guard = createPermissionGuard() as any
     const next = vi.fn()
     await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'), next) // PascalCase meta
-    expect(next).toHaveBeenCalledWith() // passes — mirrors the case-insensitive sidebar filter, no phantom 403
+    expect(next).toHaveBeenCalledWith() // passes - mirrors the case-insensitive sidebar filter, no phantom 403
   })
 
   it('super-user bypasses the role gate', async () => {

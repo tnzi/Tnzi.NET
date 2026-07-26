@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// Search result post-processor interface — processes search results after retrieval.
+/// Search result post-processor interface - processes search results after retrieval.
 /// <para>
 /// Post-processors run in sequence and can transform, filter, enrich, or annotate
 /// search results. Common use cases include:

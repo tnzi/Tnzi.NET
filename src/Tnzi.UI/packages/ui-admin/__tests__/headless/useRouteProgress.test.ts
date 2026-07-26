@@ -42,18 +42,37 @@ describe('useRouteProgress', () => {
     expect(document.documentElement.dataset.tnziRouteLoading).toBeUndefined()
   })
 
-  it('is idempotent — second attachment does not double-register hooks', async () => {
+  it('is idempotent - second attachment does not double-register hooks', async () => {
     const router = makeRouter()
     useRouteProgress(router)
     useRouteProgress(router) // should be a no-op
     await router.push('/a')
     await new Promise<void>((r) => requestAnimationFrame(() => r()))
     await new Promise<void>((r) => requestAnimationFrame(() => r()))
-    // No assertion on duplicate counters — just no crash + final state clean.
+    // No assertion on duplicate counters - just no crash + final state clean.
     expect(document.documentElement.dataset.tnziRouteLoading).toBeUndefined()
   })
 
-  it('handles concurrent navigations (counter does not go negative)', async () => {
+  it('clears the attribute after a guard redirect (regression: bar stuck at 80%)', async () => {
+    const router = makeRouter()
+    useRouteProgress(router)
+    // A redirecting guard registered AFTER progress: visiting /a bounces to /b,
+    // mirroring the auth guard sending an unauthenticated first visit to /login
+    // (or `/` → /dashboard). progress.beforeEach fires for the aborted /a nav
+    // (seq++/on) with no matching landing afterEach - the old pending counter
+    // leaked here and never returned to 0, so the bar stuck at ~80% forever.
+    router.beforeEach((to, _from, next) => {
+      if (to.path === '/a') return next('/b')
+      next()
+    })
+    await router.push('/a')
+    expect(router.currentRoute.value.path).toBe('/b')
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    await new Promise<void>((r) => requestAnimationFrame(() => r()))
+    expect(document.documentElement.dataset.tnziRouteLoading).toBeUndefined()
+  })
+
+  it('handles concurrent navigations (bar clears once the latest settles)', async () => {
     const router = makeRouter()
     useRouteProgress(router)
     let snapshot: string | undefined

@@ -8,21 +8,21 @@
  * subclassing anything.
  *
  * Design tenets:
- *  1. **Declarative-first** — a workbench is an array of objects; no JSX/
+ *  1. **Declarative-first** - a workbench is an array of objects; no JSX/
  *     render-prop required. Consumers can persist the layout to JSON.
- *  2. **Responsive by default** — `span` accepts either a fixed 1..24
+ *  2. **Responsive by default** - `span` accepts either a fixed 1..24
  *     number or a breakpoint object that mirrors naive-ui's NGrid
  *     `responsive`.
- *  3. **Lazy-loading friendly** — `component` accepts either a Component
+ *  3. **Lazy-loading friendly** - `component` accepts either a Component
  *     or a `() => Promise<Component>` (treated as a
  *     `defineAsyncComponent`).
- *  4. **Permission-aware** — a widget may declare a `permission` key. The
+ *  4. **Permission-aware** - a widget may declare a `permission` key. The
  *     HOST page filters the widget list by it before render (the admin
  *     Dashboard checks it against the signed-in user's permissions, super-user
  *     bypass + fail-open, mirroring the sidebar), so a widget the user can't
  *     use never mounts and never fires a doomed fetch. `@tnzi/ui` treats
- *     `permission` as opaque metadata — the filtering policy lives in the host.
- *  5. **Persistable order** — widget `id` is stable so the user-drag-to-
+ *     `permission` as opaque metadata - the filtering policy lives in the host.
+ *  5. **Persistable order** - widget `id` is stable so the user-drag-to-
  *     reorder layout can be persisted to localStorage and restored.
  *
  * Sunk from `@tnzi/ui-admin/widgets/types.ts` in 0.2.x.
@@ -71,7 +71,7 @@ export interface WidgetContext {
 
 export interface WidgetDef {
   /**
-   * Stable identifier — used as the Vue list key, the persisted-order
+   * Stable identifier - used as the Vue list key, the persisted-order
    * localStorage key, and the value emitted from drag-reorder events.
    * Convention: `<module>.<widget>` e.g. `ai.usage`, `identity.stats`.
    */
@@ -84,7 +84,7 @@ export interface WidgetDef {
    */
   component: Component | (() => Promise<unknown>)
 
-  /** Card title — i18n key (resolved via the translate prop) or raw text. */
+  /** Card title - i18n key (resolved via the translate prop) or raw text. */
   title?: string
 
   /** Optional iconify icon shown next to the title. */
@@ -98,7 +98,7 @@ export interface WidgetDef {
 
   /**
    * Fixed card height in pixels, or `'auto'` for content-driven height.
-   * Default `'auto'` — charts that need a definite canvas size pass a
+   * Default `'auto'` - charts that need a definite canvas size pass a
    * number so the inner echarts container has somewhere to draw.
    */
   height?: number | 'auto'
@@ -110,11 +110,11 @@ export interface WidgetDef {
   props?: Record<string, unknown>
 
   /**
-   * Permission key — when set, the HOST page drops this widget from the deck
+   * Permission key - when set, the HOST page drops this widget from the deck
    * for users who lack the permission (the admin Dashboard filters here with a
    * super-user bypass + fail-open, like the sidebar). Opaque to `@tnzi/ui`;
    * omit for widgets that are always shown (business tiles, or mixed tiles that
-   * degrade their own inaccessible rows to "—").
+   * degrade their own inaccessible rows to "-").
    */
   permission?: string
 
@@ -123,7 +123,7 @@ export interface WidgetDef {
    * `'ai'`, `'storage'`). When set, the HOST page drops the widget unless the
    * backend host actually loaded that module (the admin Dashboard filters
    * against the `GET /admin/shell/modules` availability signal). Orthogonal
-   * to `permission` — the module gate has NO super-user bypass, because an
+   * to `permission` - the module gate has NO super-user bypass, because an
    * unloaded module's endpoints 404 for the super admin too. Opaque to
    * `@tnzi/ui`; omit for widgets that don't fetch from an optional module.
    */
@@ -135,7 +135,7 @@ export interface WidgetDef {
    */
   refreshable?: boolean
 
-  /** Hide the card chrome — render the component bare. Default `false`. */
+  /** Hide the card chrome - render the component bare. Default `false`. */
   bare?: boolean
 
   /**
@@ -153,7 +153,7 @@ export interface WidgetDef {
  */
 export interface WorkbenchConfig {
   /**
-   * Widget descriptors rendered in order. Optional — when omitted the admin
+   * Widget descriptors rendered in order. Optional - when omitted the admin
    * Workbench page falls back to `defaultWorkbenchWidgets()`, so a consumer can
    * opt into the bundled deck with just `{ layout: 'draggable' }`.
    */
@@ -167,7 +167,7 @@ export interface WorkbenchConfig {
   /**
    * localStorage key used by the draggable layout to persist the
    * user-customised widget order. Defaults to
-   * `'tnzi-workbench-order'` — override per workbench when one shell
+   * `'tnzi-workbench-order'` - override per workbench when one shell
    * embeds multiple workbenches (rare).
    */
   persistKey?: string

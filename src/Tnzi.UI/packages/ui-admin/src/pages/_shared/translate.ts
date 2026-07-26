@@ -50,7 +50,7 @@ function lookup(messages: Record<string, unknown>, path: string): string | undef
 export function translatePageKey(pageNs: string, key: string): string {
   if (!key) return key
   // `useAdminAppStore()` requires an active Pinia. In test harnesses that
-  // mount components without `createPinia()` the store throws — catch and
+  // mount components without `createPinia()` the store throws - catch and
   // default to English so unit tests don't have to wire pinia for every
   // mount. Production app shells always install pinia in main.ts.
   let locale: 'en' | 'zh-cn' = 'en'
@@ -64,7 +64,7 @@ export function translatePageKey(pageNs: string, key: string): string {
   }
   const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
 
-  // Strip optional `tnzi.` prefix — bundled locales are rooted at `admin.*`.
+  // Strip optional `tnzi.` prefix - bundled locales are rooted at `admin.*`.
   const normalised = key.startsWith('tnzi.') ? key.slice(5) : key
 
   // Resolution order for every lookup: consumer overrides (registered via
@@ -75,17 +75,17 @@ export function translatePageKey(pageNs: string, key: string): string {
   const find = (path: string): string | undefined =>
     (overrides && lookup(overrides, path)) ?? lookup(messages, path)
 
-  // Absolute key — resolve directly without prefixing the page namespace.
+  // Absolute key - resolve directly without prefixing the page namespace.
   if (normalised.startsWith('admin.')) {
     return find(normalised) ?? humanise(key)
   }
 
-  // Page-scoped key — prepend the namespace.
+  // Page-scoped key - prepend the namespace.
   const full = `admin.modules.${pageNs}.${normalised}`
   const hit = find(full)
   if (hit !== undefined) return hit
 
-  // Shared dictionary fallback for `columns.xxx` / `form.xxx` keys — lets a
+  // Shared dictionary fallback for `columns.xxx` / `form.xxx` keys - lets a
   // single global label cover every page that surfaces the same field name
   // (column.key). Page-scoped entries always take precedence above; this
   // only kicks in when the page hasn't defined a per-key override.
@@ -99,7 +99,7 @@ export function translatePageKey(pageNs: string, key: string): string {
 
 /**
  * Mustache-style `{name}` placeholder substitution against a translated string.
- * Centralised here so every page uses identical null-handling semantics —
+ * Centralised here so every page uses identical null-handling semantics -
  * missing params resolve to an empty string (not the literal `{name}` token)
  * to avoid leaking template syntax into user-facing copy.
  *
@@ -117,7 +117,7 @@ export function interpolate(template: string, params?: Record<string, unknown>):
 }
 
 /**
- * Bound translate factory — returns a `t(key, params?)` function pinned to
+ * Bound translate factory - returns a `t(key, params?)` function pinned to
  * a page namespace and aware of the `{name}` interpolation convention.
  *
  * Usage in page setup:
@@ -138,7 +138,7 @@ export function makePageTranslator(pageNs: string): (key: string, params?: Recor
  * pre-translated literal string.
  *
  * The "is this an i18n key?" check is the same one TCrudPage uses for its
- * `title` prop — dotted lower-camel ASCII (`admin.modules.foo.bar`). When
+ * `title` prop - dotted lower-camel ASCII (`admin.modules.foo.bar`). When
  * the value matches, it's resolved through `translatePageKey('', value)`;
  * when it doesn't (e.g. "Hello world" or a raw display string), it passes
  * through unchanged.
@@ -160,8 +160,8 @@ export function maybeTranslate(value: string | undefined | null): string {
 
 /**
  * Resolve a backend-provided i18n key, falling back to the backend display
- * string on a dictionary miss. `translatePageKey` never echoes the raw key —
- * it returns `humanise(key)` when the dictionary misses — so a miss is
+ * string on a dictionary miss. `translatePageKey` never echoes the raw key -
+ * it returns `humanise(key)` when the dictionary misses - so a miss is
  * detected by comparing against the humanised form. Used by the settings
  * center where every group/field ships both an `i18nKey` and an English
  * `label`/`displayName` fallback.

@@ -4,7 +4,7 @@ import { NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 
 /**
- * Reusable exception page — used by 403, 404, 500 routes and any
+ * Reusable exception page - used by 403, 404, 500 routes and any
  * custom error state. Layout is a centered illustration + heading +
  * subtitle + primary CTA, with subtle background blob for visual interest.
  *
@@ -14,7 +14,7 @@ import { TSvgIcon } from '@tnzi/ui'
 type ExceptionCode = '403' | '404' | '500' | 'offline'
 
 interface Props {
-  /** Preset error type — drives illustration + default copy. */
+  /** Preset error type - drives illustration + default copy. */
   type?: ExceptionCode
   /** Custom title; falls back to type-default. */
   title?: string
@@ -144,7 +144,7 @@ const resolved = computed(() => {
   background: rgb(var(--tnzi-info-rgb, 32 128 240) / 0.16);
 }
 
-/* No card chrome — the content sits directly on the page background (soybean
+/* No card chrome - the content sits directly on the page background (soybean
    style): keeps the illustration + heading + single CTA the sole focus, with
    no box/shadow competing for attention. */
 .t-exception-page__content {

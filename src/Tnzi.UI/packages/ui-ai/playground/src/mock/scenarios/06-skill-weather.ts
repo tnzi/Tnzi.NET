@@ -33,7 +33,7 @@ const scenario: MockScenario = {
     },
     { at: 1900, type: 'assistant-delta', text: '\n\nBeijing is **partly cloudy** right now, ' },
     { at: 2200, type: 'assistant-delta', text: 'around **14°C** with 42% humidity and a 12 km/h breeze. ' },
-    { at: 2500, type: 'assistant-delta', text: 'Comfortable for outdoor activities — consider a light jacket for the evening.' },
+    { at: 2500, type: 'assistant-delta', text: 'Comfortable for outdoor activities - consider a light jacket for the evening.' },
     { at: 2800, type: 'assistant-end', usage: { promptTokens: 15, completionTokens: 72, totalTokens: 87 } },
   ],
 }

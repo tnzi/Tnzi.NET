@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// 文档摄取服务 — 提取文本 → 切块 → 生成嵌入 → 存储到 pgvector
+/// 文档摄取服务 - 提取文本 → 切块 → 生成嵌入 → 存储到 pgvector
 /// </summary>
 public class DocumentIngestionService : ApplicationService, IDocumentIngestionService
 {
@@ -91,7 +91,9 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
 
             for (var i = 0; i < chunks.Count; i += batchSize)
             {
-                var batch = chunks.Skip(i).Take(batchSize).ToList();
+                // GetRange 是 O(batch)；Skip+Take 每轮都要重走 i 长度的前缀（O(n²)），
+                // 大文档切出数千块时可测（与 KnowledgeBaseService.ReindexAsync 同处理）。
+                var batch = chunks.GetRange(i, Math.Min(batchSize, chunks.Count - i));
                 var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(batch, embeddingOptions, ct);
 
                 if (!embeddingResult.Succeeded)
@@ -126,7 +128,7 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
                 });
             }
 
-            await _chunkRepository.InsertManyAsync(chunkEntities);
+            await _chunkRepository.InsertManyAsync(chunkEntities, ct);
 
             // 7. GraphRAG 实体/关系抽取（默认关闭，opt-in via AI:Rag:GraphRag:Enabled）
             // 抽取失败不能影响文档摄取主流程：捕获并记录后继续。

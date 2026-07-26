@@ -3,7 +3,7 @@ using Tnzi.AI.Sandbox.Tools;
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
-/// SandboxTools 单元测试 — 工具方法只接收 LLM 参数，
+/// SandboxTools 单元测试 - 工具方法只接收 LLM 参数，
 /// 沙箱环境（ISandbox + threadId）经 IAgentExecutionContextAccessor（AsyncLocal）解析。
 /// </summary>
 public class SandboxToolsTests : IAsyncLifetime
@@ -39,7 +39,7 @@ public class SandboxToolsTests : IAsyncLifetime
 
     /// <summary>
     /// 在当前测试方法的异步流上发布沙箱环境（模拟 SandboxMiddleware 的发布动作）。
-    /// 必须在测试方法体内调用 — AsyncLocal 值不会从 InitializeAsync 流到测试方法。
+    /// 必须在测试方法体内调用 - AsyncLocal 值不会从 InitializeAsync 流到测试方法。
     /// </summary>
     private void SeedEnvironment()
     {
@@ -93,13 +93,13 @@ public class SandboxToolsTests : IAsyncLifetime
     }
 
     // -------------------------------------------------------------------------
-    // 环境缺失 — 工具必须返回结构化错误而不是抛异常
+    // 环境缺失 - 工具必须返回结构化错误而不是抛异常
     // -------------------------------------------------------------------------
 
     [Fact]
     public async Task AllTools_WithoutEnvironment_ReturnStructuredError()
     {
-        // 不调用 SeedEnvironment() — 模拟中间件未运行/子代理裸执行器路径
+        // 不调用 SeedEnvironment() - 模拟中间件未运行/子代理裸执行器路径
         var results = new[]
         {
             await _tools.BashAsync("echo nope"),
@@ -141,7 +141,7 @@ public class SandboxToolsTests : IAsyncLifetime
     {
         SeedEnvironment();
 
-        // VirtualPathTranslator 对 .. 路径穿越抛异常 — 工具必须转换为结构化错误
+        // VirtualPathTranslator 对 .. 路径穿越抛异常 - 工具必须转换为结构化错误
         var result = await _tools.ReadFileAsync("/mnt/workspace/../../etc/passwd");
 
         Assert.Contains("read_file failed", result.ToString()!);
@@ -167,7 +167,7 @@ public class SandboxToolsTests : IAsyncLifetime
     {
         SeedEnvironment();
 
-        // A well-formed /mnt path stays inside the thread directory — must NOT trip
+        // A well-formed /mnt path stays inside the thread directory - must NOT trip
         // the escape guard. We assert it is NOT denied (the shell `cat`/`type` may
         // differ per OS, so we check the guard let it through rather than output).
         await _tools.WriteFileAsync("/mnt/workspace/ok.txt", "content-here");

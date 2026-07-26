@@ -7,7 +7,7 @@ using Tnzi.Modules;
 namespace Tnzi.AI.Tests.Modules;
 
 /// <summary>
-/// AIModule DI 注册覆盖测试 — 验证所有核心服务、中间件、工具、Guardrails 都正确注册
+/// AIModule DI 注册覆盖测试 - 验证所有核心服务、中间件、工具、Guardrails 都正确注册
 /// </summary>
 public class AIModuleRegistrationTests
 {
@@ -68,7 +68,6 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(IUsageAnalyticsService), typeof(UsageAnalyticsService))]
     [InlineData(typeof(IAgentValidationService), typeof(AgentValidationService))]
     [InlineData(typeof(IEvaluationService), typeof(EvaluationService))]
-    [InlineData(typeof(IAgentPersonaService), typeof(AgentPersonaService))]
     [InlineData(typeof(IUserProfileService), typeof(UserProfileService))]
     [InlineData(typeof(IAgentArtifactService), typeof(AgentArtifactService))]
     [InlineData(typeof(IMessageFeedbackService), typeof(MessageFeedbackService))]

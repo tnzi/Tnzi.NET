@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `LoginBrandPanel` — brand narrative panel for the `split` login layout
+ * `LoginBrandPanel` - brand narrative panel for the `split` login layout
  * (2026-06-11 redesign, 方案 B). A deep primary gradient base carrying a
  * careercompass-style flowing aurora: layered morphing gradient blobs (screen
  * blend), a fine grain to break banding, a slow diagonal light sheen, a
@@ -10,7 +10,7 @@
  *
  * All colors derive from the `--tnzi-primary-*` palette tokens so the panel
  * follows the consumer's theme. Below 768px the panel collapses to a brand
- * strip (sub copy / characters / copyright hidden, compact paddings) — the
+ * strip (sub copy / characters / copyright hidden, compact paddings) - the
  * parent sizes it to a fixed height there.
  *
  * Decorative layers are `aria-hidden`; all animation stops under
@@ -271,7 +271,7 @@ const RINGS = [
   gap: 8px;
   padding-bottom: 16px;
 }
-/* Understated by design — the characters are the centerpiece; the copy is a
+/* Understated by design - the characters are the centerpiece; the copy is a
    quiet sign-off. Consumers replace it via login.tagline/taglineSub, or pass
    an empty string to hide it entirely. */
 .t-login-brand__tagline {

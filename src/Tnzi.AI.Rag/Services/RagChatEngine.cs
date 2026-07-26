@@ -1,9 +1,7 @@
-using System.Runtime.CompilerServices;
-
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// RAG 聊天引擎 — 多轮对话，带历史上下文
+/// RAG 聊天引擎 - 多轮对话，带历史上下文
 /// <para>
 /// 委托给 IAgentRuntime.RunAsync/RunStreamingAsync，通过 ThreadId 维护对话历史，
 /// 结合 RAG 检索上下文注入到用户消息中。支持完整的 AI 中间件管道。
@@ -115,16 +113,17 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
                 IsDone = chunk.FinishReason != null
             };
 
-            // 在最终事件中注入 citations
+            // 在最终事件中注入 citations（拷贝一份：直接挂共享列表再 AddRange 会把 chunk 的
+            // citations 永久写进共享列表，多个终止事件时不断累积重复项）
             if (evt.IsDone && citations is { Count: > 0 })
             {
-                evt.Citations = citations;
-
-                // 合并 chunk 中的 citations
+                var eventCitations = new List<CitationDto>(citations);
                 if (chunk.Citations is { Count: > 0 })
                 {
-                    evt.Citations.AddRange(chunk.Citations);
+                    eventCitations.AddRange(chunk.Citations);
                 }
+
+                evt.Citations = eventCitations;
             }
 
             yield return evt;

@@ -37,10 +37,16 @@ public class PayrollTestDbContext : TnziDbContext<PayrollTestDbContext>
         modelBuilder.ApplyConfiguration(new JournalEntryConfiguration());
         modelBuilder.ApplyConfiguration(new JournalLineConfiguration());
         modelBuilder.ApplyConfiguration(new FiscalYearConfiguration());
+        modelBuilder.ApplyConfiguration(new LedgerLockConfiguration());
         modelBuilder.ApplyConfiguration(new ExchangeRateConfiguration());
         modelBuilder.ApplyConfiguration(new VendorConfiguration());
         modelBuilder.ApplyConfiguration(new DocumentSequenceConfiguration());
         modelBuilder.ApplyConfiguration(new AccountPeriodBalanceConfiguration());
+
+        // 冲销守卫的判定输入：PayRun 作废经 ILedgerPostingService.ReverseAsync 走冲销漏斗，
+        // 守卫会查这三张表（本套件不勾对账/不导流水，故恒不命中，但模型里必须有）
+        modelBuilder.ApplyConfiguration(new ReconciliationConfiguration());
+        modelBuilder.ApplyConfiguration(new ReconciliationLineConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

@@ -12,7 +12,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Set next check number — per-account register advance (jump = new book). -->
+  <!-- Set next check number - per-account register advance (jump = new book). -->
   <TDetailHost :state="checkDetail" :title="t('setCheck.title')" :width="420" :footer="false" :translate="t">
     <div class="fin-bank-acct__set-check">
       <p class="fin-bank-acct__set-check-hint">{{ t('setCheck.hint') }}</p>
@@ -127,12 +127,12 @@ const title = 'tnzi.admin.modules.finance.bankAccounts.title'
 
 /**
  * Whether this deployment can store account numbers at all (the backend refuses
- * to when `Finance:Encryption:EncryptionKey` is unset — an account number must
+ * to when `Finance:Encryption:EncryptionKey` is unset - an account number must
  * never land in the database unencrypted).
  *
  * Fail-open: only an explicit `false` disables the field. If the capability read
  * fails or the backend predates the endpoint, leave the field usable and let the
- * server's 400 be the wall — wrongly disabling it would block a legitimate write
+ * server's 400 be the wall - wrongly disabling it would block a legitimate write
  * on a properly configured deployment.
  */
 const canStoreAccountNumber = ref(true)

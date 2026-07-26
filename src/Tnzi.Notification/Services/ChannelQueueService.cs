@@ -9,6 +9,10 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ChannelQueueService> _logger;
 
+    // ExecuteAsync 的停止令牌，供延迟入队的等待跟随服务生命周期。
+    // 若在 ExecuteAsync 启动前就有延迟入队（宿主仍在启动），为 None。
+    private CancellationToken _stoppingToken = CancellationToken.None;
+
     // 队列容量固化进 Channel 是刻意的（BoundedChannel 容量运行时不可变）；
     // 用 Monitor 在实例创建时点读一次，语义等价且不触发热消费审计告警。
     public ChannelQueueService(
@@ -37,25 +41,42 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
         await _queue.Writer.WriteAsync(workItem);
     }
 
-    public async Task EnqueueWithDelayAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+    public Task EnqueueWithDelayAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
     {
         Check.NotNull(workItem);
         if (delay <= TimeSpan.Zero)
         {
-            await EnqueueAsync(workItem);
-            return;
+            return EnqueueAsync(workItem);
         }
 
-        // 包装为延迟执行的工作项
-        await _queue.Writer.WriteAsync(async (sp, ct) =>
+        // 延迟必须发生在入队之前。读循环是单读者且逐个串行 await 工作项，
+        // 若把 Task.Delay 包进工作项，一个计划发送（延迟可达数天）会把整条通知队列
+        // 堵到它到期为止（头部阻塞：其后的重试与即时发送全部停摆）。
+        _ = WaitThenEnqueueAsync(workItem, delay);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>等待到期后再入队。等待不占用读循环，随服务停止一并取消。</summary>
+    private async Task WaitThenEnqueueAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+    {
+        try
         {
-            await Task.Delay(delay, ct);
-            await workItem(sp, ct);
-        });
+            await Task.Delay(delay, _stoppingToken);
+            await _queue.Writer.WriteAsync(workItem, _stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // 服务停止：未到期的延迟项丢弃（内存队列本就不跨进程持久化）
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred enqueuing a delayed notification work item.");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
         _logger.LogInformation("Notification Background Queue Service is starting.");
 
         while (!stoppingToken.IsCancellationRequested)

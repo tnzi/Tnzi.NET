@@ -1,12 +1,12 @@
 /**
- * `useAdminMenuContext` — Phase E composable that gives the 4 hybrid layout
+ * `useAdminMenuContext` - Phase E composable that gives the 4 hybrid layout
  * modes the layered menu data they need (1st level / 2nd level / 3rd level
  * slices) plus cross-component state (which top-level item is currently
  * selected) so multiple menu surfaces (top, rail, drawer) can co-ordinate.
  *
  * Mirrors soybean's `provideMixMenuContext()` / `useMixMenuContext()` pair
  * (`src/layouts/modules/global-menu/context.ts`). Without this, the 3
- * hybrid modes can only render the full menu tree everywhere — they look
+ * hybrid modes can only render the full menu tree everywhere - they look
  * identical to vertical+horizontal stacked together.
  *
  * Usage (in TAdminShell):
@@ -45,7 +45,7 @@ export interface AdminMenuContext {
   /**
    * Locate the route's nearest matching 1st level item. If the route doesn't
    * match any item (e.g. Workbench has no children), and `autoSelectFirstWith`
-   * is true, fall back to the first 1st level item that has children — so the
+   * is true, fall back to the first 1st level item that has children - so the
    * vertical-mix drawer / hybrid sider has something to render on initial load.
    */
   resolveFirstLevelKeyForRoute: (routeName: string) => string
@@ -104,7 +104,7 @@ export function useAdminMenuContext(opts: UseAdminMenuContextOptions): AdminMenu
   }
 
   function resolveFirstLevelKeyForRoute(name: string): string {
-    // 1. Direct match — the route name *is* a 1st level menu key (e.g. a
+    // 1. Direct match - the route name *is* a 1st level menu key (e.g. a
     //    leaf top-level like 'dashboard'). Without this, leaf top-level
     //    routes would fall through to step 2 / 3 and silently jump the
     //    rail to a sibling that *does* have children.
@@ -112,7 +112,7 @@ export function useAdminMenuContext(opts: UseAdminMenuContextOptions): AdminMenu
       const direct = menus.value.find((m) => m.key === name)
       if (direct) return direct.key
     }
-    // 2. Descendant match — find the 1st level ancestor of a nested route.
+    // 2. Descendant match - find the 1st level ancestor of a nested route.
     const match = findFirstLevelByDescendantKey(name)
     if (match) return match.key
     // 3. Optional fallback to the first item with children, so vertical-mix
@@ -125,7 +125,7 @@ export function useAdminMenuContext(opts: UseAdminMenuContextOptions): AdminMenu
   }
 
   // Keep activeFirstLevelMenuKey in sync with the current route. We only
-  // *push* the route's key into the active state — the user can still
+  // *push* the route's key into the active state - the user can still
   // hover-override via handleSelectFirstLevelMenu without us yanking it back.
   watch(
     routeName,
@@ -172,7 +172,7 @@ export function useAdminMenuContext(opts: UseAdminMenuContextOptions): AdminMenu
       if (readAutoSelectSecondLevel()) {
         activeSecondLevelMenuKey.value = secondLevelMenus.value[0]?.key ?? ''
       } else {
-        // User opted out of auto-select — leave it cleared rather than
+        // User opted out of auto-select - leave it cleared rather than
         // silently snapping to the first child.
         activeSecondLevelMenuKey.value = ''
       }

@@ -1,4 +1,5 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 export interface PasswordResetData {
   email: string
@@ -35,7 +36,7 @@ export interface UsePasswordResetReturn {
 }
 
 export function usePasswordReset(options: UsePasswordResetOptions = {}): UsePasswordResetReturn {
-  const countdownSeconds = options.countdownSeconds ?? 60
+  const { t } = useI18n()
 
   const email = ref('')
   const code = ref('')
@@ -64,7 +65,8 @@ export function usePasswordReset(options: UsePasswordResetOptions = {}): UsePass
   let timer: ReturnType<typeof setInterval> | null = null
 
   function startCountdown(): void {
-    countdown.value = countdownSeconds
+    // Read lazily so callers can drive the duration from a reactive source.
+    countdown.value = options.countdownSeconds ?? 60
     timer = setInterval(() => {
       countdown.value -= 1
       if (countdown.value <= 0 && timer) {
@@ -87,10 +89,10 @@ export function usePasswordReset(options: UsePasswordResetOptions = {}): UsePass
 
   async function submit(): Promise<void> {
     const newErrors: Record<string, string> = {}
-    if (!email.value) newErrors.email = 'Email is required'
-    if (!code.value) newErrors.code = 'Verification code is required'
-    if (!password.value) newErrors.password = 'Password is required'
-    if (passwordMismatch.value) newErrors.confirmPassword = 'Passwords do not match'
+    if (!email.value) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
+    if (!code.value) newErrors.code = t('auth.pleaseEnter', { field: t('auth.verificationCode') })
+    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.newPassword') })
+    if (passwordMismatch.value) newErrors.confirmPassword = t('auth.passwordMismatch')
     errors.value = newErrors
     if (Object.keys(newErrors).length > 0) return
 

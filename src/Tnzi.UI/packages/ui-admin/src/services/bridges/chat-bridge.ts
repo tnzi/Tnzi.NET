@@ -1,5 +1,5 @@
 /**
- * Chat admin bridge — wraps `useChatBroadcastApi` + `useChatAdminApi` (core)
+ * Chat admin bridge - wraps `useChatBroadcastApi` + `useChatAdminApi` (core)
  * for the admin maintenance pages (Overview / Conversations / Presence /
  * Broadcast). The IM chat window uses the separate `chat-im-bridge`.
  *
@@ -61,7 +61,7 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
   const adminApi = deps.adminApi ?? (deps.client ? useChatAdminApi(deps.client) : null)
 
   const noClient = (m: string) => () =>
-    Promise.reject(new Error(`chat-bridge: ${m} — no HttpClient (deps.client) provided`))
+    Promise.reject(new Error(`chat-bridge: ${m} - no HttpClient (deps.client) provided`))
 
   return {
     broadcast: broadcastApi

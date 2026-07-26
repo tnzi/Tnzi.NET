@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services.Interfaces;
 
 /// <summary>
-/// 关键词搜索提供者接口 — 用于混合搜索中的关键词匹配部分
+/// 关键词搜索提供者接口 - 用于混合搜索中的关键词匹配部分
 /// </summary>
 /// <remarks>
 /// <para>

@@ -1,6 +1,27 @@
 <template>
-  <TTabsPage :title="title" icon="mdi:chart-box-outline" :translate="t" :sections="tabs" default-section="trial-balance">
+  <TTabsPage
+    v-model:section="activeSection"
+    :title="title"
+    icon="mdi:chart-box-outline"
+    :translate="t"
+    :sections="tabs"
+    default-section="trial-balance"
+  >
       <!-- Per-tab CSV export (server-generated, UTF-8 BOM) + balance-summary maintenance -->
+      <!-- Cross-tab controls live on the canvas strip: they belong to the whole
+           report set, and the header bar cannot hold them without eating the title. -->
+      <template #kpis>
+        <div class="fin-reports__controls">
+          <TFinanceViewToggle :translate="t" />
+          <TPeriodPicker
+            :mode="asOfTabs.includes(activeSection) ? 'as-of' : 'range'"
+            :show-comparison="activeSection === 'profit-and-loss'"
+            :translate="t"
+            @change="onPeriodChange(activeSection)"
+          />
+        </div>
+      </template>
+
       <template #actions="{ active }">
         <NButton size="small" :loading="exporting" :disabled="!canExport(active)" @click="exportCsv(active)">
           {{ t('actions.export') }}
@@ -18,7 +39,6 @@
       <!-- ── Trial Balance ─────────────────────────────────── -->
       <template #trial-balance>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="tbRange" type="daterange" size="small" clearable />
           <NButton size="small" type="primary" :loading="tbLoading" @click="runTrialBalance">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="tb">
@@ -29,13 +49,12 @@
             <span>{{ t('trialBalance.totalClosing') }}: <strong>{{ fmtAmount(tb.totalClosingBalance) }}</strong></span>
           </div>
         </template>
-        <TEmpty v-else-if="!tbLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!tbLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── Balance Sheet ─────────────────────────────────── -->
       <template #balance-sheet>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="bsAsOf" type="date" size="small" />
           <NButton size="small" type="primary" :loading="bsLoading" @click="runBalanceSheet">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="bs">
@@ -63,39 +82,41 @@
             </span>
           </div>
         </template>
-        <TEmpty v-else-if="!bsLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!bsLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── Profit & Loss ─────────────────────────────────── -->
       <template #profit-and-loss>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="plRange" type="daterange" size="small" clearable />
           <NButton size="small" type="primary" :loading="plLoading" @click="runProfitAndLoss">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="pl">
           <div class="fin-reports__bs-grid">
             <div class="fin-reports__section">
               <h4>{{ t('profitAndLoss.income') }}</h4>
-              <TResponsiveTable :columns="rowColumns" :data="pl.income" size="small" mobile="scroll" :pagination="false" :bordered="false" />
+              <TResponsiveTable :columns="plColumns" :data="pl.income" size="small" mobile="scroll" :pagination="false" :bordered="false" />
               <div class="fin-reports__section-total">{{ t('profitAndLoss.totalIncome') }}: <strong>{{ fmtAmount(pl.totalIncome) }}</strong></div>
             </div>
             <div class="fin-reports__section">
               <h4>{{ t('profitAndLoss.expenses') }}</h4>
-              <TResponsiveTable :columns="rowColumns" :data="pl.expenses" size="small" mobile="scroll" :pagination="false" :bordered="false" />
+              <TResponsiveTable :columns="plColumns" :data="pl.expenses" size="small" mobile="scroll" :pagination="false" :bordered="false" />
               <div class="fin-reports__section-total">{{ t('profitAndLoss.totalExpenses') }}: <strong>{{ fmtAmount(pl.totalExpenses) }}</strong></div>
             </div>
           </div>
           <div class="fin-reports__totals">
             <span>{{ t('profitAndLoss.netProfit') }}: <strong :class="pl.netProfit >= 0 ? 'fin-reports__check--ok' : 'fin-reports__check--bad'">{{ fmtAmount(pl.netProfit) }}</strong></span>
+            <span v-if="comparing && plPrior">
+              {{ priorLabel }}: <strong>{{ formatMoney(plPrior.netProfit) }}</strong>
+              <component :is="renderVariance(pl.netProfit, plPrior.netProfit)" />
+            </span>
           </div>
         </template>
-        <TEmpty v-else-if="!plLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!plLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── Cash Flow (indirect method) ───────────────────── -->
       <template #cash-flow>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="cfRange" type="daterange" size="small" clearable />
           <NButton size="small" type="primary" :loading="cfLoading" @click="runCashFlow">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="cf">
@@ -129,7 +150,7 @@
             </span>
           </div>
         </template>
-        <TEmpty v-else-if="!cfLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!cfLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── General Ledger ────────────────────────────────── -->
@@ -143,7 +164,6 @@
             :placeholder="t('generalLedger.accountPlaceholder')"
             class="fin-reports__account-select"
           />
-          <NDatePicker v-model:value="glRange" type="daterange" size="small" clearable />
           <NButton size="small" type="primary" :loading="glLoading" :disabled="!glAccountId" @click="runGeneralLedger(1)">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="gl">
@@ -163,13 +183,12 @@
             />
           </div>
         </template>
-        <TEmpty v-else-if="!glLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!glLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── AR Aging ──────────────────────────────────────── -->
       <template #ar-aging>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="arAsOf" type="date" size="small" />
           <NButton size="small" type="primary" :loading="arLoading" @click="runAging('ar')">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="arAging">
@@ -179,13 +198,12 @@
             <span>{{ t('aging.over90') }}: <strong>{{ fmtAmount(arAging.totals.over90) }}</strong></span>
           </div>
         </template>
-        <TEmpty v-else-if="!arLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!arLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── AP Aging ──────────────────────────────────────── -->
       <template #ap-aging>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="apAsOf" type="date" size="small" />
           <NButton size="small" type="primary" :loading="apLoading" @click="runAging('ap')">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="apAging">
@@ -195,13 +213,12 @@
             <span>{{ t('aging.over90') }}: <strong>{{ fmtAmount(apAging.totals.over90) }}</strong></span>
           </div>
         </template>
-        <TEmpty v-else-if="!apLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!apLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── Tax Summary ───────────────────────────────────── -->
       <template #tax-summary>
         <div class="fin-reports__toolbar">
-          <NDatePicker v-model:value="taxRange" type="daterange" size="small" clearable />
           <NButton size="small" type="primary" :loading="taxLoading" @click="runTaxSummary">{{ t('actions.run') }}</NButton>
         </div>
         <template v-if="tax">
@@ -212,11 +229,59 @@
             <span>{{ t('taxSummary.totalNet') }}: <strong :class="tax.totalNetTax >= 0 ? 'fin-reports__check--ok' : 'fin-reports__check--bad'">{{ fmtAmount(tax.totalNetTax) }}</strong></span>
           </div>
         </template>
-        <TEmpty v-else-if="!taxLoading" :description="t('runHint')" />
+        <TEmpty v-else-if="!taxLoading" :text="t('runHint')" />
       </template>
 
       <!-- ── Balance-summary verify result (tab-agnostic overlay) ── -->
       <template #overlays>
+        <!-- Drill-down: the ledger rows behind whichever figure was clicked. -->
+        <TDetailHost :state="drillDetail" :title="drillTitle" :width="900" :footer="false" :translate="t">
+          <div class="fin-reports__drill">
+            <div class="fin-reports__drill-head">
+              <NInput
+                :value="drill.keyword.value"
+                size="small"
+                clearable
+                :placeholder="t('drilldown.search')"
+                class="fin-reports__drill-search"
+                @update:value="(v: string) => void drill.search(v)"
+              />
+              <NButton size="tiny" quaternary @click="void drill.toggleOrder()">
+                {{ drill.descending.value ? t('drilldown.newestFirst') : t('drilldown.oldestFirst') }}
+              </NButton>
+              <span class="fin-reports__drill-period">{{ formatAccountingDateRange(period.from, period.to) }}</span>
+            </div>
+
+            <!-- A filtered ledger has no continuous running balance; the backend
+                 zeroes the balances and flags it, so say so instead of showing 0. -->
+            <NAlert v-if="!drill.balancesApply.value && drill.report.value" type="info" :bordered="false" class="fin-reports__drill-alert">
+              {{ t('drilldown.filteredNoBalance') }}
+            </NAlert>
+
+            <NSpin :show="drill.loading.value">
+              <TResponsiveTable
+                :columns="drillColumnsWithBalance"
+                :data="drill.rows.value"
+                :row-key="(r: GeneralLedgerLineDto) => `${r.journalEntryId}-${r.postingDate}-${r.debit}-${r.credit}`"
+                size="small"
+                mobile="scroll"
+                :pagination="false"
+                :bordered="false"
+              />
+              <TEmpty v-if="!drill.loading.value && drill.rows.value.length === 0" :text="t('drilldown.empty')" />
+            </NSpin>
+
+            <NPagination
+              v-if="drill.total.value > drill.pageSize"
+              :page="drill.pageIndex.value"
+              :page-size="drill.pageSize"
+              :item-count="drill.total.value"
+              size="small"
+              @update:page="(n: number) => void drill.goToPage(n)"
+            />
+          </div>
+        </TDetailHost>
+
         <TModalShell
           v-model:show="verifyShow"
           :title="t('maintenance.verifyTitle')"
@@ -244,7 +309,7 @@
             <p v-if="verifyResult.totalDifferences > verifyResult.differences.length" class="fin-reports__truncation">
               {{ t('maintenance.truncated', { shown: verifyResult.differences.length, total: verifyResult.totalDifferences }) }}
             </p>
-            <TEmpty v-else-if="verifyResult.isConsistent" :description="t('maintenance.consistentHint')" />
+            <TEmpty v-else-if="verifyResult.isConsistent" :text="t('maintenance.consistentHint')" />
           </template>
         </TModalShell>
       </template>
@@ -252,8 +317,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { NButton, NDatePicker, NDropdown, NPagination, NSelect, useDialog, type DataTableColumns } from 'naive-ui'
+import { EMPTY_DASH } from '../../utils/placeholders'
+import { computed, h, onMounted, ref } from 'vue'
+import { NAlert, NButton, NDropdown, NInput, NPagination, NSelect, NSpin, useDialog, type DataTableColumns } from 'naive-ui'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TEmpty from '../../components/data/TEmpty.vue'
@@ -278,12 +344,21 @@ import {
   type TrialBalanceReportDto,
   type TrialBalanceRowDto,
 } from '../../services/bridges/finance-bridge'
+import TPeriodPicker from '../../components/finance/TPeriodPicker.vue'
+import TFinanceViewToggle from '../../components/finance/TFinanceViewToggle.vue'
+import TMoney from '../../components/finance/TMoney.vue'
+import { moneyPairColumns } from '../../components/finance/money-columns'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useFinancePeriod } from '../../headless/useFinancePeriod'
+import { useGlDrilldown, type GlDrilldownTarget } from '../../headless/useGlDrilldown'
+import { useDetail } from '../../headless/useDetail'
+import { formatAccountingDateRange, formatMoney, formatPercent, srMoney, variance } from '../../utils/finance-format'
 import { useAdminClient } from '../../plugin/client'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { downloadBlob, formatDateOnly } from '@tnzi/core'
-import { amountCell, fmtAmount, tsToIsoDate } from './money'
+import { downloadBlob } from '@tnzi/core'
+import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'
 import { financeSourceTypeLabel } from './source-type'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -305,15 +380,77 @@ const tabs: TabSection[] = [
   { name: 'tax-summary', label: t('tabs.taxSummary'), scroll: true },
 ]
 
-const yearStart = new Date(new Date().getFullYear(), 0, 1).getTime()
-const today = Date.now()
+// One reporting period for the whole page (and for every other finance
+// surface): `useFinancePeriod` is module-level, so moving from P&L to the
+// general ledger keeps the window instead of silently resetting it.
+const { period, comparisonPeriod, comparison } = useFinancePeriod()
+
+/** Point-in-time reports: the control collapses to a single date. */
+const asOfTabs = ['balance-sheet', 'ar-aging', 'ap-aging']
+
+/** Mirrors the active tab so the canvas-strip controls can adapt to it. */
+const activeSection = ref('trial-balance')
+
+/** Re-run whichever report the user is looking at when the period changes. */
+function onPeriodChange(active: string) {
+  const runners: Record<string, () => void> = {
+    'trial-balance': () => void runTrialBalance(),
+    'balance-sheet': () => void runBalanceSheet(),
+    'profit-and-loss': () => void runProfitAndLoss(),
+    'cash-flow': () => void runCashFlow(),
+    'general-ledger': () => void runGeneralLedger(1),
+    'ar-aging': () => void runAging('ar'),
+    'ap-aging': () => void runAging('ap'),
+    'tax-summary': () => void runTaxSummary(),
+  }
+  runners[active]?.()
+}
+
+// ── Drill-down ──────────────────────────────────────────────────
+// Stripe's rule: users do not trust numbers they cannot verify. Every account
+// row's balance is a button that opens the ledger rows behind it, for the same
+// period, without re-navigating and retyping the range.
+const drill = useGlDrilldown({ bridge, period: () => period.value })
+const drillDetail = useDetail<{ id: string }>({ mode: 'drawer', url: 'ledger' })
+
+async function openDrilldown(target: GlDrilldownTarget) {
+  await drillDetail.open('view')
+  await drill.openFor(target)
+}
+
+const drillTitle = computed(() => {
+  const target = drill.target.value
+  if (!target) return t('drilldown.title')
+  const name = [target.accountCode, target.accountName].filter(Boolean).join(' ')
+  return name || t('drilldown.title')
+})
+
+const drillColumns = computed<DataTableColumns<GeneralLedgerLineDto>>(() => [
+  { key: 'postingDate', title: t('columns.postingDate'), width: 110, render: (r: GeneralLedgerLineDto) => fmtDate(r.postingDate) },
+  { key: 'entryNumber', title: t('generalLedger.entryNumber'), width: 120, render: (r: GeneralLedgerLineDto) => r.entryNumber ?? EMPTY_DASH },
+  { key: 'memo', title: t('columns.memo'), minWidth: 160, render: (r: GeneralLedgerLineDto) => r.memo ?? EMPTY_DASH },
+  // A drill-down lands on whatever account the reader clicked - revenue and
+  // equity rows included - so this is the ledger, not one account's cash flow.
+  ...moneyPairColumns<GeneralLedgerLineDto>({
+    presentation: 'ledger',
+    translate: t,
+    debit: (r) => r.debit,
+    credit: (r) => r.credit,
+  }),
+])
+
+/** Balance column is dropped while a filter is active: see `isFiltered`. */
+const drillColumnsWithBalance = computed<DataTableColumns<GeneralLedgerLineDto>>(() =>
+  drill.balancesApply.value
+    ? [...drillColumns.value, { key: 'runningBalance', title: t('generalLedger.balance'), width: 130, align: 'right', render: (r: GeneralLedgerLineDto) => h(TMoney, { value: r.runningBalance, strong: true }) }]
+    : drillColumns.value,
+)
 
 function showError(error: unknown) {
   message.error(error instanceof Error ? error.message : String(error))
 }
 
 // ── Trial Balance ───────────────────────────────────────────────
-const tbRange = ref<[number, number]>([yearStart, today])
 const tb = ref<TrialBalanceReportDto | null>(null)
 const tbLoading = ref(false)
 
@@ -327,10 +464,9 @@ const tbColumns: DataTableColumns<TrialBalanceRowDto> = [
 ]
 
 async function runTrialBalance() {
-  if (!tbRange.value) return
   tbLoading.value = true
   try {
-    tb.value = await bridge.reports.trialBalance(tsToIsoDate(tbRange.value[0]), tsToIsoDate(tbRange.value[1]))
+    tb.value = await bridge.reports.trialBalance(period.value.from, period.value.to)
   } catch (error) {
     showError(error)
   } finally {
@@ -339,20 +475,33 @@ async function runTrialBalance() {
 }
 
 // ── Balance Sheet ───────────────────────────────────────────────
-const bsAsOf = ref<number>(today)
 const bs = ref<BalanceSheetReportDto | null>(null)
 const bsLoading = ref(false)
 
 const rowColumns: DataTableColumns<ReportAccountRowDto> = [
   { key: 'code', title: t('columns.code'), width: 100 },
   { key: 'name', title: t('columns.name'), minWidth: 160 },
-  { key: 'balance', title: t('columns.balance'), width: 140, render: (r) => amountCell(fmtAmount(r.balance), true) },
+  {
+    key: 'balance',
+    title: t('columns.balance'),
+    width: 140,
+    align: 'right',
+    render: (r) =>
+      h(TMoney, {
+        value: r.balance,
+        strong: true,
+        drilldown: true,
+        drilldownHint: t('drilldown.hint'),
+        label: r.name,
+        onDrilldown: () => void openDrilldown({ accountId: r.accountId, accountCode: r.code, accountName: r.name }),
+      }),
+  },
 ]
 
 async function runBalanceSheet() {
   bsLoading.value = true
   try {
-    bs.value = await bridge.reports.balanceSheet(tsToIsoDate(bsAsOf.value))
+    bs.value = await bridge.reports.balanceSheet(period.value.to)
   } catch (error) {
     showError(error)
   } finally {
@@ -361,15 +510,25 @@ async function runBalanceSheet() {
 }
 
 // ── Profit & Loss ───────────────────────────────────────────────
-const plRange = ref<[number, number]>([yearStart, today])
 const pl = ref<ProfitAndLossReportDto | null>(null)
 const plLoading = ref(false)
 
+/** The comparison run, or null when comparison is off. */
+const plPrior = ref<ProfitAndLossReportDto | null>(null)
+
 async function runProfitAndLoss() {
-  if (!plRange.value) return
   plLoading.value = true
   try {
-    pl.value = await bridge.reports.profitAndLoss(tsToIsoDate(plRange.value[0]), tsToIsoDate(plRange.value[1]))
+    // Comparison is two ordinary runs joined in the client. The backend has no
+    // `compareTo`, and adding one would buy a single round-trip at the cost of
+    // a second reporting contract to keep honest.
+    const prior = comparisonPeriod.value
+    const [current, previous] = await Promise.all([
+      bridge.reports.profitAndLoss(period.value.from, period.value.to),
+      prior ? bridge.reports.profitAndLoss(prior.from, prior.to) : Promise.resolve(null),
+    ])
+    pl.value = current
+    plPrior.value = previous
   } catch (error) {
     showError(error)
   } finally {
@@ -377,16 +536,63 @@ async function runProfitAndLoss() {
   }
 }
 
+const comparing = computed(() => comparison.value !== 'none' && plPrior.value !== null)
+
+const priorLabel = computed(() =>
+  comparisonPeriod.value ? formatAccountingDateRange(comparisonPeriod.value.from, comparisonPeriod.value.to) : '',
+)
+
+/** Prior-period balance by account, so rows line up even when the sets differ. */
+const priorByAccount = computed(() => {
+  const map = new Map<string, number>()
+  for (const row of [...(plPrior.value?.income ?? []), ...(plPrior.value?.expenses ?? [])]) {
+    map.set(row.accountId, row.balance)
+  }
+  return map
+})
+
+/** P&L columns gain prior + variance columns while a comparison is active. */
+const plColumns = computed<DataTableColumns<ReportAccountRowDto>>(() => {
+  if (!comparing.value) return rowColumns
+  return [
+    ...rowColumns,
+    {
+      key: 'prior',
+      title: priorLabel.value,
+      width: 140,
+      align: 'right',
+      render: (r: ReportAccountRowDto) => h(TMoney, { value: priorByAccount.value.get(r.accountId) ?? 0 }),
+    },
+    {
+      key: 'variance',
+      title: t('profitAndLoss.variance'),
+      width: 150,
+      align: 'right',
+      render: (r: ReportAccountRowDto) => renderVariance(r.balance, priorByAccount.value.get(r.accountId) ?? 0),
+    },
+  ]
+})
+
+/**
+ * Delta + percent. The percent is omitted against a zero base rather than
+ * printed as an infinity, which is the classic comparison-table lie.
+ */
+function renderVariance(current: number, prior: number) {
+  const v = variance(current, prior)
+  return h('span', { class: 'fin-reports__variance', 'aria-label': srMoney(v.delta) }, [
+    h(TMoney, { value: v.delta, signed: true, tone: 'sign' }),
+    v.percent === null ? null : h('span', { class: 'fin-reports__variance-pct' }, formatPercent(v.percent)),
+  ])
+}
+
 // ── Cash Flow ───────────────────────────────────────────────────
-const cfRange = ref<[number, number]>([yearStart, today])
 const cf = ref<CashFlowReportDto | null>(null)
 const cfLoading = ref(false)
 
 async function runCashFlow() {
-  if (!cfRange.value) return
   cfLoading.value = true
   try {
-    cf.value = await bridge.reports.cashFlow(tsToIsoDate(cfRange.value[0]), tsToIsoDate(cfRange.value[1]))
+    cf.value = await bridge.reports.cashFlow(period.value.from, period.value.to)
   } catch (error) {
     showError(error)
   } finally {
@@ -396,19 +602,27 @@ async function runCashFlow() {
 
 // ── General Ledger ──────────────────────────────────────────────
 const glAccountId = ref<string | null>(null)
-const glRange = ref<[number, number]>([yearStart, today])
 const gl = ref<GeneralLedgerReportDto | null>(null)
 const glLoading = ref(false)
 const accountOptions = ref<Array<{ label: string; value: string }>>([])
 
 const glColumns: DataTableColumns<GeneralLedgerLineDto> = [
-  { key: 'postingDate', title: t('columns.postingDate'), width: 120, render: (r) => formatDateOnly(r.postingDate, { utc: true }) },
-  { key: 'entryNumber', title: t('generalLedger.entryNumber'), width: 130, render: (r) => r.entryNumber ?? '—' },
-  { key: 'memo', title: t('columns.memo'), minWidth: 180, render: (r) => r.memo ?? '—' },
+  { key: 'postingDate', title: t('columns.postingDate'), width: 120, render: (r) => fmtDate(r.postingDate) },
+  { key: 'entryNumber', title: t('generalLedger.entryNumber'), width: 130, render: (r) => r.entryNumber ?? EMPTY_DASH },
+  { key: 'memo', title: t('columns.memo'), minWidth: 180, render: (r) => r.memo ?? EMPTY_DASH },
   { key: 'source', title: t('generalLedger.source'), width: 130, render: (r) => financeSourceTypeLabel(r.sourceType) },
-  { key: 'debit', title: t('generalLedger.debit'), width: 120, render: (r) => amountCell(r.debit > 0 ? fmtAmount(r.debit) : '—') },
-  { key: 'credit', title: t('generalLedger.credit'), width: 120, render: (r) => amountCell(r.credit > 0 ? fmtAmount(r.credit) : '—') },
-  { key: 'runningBalance', title: t('generalLedger.balance'), width: 130, render: (r) => amountCell(fmtAmount(r.runningBalance), true) },
+  // The account picker offers every postable leaf, so this table renders
+  // revenue, equity and liability accounts as readily as bank accounts -
+  // "money out" of a revenue account would be nonsense. It is the ledger.
+  ...moneyPairColumns<GeneralLedgerLineDto>({
+    presentation: 'ledger',
+    translate: t,
+    debit: (r) => r.debit,
+    credit: (r) => r.credit,
+  }),
+  // Right-aligned with the two amount columns above it: a money block that
+  // mixes alignments reads as two unrelated tables glued together.
+  { key: 'runningBalance', title: t('generalLedger.balance'), width: 130, align: 'right', render: (r) => amountCell(fmtAmount(r.runningBalance), true) },
 ]
 
 function flattenLeaves(nodes: AccountTreeDto[], into: Array<{ label: string; value: string }>) {
@@ -421,13 +635,13 @@ function flattenLeaves(nodes: AccountTreeDto[], into: Array<{ label: string; val
 }
 
 async function runGeneralLedger(page: number) {
-  if (!glAccountId.value || !glRange.value) return
+  if (!glAccountId.value) return
   glLoading.value = true
   try {
     gl.value = await bridge.reports.generalLedger(
       glAccountId.value,
-      tsToIsoDate(glRange.value[0]),
-      tsToIsoDate(glRange.value[1]),
+      period.value.from,
+      period.value.to,
       page,
       20,
     )
@@ -438,10 +652,7 @@ async function runGeneralLedger(page: number) {
   }
 }
 
-
 // ── AR / AP Aging ───────────────────────────────────────────────
-const arAsOf = ref<number>(today)
-const apAsOf = ref<number>(today)
 const arAging = ref<AgingReportDto | null>(null)
 const apAging = ref<AgingReportDto | null>(null)
 const arLoading = ref(false)
@@ -461,8 +672,8 @@ async function runAging(side: 'ar' | 'ap') {
   const loading = side === 'ar' ? arLoading : apLoading
   loading.value = true
   try {
-    if (side === 'ar') arAging.value = await bridge.reports.arAging(tsToIsoDate(arAsOf.value))
-    else apAging.value = await bridge.reports.apAging(tsToIsoDate(apAsOf.value))
+    if (side === 'ar') arAging.value = await bridge.reports.arAging(period.value.to)
+    else apAging.value = await bridge.reports.apAging(period.value.to)
   } catch (error) {
     showError(error)
   } finally {
@@ -471,24 +682,22 @@ async function runAging(side: 'ar' | 'ap') {
 }
 
 // ── Tax Summary ─────────────────────────────────────────────────
-const taxRange = ref<[number, number]>([yearStart, today])
 const tax = ref<TaxSummaryReportDto | null>(null)
 const taxLoading = ref(false)
 
 const taxColumns: DataTableColumns<TaxSummaryRowDto> = [
-  { key: 'agencyName', title: t('taxSummary.agency'), minWidth: 140, render: (r) => r.agencyName ?? '—' },
-  { key: 'rateName', title: t('taxSummary.rateName'), minWidth: 140, render: (r) => r.rateName ?? '—' },
-  { key: 'rate', title: t('taxSummary.rate'), width: 90, render: (r) => (r.rate != null ? `${r.rate}%` : '—') },
+  { key: 'agencyName', title: t('taxSummary.agency'), minWidth: 140, render: (r) => r.agencyName ?? EMPTY_DASH },
+  { key: 'rateName', title: t('taxSummary.rateName'), minWidth: 140, render: (r) => r.rateName ?? EMPTY_DASH },
+  { key: 'rate', title: t('taxSummary.rate'), width: 90, render: (r) => (r.rate != null ? `${r.rate}%` : EMPTY_DASH) },
   { key: 'outputTax', title: t('taxSummary.outputTax'), width: 130, render: (r) => amountCell(fmtAmount(r.outputTax)) },
   { key: 'inputTax', title: t('taxSummary.inputTax'), width: 130, render: (r) => amountCell(fmtAmount(r.inputTax)) },
   { key: 'netTax', title: t('taxSummary.netTax'), width: 130, render: (r) => amountCell(fmtAmount(r.netTax), true) },
 ]
 
 async function runTaxSummary() {
-  if (!taxRange.value) return
   taxLoading.value = true
   try {
-    tax.value = await bridge.reports.taxSummary(tsToIsoDate(taxRange.value[0]), tsToIsoDate(taxRange.value[1]))
+    tax.value = await bridge.reports.taxSummary(period.value.from, period.value.to)
   } catch (error) {
     showError(error)
   } finally {
@@ -503,36 +712,36 @@ const exporting = ref(false)
 
 const exporters: Record<string, { ready: () => boolean; run: () => Promise<Blob> }> = {
   'trial-balance': {
-    ready: () => !!tbRange.value,
-    run: () => bridge.reports.exportTrialBalanceCsv(tsToIsoDate(tbRange.value[0]), tsToIsoDate(tbRange.value[1])),
+    ready: () => true,
+    run: () => bridge.reports.exportTrialBalanceCsv(period.value.from, period.value.to),
   },
   'balance-sheet': {
     ready: () => true,
-    run: () => bridge.reports.exportBalanceSheetCsv(tsToIsoDate(bsAsOf.value)),
+    run: () => bridge.reports.exportBalanceSheetCsv(period.value.to),
   },
   'profit-and-loss': {
-    ready: () => !!plRange.value,
-    run: () => bridge.reports.exportProfitAndLossCsv(tsToIsoDate(plRange.value[0]), tsToIsoDate(plRange.value[1])),
+    ready: () => true,
+    run: () => bridge.reports.exportProfitAndLossCsv(period.value.from, period.value.to),
   },
   'cash-flow': {
-    ready: () => !!cfRange.value,
-    run: () => bridge.reports.exportCashFlowCsv(tsToIsoDate(cfRange.value[0]), tsToIsoDate(cfRange.value[1])),
+    ready: () => true,
+    run: () => bridge.reports.exportCashFlowCsv(period.value.from, period.value.to),
   },
   'general-ledger': {
-    ready: () => !!glAccountId.value && !!glRange.value,
-    run: () => bridge.reports.exportGeneralLedgerCsv(glAccountId.value!, tsToIsoDate(glRange.value[0]), tsToIsoDate(glRange.value[1])),
+    ready: () => !!glAccountId.value,
+    run: () => bridge.reports.exportGeneralLedgerCsv(glAccountId.value!, period.value.from, period.value.to),
   },
   'ar-aging': {
     ready: () => true,
-    run: () => bridge.reports.exportArAgingCsv(tsToIsoDate(arAsOf.value)),
+    run: () => bridge.reports.exportArAgingCsv(period.value.to),
   },
   'ap-aging': {
     ready: () => true,
-    run: () => bridge.reports.exportApAgingCsv(tsToIsoDate(apAsOf.value)),
+    run: () => bridge.reports.exportApAgingCsv(period.value.to),
   },
   'tax-summary': {
-    ready: () => !!taxRange.value,
-    run: () => bridge.reports.exportTaxSummaryCsv(tsToIsoDate(taxRange.value[0]), tsToIsoDate(taxRange.value[1])),
+    ready: () => true,
+    run: () => bridge.reports.exportTaxSummaryCsv(period.value.from, period.value.to),
   },
 }
 
@@ -668,6 +877,56 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.fin-reports__drill {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fin-reports__drill-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fin-reports__drill-search {
+  width: 240px;
+  max-width: 100%;
+}
+
+.fin-reports__drill-period {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-reports__drill-alert {
+  margin: 0;
+}
+
+.fin-reports__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fin-reports__variance {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.fin-reports__variance-pct {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .fin-reports__toolbar {
   display: flex;
   align-items: center;

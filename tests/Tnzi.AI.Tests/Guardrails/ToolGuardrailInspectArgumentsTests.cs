@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// B5: GuardrailsOptions.InspectToolArguments — flag ON causes ToolGuardrailMiddleware to
+/// B5: GuardrailsOptions.InspectToolArguments - flag ON causes ToolGuardrailMiddleware to
 /// serialize tool arguments as Content and pass them to content-inspection providers;
 /// flag OFF (default) preserves existing behavior where Content is null.
 /// </summary>
@@ -41,7 +41,7 @@ public class ToolGuardrailInspectArgumentsTests
     [Fact]
     public async Task InspectToolArguments_True_ContentProviderReceivesSerializedArgs()
     {
-        // Arrange — a content-inspection provider that rejects when Content is non-null
+        // Arrange - a content-inspection provider that rejects when Content is non-null
         GuardrailRequest? captured = null;
 
         var provider = new Mock<IGuardrailProvider>();
@@ -58,7 +58,7 @@ public class ToolGuardrailInspectArgumentsTests
         // Act
         var result = await middleware.InvokeAsync(CreateToolContext(), () => Task.FromResult<object?>("ok"));
 
-        // Assert — Content was set, provider denied based on it
+        // Assert - Content was set, provider denied based on it
         captured.ShouldNotBeNull();
         captured!.Content.ShouldNotBeNullOrEmpty();
         // Content should be the JSON serialization of the tool arguments

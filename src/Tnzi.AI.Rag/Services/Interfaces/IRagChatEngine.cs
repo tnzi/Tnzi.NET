@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services.Interfaces;
 
 /// <summary>
-/// RAG 聊天引擎 — 多轮对话（带历史上下文）
+/// RAG 聊天引擎 - 多轮对话（带历史上下文）
 /// <para>
 /// 委托给 IAgentRuntime.RunAsync，通过 ThreadId 维护对话历史，
 /// 结合 RAG 检索上下文注入。支持完整的 AI 中间件管道。

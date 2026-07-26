@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Abstractions;
 
 /// <summary>
-/// 消息调度管理器 — 消费入站消息，调用 AI，发布出站回复
+/// 消息调度管理器 - 消费入站消息，调用 AI，发布出站回复
 /// </summary>
 public interface IChannelManager
 {

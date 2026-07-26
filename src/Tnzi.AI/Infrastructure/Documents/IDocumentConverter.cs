@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Documents;
 
 /// <summary>
-/// 文档转换接口 — 将各种文档格式转换为 Markdown 文本
+/// 文档转换接口 - 将各种文档格式转换为 Markdown 文本
 /// </summary>
 public interface IDocumentConverter
 {

@@ -31,21 +31,6 @@ public class ChatOptions
     public int GroupAvatarMemberCount { get; set; } = 9;
 
     /// <summary>
-    /// 是否启用用户在线状态展示（状态点/状态切换器）。
-    /// </summary>
-    [RuntimeSetting(Label = "Enable Presence", I18n = "admin.modules.system.settings.fields.chatEnablePresence",
-        Type = SettingFieldType.Boolean)]
-    public bool EnablePresence { get; set; } = true;
-
-    /// <summary>
-    /// 是否允许用户设置"隐身"状态（对外显示离线）。关闭后前端隐藏隐身选项，
-    /// 服务端拒绝隐身意图，且历史隐身意图按在线解析——面向不希望员工隐身的部署。
-    /// </summary>
-    [RuntimeSetting(Label = "Allow Invisible Status", I18n = "admin.modules.system.settings.fields.chatAllowInvisible",
-        Type = SettingFieldType.Boolean)]
-    public bool AllowInvisible { get; set; } = true;
-
-    /// <summary>
     /// 消息提示音总开关（关闭后所有聊天音效均不播放；用户仍可按会话静音）。
     /// </summary>
     [RuntimeSetting(Label = "Message Sound", I18n = "admin.modules.system.settings.fields.chatEnableMessageSound",
@@ -114,4 +99,71 @@ public class ChatOptionsValidator : OptionsValidatorBase<ChatOptions>
         if (options.ContactSearchLimit <= 0)
             errors.Add("ContactSearchLimit must be greater than 0.");
     }
+}
+
+// 配置值枚举与其唯一 owner ChatOptions 同文件共置（config-value enum co-located with its owning
+// options class，对齐框架 AI 的 Options/ThinkingOptions.cs 范式，见 docs/coding-standards/metadata.md）。
+
+/// <summary>
+/// 聊天消息音效预设。前端用 WebAudio 实时合成对应音效（无二进制资源、无外部请求）。
+/// 分两个家族：
+/// <list type="bullet">
+/// <item><b>Attention（通知型）</b>：较长、多音、引人注意——用于窗口关闭或非当前会话收到消息。</item>
+/// <item><b>Subtle（对话型）</b>：短促、平和、低音量——用于当前会话内收发消息，仅作体验反馈。</item>
+/// </list>
+/// <c>None</c> = 该类别静音。
+/// </summary>
+public enum ChatSoundEffect
+{
+    /// <summary>静音（该类别不播放）。</summary>
+    None = 0,
+
+    // ── Attention（通知型：较长、引人注意）────────────────────────────
+    /// <summary>钟琴：两声下行铃音，温暖经典（默认通知音）。</summary>
+    Chime = 1,
+    /// <summary>叮咚：门铃式下行两声，熟悉的到达提示。</summary>
+    DingDong = 2,
+    /// <summary>三连音：三声上行琶音，明亮清脆。</summary>
+    TriTone = 3,
+    /// <summary>马林巴：三声木琴琶音，柔和活泼。</summary>
+    Marimba = 4,
+    /// <summary>脉冲：两声同音短促提示，醒目直接。</summary>
+    Pulse = 5,
+    /// <summary>铃：单声撞钟带长衰减尾音，优雅。</summary>
+    Bell = 6,
+
+    // ── Subtle（对话型：短促、平和）──────────────────────────────────
+    /// <summary>气泡：单声柔和下滑气泡音（默认会话音）。</summary>
+    Pop = 7,
+    /// <summary>轻点：极短高频轻响，极简。</summary>
+    Tick = 8,
+    /// <summary>轻鸣：短促中频单音，中性。</summary>
+    Blip = 9,
+    /// <summary>柔和：略缓起音的低音量单音，平静。</summary>
+    Soft = 10,
+    /// <summary>水滴：短促上下滑音，悦耳。</summary>
+    Drop = 11,
+}
+
+/// <summary>
+/// 新消息且聊天窗口关闭时，启动器图标（header 聊天入口）的视觉提醒动效。
+/// 借鉴主流 IM 的"引起注意"手法（微信/QQ 桌面端图标晃动、macOS Dock 弹跳、MSN 闪烁）。
+/// 纯 CSS 动画，短暂播放一次；<c>None</c> = 不做动效（仍保留未读徽标）。
+/// </summary>
+public enum ChatNewMessageEffect
+{
+    /// <summary>不做动效（仅未读徽标）。</summary>
+    None = 0,
+
+    /// <summary>晃动：图标左右摇摆（默认，微信/QQ 桌面端手法）。</summary>
+    Shake = 1,
+
+    /// <summary>脉冲：图标缩放一次并带光环扩散。</summary>
+    Pulse = 2,
+
+    /// <summary>闪烁：图标短暂闪烁并高亮主题色（经典 MSN/QQ 手法）。</summary>
+    Blink = 3,
+
+    /// <summary>弹跳：图标上下弹跳（macOS Dock 手法）。</summary>
+    Bounce = 4,
 }

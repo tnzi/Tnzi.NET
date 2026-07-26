@@ -3,7 +3,7 @@ import { NButton, NTooltip } from 'naive-ui'
 import TSvgIcon from './TSvgIcon.vue'
 
 /**
- * Icon button with optional tooltip — the workhorse for header action bars,
+ * Icon button with optional tooltip - the workhorse for header action bars,
  * row actions, and toolbar pills. Wraps NButton + NTooltip and the project's
  * TSvgIcon to keep one consistent set of props for every clickable icon.
  *
@@ -18,7 +18,7 @@ interface Props {
   iconSize?: number | string
   /** Tooltip text. When empty the tooltip wrapper is skipped. */
   tooltip?: string
-  /** Tooltip placement — passes through to NTooltip. Default `bottom`. */
+  /** Tooltip placement - passes through to NTooltip. Default `bottom`. */
   tooltipPlacement?:
     | 'top'
     | 'top-start'
@@ -36,7 +36,7 @@ interface Props {
   type?: 'default' | 'tertiary' | 'primary' | 'info' | 'success' | 'warning' | 'error'
   /** Disable button + tooltip. */
   disabled?: boolean
-  /** Render as quaternary (transparent) — typical for header bars. Default true. */
+  /** Render as quaternary (transparent) - typical for header bars. Default true. */
   ghost?: boolean
   /** Aria-label override; falls back to `tooltip`. */
   ariaLabel?: string

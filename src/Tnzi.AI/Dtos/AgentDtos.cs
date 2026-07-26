@@ -41,8 +41,8 @@ public class AgentDto
     public int LatencyTier { get; set; }
     /// <summary>Cost tier (1-5, 1=cheapest)</summary>
     public int CostTier { get; set; }
-    /// <summary>Persona ID — FK to AgentPersona for soul / role injection (optional).</summary>
-    public Guid? PersonaId { get; set; }
+    /// <summary>Persona (soul) content injected as a &lt;soul&gt; block. Inline on the agent (optional).</summary>
+    public string? Persona { get; set; }
     /// <summary>Assigned knowledge base IDs (RAG). Retrieval is scoped to these.</summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }
     /// <summary>Assigned skill slugs. Only these skills are visible to the agent.</summary>
@@ -119,8 +119,9 @@ public class CreateAgentDto
     [Range(1, 5)]
     public int CostTier { get; set; } = 3;
 
-    /// <summary>Persona ID — FK to AgentPersona (optional).</summary>
-    public Guid? PersonaId { get; set; }
+    /// <summary>Persona (soul) content injected as a &lt;soul&gt; block (optional).</summary>
+    [MaxLength(32000)]
+    public string? Persona { get; set; }
 
     /// <summary>Assigned knowledge base IDs (RAG).</summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }
@@ -193,8 +194,9 @@ public class UpdateAgentDto
     [Range(1, 5)]
     public int? CostTier { get; set; }
 
-    /// <summary>Persona ID — FK to AgentPersona; pass Guid.Empty to clear.</summary>
-    public Guid? PersonaId { get; set; }
+    /// <summary>Persona (soul) content; null = no change, empty string = clear, non-empty = set.</summary>
+    [MaxLength(32000)]
+    public string? Persona { get; set; }
 
     /// <summary>Assigned knowledge base IDs (RAG). Pass an empty list to clear all.</summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }
@@ -208,7 +210,7 @@ public class UpdateAgentDto
 }
 
 /// <summary>
-/// Agent 执行配置 DTO — 统一序列化/反序列化入口
+/// Agent 执行配置 DTO - 统一序列化/反序列化入口
 /// </summary>
 public class AgentExecutionConfigDto
 {
@@ -321,10 +323,10 @@ public class AgentListQueryDto : PagedQueryDto
     /// <summary>Filter by execution mode</summary>
     public AgentExecutionMode? ExecutionMode { get; set; }
 
-    /// <summary>Filter by domain tag (e.g. "coding", "research") — matches if agent has this domain</summary>
+    /// <summary>Filter by domain tag (e.g. "coding", "research") - matches if agent has this domain</summary>
     public string? Domain { get; set; }
 
-    /// <summary>Filter by role tag (e.g. "reviewer", "planner") — matches if agent has this role</summary>
+    /// <summary>Filter by role tag (e.g. "reviewer", "planner") - matches if agent has this role</summary>
     public string? Role { get; set; }
 
     /// <summary>Minimum quality tier (1-5, 5=highest)</summary>
@@ -456,7 +458,7 @@ public class AgentVersionQueryDto : PagedQueryDto
 }
 
 /// <summary>
-/// 工具组目录 DTO — 供前端 Agent 配置的工具组多选选择器（替代自由文本）
+/// 工具组目录 DTO - 供前端 Agent 配置的工具组多选选择器（替代自由文本）
 /// </summary>
 public class ToolGroupDto
 {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Memory;
 
 /// <summary>
-/// 数据库实体记忆存储 — 使用 EF Core 持久化命名实体记忆
+/// 数据库实体记忆存储 - 使用 EF Core 持久化命名实体记忆
 /// </summary>
 public class DatabaseEntityMemoryStore : IEntityMemoryStore
 {
@@ -110,7 +110,7 @@ public class DatabaseEntityMemoryStore : IEntityMemoryStore
         }
         catch (DbUpdateException)
         {
-            // 并发插入导致唯一约束冲突 — 回退到 UPDATE（绕过 ChangeTracker）
+            // 并发插入导致唯一约束冲突 - 回退到 UPDATE（绕过 ChangeTracker）
             await _repository.AsQueryable()
                 .Where(e => e.EntityName == entry.EntityName && e.UserId == entry.UserId && e.AgentId == entry.AgentId)
                 .ExecuteUpdateAsync(s => s

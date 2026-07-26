@@ -10,7 +10,7 @@ namespace Tnzi.AI.Engine.Context;
 /// Implements both <see cref="IContextProviderContributor"/> (registration) and
 /// <see cref="IContextProvider"/> (injection). <see cref="TryCreate"/> returns
 /// <c>this</c> because claim reading is stateless and bound to the current
-/// <see cref="IHttpContextAccessor"/> — no per-agent-session state is needed.
+/// <see cref="IHttpContextAccessor"/> - no per-agent-session state is needed.
 /// </remarks>
 public sealed class ClaimContextProvider : IContextProviderContributor, IContextProvider
 {

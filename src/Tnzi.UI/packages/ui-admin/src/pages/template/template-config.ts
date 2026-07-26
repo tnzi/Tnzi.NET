@@ -1,11 +1,11 @@
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TSourceBadge } from '@tnzi/ui'
 
 /**
- * Template page config — Phase 3 Task 3.36.
+ * Template page config - Phase 3 Task 3.36.
  *
  * Columns and form schema for the admin Template management view.
  * Backend fields from TemplateInfoDto / TemplateEntityDto:
@@ -48,13 +48,23 @@ export const templateColumns: ColumnDef[] = [
   },
 ]
 
+/**
+ * Where the template lives, then what it says. The body is the substance of the
+ * record and gets its own block; mixing it in with the four routing fields made
+ * the editor read as a settings form with a stray textarea.
+ */
+export const templateFormSections: FormSchemaSection[] = [
+  { key: 'placement', labelKey: 'admin.shared.formSections.placement', label: 'Placement', icon: 'mdi:folder-outline' },
+  { key: 'content', labelKey: 'admin.shared.formSections.content', label: 'Content', icon: 'mdi:text-box-outline' },
+]
+
 export const templateFormSchema: FormSchemaItem[] = [
-  { key: 'templateName',      labelKey: 'form.templateName', label: 'Template Name',    type: 'text',     required: true },
-  { key: 'module',            labelKey: 'form.module', label: 'Module',           type: 'text',     required: true },
-  { key: 'category',          labelKey: 'form.category', label: 'Category',         type: 'text' },
-  { key: 'defaultLayoutName', labelKey: 'form.defaultLayoutName', label: 'Layout Name',      type: 'text' },
-  { key: 'subjectTemplate',   labelKey: 'form.subjectTemplate', label: 'Subject',          type: 'text' },
-  { key: 'contentTemplate',   labelKey: 'form.contentTemplate', label: 'Content',          type: 'textarea', required: true },
-  { key: 'description',       labelKey: 'form.description', label: 'Description',      type: 'textarea' },
-  { key: 'isActive',          labelKey: 'form.isActive', label: 'Enabled',          type: 'switch' },
+  { key: 'templateName',      labelKey: 'form.templateName', label: 'Template Name',    type: 'text',     required: true, section: 'placement' },
+  { key: 'module',            labelKey: 'form.module', label: 'Module',           type: 'text',     required: true, section: 'placement' },
+  { key: 'category',          labelKey: 'form.category', label: 'Category',         type: 'text', section: 'placement' },
+  { key: 'defaultLayoutName', labelKey: 'form.defaultLayoutName', label: 'Layout Name',      type: 'text', section: 'placement' },
+  { key: 'isActive',          labelKey: 'form.isActive', label: 'Enabled',          type: 'switch', section: 'placement' },
+  { key: 'description',       labelKey: 'form.description', label: 'Description',      type: 'textarea', section: 'placement' },
+  { key: 'subjectTemplate',   labelKey: 'form.subjectTemplate', label: 'Subject',          type: 'text', span: 'full', section: 'content' },
+  { key: 'contentTemplate',   labelKey: 'form.contentTemplate', label: 'Content',          type: 'textarea', required: true, section: 'content' },
 ]

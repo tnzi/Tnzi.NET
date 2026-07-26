@@ -8,6 +8,19 @@
     default-section="queue"
   >
     <!-- ── Payable queue ───────────────────────────────────────── -->
+    <!-- 队列概览（标准 2）：数据源是全量队列，不是当前页合计。 -->
+    <template #kpis>
+      <TKpiRow cols="1 s:2">
+        <TKpiCard :label="t('queue.kpiCount')" :value="eftQueueKpis.count" icon="mdi:bank-transfer" />
+        <TKpiCard
+          :label="t('queue.kpiTotal')"
+          :value="fmtMoney(eftQueueKpis.total, eftQueueKpis.currency)"
+          :animated="false"
+          icon="mdi:cash-multiple"
+        />
+      </TKpiRow>
+    </template>
+
     <template #queue>
       <div class="fin-eft__queue">
         <div class="fin-eft__queue-bar">
@@ -46,7 +59,8 @@
         :state="crud"
         :all-columns="columns"
         :title="batchesTitle"
-        :row-actions="rowActions"
+        :search-fields="searchFields"
+    :row-actions="rowActions"
         :translate="t"
         :show-header="false"
       />
@@ -80,11 +94,11 @@
         <div v-if="detail.data.value" class="fin-eft__detail">
           <NDescriptions :column="2" size="small" label-placement="left" bordered>
             <NDescriptionsItem :label="t('detail.number')">{{ detail.data.value.number ?? t('draftLabel') }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.account')">{{ detail.data.value.bankAccountName ?? '—' }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.account')">{{ detail.data.value.bankAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.format')">{{ t(formatLabel(detail.data.value.format)) }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.currency')">{{ detail.data.value.currency }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.effectiveDate')">{{ fmtDate(detail.data.value.effectiveDate) }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.fileCreationNumber')">{{ detail.data.value.fileCreationNumber ?? '—' }}</NDescriptionsItem>
+            <NDescriptionsItem :label="t('detail.fileCreationNumber')">{{ detail.data.value.fileCreationNumber ?? EMPTY_DASH }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.count')">{{ detail.data.value.totalCount }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.amount')">{{ fmtMoney(detail.data.value.totalAmount, detail.data.value.currency) }}</NDescriptionsItem>
           </NDescriptions>
@@ -120,12 +134,15 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref } from 'vue'
 import { NButton, NSelect, NInput, NDatePicker, NDescriptions, NDescriptionsItem, NForm, NFormItem } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { downloadBlob, formatDateOnly } from '@tnzi/core'
+import { downloadBlob } from '@tnzi/core'
 import TTabsPage from '../../components/layout/TTabsPage.vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -144,8 +161,8 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { fmtMoney, tsToIsoDate } from './money'
-import { buildEftBatchColumns, buildEftQueueColumns, buildEftLineColumns, EFT_FORMAT_LABEL, type EftBatchRow } from './eft-batch-config'
+import { fmtMoney, tsToIsoDate, fmtDate } from './money'
+import { buildEftSearchFields, buildEftBatchColumns, buildEftQueueColumns, buildEftLineColumns, EFT_FORMAT_LABEL, type EftBatchRow } from './eft-batch-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.eftBatches')
@@ -155,11 +172,15 @@ const { can } = usePermissionGuard()
 const title = 'tnzi.admin.modules.finance.eftBatches.title'
 const batchesTitle = 'tnzi.admin.modules.finance.eftBatches.batchesTitle'
 const columns = buildEftBatchColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildEftSearchFields(t)
 const queueColumns = buildEftQueueColumns(t)
 const lineColumns = buildEftLineColumns(t)
 
 const sections = [
-  { name: 'queue', label: t('tabs.queue') },
+  // Mixed blocks (filter bar + a plain table): the pane owns its scroll.
+  { name: 'queue', label: t('tabs.queue'), scroll: true },
   { name: 'batches', label: t('tabs.batches') },
 ]
 
@@ -175,10 +196,6 @@ const canDownload = computed(() => can('finance.eft.download'))
 function formatLabel(fmt?: EftFileFormat | null): string {
   return fmt ? (EFT_FORMAT_LABEL[String(fmt)] ?? '') : ''
 }
-function fmtDate(iso?: string | null): string {
-  return formatDateOnly(iso, { utc: true })
-}
-
 // ── Bank account profile options (originating account) ──────────
 const bankAccountOptions = ref<{ label: string; value: string }[]>([])
 
@@ -204,6 +221,15 @@ const crud = useCrudPage<EftBatchRow>({
 const queueRows = ref<EftQueueItemDto[]>([])
 const queueLoading = ref(false)
 const checkedQueueKeys = ref<string[]>([])
+
+/**
+ * 队列概览（标准 2）：数据源是**全量队列**（不分页），所以合计是真数字。
+ */
+const eftQueueKpis = computed(() => ({
+  count: queueRows.value.length,
+  total: queueRows.value.reduce((sum, r) => sum + (r.amount ?? 0), 0),
+  currency: queueRows.value[0]?.currency,
+}))
 
 async function loadQueue() {
   queueLoading.value = true

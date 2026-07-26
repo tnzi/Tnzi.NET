@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 历史中间件 — Before: 自动创建线程 + 加载对话历史, After: 保存用户消息和助手回复
+/// 历史中间件 - Before: 自动创建线程 + 加载对话历史, After: 保存用户消息和助手回复
 /// </summary>
 public class HistoryMiddleware : IAiMiddleware
 {
@@ -28,36 +28,7 @@ public class HistoryMiddleware : IAiMiddleware
 
         var threadId = context.Request.ThreadId;
 
-        // Before: 加载对话历史
-        if (threadId != null)
-        {
-            try
-            {
-                var maxLoaded = _options.CurrentValue.History.Store.MaxLoadedMessages;
-                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
-                if (history.Count > 0)
-                {
-                    // 将历史消息插入到 Messages 前面
-                    context.Messages.InsertRange(0, history);
-                    _logger.LogDebug("Loaded {Count} history messages for thread {ThreadId}", history.Count, threadId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to load history for thread {ThreadId}", threadId);
-            }
-
-            // Patch dangling tool calls (from user interruption)
-            var patched = PatchDanglingToolCalls(context.Messages);
-            if (!ReferenceEquals(patched, context.Messages))
-            {
-                context.Messages.Clear();
-                context.Messages.AddRange(patched);
-                _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
-            }
-
-            ApplyToolResultBudget(context.Messages, threadId);
-        }
+        await PrepareHistoryAsync(context, threadId, cancellationToken);
 
         // 执行下游管道
         var result = await next(context, cancellationToken);
@@ -134,35 +105,7 @@ public class HistoryMiddleware : IAiMiddleware
 
         var threadId = context.Request.ThreadId;
 
-        // Before: 加载对话历史
-        if (threadId != null)
-        {
-            try
-            {
-                var maxLoaded = _options.CurrentValue.History.Store.MaxLoadedMessages;
-                var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
-                if (history.Count > 0)
-                {
-                    context.Messages.InsertRange(0, history);
-                    _logger.LogDebug("Loaded {Count} history messages for thread {ThreadId}", history.Count, threadId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to load history for thread {ThreadId}", threadId);
-            }
-
-            // Patch dangling tool calls (from user interruption)
-            var patched = PatchDanglingToolCalls(context.Messages);
-            if (!ReferenceEquals(patched, context.Messages))
-            {
-                context.Messages.Clear();
-                context.Messages.AddRange(patched);
-                _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
-            }
-
-            ApplyToolResultBudget(context.Messages, threadId);
-        }
+        await PrepareHistoryAsync(context, threadId, cancellationToken);
 
         // 收集流式响应文本和工具调用详情
         var responseBuilder = new StringBuilder();
@@ -227,7 +170,13 @@ public class HistoryMiddleware : IAiMiddleware
                     {
                         preGenUserMessageId = SequentialGuid.NewGuid();
                     }
-                    preGenAssistantMessageId = SequentialGuid.NewGuid();
+                    // 只有确实有助手文本要落库时才预生成 id：空响应时 after 块不会写助手消息，
+                    // 提前盖章会让客户端拿到一个查不到的 assistantMessageId（反馈接口 404）。
+                    // chunk.Text 已在本轮循环上方追加进 responseBuilder，含终止 chunk 自带的文本。
+                    if (responseBuilder.Length > 0)
+                    {
+                        preGenAssistantMessageId = SequentialGuid.NewGuid();
+                    }
                 }
                 lastFinishReason = chunk.FinishReason;
             }
@@ -278,6 +227,42 @@ public class HistoryMiddleware : IAiMiddleware
                 _logger.LogWarning(ex, "Failed to persist streaming messages for thread {ThreadId}", threadId);
             }
         }
+    }
+
+    /// <summary>
+    /// Before 阶段共享前置：加载对话历史 → 修补悬挂 tool call → 应用工具结果预算。
+    /// 流式与非流式路径行为必须一致，故收口到同一个方法。
+    /// </summary>
+    private async Task PrepareHistoryAsync(AiMiddlewareContext context, Guid? threadId, CancellationToken cancellationToken)
+    {
+        if (threadId == null) return;
+
+        try
+        {
+            var maxLoaded = _options.CurrentValue.History.Store.MaxLoadedMessages;
+            var history = await _threadService.GetMessageHistoryAsync(threadId.Value, limit: maxLoaded, ct: cancellationToken);
+            if (history.Count > 0)
+            {
+                // 将历史消息插入到 Messages 前面
+                context.Messages.InsertRange(0, history);
+                _logger.LogDebug("Loaded {Count} history messages for thread {ThreadId}", history.Count, threadId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load history for thread {ThreadId}", threadId);
+        }
+
+        // Patch dangling tool calls (from user interruption)
+        var patched = PatchDanglingToolCalls(context.Messages);
+        if (!ReferenceEquals(patched, context.Messages))
+        {
+            context.Messages.Clear();
+            context.Messages.AddRange(patched);
+            _logger.LogDebug("Patched dangling tool calls in thread {ThreadId}", threadId);
+        }
+
+        ApplyToolResultBudget(context.Messages, threadId);
     }
 
     /// <summary>
@@ -346,7 +331,7 @@ public class HistoryMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 截断超限的工具结果（不可变 — 返回新列表，不修改原消息）。
+    /// 截断超限的工具结果（不可变 - 返回新列表，不修改原消息）。
     /// 借鉴 Claude Code maybePersistLargeToolResult。
     /// </summary>
     public static List<ChatMessage> TruncateLargeToolResults(

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流节点执行器 — 负责执行单个节点（含重试、超时、Trace 记录）
+/// 工作流节点执行器 - 负责执行单个节点（含重试、超时、Trace 记录）
 /// </summary>
 public class WorkflowNodeExecutor
 {
@@ -20,6 +20,7 @@ public class WorkflowNodeExecutor
     /// <param name="step">步骤定义</param>
     /// <param name="state">工作流状态</param>
     /// <param name="run">关联的运行实例（可选，用于 Trace）</param>
+    /// <param name="resumeData">中断恢复数据（非 null 表示本次为恢复执行，跳过中断检查）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>节点执行结果</returns>
     public async Task<WorkflowNodeResult> ExecuteAsync(

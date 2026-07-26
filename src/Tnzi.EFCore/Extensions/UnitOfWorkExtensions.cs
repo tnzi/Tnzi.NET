@@ -28,7 +28,7 @@ public static class UnitOfWorkExtensions
             return unitOfWork;
         }
 
-        // 如果都没有，返回 null
+        // 未注册 IUnitOfWork（未配置 DbContext）时返回 null
         return null;
     }
 

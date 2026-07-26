@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// 混合搜索服务 — 融合向量搜索和关键词搜索结果，使用 Reciprocal Rank Fusion (RRF) 算法
+/// 混合搜索服务 - 融合向量搜索和关键词搜索结果，使用 Reciprocal Rank Fusion (RRF) 算法
 /// </summary>
 /// <remarks>
 /// <para>
@@ -58,7 +58,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
             using var activity = RagActivitySource.StartSearchActivity(maxResults);
             var sw = Stopwatch.StartNew();
 
-            // 1. 生成查询向量 — 使用 RAG 默认嵌入配置（provider/model 须与摄取对齐，
+            // 1. 生成查询向量 - 使用 RAG 默认嵌入配置（provider/model 须与摄取对齐，
             //    与 VectorTextSearchService.SearchCoreAsync 同范式；否则向量空间不一致）。
             var defaultOptions = RagEmbeddingOptionsResolver.ResolveDefault(_ragOptions);
             var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, defaultOptions, ct);
@@ -135,7 +135,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
     }
 
     /// <summary>
-    /// Reciprocal Rank Fusion (RRF) — 融合向量搜索和关键词搜索结果
+    /// Reciprocal Rank Fusion (RRF) - 融合向量搜索和关键词搜索结果
     /// </summary>
     /// <param name="vectorResults">向量搜索结果</param>
     /// <param name="keywordResults">关键词搜索结果</param>

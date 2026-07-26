@@ -1,6 +1,6 @@
 <template>
   <!--
-    Agents — production-grade card page.
+    Agents - production-grade card page.
       - top health KPI strip (bridge.agents.getHealth): Total / Healthy / Unhealthy / Disabled
       - TCardPage grid: each agent card shows robot icon + name + enabled badge +
         execution-mode badge + provider·model + truncated description + 3 tier
@@ -22,7 +22,7 @@
     :form-modal-width="760"
     :translate="t"
   >
-    <!-- Health KPI strip — between the page header and the card grid. -->
+    <!-- Health KPI strip - between the page header and the card grid. -->
     <template #kpis>
       <TKpiRow class="ai-agent-page__kpis">
         <TKpiCard
@@ -63,7 +63,7 @@
           <NTag size="small" type="info" :bordered="false">
             {{ t(executionModeKey(item.executionMode)) }}
           </NTag>
-          <NTag v-if="item.personaId" size="small" :bordered="false">
+          <NTag v-if="item.persona" size="small" :bordered="false">
             {{ t('badge.persona') }}
           </NTag>
         </div>

@@ -10,7 +10,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Channels.Gateway;
 
 /// <summary>
-/// A3 多租户隔离门禁 — 证明 <see cref="DefaultSessionBinder"/> 把数据库
+/// A3 多租户隔离门禁 - 证明 <see cref="DefaultSessionBinder"/> 把数据库
 /// <see cref="SessionBindingRule"/> 行<b>按 TenantId 分区</b>，杜绝跨租户绑定泄漏：
 /// 租户 A 的入站流量绝不会命中租户 B 的规则，反之亦然。
 /// <para>
@@ -62,7 +62,7 @@ public sealed class SessionBinderMultiTenantTests : IDisposable
     }
 
     // =====================================================================
-    // 核心证明 — 跨租户隔离：A 的流量 → AgentA；B 的流量 → AgentB；null → 兜底
+    // 核心证明 - 跨租户隔离：A 的流量 → AgentA；B 的流量 → AgentB；null → 兜底
     // =====================================================================
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class SessionBinderMultiTenantTests : IDisposable
     }
 
     // =====================================================================
-    // 单租户回归 — MT 关闭 + null-tenant 全局规则仍照常匹配（无回归）
+    // 单租户回归 - MT 关闭 + null-tenant 全局规则仍照常匹配（无回归）
     // =====================================================================
 
     [Fact]

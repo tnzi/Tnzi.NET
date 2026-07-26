@@ -1,7 +1,7 @@
 /**
  * Logging Module API - admin read access to on-disk Serilog file outputs.
  *
- * Mirrors `Tnzi.AspNetCore/Controllers/DefaultLogFileAdminController` —
+ * Mirrors `Tnzi.AspNetCore/Controllers/DefaultLogFileAdminController` -
  * every endpoint under `/admin/logs/*` is read-only because the log
  * files are runtime artefacts owned by Serilog (retention configured
  * server-side via `LoggingOptions.FileOutput.*.RetainedFileCountLimit`).
@@ -20,7 +20,7 @@ import type {
 const ADMIN_LOGS_BASE = '/admin/logs';
 
 /**
- * Admin Log File API — read-only access to per-level rolling-day log files.
+ * Admin Log File API - read-only access to per-level rolling-day log files.
  *
  * Example:
  * ```ts

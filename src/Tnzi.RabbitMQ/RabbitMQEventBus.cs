@@ -25,7 +25,6 @@ public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsy
     // Channel pool for high-throughput publish scenarios
     private readonly ConcurrentBag<IChannel>? _channelPool;
     private readonly SemaphoreSlim? _channelPoolSemaphore;
-    private int _channelPoolCount;
 
     // 每个事件类型的独立消费者 Channel（消除 publish/consume 锁竞争）
     private readonly ConcurrentDictionary<Type, ConsumerSubscription> _subscriptions = new();
@@ -108,22 +107,30 @@ public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsy
     {
         await _channelPoolSemaphore!.WaitAsync(cancellationToken);
 
-        // Try to get an existing healthy channel from the pool
-        while (_channelPool!.TryTake(out var channel))
+        // 从这里往下的每条失败路径都必须归还许可：只有成功返回的 Channel 才会
+        // 经 ReturnPooledChannel 释放许可，否则池许可会被永久吞掉（连续失败后
+        // 达到 MaxSize 次即整个发布路径无限期挂在 WaitAsync 上）。
+        try
         {
-            if (channel.IsOpen)
-                return channel;
+            // Try to get an existing healthy channel from the pool
+            while (_channelPool!.TryTake(out var channel))
+            {
+                if (channel.IsOpen)
+                    return channel;
 
-            // Channel is dead, dispose and decrement count
-            try { await channel.DisposeAsync(); }
-            catch { /* ignore cleanup errors */ }
-            Interlocked.Decrement(ref _channelPoolCount);
+                // Channel is dead, dispose it and fall through to create a fresh one
+                try { await channel.DisposeAsync(); }
+                catch { /* ignore cleanup errors */ }
+            }
+
+            // No available channel, create a new one
+            return await CreateAndInitializeChannelAsync(cancellationToken);
         }
-
-        // No available channel, create a new one
-        var newChannel = await CreateAndInitializeChannelAsync(cancellationToken);
-        Interlocked.Increment(ref _channelPoolCount);
-        return newChannel;
+        catch
+        {
+            _channelPoolSemaphore.Release();
+            throw;
+        }
     }
 
     /// <summary>
@@ -139,7 +146,6 @@ public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsy
         {
             try { channel.Dispose(); }
             catch { /* ignore cleanup errors */ }
-            Interlocked.Decrement(ref _channelPoolCount);
         }
 
         _channelPoolSemaphore!.Release();
@@ -348,6 +354,12 @@ public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsy
     /// 处理消费者错误：重试或发送到死信队列
     /// Nack 在消费者 Channel 上，republish 在发布 Channel 上（各自独立）
     /// </summary>
+    /// <remarks>
+    /// 主队列声明了 <c>x-dead-letter-exchange</c>，因此 <c>BasicNack(requeue: false)</c>
+    /// 等价于"投进死信队列"。重试分支绝不能先 Nack：那会让每一次失败都在死信队列
+    /// 留下一份副本，与"仅超过 MaxRetryCount 才进死信"的语义相矛盾。重试分支的顺序是
+    /// 退避 → 重新发布带递增计数的副本 → ACK 原消息；重发失败才 Nack 走死信，避免静默丢失。
+    /// </remarks>
     private async Task HandleConsumerErrorAsync(IChannel consumerChannel, BasicDeliverEventArgs ea, string eventTypeName)
     {
         var retryCount = GetRetryCount(ea.BasicProperties);
@@ -358,42 +370,54 @@ public class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsy
                 eventTypeName, _options.MaxRetryCount);
             // requeue=false，消息会被发送到死信交换机
             await consumerChannel.BasicNackAsync(ea.DeliveryTag, false, false);
+            return;
         }
-        else
+
+        // Apply exponential backoff delay before republishing
+        var delay = _options.RetryDelay.GetDelay(retryCount + 1);
+        if (delay > TimeSpan.Zero)
         {
-            // Reject 在消费者 Channel 上
-            await consumerChannel.BasicNackAsync(ea.DeliveryTag, false, false);
+            _logger.LogDebug("Applying retry delay of {DelayMs}ms for event {EventType} (attempt {RetryCount})",
+                delay.TotalMilliseconds, eventTypeName, retryCount + 1);
+            await Task.Delay(delay);
+        }
 
-            // Apply exponential backoff delay before republishing
-            var delay = _options.RetryDelay.GetDelay(retryCount + 1);
-            if (delay > TimeSpan.Zero)
+        // 重新发布消息并递增重试计数（使用发布 Channel，无锁竞争）
+        try
+        {
+            var newProperties = new BasicProperties
             {
-                _logger.LogDebug("Applying retry delay of {DelayMs}ms for event {EventType} (attempt {RetryCount})",
-                    delay.TotalMilliseconds, eventTypeName, retryCount + 1);
-                await Task.Delay(delay);
-            }
+                Persistent = ea.BasicProperties.Persistent,
+                MessageId = ea.BasicProperties.MessageId,
+                Timestamp = ea.BasicProperties.Timestamp,
+                Type = ea.BasicProperties.Type,
+                Headers = ea.BasicProperties.Headers != null
+                    ? new Dictionary<string, object?>(ea.BasicProperties.Headers)
+                    : new Dictionary<string, object?>()
+            };
+            newProperties.Headers["x-retry-count"] = retryCount + 1;
 
-            // 重新发布消息并递增重试计数（使用发布 Channel，无锁竞争）
+            var publishChannel = await GetPublishChannelAsync();
+            await publishChannel.BasicPublishAsync(_exchangeName, eventTypeName, false, newProperties, ea.Body);
+
+            // 副本已入队，原消息才可以确认（顺序反过来会在重发失败时丢消息）
+            await consumerChannel.BasicAckAsync(ea.DeliveryTag, false);
+        }
+        catch (Exception republishEx)
+        {
+            _logger.LogError(republishEx,
+                "Failed to republish event {EventType} for retry; routing the original message to the dead letter exchange",
+                eventTypeName);
+
             try
             {
-                var newProperties = new BasicProperties
-                {
-                    Persistent = ea.BasicProperties.Persistent,
-                    MessageId = ea.BasicProperties.MessageId,
-                    Timestamp = ea.BasicProperties.Timestamp,
-                    Type = ea.BasicProperties.Type,
-                    Headers = ea.BasicProperties.Headers != null
-                        ? new Dictionary<string, object?>(ea.BasicProperties.Headers)
-                        : new Dictionary<string, object?>()
-                };
-                newProperties.Headers["x-retry-count"] = retryCount + 1;
-
-                var publishChannel = await GetPublishChannelAsync();
-                await publishChannel.BasicPublishAsync(_exchangeName, eventTypeName, false, newProperties, ea.Body);
+                await consumerChannel.BasicNackAsync(ea.DeliveryTag, false, false);
             }
-            catch (Exception republishEx)
+            catch (Exception nackEx)
             {
-                _logger.LogError(republishEx, "Failed to republish event {EventType} for retry", eventTypeName);
+                _logger.LogError(nackEx,
+                    "Failed to nack event {EventType} after the retry republish failed; the broker will redeliver it when the channel closes",
+                    eventTypeName);
             }
         }
     }

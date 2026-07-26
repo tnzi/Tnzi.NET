@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TStreamMarkdown — Streaming markdown renderer
+ * TStreamMarkdown - Streaming markdown renderer
  *
  * Watches `content` prop changes, feeds deltas into useStreamMarkdown composable,
  * and renders the resulting HTML. Handles full content replacement (e.g., branch
@@ -9,6 +9,7 @@
 
 import { watch, onBeforeUnmount } from 'vue';
 import { useStreamMarkdown } from '@/composables/useStreamMarkdown';
+import { useAiI18n } from '@/locale/index';
 
 const props = withDefaults(defineProps<{
   /** Markdown content string (accumulated, not delta). */
@@ -19,6 +20,7 @@ const props = withDefaults(defineProps<{
   streaming: false,
 });
 
+const t = useAiI18n();
 const { html, append, finish, reset } = useStreamMarkdown();
 
 /** Track the previously seen content to compute deltas. */
@@ -62,7 +64,10 @@ watch(
 
 onBeforeUnmount(() => {
   reset();
+  if (copyLabelTimer != null) window.clearTimeout(copyLabelTimer);
 });
+
+let copyLabelTimer: number | null = null;
 
 /** Event-delegated copy for fenced code blocks (buttons live in v-html output). */
 function onMarkdownClick(e: MouseEvent): void {
@@ -75,8 +80,12 @@ function onMarkdownClick(e: MouseEvent): void {
     /* clipboard unavailable */
   });
   const original = btn.textContent;
-  btn.textContent = 'Copied';
-  window.setTimeout(() => {
+  btn.textContent = t.value.chat.copied;
+  /* Tracked so unmounting before the label reverts does not leave a timer
+     holding a detached DOM node. */
+  if (copyLabelTimer != null) window.clearTimeout(copyLabelTimer);
+  copyLabelTimer = window.setTimeout(() => {
+    copyLabelTimer = null;
     btn.textContent = original;
   }, 2000);
 }
@@ -99,7 +108,7 @@ function onMarkdownClick(e: MouseEvent): void {
   line-height: 1.6;
 }
 
-/* Prose-like styles — replaces Tailwind prose + dark:prose-invert */
+/* Prose-like styles - replaces Tailwind prose + dark:prose-invert */
 .t-stream-markdown :deep(h1),
 .t-stream-markdown :deep(h2),
 .t-stream-markdown :deep(h3),
@@ -199,8 +208,10 @@ function onMarkdownClick(e: MouseEvent): void {
   background-color: var(--tnzi-ai-hover);
 }
 
-/* Streaming cursor */
-.ai-streaming :deep(:last-child)::after {
+/* Streaming cursor. Scoped to the LAST TOP-LEVEL block: `:deep(:last-child)`
+   matched at any depth, so a trailing list or table sprouted a cursor on every
+   nested last child at once. */
+.ai-streaming > :deep(*:last-child)::after {
   content: '\25CF';
   display: inline-block;
   width: 6px;
@@ -215,7 +226,7 @@ function onMarkdownClick(e: MouseEvent): void {
   50% { opacity: 0.3; }
 }
 
-/* Fenced code block (shiki) wrapper — header bar + highlighted body */
+/* Fenced code block (shiki) wrapper - header bar + highlighted body */
 .t-stream-markdown :deep(.t-md-code) {
   margin-bottom: 0.75em;
   border-radius: 12px;

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Receipts page — upload → register → extract → convert. A read-only CRUD list
+ * Receipts page - upload → register → extract → convert. A read-only CRUD list
  * with a detail drawer that edits the extracted fields and converts the receipt
  * into an expense / bill draft; delete is hidden once converted.
  */

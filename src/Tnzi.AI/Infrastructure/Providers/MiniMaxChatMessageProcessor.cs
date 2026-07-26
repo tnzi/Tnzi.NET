@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// MiniMax 消息处理器 — 处理 inline &lt;think&gt; 标签和 reasoning_details 字段。
+/// MiniMax 消息处理器 - 处理 inline &lt;think&gt; 标签和 reasoning_details 字段。
 /// </summary>
 /// <remarks>
 /// MiniMax 模型在流式和非流式响应中使用 inline &lt;think&gt;...&lt;/think&gt; 标签包裹推理内容，

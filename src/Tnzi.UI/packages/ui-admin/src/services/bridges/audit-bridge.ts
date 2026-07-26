@@ -1,9 +1,9 @@
 /**
- * Audit bridge — full implementation (Phase 3 Task 3.21).
+ * Audit bridge - full implementation (Phase 3 Task 3.21).
  *
  * Adapts the audit backend API to BridgeCrudContract shapes used by
  * TCrudPage-based audit pages. Both sub-contracts are READ-ONLY:
- * audit data is immutable — create/update/delete always reject.
+ * audit data is immutable - create/update/delete always reject.
  *
  * Sub-contracts:
  *   - logs       → useAdminAuditApi.getList  (request-level audit log view: ALL audited requests)
@@ -40,7 +40,7 @@ export interface AuditBridgeDeps {
 
 export interface AuditBridge {
   logs: BridgeCrudContract<AuditOperationDto> & {
-    /** Full detail by id — includes entityEntries/propertyEntries (list rows do not). */
+    /** Full detail by id - includes entityEntries/propertyEntries (list rows do not). */
     detail(id: string): Promise<AuditOperationDto>
     /** Export filtered audit operations as a CSV Blob (UTF-8 BOM). */
     exportCsv(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
@@ -48,13 +48,13 @@ export interface AuditBridge {
     exportJson(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
   }
   operations: BridgeCrudContract<AuditOperationDto> & {
-    /** Full detail by id — includes entityEntries/propertyEntries (list rows do not). */
+    /** Full detail by id - includes entityEntries/propertyEntries (list rows do not). */
     detail(id: string): Promise<AuditOperationDto>
   }
 }
 
 const readOnlyReject = (): Promise<never> =>
-  Promise.reject(new Error('Audit data is read-only — create/update/delete are not permitted'))
+  Promise.reject(new Error('Audit data is read-only - create/update/delete are not permitted'))
 
 export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   const auditApi = deps.auditApi ?? (deps.client ? useAdminAuditApi(deps.client) : null)
@@ -91,13 +91,13 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
     })
   }
 
-  // Detail by id — the list endpoint returns rows WITHOUT entityEntries; the
+  // Detail by id - the list endpoint returns rows WITHOUT entityEntries; the
   // GET-by-id endpoint Includes the full entity/property change tree.
   const detail = async (id: string): Promise<AuditOperationDto> =>
     unwrap<AuditOperationDto>(await api.getById(id))
 
   const logs: AuditBridge['logs'] = {
-    // Request-level full view — no implicit filter.
+    // Request-level full view - no implicit filter.
     fetch: (query) => fetchAudit(query),
     detail,
     create: readOnlyReject,
@@ -108,7 +108,7 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   }
 
   const operations: AuditBridge['operations'] = {
-    // Change-type operations view — write methods only.
+    // Change-type operations view - write methods only.
     fetch: (query) => fetchAudit(query, { isWriteOperation: true }),
     detail,
     create: readOnlyReject,

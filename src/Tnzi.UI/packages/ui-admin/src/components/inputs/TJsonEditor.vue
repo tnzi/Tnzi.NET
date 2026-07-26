@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * `TJsonEditor` — textarea-based JSON editor with format/validate/auto-fix.
+ * `TJsonEditor` - textarea-based JSON editor with format/validate/auto-fix.
  *
  * Keeps the bundle tiny (no Monaco / CodeMirror dependency). For users who
  * need syntax highlighting + autocomplete, swap in `@guolao/vue-monaco-editor`
  * in your own page. This component covers the 90% case (config blobs,
  * environment overrides, theme snapshots).
  *
- * v-model:value is the JSON string. The component does NOT auto-parse — the
+ * v-model:value is the JSON string. The component does NOT auto-parse - the
  * consumer decides when to convert to an object.
  */
 import { ref, computed, watch } from 'vue'

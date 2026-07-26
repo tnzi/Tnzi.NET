@@ -229,9 +229,14 @@ public static class DapperBulkOperations
             valuesParts.Add($"({string.Join(", ", valueParams)})");
         }
 
-        // 构建 SET 子句
-        var setClauses = escapedColumns.Select((col, i) =>
-            $"{escapedTable}.{col} = v.{escapedColumnAliases[i]}").ToList();
+        // 构建 SET 子句。
+        // 只有 SQL Server 允许在 SET 左侧写表限定列名（SET tbl.col = ...）；
+        // PostgreSQL / SQLite 的 UPDATE ... FROM 语法里 SET 左侧必须是裸列名，
+        // 加表限定会直接报语法错误（本方法也是"其它数据库"的回退路径，故按 provider 判定）。
+        var qualifySetColumns = provider.DatabaseType.Equals("SqlServer", StringComparison.OrdinalIgnoreCase);
+        var setClauses = escapedColumns.Select((col, i) => qualifySetColumns
+            ? $"{escapedTable}.{col} = v.{escapedColumnAliases[i]}"
+            : $"{col} = v.{escapedColumnAliases[i]}").ToList();
 
         var sql = $@"
 UPDATE {escapedTable}

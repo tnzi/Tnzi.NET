@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Sandbox.Models;
 
 /// <summary>
-/// 沙箱工具执行环境 — SandboxMiddleware 在 Agent 运行期间通过
+/// 沙箱工具执行环境 - SandboxMiddleware 在 Agent 运行期间通过
 /// <c>IAgentExecutionContextAccessor.Properties[SandboxPropertyKeys.ToolEnvironment]</c>
 /// 发布给 <see cref="Tools.SandboxTools"/> 的环境参数（AsyncLocal 通道，
 /// 主管线与 AgentAsTools 子代理路径均可见）。

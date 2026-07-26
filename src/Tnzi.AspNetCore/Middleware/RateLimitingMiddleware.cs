@@ -25,7 +25,7 @@ public class RateLimitingMiddleware
     }
 
     /// <summary>
-    /// 处理请求。IRateLimitService 是 scoped 服务，约定中间件本身是单例 —
+    /// 处理请求。IRateLimitService 是 scoped 服务，约定中间件本身是单例 -
     /// 必须经 InvokeAsync 参数按请求解析（构造注入会在 root provider 校验时失败）。
     /// </summary>
     public async Task InvokeAsync(HttpContext context, IRateLimitService rateLimitService)

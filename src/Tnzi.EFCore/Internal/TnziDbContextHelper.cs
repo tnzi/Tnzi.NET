@@ -68,7 +68,7 @@ public static class TnziDbContextHelper
             await DispatchDomainEventsAsync(dbContext, domainEvents, cancellationToken);
         }
 
-        // 6. 文件引用处理（事务后异步处理，避免并发 DbContext 问题）
+        // 5. 文件引用处理（事务后异步处理，避免并发 DbContext 问题）
         if (fileTracker.HasChanges)
         {
             foreach (var change in fileTracker.GetChanges())

@@ -17,7 +17,7 @@ const scenario: MockScenario = {
       type: 'citation',
       source: {
         id: 'c1',
-        title: 'Tnzi.NET Architecture — Module System',
+        title: 'Tnzi.NET Architecture - Module System',
         snippet: 'Tnzi.NET organizes functionality into core, infrastructure, framework, application, and custom module tiers.',
         url: 'docs/architecture.md#module-system',
         pageNumber: 12,

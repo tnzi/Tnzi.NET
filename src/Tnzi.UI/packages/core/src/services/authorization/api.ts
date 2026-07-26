@@ -133,7 +133,7 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
 
     /**
      * Compare permissions between two roles.
-     * Returns `onlyInA`, `onlyInB`, and `common` function lists — the admin
+     * Returns `onlyInA`, `onlyInB`, and `common` function lists - the admin
      * UI uses this to power the "compare with another role" modal.
      */
     compareRolePermissions: (roleAId: string, roleBId: string) =>
@@ -143,7 +143,7 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
 
     /**
      * Copy every function assignment from `sourceRoleId` to `roleId`.
-     * Existing assignments on the target role are not removed first — pair
+     * Existing assignments on the target role are not removed first - pair
      * with `clearFunctions(roleId)` if a hard reset is needed.
      */
     cloneRolePermissions: (roleId: string, sourceRoleId: string) =>
@@ -164,7 +164,7 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
 // ─── User Function API (direct user grants, no role involved) ────────────────
 
 /**
- * User-direct permission grants — maps to `DefaultUserFunctionAdminController`
+ * User-direct permission grants - maps to `DefaultUserFunctionAdminController`
  * (`/admin/user-functions`). Complements the role surface: permission
  * resolution is `(role grants ∪ direct grants) − direct denies`, so this
  * surface can give ONE user extra codes OR take a role-derived code away
@@ -203,7 +203,7 @@ export function useAdminUserFunctionApi(client: HttpClient) {
       client.get<string[]>(`${USER_FUNCTIONS_BASE}/user/${userId}/denied-function-ids`),
 
     /**
-     * Set (overwrite) the user's deny set — each denied code is removed from
+     * Set (overwrite) the user's deny set - each denied code is removed from
      * the user's effective permissions no matter which role granted it.
      * Pass an empty list to clear all denies.
      */
@@ -275,13 +275,13 @@ export function useAdminEntityRoleApi(client: HttpClient) {
 // ─── Function Authorization API (current-user permissions, checks) ────────────
 
 /**
- * Function authorization API — maps to `DefaultFunctionAuthorizationAdminController`
+ * Function authorization API - maps to `DefaultFunctionAuthorizationAdminController`
  * (`/admin/function-authorization`).
  *
  * `getUserPermissionNames` is the source the admin shell feeds into its auth
  * store to drive permission-filtered menus and route guards. The backend
  * returns the FULL enabled-function catalogue for super-admins, so the client
- * never needs a super-user special case — a super-admin simply receives every
+ * never needs a super-user special case - a super-admin simply receives every
  * code and therefore sees every menu.
  */
 export function useAdminFunctionAuthorizationApi(client: HttpClient) {

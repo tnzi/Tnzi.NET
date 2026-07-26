@@ -48,6 +48,34 @@ public class CsvBuilder
     public override string ToString() => _sb.ToString();
 
     /// <summary>
+    /// 金额单元格：把小数规范到固定标度(默认 2 位),使补零与舍入在整列保持一致
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AppendRow"/> 的 decimal 分支按值的自然标度输出,因此 <c>1.5m</c> 会写成 "1.5" 而
+    /// <c>1.50m</c> 写成 "1.50" —— 同一金额列里补零不一致。本方法按 <paramref name="decimals"/>
+    /// 舍入并把标度固定下来,让整列对齐。
+    /// <para>
+    /// 返回值刻意仍为 <see cref="decimal"/> 而非预格式化字符串：数值分支会原样输出,负数保持
+    /// "-1234.50",不会被公式注入防护加上前置单引号(字符串单元格则会)。
+    /// </para>
+    /// </remarks>
+    /// <param name="value">金额;<c>null</c> 原样返回,输出为空单元格</param>
+    /// <param name="decimals">小数位数,默认 2</param>
+    public static decimal? Money(decimal? value, int decimals = 2)
+    {
+        Check.InRange(decimals, 0, 28);
+
+        if (value is null)
+            return null;
+
+        // 先按 decimals 舍入(远离零,与会计口径一致),再加上一个该标度的零值把标度固定住：
+        // decimal 加法结果取两操作数标度的较大者,于是 1.5m -> 1.50m,补零得以保留。
+        var rounded = Math.Round(value.Value, decimals, MidpointRounding.AwayFromZero);
+        var zeroAtScale = new decimal(0, 0, 0, false, (byte)decimals);
+        return rounded + zeroAtScale;
+    }
+
+    /// <summary>
     /// 转义单个字符串单元格(公式注入防护 + RFC 4180 引号转义),供自定义拼装场景复用
     /// </summary>
     public static string EscapeCell(string? value)

@@ -59,7 +59,7 @@ describe('useLocalSearch', () => {
     const { query, filtered } = useLocalSearch<Item>(() => items, ['name'])
     query.value = 'x'
     expect(filtered.value).toHaveLength(1)
-    // Change items AND change query — computed will re-read both inputs
+    // Change items AND change query - computed will re-read both inputs
     items = [{ id: 'y', name: 'Y', description: '', count: 0 }]
     query.value = 'z'
     expect(filtered.value).toHaveLength(0)

@@ -479,7 +479,7 @@ public class FileIntegrityResult
 public enum FileIntegrityStatus
 {
     /// <summary>
-    /// File is healthy — exists and MD5 matches
+    /// File is healthy - exists and MD5 matches
     /// </summary>
     Healthy,
 

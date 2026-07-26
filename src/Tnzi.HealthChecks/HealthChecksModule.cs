@@ -85,7 +85,7 @@ public class HealthChecksModule : TnziFrameworkModule
         // 添加缓存健康检查（内存缓存）
         if (options.EnableCacheCheck)
         {
-            healthChecksBuilder.AddCheck<Checks.CacheHealthCheck>(
+            healthChecksBuilder.AddCheck<CacheHealthCheck>(
                 "cache",
                 HealthStatus.Degraded,
                 ["cache", "infrastructure"],
@@ -95,7 +95,7 @@ public class HealthChecksModule : TnziFrameworkModule
         // 添加数据库健康检查（支持多 DbContext）
         if (options.EnableDatabaseCheck)
         {
-            var dbContextTypes = new Checks.RegisteredDbContextTypes();
+            var dbContextTypes = new RegisteredDbContextTypes();
             foreach (var descriptor in context.Services)
             {
                 var serviceType = descriptor.ServiceType;
@@ -112,7 +112,7 @@ public class HealthChecksModule : TnziFrameworkModule
             if (dbContextTypes.Types.Count > 0)
             {
                 context.Services.AddSingleton(dbContextTypes);
-                healthChecksBuilder.AddCheck<Checks.DatabaseHealthCheck>(
+                healthChecksBuilder.AddCheck<DatabaseHealthCheck>(
                     "database",
                     HealthStatus.Unhealthy,
                     ["database", "infrastructure"],
@@ -128,7 +128,7 @@ public class HealthChecksModule : TnziFrameworkModule
 
             if (hasDistributedCache)
             {
-                healthChecksBuilder.AddCheck<Checks.RedisHealthCheck>(
+                healthChecksBuilder.AddCheck<RedisHealthCheck>(
                     "redis",
                     HealthStatus.Unhealthy,
                     ["redis", "cache", "infrastructure"],
@@ -144,7 +144,7 @@ public class HealthChecksModule : TnziFrameworkModule
 
             if (hasEventBus)
             {
-                healthChecksBuilder.AddCheck<Checks.EventBusHealthCheck>(
+                healthChecksBuilder.AddCheck<EventBusHealthCheck>(
                     "eventbus",
                     HealthStatus.Degraded,
                     ["eventbus", "messaging", "infrastructure"],

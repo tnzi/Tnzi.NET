@@ -4,8 +4,8 @@
  * Vue 3 + Vite SPA package based on Vant.
  */
 
-export { default, createTnziMobile } from './plugin';
-export type { TnziMobileOptions } from './plugin';
+export { createTnziMobile } from './plugin';
+export type { TnziMobileOptions, TnziMobileLocale } from './plugin';
 
 export * from './components/index';
 export * from './composables/index';

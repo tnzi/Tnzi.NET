@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Agents.Definitions;
 
 /// <summary>
-/// Agent 定义提供器接口 — 从文件系统加载 Agent 定义
+/// Agent 定义提供器接口 - 从文件系统加载 Agent 定义
 /// </summary>
 public interface IAgentDefinitionProvider
 {

@@ -9,6 +9,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private readonly IRepository<FileReference, Guid> _referenceRepository;
     private readonly IFileStorage _storage;
     private readonly IOptionsMonitor<StorageOptions> _optionsMonitor;
+    private readonly IFileAccessAuthorizer _accessAuthorizer;
 
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
@@ -17,6 +18,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IRepository<FileReference, Guid> referenceRepository,
         IFileStorage storage,
         IOptionsMonitor<StorageOptions> optionsMonitor,
+        IFileAccessAuthorizer accessAuthorizer,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -24,6 +26,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         _referenceRepository = Check.NotNull(referenceRepository);
         _storage = Check.NotNull(storage);
         _optionsMonitor = Check.NotNull(optionsMonitor);
+        _accessAuthorizer = Check.NotNull(accessAuthorizer);
     }
 
     public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false)
@@ -97,7 +100,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<Stream>> GetAsync(Guid id)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<Stream>(record);
+        var check = await EnsureReadableAsync<Stream>(record);
         if (check != null)
             return check;
 
@@ -115,7 +118,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         long? rangeEnd = null)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<(Stream Stream, long Start, long End, long TotalLength)>(record);
+        var check = await EnsureReadableAsync<(Stream Stream, long Start, long End, long TotalLength)>(record);
         if (check != null)
             return check;
 
@@ -130,7 +133,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileRecord>> GetRecordAsync(Guid id)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<FileRecord>(record);
+        var check = await EnsureReadableAsync<FileRecord>(record);
         if (check != null)
             return check;
         return Ok(record!);
@@ -139,7 +142,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileInfoDto>> GetFileInfoAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(id, cancellationToken);
-        var check = EnsureFileRecordExists<FileInfoDto>(record);
+        var check = await EnsureReadableAsync<FileInfoDto>(record, cancellationToken);
         if (check != null)
             return check;
 
@@ -150,7 +153,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<string>> GetUrlAsync(Guid id, int? expiresIn = null)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<string>(record);
+        var check = await EnsureReadableAsync<string>(record);
         if (check != null)
             return check;
 
@@ -162,10 +165,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<Stream>> GetThumbnailAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(id, cancellationToken);
-        if (record == null)
-            return Fail<Stream>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        var check = await EnsureReadableAsync<Stream>(record, cancellationToken);
+        if (check != null)
+            return check;
 
-        if (string.IsNullOrEmpty(record.ThumbnailPath))
+        if (string.IsNullOrEmpty(record!.ThumbnailPath))
             return Fail<Stream>("Thumbnail not available", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var stream = await _storage.DownloadAsync(record.ThumbnailPath);
@@ -176,7 +180,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result> DeleteAsync(Guid id)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<object>(record);
+        var check = await EnsureWritableAsync<object>(record);
         if (check != null)
             return check;
 
@@ -208,13 +212,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
     public async Task<Result<FileRecord>> GetOrCreateByMd5Async(string md5Hash, string fileName, Stream stream)
     {
-        // 检查是否已存在相同MD5的文件
-        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream);
-        if (existingResult != null)
-        {
-            return existingResult;
-        }
-
+        // 入参校验必须先于去重查询：命中"记录存在但物理文件缺失"分支时会回读 stream 重传，
+        // 若此时 stream/fileName 非法会抛 NullReferenceException 而不是返回 400。
         var validation = ValidateFileName<FileRecord>(fileName);
         if (validation != null)
             return validation;
@@ -225,6 +224,13 @@ public class FileStorageService : ApplicationService, IFileStorageService
         validation = ValidateFile<FileRecord>(fileName, stream);
         if (validation != null)
             return validation;
+
+        // 检查是否已存在相同MD5的文件
+        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream);
+        if (existingResult != null)
+        {
+            return existingResult;
+        }
 
         // 验证 MD5
         var calculatedMd5 = await Md5Helper.CalculateAsync(stream);
@@ -324,7 +330,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileRecord>> RenameAsync(Guid id, string newFileName)
     {
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<FileRecord>(record);
+        var check = await EnsureWritableAsync<FileRecord>(record);
         if (check != null)
             return check;
 
@@ -338,10 +344,13 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileRecord>> CopyAsync(Guid sourceFileId, string? newFileName = null, CancellationToken cancellationToken = default)
     {
         var sourceFile = await _repository.GetAsync(sourceFileId, cancellationToken);
-        if (sourceFile == null)
-            return Fail<FileRecord>("Source file not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        // Copying hands the caller the bytes under a new id, so it needs read
+        // rights on the source, not merely knowledge of its id.
+        var sourceCheck = await EnsureReadableAsync<FileRecord>(sourceFile, cancellationToken);
+        if (sourceCheck != null)
+            return sourceCheck;
 
-        if (string.IsNullOrEmpty(sourceFile.Path))
+        if (string.IsNullOrEmpty(sourceFile!.Path))
             return Fail<FileRecord>("Source file path is empty", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
         var extension = sourceFile.Extension;
@@ -500,7 +509,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             query = query.Where(f => f.OriginalName != null && f.OriginalName.ToLower().Contains(keyword));
         }
 
-        // Folder filter — two modes:
+        // Folder filter - two modes:
         //   1. FolderId set + IncludeUnfiled=false → that folder's direct children only.
         //   2. FolderId=null + IncludeUnfiled=true  → root/unfiled (FolderId IS NULL).
         // Other combinations leave the query unconstrained on folder so legacy
@@ -712,7 +721,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<string>("ExpiresInSeconds must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
 
         var record = await _repository.GetAsync(id);
-        var check = EnsureFileRecordExists<string>(record);
+        // A presigned URL bypasses this API entirely once minted, so the caller
+        // must be allowed to read the file before one is issued.
+        var check = await EnsureReadableAsync<string>(record);
         if (check != null)
             return check;
 
@@ -829,7 +840,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<FileRecord>(record);
+        var check = await EnsureWritableAsync<FileRecord>(record, cancellationToken);
         if (check != null)
             return check;
 
@@ -843,7 +854,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<FileRecord>> SetMetadataAsync(Guid fileId, Dictionary<string, string> metadata, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<FileRecord>(record);
+        var check = await EnsureWritableAsync<FileRecord>(record, cancellationToken);
         if (check != null)
             return check;
 
@@ -862,7 +873,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<Dictionary<string, string>>> GetMetadataAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
         var record = await _repository.GetAsync(fileId, cancellationToken);
-        var check = EnsureFileRecordExists<Dictionary<string, string>>(record);
+        var check = await EnsureReadableAsync<Dictionary<string, string>>(record, cancellationToken);
         if (check != null)
             return check;
 
@@ -1022,6 +1033,37 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return null;
     }
 
+    /// <summary>
+    /// 存在性 + 读权限。不可读时返回 **404 而非 403** —— 403 会告诉调用者"这个 id 上确实有东西",
+    /// 顺序 GUID 下这本身就是可枚举的信息。
+    /// </summary>
+    private async Task<Result<T>?> EnsureReadableAsync<T>(FileRecord? fileRecord, CancellationToken cancellationToken = default)
+    {
+        var missing = EnsureFileRecordExists<T>(fileRecord);
+        if (missing != null)
+            return missing;
+
+        if (await _accessAuthorizer.CanReadAsync(fileRecord!, cancellationToken))
+            return null;
+
+        return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+    }
+
+    /// <summary>
+    /// 存在性 + 变更权限(删除 / 改名 / 改标签或元数据)。同样以 404 掩盖存在性。
+    /// </summary>
+    private async Task<Result<T>?> EnsureWritableAsync<T>(FileRecord? fileRecord, CancellationToken cancellationToken = default)
+    {
+        var missing = EnsureFileRecordExists<T>(fileRecord);
+        if (missing != null)
+            return missing;
+
+        if (await _accessAuthorizer.CanWriteAsync(fileRecord!, cancellationToken))
+            return null;
+
+        return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+    }
+
     private static string GetSafePath(string? path)
     {
         return path ?? string.Empty;
@@ -1131,7 +1173,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
             else
             {
-                // No MD5 stored, file exists — consider healthy
+                // No MD5 stored, file exists - consider healthy
                 result.Md5Matches = null;
                 result.Status = FileIntegrityStatus.Healthy;
             }
@@ -1149,7 +1191,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// Physically delete a file (and its thumbnail), then delete the DB record only when the
     /// primary physical file is confirmed gone. If the physical delete fails while the file still
     /// exists on storage, the DB record is intentionally KEPT (ReferenceCount is already 0) so the
-    /// background cleanup task (CleanupOrphanFilesAsync) can retry — this avoids leaving an
+    /// background cleanup task (CleanupOrphanFilesAsync) can retry - this avoids leaving an
     /// orphaned physical file with no DB record. Returns true if the DB record was deleted.
     /// </summary>
     private async Task<bool> DeleteFileAsync(FileRecord record)

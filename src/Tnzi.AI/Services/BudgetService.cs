@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// USD 成本预算管理服务实现 — 基于 UsageLog 聚合 + 内存缓存
+/// USD 成本预算管理服务实现 - 基于 UsageLog 聚合 + 内存缓存
 /// </summary>
 public class BudgetService : ApplicationService, IBudgetService
 {

@@ -3,7 +3,7 @@ namespace Tnzi.Storage.Tests;
 
 /// <summary>
 /// Provider-level tests for <c>GetPresignedUrlAsync</c> overrides on the cloud storage providers
-/// (S3 / R2 use AWS SDK signing; Azure uses SAS). These run fully offline with fake credentials —
+/// (S3 / R2 use AWS SDK signing; Azure uses SAS). These run fully offline with fake credentials -
 /// signing is a local cryptographic operation that does not touch the network.
 /// </summary>
 public class ProviderPresignedUrlTests
@@ -113,7 +113,7 @@ public class ProviderPresignedUrlTests
 
     #endregion
 
-    #region S3 (regression — existing override + UseHttps wiring)
+    #region S3 (regression - existing override + UseHttps wiring)
 
     [Fact]
     public async Task S3_GetPresignedUrlAsync_Put_ReturnsSignedUrl()

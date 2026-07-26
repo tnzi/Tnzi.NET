@@ -70,6 +70,10 @@ public static class ErrorCodes
     public const string IDENTITY_EMAIL_NOT_CONFIRMED = "IDENTITY_EMAIL_NOT_CONFIRMED";
     public const string IDENTITY_TOKEN_INVALID = "IDENTITY_TOKEN_INVALID";
     public const string IDENTITY_2FA_REQUIRED = "2FA_REQUIRED";
+    public const string IDENTITY_SESSION_ALREADY_ACTIVE = "IDENTITY_SESSION_ALREADY_ACTIVE";
+    public const string IDENTITY_SESSION_LIMIT_REACHED = "IDENTITY_SESSION_LIMIT_REACHED";
+    public const string IDENTITY_SESSION_REVOKED = "IDENTITY_SESSION_REVOKED";
+    public const string IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED";
 
     // ==================== FileStorage 模块错误码 ====================
     public const string FILE_STORAGE_ERROR = "FILE_STORAGE_ERROR";
@@ -86,7 +90,6 @@ public static class ErrorCodes
 
     // ==================== System 模块错误码 ====================
     public const string SYSTEM_ERROR = "SYSTEM_ERROR";
-    public const string SYSTEM_MENU_HAS_CHILDREN = "SYSTEM_MENU_HAS_CHILDREN";
 
     // ==================== Notification 模块错误码 ====================
     public const string NOTIFICATION_ERROR = "NOTIFICATION_ERROR";

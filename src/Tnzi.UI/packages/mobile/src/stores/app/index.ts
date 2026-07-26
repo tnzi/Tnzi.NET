@@ -1,7 +1,7 @@
 /**
  * @tnzi/mobile/stores/app
  *
- * Application state store — thin Pinia wrapper delegating to core AppStateManager.
+ * Application state store - thin Pinia wrapper delegating to core AppStateManager.
  * All business logic lives in AppStateManager; this store only proxies reactive state.
  */
 
@@ -12,7 +12,9 @@ import type { StateDeps } from '@tnzi/core/state';
 // Named import from the stable `./types` subpath so the emitted useApp() .d.ts
 // can reference ThemeMode portably (avoids TS2883 pointing at a core dist chunk).
 import type { ThemeMode } from '@tnzi/core/types';
+import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
 import { getStoreStorage, getStoreHttpClient } from '../factory';
+import { createVantThemeAdapter } from '../../adapters/theme';
 
 // ============================================
 // AppStateManager Singleton
@@ -24,10 +26,14 @@ function getManager(): AppStateManager {
   if (!_manager) {
     // AppStateManager requires StateDeps shape but does not use httpClient internally.
     // httpClient is provided here to satisfy the type contract.
-    const deps = {
+    // `theme` is what turns setTheme()/toggleTheme() into a visible change: the
+    // manager calls applyTheme() through it, and the Vant adapter flips
+    // `van-theme-dark` on <html>. Without it the state changes and the UI does not.
+    const deps: StateDeps = {
       httpClient: getStoreHttpClient(),
-      storage: getStoreStorage(),
-    } as unknown as StateDeps;
+      storage: getStoreStorage() ?? createLocalStorageAdapter(),
+      theme: createVantThemeAdapter(),
+    };
     _manager = new AppStateManager(deps);
   }
   return _manager;

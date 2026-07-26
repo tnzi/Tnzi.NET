@@ -1,5 +1,5 @@
 /**
- * Invoice bridge — thin adapter over `@tnzi/core`'s admin invoice API
+ * Invoice bridge - thin adapter over `@tnzi/core`'s admin invoice API
  * (`useAdminInvoiceApi`, wrapping `/admin/invoices/*` exposed by
  * `Tnzi.Payment.Controllers.Admin.DefaultInvoiceAdminController`).
  *
@@ -10,11 +10,11 @@
  * so consuming pages are unaffected.
  *
  * The admin page focuses on the lifecycle ops (mark-paid / cancel / send)
- * — manual creation is more complex (line-items editor) and intentionally
+ * - manual creation is more complex (line-items editor) and intentionally
  * routes through the dedicated create flow rather than the table page.
  *
  * Backend note: `InvoiceQueryDto` server-side filters on
- * invoiceNo/type/status/customerEmail/startTime/endTime only — there is no
+ * invoiceNo/type/status/customerEmail/startTime/endTime only - there is no
  * free-text `searchText` parameter, so the page's search box is a no-op
  * server-side (the param is serialised but silently ignored). `status`
  * filters as expected.

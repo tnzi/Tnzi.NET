@@ -93,7 +93,7 @@ public class EventBusTenantTests
     }
 
     // ------------------------------------------------------------------
-    // 1. EventBase.TenantId — 属性可设置且可为 null
+    // 1. EventBase.TenantId - 属性可设置且可为 null
     // ------------------------------------------------------------------
 
     [Fact]
@@ -134,7 +134,7 @@ public class EventBusTenantTests
     }
 
     // ------------------------------------------------------------------
-    // 2. PublishAsync — 有租户时自动将租户 ID 写入 EventBase.TenantId
+    // 2. PublishAsync - 有租户时自动将租户 ID 写入 EventBase.TenantId
     // ------------------------------------------------------------------
 
     [Fact]
@@ -155,14 +155,14 @@ public class EventBusTenantTests
         // Act
         await bus.PublishAsync(@event);
 
-        // Assert — 发布后事件上的 TenantId 应等于当前租户 ID
+        // Assert - 发布后事件上的 TenantId 应等于当前租户 ID
         Assert.Equal(tenantId, @event.TenantId);
         Assert.NotNull(handler.ReceivedEvent);
         Assert.Equal(tenantId, handler.ReceivedEvent!.TenantId);
     }
 
     // ------------------------------------------------------------------
-    // 3. PublishAsync — 无租户时 TenantId 保持 null
+    // 3. PublishAsync - 无租户时 TenantId 保持 null
     // ------------------------------------------------------------------
 
     [Fact]
@@ -189,7 +189,7 @@ public class EventBusTenantTests
     [Fact]
     public async Task PublishAsync_WithNullCurrentTenant_TenantIdRemainsNull()
     {
-        // Arrange — 未注册 ICurrentTenant（多租户模块未加载场景）
+        // Arrange - 未注册 ICurrentTenant（多租户模块未加载场景）
         var handler = new RecordingEventHandler();
         var (bus, _) = BuildBus(
             tenantMock: null,
@@ -205,7 +205,7 @@ public class EventBusTenantTests
     }
 
     // ------------------------------------------------------------------
-    // 4. PublishAsync — 事件已显式设置 TenantId 时，不覆盖
+    // 4. PublishAsync - 事件已显式设置 TenantId 时，不覆盖
     // ------------------------------------------------------------------
 
     [Fact]
@@ -229,12 +229,12 @@ public class EventBusTenantTests
         // Act
         await bus.PublishAsync(@event);
 
-        // Assert — 保持显式设置的值，不被 ICurrentTenant 覆盖
+        // Assert - 保持显式设置的值，不被 ICurrentTenant 覆盖
         Assert.Equal(explicitTenantId, @event.TenantId);
     }
 
     // ------------------------------------------------------------------
-    // 5. 后台处理器 — 租户上下文从 EventBase.TenantId 恢复
+    // 5. 后台处理器 - 租户上下文从 EventBase.TenantId 恢复
     // ------------------------------------------------------------------
 
     [Fact]
@@ -279,12 +279,12 @@ public class EventBusTenantTests
         var completedTask = await Task.WhenAny(signal.Tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.True(completedTask == signal.Tcs.Task, "后台处理器未在 5 秒内完成");
 
-        // Assert — Change() 应以正确的 tenantId 被调用
+        // Assert - Change() 应以正确的 tenantId 被调用
         Assert.Equal(tenantId, changedTo);
     }
 
     // ------------------------------------------------------------------
-    // 6. 后台处理器 — TenantId 为 null 时不切换租户上下文
+    // 6. 后台处理器 - TenantId 为 null 时不切换租户上下文
     // ------------------------------------------------------------------
 
     [Fact]
@@ -316,12 +316,12 @@ public class EventBusTenantTests
         var completedTask = await Task.WhenAny(signal.Tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.True(completedTask == signal.Tcs.Task, "后台处理器未在 5 秒内完成");
 
-        // Assert — TenantId 为 null 时不应调用 Change()
+        // Assert - TenantId 为 null 时不应调用 Change()
         mockTenant.Verify(t => t.Change(It.IsAny<Guid?>(), It.IsAny<string?>()), Times.Never);
     }
 
     // ------------------------------------------------------------------
-    // 7. 后台处理器 — 租户 scope 在处理器完成后被释放
+    // 7. 后台处理器 - 租户 scope 在处理器完成后被释放
     // ------------------------------------------------------------------
 
     [Fact]
@@ -361,7 +361,7 @@ public class EventBusTenantTests
         // 给 finally 块一点时间执行
         await Task.Delay(50);
 
-        // Assert — 租户 scope 的 Dispose() 必须被调用
+        // Assert - 租户 scope 的 Dispose() 必须被调用
         tenantScopeDisposable.Verify(d => d.Dispose(), Times.Once);
     }
 }

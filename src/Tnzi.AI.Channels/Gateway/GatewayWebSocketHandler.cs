@@ -4,7 +4,7 @@ using System.Text;
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// WebSocket 连接处理器 — 接收 GatewayMessage，按 Method 分发到 IGateway
+/// WebSocket 连接处理器 - 接收 GatewayMessage，按 Method 分发到 IGateway
 /// </summary>
 public class GatewayWebSocketHandler
 {
@@ -26,7 +26,7 @@ public class GatewayWebSocketHandler
     private readonly bool _requireAuthentication;
 
     /// <summary>
-    /// Serializes all sends on this connection — WebSocket forbids overlapping SendAsync
+    /// Serializes all sends on this connection - WebSocket forbids overlapping SendAsync
     /// calls (heartbeat vs stream), which otherwise corrupt frames / throw InvalidOperationException.
     /// </summary>
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -57,7 +57,7 @@ public class GatewayWebSocketHandler
             return;
         }
 
-        // 检查每用户最大连接数 — 匿名连接共享 UserId==null 桶，同样受上限约束
+        // 检查每用户最大连接数 - 匿名连接共享 UserId==null 桶，同样受上限约束
         var existingConnections = _presence.GetConnections()
             .Count(c => c.UserId == userId);
         if (existingConnections >= _maxConnectionsPerUser)

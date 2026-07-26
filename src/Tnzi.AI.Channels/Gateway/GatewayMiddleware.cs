@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// Gateway WebSocket 中间件扩展 — 将 WebSocket 请求路由到 GatewayWebSocketHandler
+/// Gateway WebSocket 中间件扩展 - 将 WebSocket 请求路由到 GatewayWebSocketHandler
 /// </summary>
 public static class GatewayMiddlewareExtensions
 {

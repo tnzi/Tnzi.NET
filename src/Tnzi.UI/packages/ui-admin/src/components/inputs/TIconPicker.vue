@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TIconPicker` — searchable Iconify icon picker.
+ * `TIconPicker` - searchable Iconify icon picker.
  *
  * Renders an `NInput` with a popover panel showing a grid of icons. By
  * default ships with a curated MDI subset (~80 commonly-used admin icons).

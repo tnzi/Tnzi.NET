@@ -45,7 +45,7 @@ public interface IModuleDescriptor
     Exception? InitializationError { get; }
 
     /// <summary>
-    /// Module architecture manifest — auto-generated during initialization
+    /// Module architecture manifest - auto-generated during initialization
     /// </summary>
     ModuleManifest Manifest { get; }
 
@@ -90,7 +90,7 @@ public class ModuleDescriptor : IModuleDescriptor
     private Lazy<ModuleManifest>? _lazyManifest;
 
     /// <summary>
-    /// Module architecture manifest — lazily built on first access from the module's
+    /// Module architecture manifest - lazily built on first access from the module's
     /// registered service descriptors. Returns <see cref="ModuleManifest.Empty"/> until a
     /// manifest source is provided via <see cref="SetManifestSource"/>. Thread-safe.
     /// </summary>

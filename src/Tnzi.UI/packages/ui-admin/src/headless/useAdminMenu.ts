@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { useAdminRouteStore, type AdminMenuItem } from '../stores/useAdminRouteStore'
 
 /**
- * Admin menu composable — resolves the active menu item and its parent chain
+ * Admin menu composable - resolves the active menu item and its parent chain
  * from a key against the route store's derived menu tree.
  *
  * Menus themselves live on `useAdminRouteStore.menus`; this composable owns

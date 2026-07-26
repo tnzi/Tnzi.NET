@@ -1,9 +1,7 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Tnzi.Logging.Dtos;
-using Tnzi.Logging.Services.Interfaces;
 using Tnzi.Results;
 
 namespace Tnzi.Logging.Services;
@@ -23,7 +21,7 @@ public class LogFileService : ILogFileService
     private const int SearchResultsCapMax = 1000;
     private const int SearchResultsCapDefault = 200;
 
-    // Recognised level directory names — anything else passed to a level
+    // Recognised level directory names; anything else passed to a level
     // parameter is rejected.
     private static readonly string[] ValidLevels =
         ["Information", "Warning", "Error", "Fatal", "Debug"];
@@ -170,7 +168,6 @@ public class LogFileService : ILogFileService
             ToUtc = toUtc,
             Keyword = keyword,
         };
-        var keywordLower = keyword.ToLowerInvariant();
 
         foreach (var lv in levelsToScan)
         {
@@ -192,7 +189,8 @@ public class LogFileService : ILogFileService
                     var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                     if (line == null) break;
                     lineNumber++;
-                    if (line.ToLowerInvariant().Contains(keywordLower, StringComparison.Ordinal))
+                    // 内存比较用 OrdinalIgnoreCase，避免为每一行额外分配一份小写副本
+                    if (line.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                     {
                         result.Hits.Add(new LogSearchHitDto
                         {
@@ -221,7 +219,7 @@ public class LogFileService : ILogFileService
 
     private string ResolveBasePath()
     {
-        // BasePath may be relative (default "Logs") — resolve against the
+        // BasePath may be relative (default "Logs"), so resolve it against the
         // current process directory the same way Serilog does at writer setup.
         var raw = _options.BasePath;
         return Path.GetFullPath(raw);
@@ -249,7 +247,7 @@ public class LogFileService : ILogFileService
     }
 
     /// <summary>
-    /// Reject file names containing directory separators or `..` segments —
+    /// Reject file names containing directory separators or `..` segments,
     /// these would let a caller escape the level directory. Allow only the
     /// rolling pattern `log-YYYYMMDD.txt` plus its no-date sibling `log-.txt`
     /// Serilog uses for the latest day before rollover.
@@ -322,7 +320,7 @@ public class LogFileService : ILogFileService
                     newlineCount++;
                     if (newlineCount > count)
                     {
-                        // Found one more newline than needed — start position
+                        // Found one more newline than needed, so the start position
                         // is just past this newline.
                         pos += i + 1;
                         goto SeekAndRead;
@@ -330,7 +328,7 @@ public class LogFileService : ILogFileService
                 }
             }
         }
-        // Fewer than `count` newlines in the file — return the entire file.
+        // Fewer than `count` newlines in the file: return the entire file.
         pos = 0;
 
     SeekAndRead:

@@ -76,7 +76,7 @@ public class LocalSandbox : ISandbox
                 psi.Environment.Remove(k);
         }
 
-        // Apply environment overrides AFTER blacklist filtering — overrides always win.
+        // Apply environment overrides AFTER blacklist filtering - overrides always win.
         if (_environmentOverrides is not null)
         {
             foreach (var (k, v) in _environmentOverrides)
@@ -134,7 +134,7 @@ public class LocalSandbox : ISandbox
         if (!File.Exists(path))
             throw new FileNotFoundException($"File not found: {path}");
 
-        // Size precheck — reject before pulling a multi-GB file into memory.
+        // Size precheck - reject before pulling a multi-GB file into memory.
         if (_maxFileSize > 0)
         {
             var length = new FileInfo(path).Length;
@@ -202,7 +202,7 @@ public class LocalSandbox : ISandbox
             throw new DirectoryNotFoundException($"Directory not found: {path}");
 
         var entries = new List<FileEntry>();
-        CollectEntries(path, entries, maxDepth, 0, _deniedPatterns);
+        CollectEntries(path, entries, maxDepth, 0, _deniedPatterns, ct);
         return Task.FromResult<IReadOnlyList<FileEntry>>(entries);
     }
 
@@ -221,15 +221,17 @@ public class LocalSandbox : ISandbox
     }
 
     private static void CollectEntries(string dir, List<FileEntry> entries, int maxDepth, int currentDepth,
-        IReadOnlyCollection<string> deniedPatterns)
+        IReadOnlyCollection<string> deniedPatterns, CancellationToken ct)
     {
         if (currentDepth > maxDepth) return;
+        // 深目录树的遍历可能很长：每层都检查取消，避免调用方取消后仍走完整棵树。
+        ct.ThrowIfCancellationRequested();
 
         foreach (var d in Directory.GetDirectories(dir))
         {
             var info = new DirectoryInfo(d);
             entries.Add(new FileEntry(info.Name, d, 0, IsDirectory: true));
-            CollectEntries(d, entries, maxDepth, currentDepth + 1, deniedPatterns);
+            CollectEntries(d, entries, maxDepth, currentDepth + 1, deniedPatterns, ct);
         }
         foreach (var f in Directory.GetFiles(dir))
         {

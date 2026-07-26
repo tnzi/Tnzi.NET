@@ -4,7 +4,7 @@
  * Covers: Chat, Threads, Agents (admin), Agent Runs (admin), Providers (admin),
  * Quotas (user + admin), Usage Analytics (admin), Evaluations (admin),
  * Skills (user + admin), Workflows (admin), MCP (admin), MCP Tool Analytics (admin),
- * Personas (admin), Skill Categories (admin), Artifacts (user), User Profile (user),
+ * Skill Categories (admin), Artifacts (user), User Profile (user),
  * Workspace Agents (admin).
  *
  * RAG endpoints live in `./rag`. The Permission rule engine
@@ -130,11 +130,6 @@ import type {
   McpToolStatsDto,
   McpToolPopularityDto,
   McpToolErrorDto,
-  // Personas
-  AgentPersonaDto,
-  CreateAgentPersonaDto,
-  UpdateAgentPersonaDto,
-  AgentPersonaQueryDto,
   // Skill Categories
   SkillCategoryDto,
   CreateSkillCategoryDto,
@@ -478,7 +473,7 @@ export function useAdminQuotaApi(client: HttpClient) {
 
     /**
      * Get the USD cost budget summary for a tenant/time-range.
-     * All params optional — omit `tenantId` for the global view; start/end
+     * All params optional - omit `tenantId` for the global view; start/end
      * default to the current calendar month on the backend.
      */
     getBudgetSummary: (params?: { tenantId?: string; startTime?: string; endTime?: string }) =>
@@ -503,7 +498,7 @@ export function useAdminProviderApi(client: HttpClient) {
     getDefaultModel: (providerName: string) =>
       client.get<ProviderDefaultModelDto>(`${base}/${providerName}/default-model`),
 
-    /** Provider dropdown options (enabled only) — for the Agent config Provider select */
+    /** Provider dropdown options (enabled only) - for the Agent config Provider select */
     getOptions: () =>
       client.get<ProviderOptionDto[]>(`${base}/options`),
 
@@ -765,7 +760,7 @@ export function useAdminWorkflowApi(client: HttpClient) {
 
     /**
      * Batch enable workflows. Workflow definitions have a single `IsEnabled`
-     * flag — there is no separate Draft/Published state machine, so enabling
+     * flag - there is no separate Draft/Published state machine, so enabling
      * a workflow IS the framework's "publish" semantic.
      * See docs/modules/ai.md → Workflow → Publish semantics.
      */
@@ -842,7 +837,7 @@ export function useAdminMcpApi(client: HttpClient) {
     delete: (id: string) =>
       client.delete<void>(`${clientBase}/${id}`),
 
-    /** Shallow probe — verifies entity is enabled, URI parses, credentials decrypt */
+    /** Shallow probe - verifies entity is enabled, URI parses, credentials decrypt */
     test: (id: string) =>
       client.post<McpServerTestResultDto>(`${clientBase}/${id}/test`, {}),
   };
@@ -872,41 +867,6 @@ export function useAdminMcpToolAnalyticsApi(client: HttpClient) {
     /** Cleanup old analytics records */
     cleanup: (retentionDays = 90) =>
       client.delete<number>(`${base}/cleanup`, { params: { retentionDays } }),
-  };
-}
-
-// ============================================
-// Admin: Persona API
-// Route: /admin/ai/personas
-// ============================================
-
-/** Admin persona management API */
-export function useAdminPersonaApi(client: HttpClient) {
-  const base = '/admin/ai/personas';
-  return {
-    /** Get persona list (paged) */
-    getList: (data: AgentPersonaQueryDto) =>
-      client.post<PagedList<AgentPersonaDto>>(`${base}/query`, data),
-
-    /** Get persona by ID */
-    getById: (id: string) =>
-      client.get<AgentPersonaDto>(`${base}/${id}`),
-
-    /** Get persona by slug */
-    getBySlug: (slug: string) =>
-      client.get<AgentPersonaDto>(`${base}/by-slug/${slug}`),
-
-    /** Create persona */
-    create: (data: CreateAgentPersonaDto) =>
-      client.post<AgentPersonaDto>(base, data),
-
-    /** Update persona */
-    update: (id: string, data: UpdateAgentPersonaDto) =>
-      client.put<AgentPersonaDto>(`${base}/${id}`, data),
-
-    /** Delete persona */
-    delete: (id: string) =>
-      client.delete<void>(`${base}/${id}`),
   };
 }
 

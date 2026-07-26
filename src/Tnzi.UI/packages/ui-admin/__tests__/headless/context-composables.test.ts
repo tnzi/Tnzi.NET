@@ -129,5 +129,5 @@ describe('useTabContext', () => {
   })
 })
 
-// Suppress unused import warning for injectTabContext — imported for API symmetry.
+// Suppress unused import warning for injectTabContext - imported for API symmetry.
 void injectTabContext

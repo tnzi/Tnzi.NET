@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine.Router;
 
 /// <summary>
-/// Router 执行策略 — 由入口 Agent 先选择目标，再委托目标 Agent 执行
+/// Router 执行策略 - 由入口 Agent 先选择目标，再委托目标 Agent 执行
 /// </summary>
 public class RouterExecutionStrategy : IExecutionStrategy
 {
@@ -28,7 +28,7 @@ public class RouterExecutionStrategy : IExecutionStrategy
             {
                 // Fallback: route to the first target when direct response is disallowed
                 routeTarget = _config.Targets.Keys.First();
-                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false — falling back to '{Target}'", routeTarget);
+                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false - falling back to '{Target}'", routeTarget);
             }
             else
             {
@@ -83,17 +83,17 @@ public class RouterExecutionStrategy : IExecutionStrategy
             {
                 // Fallback: route to the first target when direct response is disallowed
                 detectedRoute = _config.Targets.Keys.First();
-                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false — falling back to '{Target}'", detectedRoute);
+                context.Logger.LogInformation("Router did not route but AllowDirectResponse=false - falling back to '{Target}'", detectedRoute);
             }
             else
             {
-                // No routing — direct response: yield everything the router produced
+                // No routing - direct response: yield everything the router produced
                 foreach (var buffered in preTextBuffer) yield return buffered;
                 yield break;
             }
         }
 
-        // Routing occurred — discard buffered router text (suppressing any preamble the model wrote)
+        // Routing occurred - discard buffered router text (suppressing any preamble the model wrote)
 
         if (!_config.Targets.TryGetValue(detectedRoute, out var targetAgentId))
         {

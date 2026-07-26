@@ -1,5 +1,5 @@
 /**
- * Shared operation-permission gating for CRUD write affordances — the fail-open
+ * Shared operation-permission gating for CRUD write affordances - the fail-open
  * `.create/.update/.delete` check used by both `useCrudPage` (list pages) and
  * `useChildCollection` (detail-page nested collections), so a surface's write
  * buttons hide when the code isn't held. The backend `[ApiAuthorize]` remains

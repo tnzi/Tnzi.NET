@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Streaming;
 
 /// <summary>
-/// 流式事件（delta 模型 — 每个事件只包含增量内容，非累积）
+/// 流式事件（delta 模型 - 每个事件只包含增量内容，非累积）
 /// </summary>
 public class StreamEvent
 {

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * WorkspaceAgents integration test — card grid (TCardPage).
+ * WorkspaceAgents integration test - card grid (TCardPage).
  *
  * The page is read-only: it calls createWorkspaceAgentsBridge().list() which
  * returns a plain WorkspaceAgentDto[]. The test mocks the bridge, mounts the

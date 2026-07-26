@@ -28,13 +28,13 @@ public class PostgreSqlConfigurator : DatabaseProviderConfiguratorBase
     /// </summary>
     private static Delegate? TryBuildUseVectorAction(Type npgsqlOptionsBuilderType)
     {
-        // Search loaded assemblies first (no cache — pgvector may not be loaded at startup)
+        // Search loaded assemblies first (no cache: pgvector may not be loaded at startup)
         var pvAssembly = AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(a => a.GetName().Name == "Pgvector.EntityFrameworkCore");
 
         if (pvAssembly == null)
         {
-            // Assembly is in the probing path but not yet JIT-loaded — force load
+            // Assembly is in the probing path but not yet JIT-loaded, force load
             try { pvAssembly = Assembly.Load(new AssemblyName("Pgvector.EntityFrameworkCore")); }
             catch { return null; }
         }

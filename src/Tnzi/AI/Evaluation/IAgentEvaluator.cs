@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Evaluation;
 
 /// <summary>
-/// Agent 评估器接口 — 用于评估 Agent 的响应质量
+/// Agent 评估器接口 - 用于评估 Agent 的响应质量
 /// </summary>
 [ExperimentalApi(Reason = "Agent evaluation is in preview")]
 public interface IAgentEvaluator

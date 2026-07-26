@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Readability;
 
 /// <summary>
-/// HTML 可读性提取接口 — 从 HTML 中提取文章正文内容
+/// HTML 可读性提取接口 - 从 HTML 中提取文章正文内容
 /// </summary>
 public interface IReadabilityExtractor
 {

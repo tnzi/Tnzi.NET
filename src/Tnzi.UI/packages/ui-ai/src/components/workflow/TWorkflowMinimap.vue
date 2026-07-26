@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowMinimap — @vue-flow minimap wrapper
+ * TWorkflowMinimap - @vue-flow minimap wrapper
  */
 
 import { MiniMap } from '@vue-flow/minimap';

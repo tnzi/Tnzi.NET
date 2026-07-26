@@ -27,7 +27,7 @@ interface Props {
    */
   themeOverrides?: GlobalThemeOverrides
   /**
-   * Render `<router-view />` inside the provider stack. Default `true` —
+   * Render `<router-view />` inside the provider stack. Default `true` -
    * fits the typical admin App.vue use case. Set to `false` if you want
    * to provide your own content via the default slot (e.g. for non-router
    * shells or wrapped layouts).
@@ -43,7 +43,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 // Inject the theme context directly (not via useTheme()) so that this
 // component still renders when no `@tnzi/ui` plugin is installed
-// upstream — falling back to a null theme + empty overrides instead of
+// upstream - falling back to a null theme + empty overrides instead of
 // throwing. `createTnziUiAdmin()` always installs a fallback context, so
 // in the typical setup the injection succeeds.
 const ctx = inject<ThemeContext | null>(THEME_CONTEXT_KEY, null)

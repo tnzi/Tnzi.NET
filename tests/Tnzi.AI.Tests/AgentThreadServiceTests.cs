@@ -4,7 +4,7 @@ using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// AgentThreadService 单元测试 — 覆盖 GetOrCreateThreadAsync / GetByIdAsync / DeleteAsync / ExportAsync / SaveMessageAsync
+/// AgentThreadService 单元测试 - 覆盖 GetOrCreateThreadAsync / GetByIdAsync / DeleteAsync / ExportAsync / SaveMessageAsync
 /// </summary>
 public class AgentThreadServiceTests
 {
@@ -393,7 +393,7 @@ public class AgentThreadServiceTests
     }
 
     // -------------------------------------------------------------------------
-    // GetOrCreateThreadAsync — new thread (threadId == null)
+    // GetOrCreateThreadAsync - new thread (threadId == null)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -522,7 +522,7 @@ public class AgentThreadServiceTests
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
         SetupThreadQueryable([thread]);
 
-        // Existing messages — max order = 3
+        // Existing messages - max order = 3
         var existingMessages = new List<AgentThreadMessage>
         {
             MakeMessage(threadId, order: 1),

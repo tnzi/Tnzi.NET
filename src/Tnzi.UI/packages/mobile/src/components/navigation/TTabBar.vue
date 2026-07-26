@@ -3,12 +3,9 @@ import type { ITabItem } from '@tnzi/core/types/shared-ui';
 
 interface ITabBarProps {
   tabs: ITabItem[];
-  activeKey?: string;
   badge?: Record<string, number>;
   fixed?: boolean;
   safeAreaInsetBottom?: boolean;
-  class?: string | string[];
-  style?: string | Record<string, string | number>;
 }
 
 interface ITabBarEmits {
@@ -23,13 +20,15 @@ const props = withDefaults(defineProps<ITabBarProps>(), {
 
 const emit = defineEmits<ITabBarEmits>();
 
-const model = defineModel<string>('activeKey', { default: '' });
+// `activeKey` is declared by defineModel, not by defineProps: declaring it in
+// both would shadow the model with a static prop.
+const activeKey = defineModel<string>('activeKey', { default: '' });
 
 const tabBadge = (key: string, fallback?: number) => props.badge?.[key] ?? fallback;
 
 const onChange = (key: string | number) => {
   const value = String(key);
-  model.value = value;
+  activeKey.value = value;
   const tab = props.tabs.find((item) => item.key === value);
   if (tab) emit('change', value, tab as ITabItem);
 };
@@ -37,11 +36,9 @@ const onChange = (key: string | number) => {
 
 <template>
   <van-tabbar
-    :model-value="model || props.activeKey"
+    :model-value="activeKey"
     :fixed="props.fixed"
     :safe-area-inset-bottom="props.safeAreaInsetBottom"
-    :class="props.class"
-    :style="props.style"
     @change="onChange"
   >
     <van-tabbar-item

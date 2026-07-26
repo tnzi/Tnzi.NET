@@ -177,13 +177,13 @@ describe('TListShell', () => {
   // NOTE: the search toggles carry dynamic `:type`/`:tertiary` bindings (the
   // active-state highlight). @vue/test-utils' native `trigger('click')` does
   // NOT propagate a custom-stub's `$emit('click')` to the parent listener when
-  // the stubbed component has dynamic props AND lives in a slot — so we drive
+  // the stubbed component has dynamic props AND lives in a slot - so we drive
   // the wiring via the component's own `click` emit (what NButton fires on a
   // real tap). Browser-verified separately.
   it('phone: tapping the search toggle expands the keyword panel downward, tapping again collapses it', async () => {
     ;(globalThis as any).__bpNarrow = true
     const wrapper = mount(TListShell, { props: { state: makeState() as any }, slots: { renderer: '<div/>' }, global: { stubs } })
-    // Collapsed by default — only the toggle icon, no panel.
+    // Collapsed by default - only the toggle icon, no panel.
     expect(wrapper.find('.t-list-shell__mobile-search').exists()).toBe(false)
     expect(wrapper.find('.t-list-shell__search-input').exists()).toBe(false)
     wrapper.findComponent('.t-list-shell__search-icon').vm.$emit('click')
@@ -242,7 +242,7 @@ const trailingStubs = {
   },
 }
 
-describe('TListShell toolbar — icon-only buttons + trailing order', () => {
+describe('TListShell toolbar - icon-only buttons + trailing order', () => {
   afterEach(() => { delete (globalThis as Record<string, unknown>).__bpNarrow })
 
   // (a) Refresh renders as icon-only: no text node in its default slot,
@@ -259,7 +259,7 @@ describe('TListShell toolbar — icon-only buttons + trailing order', () => {
     expect(refreshBtn.attributes('aria-label')).toBeTruthy()
     // The default slot of the Refresh button must be empty (icon-only)
     // We detect text by checking that there are no text nodes directly in the
-    // button's rendered output — only the icon slot element.
+    // button's rendered output - only the icon slot element.
     const directText = refreshBtn.text().trim()
     expect(directText).toBe('')
     // The Refresh button must be inside an NTooltip wrapper
@@ -326,7 +326,7 @@ describe('TListShell toolbar — icon-only buttons + trailing order', () => {
   })
 
   // (e) No #toolbar slot → no Columns button rendered (the shell itself never
-  //     renders a Columns button — that is TCrudPage's responsibility via the slot)
+  //     renders a Columns button - that is TCrudPage's responsibility via the slot)
   it('does not render a Columns button when no #toolbar slot is provided', () => {
     const wrapper = mount(TListShell, {
       props: { state: makeState() as any, showRefresh: true },

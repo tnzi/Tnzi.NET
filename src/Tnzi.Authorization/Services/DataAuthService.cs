@@ -453,7 +453,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         }
         if (filterGroup == null || !filterGroup.HasFilters)
         {
-            // Filter JSON parsed but contained no rules — same as empty.
+            // Filter JSON parsed but contained no rules - same as empty.
             return Ok();
         }
 
@@ -470,7 +470,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         }
         if (entityType == null)
         {
-            // Soft failure — type isn't in the loading context. Don't reject
+            // Soft failure - type isn't in the loading context. Don't reject
             // the save (admin may be authoring rules for a module they're
             // about to load), but log a warning so the discrepancy is
             // visible at startup-time when validators sweep the table.
@@ -500,7 +500,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         }
         catch (System.Reflection.TargetInvocationException ex)
         {
-            // Reflection wraps the real exception — unwrap for a useful message.
+            // Reflection wraps the real exception - unwrap for a useful message.
             var inner = ex.InnerException ?? ex;
             return Fail($"Filter expression failed to build against {entityType.FullName}: {inner.Message}");
         }
@@ -597,7 +597,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         var entityInfo = await _entityInfoRepository.FindAsync(entityRole.EntityInfoId);
         if (entityInfo == null)
         {
-            // Shouldn't happen — entity row exists but its EntityInfo is
+            // Shouldn't happen - entity row exists but its EntityInfo is
             // missing → corrupted state. Surface as 500 not 400.
             return Fail<EntityRole>(
                 $"Owning EntityInfo {entityRole.EntityInfoId} not found.",

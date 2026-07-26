@@ -1,5 +1,5 @@
 /**
- * useMessageGroup — Message grouping logic
+ * useMessageGroup - Message grouping logic
  *
  * Groups consecutive chat messages for rendering:
  * - Each user message gets its own group ('human')
@@ -74,7 +74,7 @@ export function groupMessages(messages: readonly ChatMessage[]): MessageGroup[] 
       });
       currentGroup = null;
     } else {
-      // assistant / tool — merge into current assistant group
+      // assistant / tool - merge into current assistant group
       if (currentGroup && currentGroup.type === 'assistant') {
         currentGroup = {
           type: currentGroup.type,

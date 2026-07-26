@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// ExecutionStrategyResolver 单元测试 — 验证 Resolve(AgentExecutionMode, string?) 方法
+/// ExecutionStrategyResolver 单元测试 - 验证 Resolve(AgentExecutionMode, string?) 方法
 /// </summary>
 public class ExecutionStrategyResolverTests
 {

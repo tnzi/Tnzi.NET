@@ -6,7 +6,7 @@ using System.Text;
 namespace Tnzi.AI.Channels.Adapters.Feishu;
 
 /// <summary>
-/// 飞书频道适配器 — 通过 HTTP REST API 收发消息，支持流式卡片更新。
+/// 飞书频道适配器 - 通过 HTTP REST API 收发消息，支持流式卡片更新。
 /// </summary>
 /// <remarks>
 /// 消息流程（对标 DeerFlow FeishuChannel）：

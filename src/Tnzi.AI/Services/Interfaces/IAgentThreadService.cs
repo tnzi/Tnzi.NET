@@ -67,7 +67,7 @@ public interface IAgentThreadInternalService
     /// </summary>
     /// <param name="messageId">
     /// Optional pre-generated message ID. When supplied, the message is persisted with this
-    /// exact ID — letting callers (e.g. streaming pipelines) surface the ID to clients
+    /// exact ID - letting callers (e.g. streaming pipelines) surface the ID to clients
     /// before the database write completes. When null, the framework generates one.
     /// </param>
     /// <returns>The persisted message ID.</returns>

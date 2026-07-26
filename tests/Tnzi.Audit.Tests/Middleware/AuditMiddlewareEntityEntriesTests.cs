@@ -1,7 +1,7 @@
 namespace Tnzi.Audit.Tests.Middleware;
 
 /// <summary>
-/// AuditMiddleware 实体级审计挂载测试 — collector drain 后挂到 AuditOperation.EntityEntries
+/// AuditMiddleware 实体级审计挂载测试 - collector drain 后挂到 AuditOperation.EntityEntries
 /// </summary>
 public class AuditMiddlewareEntityEntriesTests
 {

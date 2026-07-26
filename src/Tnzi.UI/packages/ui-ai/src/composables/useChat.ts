@@ -1,13 +1,47 @@
 /**
- * useChat — Core chat state management composable
+ * useChat - core chat state store.
  *
- * Manages messages, streaming state, thread lifecycle, and abort control.
- * Integrates with @tnzi/core streaming API (SSE) for real-time chat.
+ * Owns the message list, streaming flag, thread lifecycle and abort control.
+ * All message updates are immutable: arrays are replaced, never mutated.
  *
- * All message updates are immutable — arrays are replaced, never mutated.
+ * ## Transport is the consumer's
+ *
+ * This composable deliberately performs no network I/O. Applications differ in
+ * how they reach the backend (admin gateway, embedded widget with its own
+ * origin, a proxy that injects auth), so the transport stays outside and feeds
+ * results back in through `addMessage` / `appendDelta` / `updateMessage` /
+ * `setStreaming` / `setError`.
+ *
+ * `send()` still owns the AbortController for the turn, and exposes it as
+ * `signal` - pass that to `streamChat()` from `@tnzi/core/services/ai` (or any
+ * `fetch`) so `abort()`, `clearThread()`, `loadThread()` and unmounting all
+ * actually cancel the in-flight request instead of letting it run to
+ * completion in the background.
+ *
+ * @example
+ * ```ts
+ * const chat = useChat()
+ * chat.send(text)
+ * const assistantId = chat.messages.value.at(-1)!.id
+ * await streamChat({
+ *   url, body, signal: chat.signal.value ?? undefined,
+ *   onDelta: (t) => chat.appendDelta(assistantId, 'content', t),
+ *   onError: (e) => chat.setError(e instanceof Error ? e : new Error(String(e))),
+ *   onDone: () => { chat.updateMessage(assistantId, { isStreaming: false, status: 'done' }); chat.setStreaming(false) },
+ * })
+ * ```
  */
 
-import { ref, readonly, computed, type Ref, type DeepReadonly, type ComputedRef } from 'vue';
+import {
+  ref,
+  shallowRef,
+  readonly,
+  computed,
+  onScopeDispose,
+  type Ref,
+  type DeepReadonly,
+  type ComputedRef,
+} from 'vue';
 import { scheduleFrame } from '@/lib/scheduleFrame';
 
 // ---------------------------------------------------------------------------
@@ -61,26 +95,21 @@ export interface ChatMessage {
   parentId?: string | null;
   /** Feedback rating (true = positive, false = negative, null = none). */
   feedbackRating?: boolean | null;
-  /** Lifecycle status — 'error'/'stopped' render dedicated UI in TChatApp/ChatMessage. */
+  /** Lifecycle status - 'error'/'stopped' render dedicated UI in TChatApp/ChatMessage. */
   status?: 'streaming' | 'done' | 'stopped' | 'error';
   /** Error message shown when status === 'error'. */
   error?: string | null;
 }
 
 export interface UseChatOptions {
-  /** Base URL for AI API endpoints. */
-  apiBaseUrl?: string;
   /** Initial thread ID to load. */
   threadId?: string | null;
-  /** Agent ID to use. */
-  agentId?: string | null;
-  /** Model ID override. */
-  modelId?: string | null;
-  /** Callbacks. */
+  /** Called whenever `setError` records a non-null error. */
   onError?: (error: Error) => void;
+  /** Called by `send()` right after the placeholder messages are appended. */
   onStreamStart?: () => void;
+  /** Called by `abort()` once the in-flight turn has been cancelled. */
   onStreamEnd?: () => void;
-  onAgentSwitch?: (agentName: string) => void;
 }
 
 export interface UseChatReturn {
@@ -94,6 +123,11 @@ export interface UseChatReturn {
   currentThreadId: DeepReadonly<Ref<string | null>>;
   /** Current agent name (for Handoff tracking). */
   currentAgentName: DeepReadonly<Ref<string | null>>;
+  /**
+   * AbortSignal for the turn started by the most recent `send()`, or null when
+   * nothing is in flight. Hand this to the transport so cancellation works.
+   */
+  signal: ComputedRef<AbortSignal | null>;
   /** Number of messages. */
   messageCount: ComputedRef<number>;
   /** Send a user message. */
@@ -127,6 +161,12 @@ export interface UseChatReturn {
    *  consumer owns the streaming lifecycle (e.g. external SSE
    *  client) and needs to mirror its state into the composable. */
   setStreaming: (value: boolean) => void;
+  /** Record (or clear) the current transport error. A non-null value also
+   *  invokes `options.onError`. */
+  setError: (error: Error | null) => void;
+  /** Record the agent currently answering, so subsequent assistant
+   *  placeholders are stamped with it (Handoff scenarios). */
+  setAgentName: (name: string | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +191,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const currentThreadId = ref<string | null>(options.threadId ?? null);
   const currentAgentName = ref<string | null>(null);
 
-  let abortController: AbortController | null = null;
+  const abortController = shallowRef<AbortController | null>(null);
+  const signal = computed<AbortSignal | null>(() => abortController.value?.signal ?? null);
 
   const messageCount = computed(() => messages.value.length);
 
@@ -161,22 +202,28 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     messages.value = [...messages.value, message];
   }
 
-  let pendingUpdate: { id: string; updates: Partial<ChatMessage> } | null = null;
+  /* Pending patches are keyed by message id and merged, not overwritten.
+     A single-slot buffer silently dropped everything but the last call in a
+     frame, and during streaming several patches routinely land in the same
+     frame: two different messages updating together, or one message getting
+     `status` and then `usage`. */
+  const pendingUpdates = new Map<string, Partial<ChatMessage>>();
   let updatePending = false;
 
   function flushMessageUpdate(): void {
-    if (pendingUpdate) {
-      const { id: msgId, updates: msgUpdates } = pendingUpdate;
-      pendingUpdate = null;
-      messages.value = messages.value.map((msg) =>
-        msg.id === msgId ? { ...msg, ...msgUpdates } : msg,
-      );
-    }
     updatePending = false;
+    if (pendingUpdates.size === 0) return;
+    const batch = new Map(pendingUpdates);
+    pendingUpdates.clear();
+    messages.value = messages.value.map((msg) => {
+      const patch = batch.get(msg.id);
+      return patch ? { ...msg, ...patch } : msg;
+    });
   }
 
   function updateMessage(id: string, updates: Partial<ChatMessage>): void {
-    pendingUpdate = { id, updates };
+    const existing = pendingUpdates.get(id);
+    pendingUpdates.set(id, existing ? { ...existing, ...updates } : { ...updates });
     if (!updatePending) {
       updatePending = true;
       scheduleFrame(flushMessageUpdate);
@@ -200,6 +247,15 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   function setStreaming(value: boolean): void {
     isStreaming.value = value;
+  }
+
+  function setError(nextError: Error | null): void {
+    error.value = nextError;
+    if (nextError) options.onError?.(nextError);
+  }
+
+  function setAgentName(name: string | null): void {
+    currentAgentName.value = name;
   }
 
   // -- Public API --
@@ -230,13 +286,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     addMessage(assistantMessage);
 
     isStreaming.value = true;
-    abortController = new AbortController();
+    // The consumer's transport must forward `signal` (see the file header) or
+    // abort() cannot actually stop the request.
+    abortController.value = new AbortController();
     options.onStreamStart?.();
-
-    // SSE streaming wiring is delegated to the consumer via options.onStreamStart /
-    // options.onStreamEnd hooks; the in-package transport binding to
-    // @tnzi/core streamChat() is intentionally not implemented here so that
-    // consumers can bring their own transport (admin gateway, embed widget, etc.).
   }
 
   function regenerate(messageId: string): void {
@@ -263,9 +316,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   }
 
   function abort(): void {
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
+    if (abortController.value) {
+      abortController.value.abort();
+      abortController.value = null;
     }
 
     // Mark any streaming messages as done
@@ -293,7 +346,13 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   function dispose(): void {
     abort();
+    pendingUpdates.clear();
   }
+
+  /* Tearing down the owning component (route change, thread switch that
+     re-creates the store) must cancel the in-flight turn; otherwise the
+     transport keeps streaming to completion against a store nobody reads. */
+  onScopeDispose(dispose, true);
 
   return {
     messages: readonly(messages) as DeepReadonly<Ref<readonly ChatMessage[]>>,
@@ -301,6 +360,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     error: readonly(error),
     currentThreadId: readonly(currentThreadId),
     currentAgentName: readonly(currentAgentName),
+    signal,
     messageCount,
     send,
     regenerate,
@@ -312,5 +372,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     updateMessage,
     appendDelta,
     setStreaming,
+    setError,
+    setAgentName,
   };
 }

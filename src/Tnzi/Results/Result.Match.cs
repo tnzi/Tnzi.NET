@@ -1,7 +1,7 @@
 namespace Tnzi.Results;
 
 /// <summary>
-/// Result 模式匹配扩展 — 强制处理成功和失败两种状态
+/// Result 模式匹配扩展 - 强制处理成功和失败两种状态
 /// </summary>
 /// <remarks>
 /// <para>

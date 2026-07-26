@@ -1,6 +1,6 @@
 <template>
   <!--
-    MissingTranslations — surfaces /admin/localization/missing{,/summary,/export}.
+    MissingTranslations - surfaces /admin/localization/missing{,/summary,/export}.
     Two zones: summary header (totals + per-culture breakdown) and a
     filterable table of every missing key. The right-side toolbar exposes
     a "Download JSON stubs" action that turns the tracker output into
@@ -38,11 +38,11 @@
 
     <!-- The per-culture breakdown chips live in the Cultures card footer (the
          chip count equals affectedCultureCount, so a separate card duplicated
-         the stat) — one unified TKpiCard visual instead of a bare NCard. -->
+         the stat) - one unified TKpiCard visual instead of a bare NCard. -->
     <TKpiRow cols="1 s:3">
-      <TKpiCard :label="t('kpi.totalKeys')" :value="summary?.totalMissingKeys ?? 0" />
-      <TKpiCard :label="t('kpi.totalAccess')" :value="summary?.totalAccessCount ?? 0" />
-      <TKpiCard :label="t('kpi.cultures')" :value="summary?.affectedCultureCount ?? 0">
+      <TKpiCard :label="t('kpi.totalKeys')" :value="summary?.totalMissingKeys ?? null" />
+      <TKpiCard :label="t('kpi.totalAccess')" :value="summary?.totalAccessCount ?? null" />
+      <TKpiCard :label="t('kpi.cultures')" :value="summary?.affectedCultureCount ?? null">
         <template v-if="summary?.cultureBreakdown?.length" #footer>
           <div class="t-i18n-page__chips">
             <NTag

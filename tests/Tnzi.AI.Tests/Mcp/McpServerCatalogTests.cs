@@ -4,7 +4,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests.Mcp;
 
 /// <summary>
-/// McpServerCatalog 单元测试 — DB 注册表物化、与部署配置合并（同名 DB 优先）、
+/// McpServerCatalog 单元测试 - DB 注册表物化、与部署配置合并（同名 DB 优先）、
 /// 总开关/禁用条目/legacy stdio 行/解密失败的过滤行为、快照 TTL 缓存与主动失效
 /// </summary>
 public class McpServerCatalogTests
@@ -275,7 +275,7 @@ public class McpServerCatalogTests
     }
 
     /// <summary>
-    /// Stub IDataProtectionProvider — marker-prefix 包装明文，无需真实 DataProtection key 基础设施。
+    /// Stub IDataProtectionProvider - marker-prefix 包装明文，无需真实 DataProtection key 基础设施。
     /// </summary>
     private sealed class StubDataProtectionProvider : IDataProtectionProvider
     {

@@ -12,7 +12,7 @@
  */
 
 /**
- * Payment status — mirrors Tnzi.Payment.Metadata.PaymentStatus.
+ * Payment status - mirrors Tnzi.Payment.Metadata.PaymentStatus.
  */
 export enum PaymentStatus {
   Pending = 'Pending',
@@ -78,7 +78,7 @@ export function isPaymentFailed(status: PaymentStatus): boolean {
 }
 
 /**
- * Payment method — mirrors Tnzi.Payment.Metadata.PaymentMethod.
+ * Payment method - mirrors Tnzi.Payment.Metadata.PaymentMethod.
  */
 export enum PaymentMethod {
   CreditCard = 'CreditCard',
@@ -115,7 +115,7 @@ export function getPaymentMethodLabel(method: PaymentMethod): string {
 }
 
 /**
- * Business type for payment — mirrors Tnzi.Payment.Metadata.BusinessType.
+ * Business type for payment - mirrors Tnzi.Payment.Metadata.BusinessType.
  */
 export enum BusinessType {
   Order = 'Order',
@@ -143,7 +143,7 @@ export function getBusinessTypeLabel(type: BusinessType): string {
 }
 
 /**
- * Refund status — mirrors Tnzi.Payment.Metadata.RefundStatus.
+ * Refund status - mirrors Tnzi.Payment.Metadata.RefundStatus.
  */
 export enum RefundStatus {
   Pending = 'Pending',
@@ -183,7 +183,7 @@ export function getRefundStatusLabel(status: RefundStatus): string {
 }
 
 /**
- * Subscription status — mirrors Tnzi.Payment.Metadata.SubscriptionStatus.
+ * Subscription status - mirrors Tnzi.Payment.Metadata.SubscriptionStatus.
  */
 export enum SubscriptionStatus {
   Pending = 'Pending',
@@ -223,7 +223,7 @@ export function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
 }
 
 /**
- * Billing cycle type — mirrors Tnzi.Payment.Metadata.BillingCycleType.
+ * Billing cycle type - mirrors Tnzi.Payment.Metadata.BillingCycleType.
  */
 export enum BillingCycleType {
   Day = 'Day',
@@ -254,7 +254,7 @@ export function getBillingCycleTypeLabel(type: BillingCycleType): string {
 }
 
 /**
- * Invoice status — mirrors Tnzi.Payment.Metadata.InvoiceStatus.
+ * Invoice status - mirrors Tnzi.Payment.Metadata.InvoiceStatus.
  */
 export enum InvoiceStatus {
   Draft = 'Draft',
@@ -288,7 +288,7 @@ export function getInvoiceStatusLabel(status: InvoiceStatus): string {
 }
 
 /**
- * Invoice type — mirrors Tnzi.Payment.Metadata.InvoiceType.
+ * Invoice type - mirrors Tnzi.Payment.Metadata.InvoiceType.
  */
 export enum InvoiceType {
   Standard = 'Standard',
@@ -313,7 +313,7 @@ export function getInvoiceTypeLabel(type: InvoiceType): string {
 }
 
 /**
- * Promotion type — mirrors Tnzi.Payment.Metadata.PromotionType.
+ * Promotion type - mirrors Tnzi.Payment.Metadata.PromotionType.
  */
 export enum PromotionType {
   PercentageDiscount = 'PercentageDiscount',
@@ -344,7 +344,7 @@ export function getPromotionTypeLabel(type: PromotionType): string {
 }
 
 /**
- * Discount type — mirrors Tnzi.Payment.Metadata.DiscountType.
+ * Discount type - mirrors Tnzi.Payment.Metadata.DiscountType.
  */
 export enum DiscountType {
   Percentage = 'Percentage',
@@ -366,7 +366,7 @@ export function getDiscountTypeLabel(type: DiscountType): string {
 }
 
 /**
- * Product type (for promotion scope) — mirrors Tnzi.Payment.Metadata.ProductType.
+ * Product type (for promotion scope) - mirrors Tnzi.Payment.Metadata.ProductType.
  */
 export enum ProductType {
   Subscription = 'Subscription',
@@ -376,7 +376,7 @@ export enum ProductType {
 }
 
 /**
- * Apply scope (for promotions) — mirrors Tnzi.Payment.Metadata.ApplyScope.
+ * Apply scope (for promotions) - mirrors Tnzi.Payment.Metadata.ApplyScope.
  */
 export enum ApplyScope {
   Global = 'Global',
@@ -386,7 +386,7 @@ export enum ApplyScope {
 
 /**
  * Trend granularity (for revenue trend queries). Sent as a query-string param
- * only — kept numeric because ASP.NET Core's enum model binder accepts the
+ * only - kept numeric because ASP.NET Core's enum model binder accepts the
  * number for `RevenueTrendQueryDto.Granularity`.
  */
 export enum TrendGranularity {

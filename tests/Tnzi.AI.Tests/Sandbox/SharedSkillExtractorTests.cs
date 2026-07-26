@@ -3,7 +3,7 @@ using Tnzi.AI.Sandbox.Services;
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
-/// Tests for <see cref="SharedSkillExtractor"/> — the startup-time, one-shot
+/// Tests for <see cref="SharedSkillExtractor"/> - the startup-time, one-shot
 /// extraction of skill resource files into a single shared directory that
 /// every thread's <c>skills/</c> symlinks to (instead of every thread keeping
 /// its own copy).

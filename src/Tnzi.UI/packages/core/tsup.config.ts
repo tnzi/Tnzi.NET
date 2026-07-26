@@ -39,6 +39,7 @@ export default defineConfig({
         "services/finance/index": "src/services/finance/index.ts",
         "services/payroll/index": "src/services/payroll/index.ts",
         "services/chat/index": "src/services/chat/index.ts",
+        "services/presence/index": "src/services/presence/index.ts",
         "services/notification/index": "src/services/notification/index.ts",
         "services/storage/index": "src/services/storage/index.ts",
         "services/system/index": "src/services/system/index.ts",

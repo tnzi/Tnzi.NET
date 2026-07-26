@@ -1,5 +1,5 @@
 /**
- * `useNaiveForm()` — wrapper composable around Naive UI's `NForm` ref
+ * `useNaiveForm()` - wrapper composable around Naive UI's `NForm` ref
  * that exposes a clean `validate` / `reset` / `setFieldsValue` API.
  *
  * Usage:

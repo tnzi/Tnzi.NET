@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// Agent 版本路由器 — 支持 A/B 测试流量分配
+/// Agent 版本路由器 - 支持 A/B 测试流量分配
 /// 当 Agent 配置了 A/B 测试时，根据流量百分比选择不同版本的配置
 /// </summary>
 public interface IAgentVersionRouter

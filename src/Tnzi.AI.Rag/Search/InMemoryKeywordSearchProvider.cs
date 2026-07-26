@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// 基于内存的关键词搜索提供者 — 使用 TF-IDF 算法进行关键词匹配
+/// 基于内存的关键词搜索提供者 - 使用 TF-IDF 算法进行关键词匹配
 /// </summary>
 /// <remarks>
 /// <para>

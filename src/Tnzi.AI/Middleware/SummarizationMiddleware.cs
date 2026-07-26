@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 摘要中间件 — 当对话消息超过阈值时，自动调用 LLM 生成摘要替换旧消息，压缩上下文窗口。
+/// 摘要中间件 - 当对话消息超过阈值时，自动调用 LLM 生成摘要替换旧消息，压缩上下文窗口。
 /// </summary>
 public class SummarizationMiddleware : IAiMiddleware
 {
@@ -209,7 +209,7 @@ public class SummarizationMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 应用 MicroCompact — 在每次执行前清理过期工具结果（轻量级上下文压缩）
+    /// 应用 MicroCompact - 在每次执行前清理过期工具结果（轻量级上下文压缩）
     /// </summary>
     private void ApplyMicroCompact(AiMiddlewareContext context)
     {
@@ -226,7 +226,7 @@ public class SummarizationMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// MicroCompact — 基于消息列表中的位置距离清理过期工具结果。
+    /// MicroCompact - 基于消息列表中的位置距离清理过期工具结果。
     /// 保留最近 N 个工具结果消息不清理，其余替换为 "[tool result cleared]"。
     /// 返回新 List（不可变原则）。如果无需修改则返回原引用。
     /// </summary>

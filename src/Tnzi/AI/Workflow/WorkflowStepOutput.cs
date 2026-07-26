@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
-/// Workflow 步骤输出 — 文本 + 结构化元数据。
+/// Workflow 步骤输出 - 文本 + 结构化元数据。
 /// 解决纯 string 无法承载 verdict/route/结构化数据的问题，
 /// 同时保持序列化简单性（不引入 object? 或 JsonElement?）。
 /// </summary>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetHeaderBanner` — Workbench widget wrapping THeaderBanner.
+ * `TWidgetHeaderBanner` - Workbench widget wrapping THeaderBanner.
  *
  * Pulls the display name from `useAdminLoginConfig().user?.userName` when
  * the consumer doesn't pass `userName` explicitly, so the default
@@ -15,7 +15,7 @@ import { useAdminLoginConfig } from '../../plugin/loginConfig'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 interface Props {
-  /** Display name override — defaults to `loginConfig.user?.userName`. */
+  /** Display name override - defaults to `loginConfig.user?.userName`. */
   userName?: string
   /** Static greeting override (skips the time-of-day default). */
   greeting?: string

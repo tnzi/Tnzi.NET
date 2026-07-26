@@ -4,7 +4,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// P0 多租户隔离门禁 — 证明 <see cref="SkillService"/> 的 admin 路径在多租户上下文下
+/// P0 多租户隔离门禁 - 证明 <see cref="SkillService"/> 的 admin 路径在多租户上下文下
 /// 强制服务层可见性过滤（<c>ApplyTenantVisibility</c>）。
 /// <para>
 /// <see cref="SkillEntity"/> 是 <see cref="IScopedResource"/>（有意不实现 <see cref="IMultiTenant"/>，
@@ -50,7 +50,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // GetPagedAsync — tenant A sees System ∪ own, never tenant B
+    // GetPagedAsync - tenant A sees System ∪ own, never tenant B
     // =====================================================================
 
     [Fact]
@@ -84,7 +84,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // UpdateAsync — tenant A cannot update tenant B's row (404) or System (403)
+    // UpdateAsync - tenant A cannot update tenant B's row (404) or System (403)
     // =====================================================================
 
     [Fact]
@@ -124,7 +124,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // DeleteAsync — tenant A cannot delete tenant B's row (404) or System (403)
+    // DeleteAsync - tenant A cannot delete tenant B's row (404) or System (403)
     // =====================================================================
 
     [Fact]
@@ -155,7 +155,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // BatchDeleteAsync — never crosses tenant boundary
+    // BatchDeleteAsync - never crosses tenant boundary
     // =====================================================================
 
     [Fact]
@@ -266,7 +266,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 注册 SkillEntity(IScopedResource) + SkillCategory(FK 目标)。
+/// 测试专用 DbContext - 注册 SkillEntity(IScopedResource) + SkillCategory(FK 目标)。
 /// SkillEntity 不是 IMultiTenant，无全局多租户过滤器；可见性全部交由服务层。
 /// </summary>
 internal sealed class SkillTenantDbContext : TnziDbContext<SkillTenantDbContext>

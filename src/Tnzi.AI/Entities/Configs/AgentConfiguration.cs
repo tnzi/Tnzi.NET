@@ -71,11 +71,9 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
         builder.Property(e => e.DefinitionHash)
             .HasMaxLength(128);
 
-        // 人格关联 FK
-        builder.HasOne(e => e.Persona)
-            .WithMany()
-            .HasForeignKey(e => e.PersonaId)
-            .OnDelete(DeleteBehavior.SetNull);
+        // 人格（Soul）内联内容 - 与 Instructions 同为 Agent 自有提示词文本，非外键。
+        builder.Property(e => e.Persona)
+            .HasMaxLength(32000);
 
         // Provider 关联 FK（过渡期，与遗留字符串 Provider 并存）
         builder.HasOne(e => e.ProviderEntity)

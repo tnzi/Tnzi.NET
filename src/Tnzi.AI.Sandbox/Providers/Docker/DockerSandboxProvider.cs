@@ -4,7 +4,7 @@ using Tnzi.AI.Security;
 namespace Tnzi.AI.Sandbox.Providers.Docker;
 
 /// <summary>
-/// Docker container sandbox provider — creates and manages Docker containers
+/// Docker container sandbox provider - creates and manages Docker containers
 /// via the Docker Engine REST API (no Docker.DotNet dependency).
 /// Supports both Unix socket (Linux/macOS) and named pipe (Windows) connections.
 /// </summary>
@@ -120,7 +120,7 @@ public class DockerSandboxProvider : ISandboxProvider
         // PidsLimit <= 0 disables the limit (Docker treats null/absent as unlimited).
         long? pidsLimit = dockerOpts.PidsLimit > 0 ? dockerOpts.PidsLimit : null;
         // When the rootfs is read-only, Python libs (PIL fontconfig cache, weasyprint
-        // tempfiles) still need a writable scratch space — give them /tmp via tmpfs.
+        // tempfiles) still need a writable scratch space - give them /tmp via tmpfs.
         var tmpfs = dockerOpts.ReadonlyRootfs
             ? new Dictionary<string, string> { ["/tmp"] = "size=64m,nosuid,nodev" }
             : null;
@@ -130,7 +130,7 @@ public class DockerSandboxProvider : ISandboxProvider
             Image = dockerOpts.Image,
             Cmd = new[] { "tail", "-f", "/dev/null" }, // 保持容器运行
             WorkingDir = "/workspace",
-            // Override the image's USER directive explicitly — defends against
+            // Override the image's USER directive explicitly - defends against
             // accidentally pulling a tampered image with USER root.
             User = dockerOpts.RunAsUser,
             Env = envList,

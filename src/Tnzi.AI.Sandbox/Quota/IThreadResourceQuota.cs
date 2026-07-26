@@ -31,7 +31,7 @@ public interface IThreadResourceQuota
     /// makes the count cap race-free even when two commands probe concurrently.
     /// The duration and output-byte dimensions are <b>soft (approximate) caps</b>
     /// evaluated against previously-recorded usage, which may briefly lag an
-    /// in-flight command — they are charged after the fact via
+    /// in-flight command - they are charged after the fact via
     /// <see cref="RecordExecutionAsync"/>.
     /// </remarks>
     /// <param name="threadId">Thread the next sandbox command will run under.</param>

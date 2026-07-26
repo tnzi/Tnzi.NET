@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// Agent 任务管理控制器 — 查询 Agent 运行中的持久化任务列表
+/// Agent 任务管理控制器 - 查询 Agent 运行中的持久化任务列表
 /// </summary>
 [DefaultController]
 [Route("admin/ai/tasks")]

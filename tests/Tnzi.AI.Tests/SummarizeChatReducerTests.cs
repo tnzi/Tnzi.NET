@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// SummarizeChatReducer 单元测试 — 验证历史消息摘要压缩策略
+/// SummarizeChatReducer 单元测试 - 验证历史消息摘要压缩策略
 /// </summary>
 public class SummarizeChatReducerTests
 {

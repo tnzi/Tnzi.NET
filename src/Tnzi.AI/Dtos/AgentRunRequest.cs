@@ -32,7 +32,7 @@ public class AgentRunRequest
     /// <summary>
     /// 附加的单个工具名称（per-request per-tool override，与 <see cref="ToolGroups"/> 对称叠加）。
     /// 在工具组解析之外额外解析这些命名工具并按名称去重合并；权限仍然门控访问。
-    /// Per-request individual tool names — additive to <see cref="ToolGroups"/>, symmetric override.
+    /// Per-request individual tool names - additive to <see cref="ToolGroups"/>, symmetric override.
     /// Resolved in addition to group-expanded tools and unioned (deduped by name); permissions still gate access.
     /// </summary>
     public List<string>? ToolNames { get; init; }

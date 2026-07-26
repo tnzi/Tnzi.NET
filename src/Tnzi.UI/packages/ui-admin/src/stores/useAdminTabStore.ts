@@ -28,6 +28,8 @@ interface RouteLike {
     fixedIndexInTab?: number
     multiTab?: boolean
     icon?: string
+    /** When true the route never becomes a tab (auth / exception / consumer-flagged). */
+    hideInTab?: boolean
   }
 }
 
@@ -36,9 +38,30 @@ function hasOwnKeys(o?: object | null): boolean {
 }
 
 /**
+ * Route names that must NEVER become a tab. `login` (+ its module sub-routes),
+ * the exception pages (403/404/500) and the bare `/admin` redirect are chrome-
+ * less full-page layouts rendered OUTSIDE the admin shell - a persisted "Login"
+ * tab (e.g. carried over from an older build / a session-expiry bounce) would
+ * otherwise linger in the bar. `addTab` refuses them and `afterHydrate` strips
+ * any that were persisted before this guard existed. Consumers can flag their
+ * own non-tab routes with `meta.hideInTab: true`.
+ */
+const NON_TAB_ROUTE_NAMES = new Set([
+  'login',
+  'forbidden',
+  'not-found',
+  'server-error',
+  'admin-root',
+])
+
+function isNonTabRoute(name: string, meta?: { hideInTab?: boolean } | null): boolean {
+  return NON_TAB_ROUTE_NAMES.has(name) || meta?.hideInTab === true
+}
+
+/**
  * Decide whether a route should get its OWN tab per instance (detail / deep-link
  * pages) instead of reusing the route-name tab. A route is multi-instance when it
- * carries dynamic params (e.g. `/agents/:id` — customer A and customer B are
+ * carries dynamic params (e.g. `/agents/:id` - customer A and customer B are
  * different records and must each own a tab) OR it explicitly opts in via
  * `meta.multiTab` together with a query string (e.g. a report page split by
  * `?type=`).
@@ -54,8 +77,8 @@ export function isMultiInstanceRoute(route: {
 /**
  * Stable per-instance id/key for a multi-instance route.
  *  - **Param routes** (`/agents/:id`): key by `path` (the resolved pathname,
- *    WITHOUT query) so a detail page that syncs volatile query state — e.g.
- *    `?section=` deep-links — keeps ONE tab / ONE component instance instead of
+ *    WITHOUT query) so a detail page that syncs volatile query state - e.g.
+ *    `?section=` deep-links - keeps ONE tab / ONE component instance instead of
  *    spawning a new tab and remounting on every section switch.
  *  - **multiTab + query routes** (reports `?type=`): key by `fullPath` since the
  *    query string IS the differentiator between instances.
@@ -87,7 +110,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   const tabs = ref<AdminTab[]>([])
   const activeTabId = ref<string>('')
   const homeTab = ref<AdminTab | null>(null)
-  // Phase G — pinned (fixed) tab IDs. soybean's `tabStore.fixTab/unfixTab/
+  // Phase G - pinned (fixed) tab IDs. soybean's `tabStore.fixTab/unfixTab/
   // isTabRetain` powers the right-click context menu's "Pin / Unpin" item
   // and prevents pinned tabs from being closed (close button is hidden,
   // close-others / close-left / close-right skip them).
@@ -101,7 +124,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     return tabs.value.find((t) => t.id === id)
   }
 
-  // Phase G — pin/unpin/isTabRetain. `isTabRetain` is true for both the
+  // Phase G - pin/unpin/isTabRetain. `isTabRetain` is true for both the
   // home tab and any pinned tab; close-related ops should skip these.
   function isTabPinned(id: string): boolean {
     return fixedTabIds.value.includes(id)
@@ -120,6 +143,8 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   }
 
   function addTab(route: RouteLike): void {
+    // Auth / exception / redirect routes are chrome-less full pages - never tab them.
+    if (isNonTabRoute(route.name, route.meta)) return
     const tab = routeToTab(route)
     const existing = findTab(tab.id)
     if (existing) {
@@ -148,7 +173,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
    * session doesn't survive into a lower-privilege sign-in and 403 on click.
    *
    * Matches a tab by its `id` (for single-instance routes the id IS the route
-   * name — which is what `deniedRouteNames` holds). Pinned tabs are pruned too
+   * name - which is what `deniedRouteNames` holds). Pinned tabs are pruned too
    * (an unauthorized pin is still unauthorized). Re-points `activeTabId` to a
    * surviving tab when the active one was removed.
    */
@@ -230,7 +255,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     activeTabId.value = id
   }
 
-  // Presentation stub — Task 2.29 router guard will replace this with real navigation.
+  // Presentation stub - Task 2.29 router guard will replace this with real navigation.
   // Keeping it on the store lets TAdminTabs stay router-agnostic and unit-testable.
   function switchRouteByTab(tab: AdminTab): void {
     activeTabId.value = tab.id
@@ -264,5 +289,24 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   persist: {
     key: 'tnzi-admin-tabs',
     pick: ['tabs', 'activeTabId', 'fixedTabIds'],
+    // Strip any auth / exception tabs that were persisted before the addTab
+    // guard existed (a stale "Login" tab from an older build / a session-expiry
+    // bounce). Hydration bypasses `addTab`, so this is the only place to catch
+    // them; `id` is the route name for these single-instance routes.
+    afterHydrate: (ctx) => {
+      const store = ctx.store as unknown as {
+        tabs: AdminTab[]
+        fixedTabIds: string[]
+        activeTabId: string
+      }
+      const survives = (t: AdminTab) => !NON_TAB_ROUTE_NAMES.has(t.id)
+      if (store.tabs.some((t) => !survives(t))) {
+        store.tabs = store.tabs.filter(survives)
+        store.fixedTabIds = store.fixedTabIds.filter((id) => !NON_TAB_ROUTE_NAMES.has(id))
+        if (!store.tabs.find((t) => t.id === store.activeTabId)) {
+          store.activeTabId = store.tabs[store.tabs.length - 1]?.id ?? ''
+        }
+      }
+    },
   },
 })

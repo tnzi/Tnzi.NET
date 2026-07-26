@@ -5,6 +5,31 @@ import TSvgIcon from '../../../src/components/display/TSvgIcon.vue'
 import TCountTo from '../../../src/components/display/TCountTo.vue'
 import TWaveBg from '../../../src/components/display/TWaveBg.vue'
 import TSourceBadge from '../../../src/components/display/TSourceBadge.vue'
+import THint from '../../../src/components/display/THint.vue'
+
+describe('THint', () => {
+  it('renders a trigger button carrying the type modifier class', () => {
+    const wrapper = mount(THint, { props: { type: 'help', content: 'hi' } })
+    const btn = wrapper.find('button.t-hint')
+    expect(btn.exists()).toBe(true)
+    expect(btn.classes()).toContain('t-hint--help')
+  })
+
+  it('maps type → default glyph (info default, help = question mark, warning = exclamation)', () => {
+    expect(mount(THint, {}).findComponent(TSvgIcon).props('icon')).toBe('mdi:information-outline')
+    expect(mount(THint, { props: { type: 'help' } }).findComponent(TSvgIcon).props('icon')).toBe(
+      'mdi:help-circle-outline',
+    )
+    expect(mount(THint, { props: { type: 'warning' } }).findComponent(TSvgIcon).props('icon')).toBe(
+      'mdi:alert-circle-outline',
+    )
+  })
+
+  it('icon prop overrides the type glyph', () => {
+    const wrapper = mount(THint, { props: { type: 'warning', icon: 'mdi:shield-alert' } })
+    expect(wrapper.findComponent(TSvgIcon).props('icon')).toBe('mdi:shield-alert')
+  })
+})
 
 describe('TSvgIcon', () => {
   it('renders Iconify when icon prop is set', () => {

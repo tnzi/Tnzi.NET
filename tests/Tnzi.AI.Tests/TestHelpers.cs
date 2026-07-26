@@ -10,7 +10,7 @@ internal static class TestHelpers
     /// <summary>
     /// 按框架真实的分阶段语义配置模块：先依序执行所有模块的 <c>ConfigureServicesAsync</c>，
     /// 再依序执行所有模块的 <c>PostConfigureServicesAsync</c>（TnziApplication 三阶段中的后两段）。
-    /// AIModule 的 NoOp 回退注册在 PostConfigure 阶段 — 任何检查回退/覆盖行为的测试
+    /// AIModule 的 NoOp 回退注册在 PostConfigure 阶段 - 任何检查回退/覆盖行为的测试
     /// 必须经由本助手 bootstrap，而不是只调用 ConfigureServicesAsync。
     /// </summary>
     public static void ConfigureModules(IServiceCollection services, IConfiguration configuration, params ITnziModule[] modules)
@@ -61,7 +61,7 @@ internal static class TestHelpers
     /// Builds an <see cref="IServiceProvider"/> with an <see cref="IAgentGrantService"/> registered.
     /// The multi-agent execution strategies load a sub-agent's tool groups from grants via the
     /// strategy context's ServiceProvider, so it must resolve a grant service. By default the
-    /// projection is empty (no grants) — pass tool groups to grant some.
+    /// projection is empty (no grants) - pass tool groups to grant some.
     /// </summary>
     public static IServiceProvider ServiceProviderWithGrants(params string[] toolGroups)
     {

@@ -26,7 +26,7 @@ public class SandboxCommandExecutedEvent : EventBase
     /// <summary>Authenticated user, if a current-user resolver was injected.</summary>
     public Guid? UserId { get; init; }
 
-    // TenantId is inherited from EventBase — set it at publish time.
+    // TenantId is inherited from EventBase - set it at publish time.
 
     /// <summary>Per-process sandbox instance identifier (e.g. <c>local-3</c> or <c>docker-abc</c>).</summary>
     public string SandboxId { get; init; } = string.Empty;

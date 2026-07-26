@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetCard` — universal frame around a single Workbench widget.
+ * `TWidgetCard` - universal frame around a single Workbench widget.
  *
  * Responsibilities:
  *   - Render the NCard chrome (title + optional icon + refresh button +
@@ -11,7 +11,7 @@
  *   - Show a unified busy / error fallback so individual widgets stay
  *     small and focused on their happy-path render.
  *
- * The card *does not* fetch data — that lives in each widget. The card
+ * The card *does not* fetch data - that lives in each widget. The card
  * just coordinates the UX around the widget's reactive state.
  *
  * Sunk from `@tnzi/ui-admin/widgets/shell/TWidgetCard.vue` in 0.2.x.
@@ -26,7 +26,7 @@ import { WIDGET_CONTEXT_KEY, type WidgetContext } from './widget-types'
 interface Props {
   /** Stable widget id, surfaced into the WidgetContext for diagnostics. */
   id: string
-  /** Card title — i18n key (resolved via `translate`) or raw text. */
+  /** Card title - i18n key (resolved via `translate`) or raw text. */
   title?: string
   /** Iconify icon shown next to the title (e.g. `mdi:chart-bar`). */
   icon?: string
@@ -124,7 +124,7 @@ function fireRefreshCallbacks(): void {
 }
 
 // --- Display helpers --------------------------------------------------------
-// `maybeTranslate` heuristic — treat dotted lower-camel ASCII as an i18n key,
+// `maybeTranslate` heuristic - treat dotted lower-camel ASCII as an i18n key,
 // everything else as a literal string. Mirrors the convention the admin
 // shell uses so existing widget descriptors keep working unchanged.
 const I18N_KEY_PATTERN = /^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$/
@@ -217,7 +217,7 @@ function handleRefresh(): void {
 
 <style scoped>
 .t-widget-card {
-  /* soybean parity — soft drop shadow on the card body. */
+  /* soybean parity - soft drop shadow on the card body. */
   background: var(--tnzi-container-bg, #fff);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);

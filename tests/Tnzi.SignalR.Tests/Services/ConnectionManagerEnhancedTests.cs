@@ -434,7 +434,7 @@ public class ConnectionManagerEnhancedTests
     [Fact]
     public async Task GetConnectionsMetadataBatchAsync_Should_Skip_Connections_Without_Metadata()
     {
-        // Arrange — add connection without metadata
+        // Arrange - add connection without metadata
         var userId = Guid.NewGuid();
         await _connectionManager.AddConnectionAsync(userId, "conn-no-meta");
         await _connectionManager.AddConnectionAsync(userId, "conn-with-meta", new ConnectionMetadata { IpAddress = "5.5.5.5" });

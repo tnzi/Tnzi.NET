@@ -13,6 +13,18 @@ public class EnableTwoFactorDto
 }
 
 /// <summary>
+/// 携带单个 2FA 方式的请求 DTO（禁用某方式 / 设置首选方式）
+/// </summary>
+public class TwoFactorMethodRequestDto
+{
+    /// <summary>
+    /// 验证方式（Sms/Email/Totp）
+    /// </summary>
+    [Required]
+    public TwoFactorType Type { get; set; }
+}
+
+/// <summary>
 /// 发送2FA验证码请求DTO
 /// </summary>
 public class SendTwoFactorCodeDto

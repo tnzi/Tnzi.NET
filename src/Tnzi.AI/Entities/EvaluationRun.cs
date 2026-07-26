@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 评估运行实体 — 记录 Agent 评估执行结果
+/// 评估运行实体 - 记录 Agent 评估执行结果
 /// </summary>
 public class EvaluationRun : CreationAuditedEntity<Guid>, IMultiTenant
 {

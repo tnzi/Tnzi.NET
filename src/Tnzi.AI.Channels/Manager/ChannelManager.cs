@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Manager;
 
 /// <summary>
-/// 消息调度管理器 — 消费入站消息，路由命令/聊天，调用 AI，发布出站回复。
+/// 消息调度管理器 - 消费入站消息，路由命令/聊天，调用 AI，发布出站回复。
 /// 支持并发控制和流式更新节流。
 /// </summary>
 public class ChannelManager : IChannelManager
@@ -216,7 +216,7 @@ public class ChannelManager : IChannelManager
             {
                 await _bus.PublishOutboundAsync(new OutboundMessage(
                     message.ChannelName, message.ChatId, Guid.Empty,
-                    "Commands:\n/new — Start a new conversation\n/status — Show current thread\n/models — List available AI models\n/memory — Show memory entries\n/help — Show this message"));
+                    "Commands:\n/new - Start a new conversation\n/status - Show current thread\n/models - List available AI models\n/memory - Show memory entries\n/help - Show this message"));
                 break;
             }
             default:

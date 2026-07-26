@@ -14,7 +14,7 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
                 "Endpoint must start with '/'.");
         }
 
-        // Required-checks are gated on Enabled — a disabled server's incomplete
+        // Required-checks are gated on Enabled - a disabled server's incomplete
         // configuration must not block application startup. Format checks above
         // still apply whenever a value is provided.
         if (options.Enabled && string.IsNullOrWhiteSpace(options.Endpoint))
@@ -29,7 +29,7 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
                 "Rate limit must be >= 0.");
         }
 
-        // Only enforce API keys when the server is actually enabled — a disabled
+        // Only enforce API keys when the server is actually enabled - a disabled
         // server must not block application startup over missing credentials.
         if (options.Enabled && options.RequireAuthentication && options.AllowedApiKeys.Count == 0)
         {
@@ -63,7 +63,7 @@ public class McpServerOptionsValidator : OptionsValidatorBase<McpServerOptions>
             AddWarning(warnings, nameof(options.AllowApiKeyInQuery),
                 "AllowApiKeyInQuery is enabled. Query-string API keys leak into access logs, " +
                 "proxy caches, browser history, and referrer headers. This flag is intended " +
-                "ONLY for transitional compatibility — migrate clients to X-Api-Key header.");
+                "ONLY for transitional compatibility; migrate clients to the X-Api-Key header.");
         }
     }
 }

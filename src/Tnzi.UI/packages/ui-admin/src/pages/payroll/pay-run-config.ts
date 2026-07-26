@@ -1,6 +1,6 @@
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { formatDateOnly } from '@tnzi/core'
 import { PayFrequency, PayRunStatus, type CreatePayRunDto } from '../../services/bridges/payroll-bridge'
@@ -57,16 +57,23 @@ export function buildPayRunColumns(t: (key: string) => string): ColumnDef<PayRun
   ]
 }
 
+/** The dates that define the run, then what it covers. */
+export const payRunFormSections: FormSchemaSection[] = [
+  { key: 'period', labelKey: 'admin.shared.formSections.period', label: 'Period', icon: 'mdi:calendar-range' },
+  { key: 'scope', labelKey: 'admin.shared.formSections.options', label: 'Scope', icon: 'mdi:filter-outline' },
+]
+
 export const payRunFormSchema: FormSchemaItem[] = [
-  { key: 'periodStart', labelKey: 'form.periodStart', label: 'Period Start', type: 'date', required: true },
-  { key: 'periodEnd', labelKey: 'form.periodEnd', label: 'Period End', type: 'date', required: true },
-  { key: 'payDate', labelKey: 'form.payDate', label: 'Pay Date', type: 'date', required: true },
+  { key: 'periodStart', labelKey: 'form.periodStart', label: 'Period Start', type: 'date', required: true, section: 'period' },
+  { key: 'periodEnd', labelKey: 'form.periodEnd', label: 'Period End', type: 'date', required: true, section: 'period' },
+  { key: 'payDate', labelKey: 'form.payDate', label: 'Pay Date', type: 'date', required: true, section: 'period' },
   {
     key: 'frequency',
     labelKey: 'form.frequency',
     label: 'Frequency',
     type: 'select',
     required: true,
+    section: 'period',
     options: [
       { label: 'Monthly', value: PayFrequency.Monthly, labelKey: 'frequency.monthly' },
       { label: 'Semi-monthly', value: PayFrequency.SemiMonthly, labelKey: 'frequency.semiMonthly' },
@@ -74,8 +81,8 @@ export const payRunFormSchema: FormSchemaItem[] = [
       { label: 'Weekly', value: PayFrequency.Weekly, labelKey: 'frequency.weekly' },
     ],
   },
-  { key: 'structureId', labelKey: 'form.structure', label: 'Structure Filter', type: 'payroll-structure' },
-  { key: 'memo', labelKey: 'form.memo', label: 'Memo', type: 'textarea' },
+  { key: 'structureId', labelKey: 'form.structure', label: 'Structure Filter', type: 'payroll-structure', section: 'scope' },
+  { key: 'memo', labelKey: 'form.memo', label: 'Memo', type: 'textarea', section: 'scope' },
 ]
 
 export function toPayRunPayload(d: Record<string, unknown>, toIso: (v: unknown) => string): CreatePayRunDto {

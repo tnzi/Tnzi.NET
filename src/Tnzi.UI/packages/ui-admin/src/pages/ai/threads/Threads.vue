@@ -1,16 +1,39 @@
 <template>
   <div class="ai-thread-page">
-    <TCrudPage
+    <TItemPage
       :state="crud"
-      :all-columns="threadColumns"
       :search-fields="threadSearchFields"
       :title="title"
       :translate="t"
       :row-actions="rowActions"
       :detail-width="720"
       :detail-title="(d: AgentThreadDto) => d.title || t('detail.untitled')"
+      :show-create="false"
+      show-batch
     >
-      <!-- Edit form — title only; threads aren't created here, they come from chat. -->
+      <!-- A thread is a conversation, so the row leads with its title and shows
+           which agent held it, how long it ran and when it was last touched.
+           Opening the row shows the transcript. -->
+      <template #item="{ item, selected, selectable, toggleSelect }">
+        <TItemCard
+          :title="item.title || t('detail.untitled')"
+          icon="mdi:forum-outline"
+          icon-tone="info"
+          :meta="threadMeta(item)"
+          :selectable="selectable"
+          :checked="selected"
+          :selected="selected"
+          clickable
+          @update:checked="toggleSelect"
+          @click="crud.openView(item)"
+        >
+          <template #actions>
+            <TRowActions :row="item" :actions="rowActions" :translate="t" />
+          </template>
+        </TItemCard>
+      </template>
+
+      <!-- Edit form - title only; threads aren't created here, they come from chat. -->
       <template #form="{ formData, mode }">
         <NForm :disabled="mode === 'view'">
           <NFormItem :label="t('form.title')" path="title">
@@ -23,7 +46,7 @@
         </NForm>
       </template>
 
-      <!-- Read-only detail — thread header + full transcript (loaded by `onView`
+      <!-- Read-only detail - thread header + full transcript (loaded by `onView`
            via getDetail). The row's `view` open-state drives the drawer; the
            heavier detail payload is page-local. -->
       <template #detail>
@@ -41,11 +64,11 @@
               </div>
               <div>
                 <strong>{{ t('detail.creationTime') }}:</strong>
-                <span>{{ formatDateTime(detail.creationTime, { fallback: '—' }) }}</span>
+                <span>{{ formatDateTime(detail.creationTime, { fallback: EMPTY_DASH }) }}</span>
               </div>
               <div v-if="detail.lastActivityTime">
                 <strong>{{ t('detail.lastActivityTime') }}:</strong>
-                <span>{{ formatDateTime(detail.lastActivityTime, { fallback: '—' }) }}</span>
+                <span>{{ formatDateTime(detail.lastActivityTime, { fallback: EMPTY_DASH }) }}</span>
               </div>
             </div>
 
@@ -64,7 +87,7 @@
                       {{ roleLabel(msg.role) }}
                     </NTag>
                     <span class="ai-thread-msg__time">
-                      {{ formatDateTime(msg.creationTime, { fallback: '—' }) }}
+                      {{ formatDateTime(msg.creationTime, { fallback: EMPTY_DASH }) }}
                     </span>
                   </div>
                   <pre class="ai-thread-msg__body">{{ msg.content }}</pre>
@@ -86,17 +109,20 @@
           <NButton size="small" @click="exportMd(detailId)">{{ t('actions.exportMd') }}</NButton>
         </div>
       </template>
-    </TCrudPage>
+    </TItemPage>
   </div>
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { ref } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NSpin, NTag } from 'naive-ui'
 import { downloadBlob, formatDateTime } from '@tnzi/core'
-import TCrudPage from '../../../components/crud/TCrudPage.vue'
+import TItemPage from '../../../components/crud/TItemPage.vue'
+import TItemCard, { type ItemCardMeta } from '../../../components/data/TItemCard.vue'
+import TRowActions from '../../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import { editAction, deleteAction, viewAction, type RowAction } from '../../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../../headless/rowActions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { useSafeMessage } from '../../_shared/safeMessage'
@@ -110,7 +136,7 @@ const title = 'title'
 const bridge = createAiBridge({ client: useAdminClient() })
 const message = useSafeMessage()
 
-// Threads are produced by conversations — no create. Edit updates the title;
+// Threads are produced by conversations - no create. Edit updates the title;
 // delete removes the thread (bridge.threads.update only sends `{ title }`).
 const crud = useCrudPage<AgentThreadDto>({
   pageId: 'ai.threads',
@@ -135,7 +161,7 @@ function setTitle(formData: unknown, value: string): void {
 }
 
 // --- detail drawer ----------------------------------------------------------
-// `detailVisible` is gone — the drawer rides the CRUD `view` open-state (row
+// `detailVisible` is gone - the drawer rides the CRUD `view` open-state (row
 // click → `crud.openView`, deep-linkable for free). Only the heavier
 // transcript payload (a different DTO loaded via getDetail) stays page-local;
 // `onView` loads it on open AND on a deep-link cold reload.
@@ -157,6 +183,19 @@ async function loadThreadDetail(row: AgentThreadDto): Promise<void> {
   } finally {
     detailLoading.value = false
   }
+}
+
+/** Row facts: which agent, how many turns, when it last moved. */
+function threadMeta(row: AgentThreadDto): ItemCardMeta[] {
+  const out: ItemCardMeta[] = []
+  const agent = row.agentName || row.agentId
+  if (agent) out.push({ icon: 'mdi:robot-outline', text: String(agent) })
+  out.push({ icon: 'mdi:message-text-outline', text: String(row.messageCount ?? 0) })
+  out.push({
+    icon: 'mdi:clock-outline',
+    text: formatDateTime(row.lastActivityTime ?? row.creationTime, { fallback: EMPTY_DASH }),
+  })
+  return out
 }
 
 // --- message role presentation ----------------------------------------------
@@ -192,7 +231,7 @@ async function exportJson(id: string): Promise<void> {
 
 function exportMd(id: string): void {
   if (!id) return
-  // The MD export is a server file download — hand the browser the URL.
+  // The MD export is a server file download - hand the browser the URL.
   const a = document.createElement('a')
   a.href = bridge.threads.getExportMarkdownUrl(id)
   a.download = `thread-${id}.md`
@@ -203,18 +242,17 @@ function exportMd(id: string): void {
 }
 
 // --- declarative row actions (C5) -------------------------------------------
-// View opens the detail drawer; Export JSON/MD download; Edit/Delete wire to
-// the CRUD state. maxInline=2 → [View][More▾] with the rest in the overflow.
+// The row click opens the transcript; these are the operations that a click
+// cannot express. Export JSON/MD download; Edit renames; Delete removes.
 const rowActions: RowAction<AgentThreadDto>[] = [
-  // `viewAction(crud)` already binds onClick → crud.openView; no override needed.
-  viewAction(crud),
+  // No View action: the row itself opens the transcript drawer.
   { key: 'exportJson', label: 'actions.exportJson', onClick: (row) => void exportJson(String(row.id)) },
   { key: 'exportMd', label: 'actions.exportMd', onClick: (row) => exportMd(String(row.id)) },
   editAction(crud),
   deleteAction(crud),
 ]
 
-// Expose the bridge-driven handlers + drawer state to the integration test —
+// Expose the bridge-driven handlers + drawer state to the integration test -
 // they're only referenced inside `rowActions`, so they wouldn't be auto-exposed
 // on `wrapper.vm` otherwise (the template-referenced `crud` already is).
 defineExpose({ crud, loadThreadDetail, exportJson, exportMd, detail })

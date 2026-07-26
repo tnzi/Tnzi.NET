@@ -264,7 +264,7 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
             return Ok(pagedList);
         }
 
-        // Merged DB + filesystem branch — analogous to TemplateStoreService.
+        // Merged DB + filesystem branch - analogous to TemplateStoreService.
         var dbItems = await query
             .OrderBy(l => l.Module)
             .ThenBy(l => l.Category)
@@ -299,7 +299,7 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
     /// <summary>
     /// Scan the configured search roots for filesystem-backed layouts under
     /// `Layouts/{module}/.../*.cshtml`. The layout root mirrors the template
-    /// root convention — both honour the same TemplateOptions paths.
+    /// root convention - both honour the same TemplateOptions paths.
     /// </summary>
     private List<LayoutInfoDto> ScanFileSystemLayouts(QueryLayoutRequest request)
     {
@@ -309,7 +309,7 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
         try
         {
             // Layouts conventionally live under a sibling `Layouts/` directory
-            // (TemplateOptions doesn't ship a separate LayoutRootPath — the
+            // (TemplateOptions doesn't ship a separate LayoutRootPath - the
             // current convention reuses the template root extended with the
             // "Layouts" subfolder).
             var extension = _templateOptions.TemplateExtension ?? ".cshtml";

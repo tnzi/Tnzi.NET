@@ -30,6 +30,7 @@
         :gap="gap"
         :card-key="cardKey"
         :show-selection="showBatch"
+        :row-actions="rowActions"
         :translate="translate"
       >
         <template #card="ctx">
@@ -48,6 +49,9 @@
     <template v-if="$slots.toolbar" #toolbar><slot name="toolbar" /></template>
     <template v-if="$slots.toolbarLeft" #toolbarLeft><slot name="toolbarLeft" /></template>
     <template v-if="$slots.toolbarRight" #toolbarRight><slot name="toolbarRight" /></template>
+    <template v-if="$slots.batchActions" #batchActions="{ selectedIds }">
+      <slot name="batchActions" :selectedIds="selectedIds" />
+    </template>
     <template v-if="$slots.error" #error="e"><slot name="error" v-bind="e" /></template>
     <template #form="f"><slot name="form" v-bind="f" /></template>
     <template v-if="$slots.formFooter" #formFooter><slot name="formFooter" /></template>
@@ -60,6 +64,7 @@
 import TListShell from './TListShell.vue'
 import TCardRenderer from './renderers/TCardRenderer.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
+import type { RowAction } from '../../headless/rowActions'
 import type { FormModalMode } from '../../headless/useFormModal'
 import type { FormSchemaItem } from '../../pages/_shared/form-schema'
 
@@ -75,7 +80,7 @@ export interface TCardPageProps<T, TId extends string | number = string | number
   cols?: number | { xs?: number; sm?: number; md?: number; lg?: number; xl?: number }
   gap?: number
   cardKey?: (row: T) => string | number
-  /** When false the shell's white header card is not rendered — for card
+  /** When false the shell's white header card is not rendered - for card
       grids nested under an outer header (e.g. inside TContentPage tabs)
       where the shell's TPageHeader would duplicate the title bar. */
   showHeader?: boolean
@@ -95,6 +100,13 @@ export interface TCardPageProps<T, TId extends string | number = string | number
    * the card list needs multi-select.
    */
   showBatch?: boolean
+  /**
+   * Declarative row operations, exactly as on `TCrudPage`, so moving a page
+   * between the table and tile shapes keeps one `RowAction[]` declaration.
+   * A tile picks its own placement, so the array comes back through the
+   * `#card` slot scope as `rowActions`.
+   */
+  rowActions?: RowAction<T>[]
   showPagination?: boolean
   formModalWidth?: number
   /** Width of the read-only view drawer (the `#detail` slot). Default 640.
@@ -125,6 +137,7 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   showImport: false,
   showRefresh: true,
   showBatch: false,
+  rowActions: undefined,
   showPagination: true,
   formModalWidth: 560,
   detailWidth: 640,
@@ -137,13 +150,21 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
 defineSlots<{
   header?: () => unknown
   kpis?: () => unknown
-  card?: (props: { item: T; index: number; selected: boolean; toggleSelect: () => void }) => unknown
+  card?: (props: {
+    item: T
+    index: number
+    selected: boolean
+    toggleSelect: () => void
+    rowActions: RowAction<T>[] | undefined
+  }) => unknown
   empty?: () => unknown
   search?: () => unknown
   primary?: () => unknown
   toolbar?: () => unknown
   toolbarLeft?: () => unknown
   toolbarRight?: () => unknown
+  /** Extra operations over the current selection (batch post, batch export …). */
+  batchActions?: (props: { selectedIds: TId[] }) => unknown
   error?: (props: { error: Error; retry: () => Promise<void>; dismiss: () => void }) => unknown
   form?: (props: { formData: Partial<T> | null; mode: FormModalMode | null }) => unknown
   formFooter?: () => unknown

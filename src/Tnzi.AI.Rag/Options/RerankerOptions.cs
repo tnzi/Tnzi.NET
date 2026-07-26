@@ -15,7 +15,7 @@ namespace Tnzi.AI.Rag.Options;
 public class RerankerOptions
 {
     /// <summary>
-    /// 递减因子（0-1）— 同一内容的后续匹配贡献递减
+    /// 递减因子（0-1）- 同一内容的后续匹配贡献递减
     /// <para>
     /// 第 i 次匹配的贡献 = score × diminishingFactor^i。
     /// 值越小，重复匹配的额外加分越少。

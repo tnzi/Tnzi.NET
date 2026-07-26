@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// ConversationContext 单元测试 — 验证消息序列化/反序列化（含多模态）
+/// ConversationContext 单元测试 - 验证消息序列化/反序列化（含多模态）
 /// </summary>
 public class ConversationContextTests
 {

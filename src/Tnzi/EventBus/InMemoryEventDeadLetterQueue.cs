@@ -80,7 +80,7 @@ public class InMemoryEventDeadLetterQueue : IEventDeadLetterQueue
             if (evicted > 0)
             {
                 _logger?.LogWarning(
-                    "In-memory dead letter queue exceeded capacity {Capacity}; evicted {Evicted} oldest entrie(s). " +
+                    "In-memory dead letter queue exceeded capacity {Capacity}; evicted the {Evicted} oldest entries. " +
                     "Persistent handler failures detected, consider investigating failing handlers or using a persistent dead letter store.",
                     _capacity, evicted);
             }

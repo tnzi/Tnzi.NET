@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// 会话作用域 — 决定 Gateway 如何映射入站请求到 Agent 线程
+/// 会话作用域 - 决定 Gateway 如何映射入站请求到 Agent 线程
 /// </summary>
 public enum SessionScope
 {

@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { formatCurrency } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
@@ -7,10 +8,10 @@ import type { StatusType } from '@tnzi/ui'
 import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * Refunds page config — aligned with the real `RefundDto`
+ * Refunds page config - aligned with the real `RefundDto`
  * (Tnzi.Payment.Dtos.RefundDto). The record keys the related payment on
  * `tradeNo` (mapped from `Refund.Payment.TradeNo`); there is no `paymentNo` /
- * `paymentId` / `amount` field — the money is `refundAmount`.
+ * `paymentId` / `amount` field - the money is `refundAmount`.
  *
  * `status` serialises as the RefundStatus member name (global
  * JsonStringEnumConverter): Pending / Processing / Approved / Rejected /
@@ -54,7 +55,7 @@ const STATUS_KEY: Record<string, string> = {
 }
 
 function money(amount?: number, currency?: string): string {
-  if (amount === null || amount === undefined) return '—'
+  if (amount === null || amount === undefined) return EMPTY_DASH
   return formatCurrency(Number(amount), String(currency || 'USD'))
 }
 
@@ -88,7 +89,7 @@ export function buildRefundColumns(t: (key: string) => string): ColumnDef<Refund
         return h(TStatusBadge, {
           value: v,
           type: STATUS_TONE[v] ?? 'default',
-          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || '—',
+          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || EMPTY_DASH,
         })
       },
     },

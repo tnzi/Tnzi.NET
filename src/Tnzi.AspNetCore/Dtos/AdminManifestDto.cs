@@ -2,7 +2,7 @@
 namespace Tnzi.AspNetCore.Dtos;
 
 /// <summary>
-/// Admin manifest — the subset of module diagnostics relevant for an admin
+/// Admin manifest - the subset of module diagnostics relevant for an admin
 /// frontend that wants to auto-render menus / CRUD pages based on which
 /// modules and admin controllers are actually loaded by the host.
 ///
@@ -49,7 +49,7 @@ public class AdminModuleEntryDto
 }
 
 /// <summary>
-/// One admin entity surface — a single route prefix under <c>admin/*</c> backed
+/// One admin entity surface - a single route prefix under <c>admin/*</c> backed
 /// by a controller, with the set of HTTP methods it exposes.
 /// </summary>
 public class AdminEntityEntryDto

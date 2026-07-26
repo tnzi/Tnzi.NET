@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Payroll Employees page — TCrudPage with ensure-vendor + salary-assignment drawer.
+ * Payroll Employees page - TCrudPage with ensure-vendor + salary-assignment drawer.
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),

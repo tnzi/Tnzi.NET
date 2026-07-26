@@ -109,16 +109,27 @@ public class FeatureUsageService : ApplicationService, IFeatureUsageService
             _ => query.GroupBy(r => r.CreationTime.Date)
         };
 
-        var trend = await grouped
-            .Select(g => new FeatureUsageTrendDto
+        // 聚合留在数据库端；只有 Period 的字符串格式化落到内存 ——
+        // DateTime.ToString(format) 无法翻译成 SQL，写在投影里会在运行时抛
+        // "could not be translated"（与 AuditOperationService.GetAuditTrendAsync 同一处理）。
+        var buckets = await grouped
+            .Select(g => new
             {
-                Period = g.Key.ToString("yyyy-MM-dd"),
+                Period = g.Key,
                 CheckCount = g.LongCount(),
                 EnableCount = g.LongCount(r => r.IsEnabled),
                 DisableCount = g.LongCount(r => !r.IsEnabled)
             })
-            .OrderBy(t => t.Period)
+            .OrderBy(b => b.Period)
             .ToListAsync();
+
+        var trend = buckets.Select(b => new FeatureUsageTrendDto
+        {
+            Period = b.Period.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            CheckCount = b.CheckCount,
+            EnableCount = b.EnableCount,
+            DisableCount = b.DisableCount
+        }).ToList();
 
         return Ok(trend);
     }
@@ -162,6 +173,10 @@ public class FeatureUsageService : ApplicationService, IFeatureUsageService
         }
 
         var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+
+        // ExecuteDelete 绕过变更跟踪直发 SQL：环境事务下物理事务默认延迟到首次
+        // SaveChanges 才开启，不先确保开启则这条删除在自动提交模式下执行，脱离事务保护。
+        await _repository.EnsureTransactionStartedAsync();
 
         var deleted = await _repository
             .Where(r => r.CreationTime < cutoff)

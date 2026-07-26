@@ -1,8 +1,8 @@
 namespace Tnzi.SignalR.Controllers;
 
 /// <summary>
-/// SignalR admin controller base class
-/// Provides connection statistics, online user management, and connection detail endpoints
+/// Default SignalR admin controller (activated by HostingModule).
+/// Provides connection statistics, online user queries, and connection detail endpoints.
 /// </summary>
 [Route("admin/signalr")]
 [DefaultController]
@@ -127,7 +127,10 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Force disconnect all connections for a specific user
+    /// Drop all server-side connection tracking for a specific user.
+    /// Note: this clears the <see cref="IConnectionManager"/> registry only, it does not
+    /// abort the live transports - SignalR offers no server-side abort by user id, so an
+    /// already-established socket keeps receiving until the client disconnects.
     /// </summary>
     [HttpDelete("users/{userId:guid}/connections")]
     [ApiAuthorize(PermissionName = "system.signalr.execute")]

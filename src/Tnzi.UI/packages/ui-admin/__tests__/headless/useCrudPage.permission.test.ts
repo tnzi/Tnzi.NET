@@ -96,7 +96,7 @@ describe('useCrudPage permission gating', () => {
     expect(crud.canCreate).toBe(true)
 
     signIn(['user.view'])
-    // Getters re-read the computed — permission load flips the affordance off.
+    // Getters re-read the computed - permission load flips the affordance off.
     expect(crud.canCreate).toBe(false)
 
     signIn(['user.view', 'user.create'])
@@ -108,7 +108,7 @@ describe('useCrudPage permission gating', () => {
     const crud = makeCrud('user')
     expect(editAction(crud).show!(row)).toBe(false)
     expect(deleteAction(crud).show!(row)).toBe(false)
-    // view stays ungated — the page itself is already view-gated by the route.
+    // view stays ungated - the page itself is already view-gated by the route.
     expect(viewAction(crud).show).toBeUndefined()
 
     signIn(['user.view', 'user.update', 'user.delete'])

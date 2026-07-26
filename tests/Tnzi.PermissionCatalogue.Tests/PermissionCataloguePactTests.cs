@@ -5,6 +5,7 @@ using Tnzi.AspNetCore.Mvc;
 using Tnzi.Authorization.Permissions;
 using Tnzi.Security.Authorization;
 using Tnzi.TestBase;
+using Tnzi.AI.Mcp.Permissions;
 using Tnzi.AI.Permissions;
 using Tnzi.AI.Rag.Permissions;
 using Tnzi.AI.Sandbox.Permissions;
@@ -15,6 +16,8 @@ using Tnzi.Audit.Permissions;
 using Tnzi.Chat.Permissions;
 using Tnzi.Feature.Permissions;
 using Tnzi.Finance.Permissions;
+using Tnzi.Finance.Banking.Permissions;
+using Tnzi.Finance.Recurring.Permissions;
 using Tnzi.Finance.Payroll.Permissions;
 using Tnzi.Hangfire.Permissions;
 using Tnzi.HealthChecks.Permissions;
@@ -68,9 +71,12 @@ public class PermissionCataloguePactTests
             ["Chat"] = new ChatPermissions(),
             ["Payment"] = new PaymentPermissions(),
             ["Finance"] = new FinancePermissions(),
+            ["Finance.Banking"] = new FinanceBankingPermissions(),
+            ["Finance.Recurring"] = new FinanceRecurringPermissions(),
             ["Finance.Payroll"] = new PayrollPermissions(),
             ["Template"] = new TemplatePermissions(),
             ["AI"] = new AIPermissions(),
+            ["AI.Mcp"] = new AIMcpPermissions(),
             ["AI.Skills"] = new AISkillsPermissions(),
             ["AI.Workflow"] = new AIWorkflowPermissions(),
             ["AI.Rag"] = new RagPermissions(),
@@ -97,9 +103,9 @@ public class PermissionCataloguePactTests
         // No duplicate permission codes.
         codes.Count.ShouldBe(codes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
-        // Locked counts — bump these deliberately when adding/removing codes so
+        // Locked counts - bump these deliberately when adding/removing codes so
         // an accidental drift (front-end route added without a backend code, or
-        // vice versa) shows up as a failing test. 259 = the operation-level
+        // vice versa) shows up as a failing test. 251 = the operation-level
         // catalogue: every managed surface declares .view plus the write
         // actions its admin endpoints actually expose (incl. the userFunction
         // direct-grant surface added 2026-07-10, the finance.reconciliation
@@ -111,8 +117,22 @@ public class PermissionCataloguePactTests
         // view/create/update (3), and eft view/create/update + download (4),
         // the finance.balanceSummary view/execute pair added 2026-07-13
         // with the account-period-balance summary surface, and chat.use
-        // added 2026-07-14 as the chat group's deny-by-default use gate).
-        codes.Count.ShouldBe(259);
+        // added 2026-07-14 as the chat group's deny-by-default use gate;
+        // minus the ai.persona crud codes retired 2026-07-22 with the persona
+        // pool, and the system.menu crud codes retired 2026-07-22 with the
+        // Sys_Menu override layer; plus the ai.mcpServer view/update/delete
+        // trio added 2026-07-23 when the MCP Server sub-module took ownership of
+        // its admin surfaces (self-hosted server management, split off from the
+        // ai.mcp external-client-registry codes it previously borrowed); plus
+        // the finance.estimate and finance.purchaseOrder crud sets added
+        // 2026-07-25 (8 codes) - quoting and ordering happen BEFORE anything is
+        // an accounting fact, so the people who do them get their own codes
+        // rather than the posting rights of finance.document.*.
+        // 又加了 finance.bankRule crud（4 码，2026-07-25）——能改银行规则的人等于
+        // 能决定钱自动记进哪个科目，与"能看流水、能确认匹配"不是一回事。
+        // 再加 finance.attachment 与 finance.comment 各 view/create/delete
+        // （6 码，2026-07-25）——能看单据不等于该看得到内部讨论。
+        codes.Count.ShouldBe(280);
         context.Groups.Count.ShouldBe(12);
     }
 
@@ -211,7 +231,7 @@ public class PermissionCataloguePactTests
     // Security-audit monitoring under identity: same genre as accessLog.
     [InlineData("identity.loginLog.view", PermissionCategory.Technical)]
     [InlineData("identity.loginSecurity.view", PermissionCategory.Technical)]
-    // Whole Authorization module is Technical — managing roles/permissions is a
+    // Whole Authorization module is Technical - managing roles/permissions is a
     // security concern; the uniform badge tells operators these codes hand out
     // the authorization matrix itself.
     [InlineData("authorization.view", PermissionCategory.Technical)]
@@ -220,11 +240,8 @@ public class PermissionCataloguePactTests
     [InlineData("authorization.roleFunction.view", PermissionCategory.Technical)]
     [InlineData("authorization.userFunction.view", PermissionCategory.Technical)]
     [InlineData("authorization.entityRole.view", PermissionCategory.Technical)]
-    // Whole system group is Technical (group default): ops/infrastructure
-    // surfaces including menus (route-key based shell configuration).
+    // Whole system group is Technical (group default): ops/infrastructure surfaces.
     [InlineData("system.view", PermissionCategory.Technical)]
-    [InlineData("system.menu.view", PermissionCategory.Technical)]
-    [InlineData("system.menu.update", PermissionCategory.Technical)]
     [InlineData("feature.view", PermissionCategory.Technical)]
     [InlineData("system.parameter.view", PermissionCategory.Technical)]
     [InlineData("system.appearance.view", PermissionCategory.Technical)]
@@ -293,14 +310,16 @@ public class PermissionCataloguePactTests
 
         // Deliberate-bump lock, same rationale as the total count: a code
         // silently flipping category erases the warning badge assignment UIs
-        // rely on to flag ops/dangerous surfaces. 91 = the 2026-07-07 audit
+        // rely on to flag ops/dangerous surfaces. 87 = the 2026-07-07 audit
         // sweep ("a business admin can't read it → Technical"): whole system
-        // group (incl. menus + the global appearance snapshot + the
-        // diagnostics/signalr execute actions), identity login logs/security,
-        // request-level audit logs, AI run monitors / workflows / evaluations;
-        // plus the 2026-07-10 userFunction direct-grant pair (authorization
-        // group default Technical).
-        technical.Count.ShouldBe(91);
+        // group (the global appearance snapshot + the diagnostics/signalr
+        // execute actions), identity login logs/security, request-level audit
+        // logs, AI run monitors / workflows / evaluations; plus the 2026-07-10
+        // userFunction direct-grant pair (authorization group default
+        // Technical). The system.menu crud codes were removed 2026-07-22 with
+        // the Sys_Menu override layer; the ai.mcpServer view/update/delete trio
+        // (self-hosted MCP server ops surface) was added 2026-07-23.
+        technical.Count.ShouldBe(90);
     }
 
     [Theory]
@@ -310,7 +329,6 @@ public class PermissionCataloguePactTests
     [InlineData("tenant.view")]
     [InlineData("authorization.roleFunction.view")]
     [InlineData("system.view")]
-    [InlineData("system.menu.view")]
     [InlineData("feature.view")]
     [InlineData("storage.file.view")]
     [InlineData("audit.log.view")]
@@ -339,7 +357,6 @@ public class PermissionCataloguePactTests
     [InlineData("user.update")]
     [InlineData("user.delete")]
     [InlineData("role.delete")]
-    [InlineData("system.menu.update")]
     [InlineData("finance.account.create")]
     [InlineData("finance.document.update")]
     [InlineData("notification.template.delete")]

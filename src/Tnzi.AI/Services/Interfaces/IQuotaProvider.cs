@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 配额提供者抽象 — 可插拔的配额策略
+/// 配额提供者抽象 - 可插拔的配额策略
 /// </summary>
 /// <remarks>
 /// 默认实现由 QuotaService 提供（数据库配额管理）。

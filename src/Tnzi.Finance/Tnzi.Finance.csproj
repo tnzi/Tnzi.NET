@@ -22,6 +22,7 @@
          同 Tnzi.Finance.Ai 复用核心公共契约的思路，只是 MICR 拼装是 internal 原语。 -->
     <InternalsVisibleTo Include="Tnzi.Finance.Tests, PublicKey=$(TnziPublicKey)" />
     <InternalsVisibleTo Include="Tnzi.Finance.Documents, PublicKey=$(TnziPublicKey)" />
+    <InternalsVisibleTo Include="Tnzi.Finance.Banking, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
 </Project>

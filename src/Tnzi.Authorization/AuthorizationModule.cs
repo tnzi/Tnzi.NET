@@ -78,7 +78,7 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddTransient<IPostMigrationStartupTask, AuthorizationStartupTask>();
 
         // This module's own permission codes (authorization.*). Every other
-        // module declares its codes in-module the same way — the declaration
+        // module declares its codes in-module the same way - the declaration
         // contract lives in core Tnzi.Security.Authorization, so no module
         // needs to reference this assembly to declare permissions
         // (docs/coding-standards/permissions.md).
@@ -92,16 +92,16 @@ public class AuthorizationModule : TnziApplicationModule
         // 让 [Authorize(Roles=...)] 与框架其余角色判断一样大小写不敏感（补充 handler，只放宽不收紧）。
         services.AddSingleton<IAuthorizationHandler, CaseInsensitiveRolesAuthorizationHandler>();
 
-        // Event handlers — cross-module signal: when Identity flips a user's
+        // Event handlers - cross-module signal: when Identity flips a user's
         // role membership, we drop that user's cached permission set so the
         // change takes effect immediately (without waiting for the cache
         // TTL to expire). Framework rule: framework assemblies MUST manually
-        // register event handlers — no auto-discovery.
+        // register event handlers - no auto-discovery.
         services.AddEventHandler<UserRolesChangedEvent,
             Tnzi.Authorization.Events.Handlers.UserRolesChangedEventHandler>();
 
         // Watch for role renames that would invalidate SuperAdminRoles by
-        // name — purely diagnostic, but the alternative is "admin gets
+        // name - purely diagnostic, but the alternative is "admin gets
         // locked out three days later and nobody knows why".
         services.AddEventHandler<RoleUpdatedEvent,
             Tnzi.Authorization.Events.Handlers.RoleRenamedSuperAdminWatcherHandler>();
@@ -122,13 +122,10 @@ public class AuthorizationModule : TnziApplicationModule
     }
 
     /// <summary>
-    /// 应用初始化：预热权限管理器 + super-admin 配置校验
-    /// </summary>
-    /// <summary>
     /// Post-migration startup work: permission-catalogue seed + <c>PermissionManager.RefreshAsync</c>
     /// + built-in super-admin role seed + first-super-admin bootstrap + role-existence
     /// diagnostics. Runs via <see cref="AuthorizationStartupTask"/> (an
-    /// <see cref="IPostMigrationStartupTask"/>) AFTER database migrations — this used to
+    /// <see cref="IPostMigrationStartupTask"/>) AFTER database migrations - this used to
     /// live in module init, which runs BEFORE migrations and therefore failed silently on
     /// a brand-new empty database, requiring a second boot to take effect.
     /// </summary>
@@ -136,7 +133,7 @@ public class AuthorizationModule : TnziApplicationModule
     {
         // Seed BEFORE PermissionManager.RefreshAsync so the manager's
         // snapshot picks up provider-declared permissions on the SAME
-        // run they're introduced — without seeding first they'd be
+        // run they're introduced - without seeding first they'd be
         // missing until the next restart (manager loads from DB).
         await using (var seedScope = serviceProvider.CreateAsyncScope())
         {
@@ -165,7 +162,7 @@ public class AuthorizationModule : TnziApplicationModule
                 }
                 catch (Exception ex)
                 {
-                    // Auxiliary step — startup must not block on it. The
+                    // Auxiliary step - startup must not block on it. The
                     // worst case is provider permissions stay invisible to
                     // admin UI; the runtime check still works because
                     // PermissionManager has the in-memory snapshot.
@@ -196,7 +193,7 @@ public class AuthorizationModule : TnziApplicationModule
 
         // First-super-admin bootstrap: assign the configured user names to
         // the first existing super-admin role while ALL super-admin roles
-        // have zero members (recovery semantics — see SuperAdminBootstrapper).
+        // have zero members (recovery semantics - see SuperAdminBootstrapper).
         // Non-fatal by design: a failed bootstrap logs and startup continues,
         // matching the seeding blocks above.
         if (optionsSnapshot.BootstrapSuperAdminUsers.Count > 0 && optionsSnapshot.SuperAdminRoles.Count > 0)
@@ -237,7 +234,7 @@ public class AuthorizationModule : TnziApplicationModule
 
         // Verify every configured super-admin role actually exists in
         // Identity_Role. A missing role means the configured name will
-        // never match — same outcome as misconfiguring the JSON key.
+        // never match - same outcome as misconfiguring the JSON key.
         var configuredRoles = optionsSnapshot.SuperAdminRoles
             .Select(name => (name, list: "SuperAdminRoles"))
             .ToList();
@@ -319,7 +316,7 @@ public class AuthorizationModule : TnziApplicationModule
             }
             catch (Exception ex)
             {
-                // Most likely a startup race with another instance — the
+                // Most likely a startup race with another instance - the
                 // unique index on NormalizedName settles the winner; either
                 // way the role exists afterwards, which is all we need.
                 logger.LogWarning(ex, "Seeding built-in admin role '{Role}' failed; continuing startup.", name);

@@ -1,7 +1,7 @@
 import { watch, nextTick, onMounted, type Ref } from 'vue'
 
 /**
- * useAutoGrowTextarea — grow a textarea with its content up to a max height,
+ * useAutoGrowTextarea - grow a textarea with its content up to a max height,
  * then scroll. JS-driven (works in every browser, unlike `field-sizing`).
  */
 export function useAutoGrowTextarea(

@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../src/utils/placeholders'
 import { describe, it, expect } from 'vitest'
 import { FINANCE_SOURCE_TYPES } from '../../../src/services/bridges/finance-bridge'
 import {
@@ -29,8 +30,8 @@ describe('finance source-type vocabulary', () => {
   })
 
   it('shows the placeholder for a posting with no source (manual journal entry)', () => {
-    expect(financeSourceTypeLabel(null)).toBe('—')
-    expect(financeSourceTypeLabel(undefined)).toBe('—')
-    expect(financeSourceTypeLabel('')).toBe('—')
+    expect(financeSourceTypeLabel(null)).toBe(EMPTY_DASH)
+    expect(financeSourceTypeLabel(undefined)).toBe(EMPTY_DASH)
+    expect(financeSourceTypeLabel('')).toBe(EMPTY_DASH)
   })
 })

@@ -53,12 +53,31 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     }
   }
 
-  // Cash / bank funds accounts only (CashEquivalent) — bank account profiles
+  // Cash / bank funds accounts only (CashEquivalent) - bank account profiles
   // and bank-feed selection require a funds account, not any leaf.
   const fundsAccounts = lazy<SelectOption>(async () => {
     const tree = await bridge.accounts.tree(false)
     const options: SelectOption[] = []
     flattenFundsLeaves(tree, options)
+    return options
+  })
+
+  // Expense-rooted leaves - the categories a spend can be coded to. Offering
+  // the whole leaf list here (assets, income, equity) invites miscoding, and
+  // "which account does a coffee go to" is the single most repeated decision
+  // in the reconcile flow.
+  const expenseAccounts = lazy<SelectOption>(async () => {
+    const tree = await bridge.accounts.tree(false)
+    const options: SelectOption[] = []
+    const walk = (nodes: AccountTreeDto[]) => {
+      for (const node of nodes) {
+        if (!node.isGroup && node.isActive && String(node.rootType) === 'Expense') {
+          options.push({ label: `${node.code} ${node.name}`, value: node.id })
+        }
+        walk(node.children ?? [])
+      }
+    }
+    walk(tree)
     return options
   })
 
@@ -94,6 +113,8 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     ensureLeafAccounts: leafAccounts.ensure,
     fundsAccountOptions: fundsAccounts.options,
     ensureFundsAccounts: fundsAccounts.ensure,
+    expenseAccountOptions: expenseAccounts.options,
+    ensureExpenseAccounts: expenseAccounts.ensure,
     customerOptions: customers.options,
     ensureCustomers: customers.ensure,
     vendorOptions: vendors.options,

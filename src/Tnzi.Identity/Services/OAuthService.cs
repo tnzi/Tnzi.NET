@@ -13,6 +13,7 @@ public class OAuthService : ApplicationService, IOAuthService
     private readonly IEventBus? _eventBus;
     private readonly IUserDetailService? _userDetailService;
     private readonly IdentityOptions _identityOptions;
+    private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -27,7 +28,8 @@ public class OAuthService : ApplicationService, IOAuthService
         IEventBus? eventBus = null,
         IUserDetailService? userDetailService = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ILoginSessionCoordinator? loginSessionCoordinator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -38,6 +40,7 @@ public class OAuthService : ApplicationService, IOAuthService
         _authTokenService = authTokenService;
         _eventBus = eventBus;
         _userDetailService = userDetailService;
+        _loginSessionCoordinator = loginSessionCoordinator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -91,8 +94,11 @@ public class OAuthService : ApplicationService, IOAuthService
         {
             // 用户已存在，直接登录
             var result = await GenerateTokenAndPublishLoginEventAsync(existingUser, provider, principal);
-            LogInformation("OAuth login successful for user {UserName} via {Provider}", existingUser.UserName ?? string.Empty, provider);
-            return Ok(result);
+            if (result.Succeeded)
+            {
+                LogInformation("OAuth login successful for user {UserName} via {Provider}", existingUser.UserName ?? string.Empty, provider);
+            }
+            return result;
         }
 
         // 用户不存在，检查邮箱是否已注册
@@ -113,8 +119,11 @@ public class OAuthService : ApplicationService, IOAuthService
 
             // 登录并返回Token
             var result = await GenerateTokenAndPublishLoginEventAsync(userByEmail, provider, principal);
-            LogInformation("OAuth login successful for user {UserName} via {Provider} (linked account)", userByEmail.UserName ?? string.Empty, provider);
-            return Ok(result);
+            if (result.Succeeded)
+            {
+                LogInformation("OAuth login successful for user {UserName} via {Provider} (linked account)", userByEmail.UserName ?? string.Empty, provider);
+            }
+            return result;
         }
 
         // 用户不存在且邮箱未注册，自动创建无密码账户
@@ -197,8 +206,11 @@ public class OAuthService : ApplicationService, IOAuthService
 
         // 生成 Token 并返回
         var newUserResult = await GenerateTokenAndPublishLoginEventAsync(newUser, provider, principal);
-        LogInformation("New user created via OAuth: {UserName}, provider: {Provider}", newUser.UserName, provider);
-        return Ok(newUserResult);
+        if (newUserResult.Succeeded)
+        {
+            LogInformation("New user created via OAuth: {UserName}, provider: {Provider}", newUser.UserName, provider);
+        }
+        return newUserResult;
     }
 
 
@@ -265,15 +277,28 @@ public class OAuthService : ApplicationService, IOAuthService
 
     /// <summary>
     /// 生成TokenResult并保存RefreshToken，发布登录事件，返回OAuth回调结果
-    /// 统一处理OAuth登录后的Token生成和保存逻辑，减少代码重复
+    /// 统一处理OAuth登录后的Token生成和保存逻辑，减少代码重复。
+    /// 先建立登录会话（应用多登录策略），使 OAuth 登录与密码登录一致地受会话强制约束。
     /// </summary>
-    private async Task<OAuthCallbackResultDto> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
+    private async Task<Result<OAuthCallbackResultDto>> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
     {
+        // 建立登录会话（Reject 达上限则拒绝本次登录）
+        var sessionId = Guid.Empty;
+        if (_loginSessionCoordinator != null)
+        {
+            var sessionResult = await _loginSessionCoordinator.EstablishAsync(user.Id);
+            if (!sessionResult.Succeeded)
+            {
+                return Fail<OAuthCallbackResultDto>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+            }
+            sessionId = sessionResult.Data;
+        }
+
         var roles = await GetRolesWithTenantContextAsync(user);
-        var tokenResult = _tokenService.GenerateTokenResult(user, roles);
+        var tokenResult = _tokenService.GenerateTokenResult(user, roles, sessionId: sessionId == Guid.Empty ? null : sessionId);
         var refreshTokenExpiresAt = DateTime.UtcNow.AddDays(_identityOptions.Jwt.RefreshTokenExpirationDays);
 
-        // 保存RefreshToken（核心业务逻辑，必须同步执行）
+        // 保存RefreshToken（核心业务逻辑，必须同步执行；按会话绑定）
         if (_authTokenService != null)
         {
             await _authTokenService.SaveTokenAsync(
@@ -281,10 +306,11 @@ public class OAuthService : ApplicationService, IOAuthService
                 IdentityConstants.TokenProvider.JWT,
                 IdentityConstants.TokenName.RefreshToken,
                 tokenResult.RefreshToken,
-                refreshTokenExpiresAt);
+                refreshTokenExpiresAt,
+                sessionId);
         }
 
-        // 发布登录事件（由事件处理器处理日志记录和会话创建）
+        // 发布登录事件（由事件处理器处理日志记录）
         if (_eventBus != null)
         {
             var ipAddress = ScopedContext?.ClientIpAddress;
@@ -300,13 +326,13 @@ public class OAuthService : ApplicationService, IOAuthService
             }, cancellationToken: default);
         }
 
-        return new OAuthCallbackResultDto
+        return Ok(new OAuthCallbackResultDto
         {
             Success = true,
             AccessToken = tokenResult.AccessToken,
             RefreshToken = tokenResult.RefreshToken,
             ExpiresAt = tokenResult.ExpiresAt
-        };
+        });
     }
 
     #endregion

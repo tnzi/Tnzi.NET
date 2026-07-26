@@ -1,6 +1,6 @@
 <template>
   <!--
-    Money input primitive — an `NInputNumber` pre-wired for currency amounts:
+    Money input primitive - an `NInputNumber` pre-wired for currency amounts:
     fixed precision (default 2), thousand-separator display, an affix (default
     `$`), no spinner buttons, clearable. Replaces the ~15-per-app hand-configured
     `NInputNumber + format/parse + $/CAD affixes` blocks. Bare (no field wrapper)

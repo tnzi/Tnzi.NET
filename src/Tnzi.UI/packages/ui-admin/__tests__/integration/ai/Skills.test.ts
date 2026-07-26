@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Skills integration test — production-grade card grid (TCardPage) with a KPI
+ * Skills integration test - production-grade card grid (TCardPage) with a KPI
  * strip, category filter, view/popular drawers, and import/export.
  *
  * Mirrors Personas.test.ts: mock the client + ai-bridge, mount with naive stubs,

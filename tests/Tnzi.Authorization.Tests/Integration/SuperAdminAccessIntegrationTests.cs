@@ -211,7 +211,7 @@ public class SuperAdminAccessIntegrationTests : IntegratedTestBase<Authorization
         var service = GetService();
 
         // Batch and single checks must reach the SAME verdict for a super
-        // admin — including undeclared codes. Before the fix the batch path
+        // admin - including undeclared codes. Before the fix the batch path
         // resolved through the enabled-only catalogue, so an endpoint gate
         // (single) and an in-service RequireAllPermissionsAsync (batch) could
         // contradict each other for the same code.
@@ -228,7 +228,7 @@ public class SuperAdminAccessIntegrationTests : IntegratedTestBase<Authorization
     {
         // This fixture builds the service WITHOUT a role repository. With
         // SuperAdminRoles configured, CanManageRoleAsync must treat every
-        // role as protected — a super-admin role's explicit grant set is
+        // role as protected - a super-admin role's explicit grant set is
         // usually empty, so silently dropping the name-based protection
         // would let any grantor "trivially dominate" it via the membership
         // path (self-escalation).

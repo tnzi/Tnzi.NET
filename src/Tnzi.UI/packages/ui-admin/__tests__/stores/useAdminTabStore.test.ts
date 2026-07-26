@@ -36,6 +36,24 @@ describe('useAdminTabStore', () => {
     expect(store.tabs).toHaveLength(1)
   })
 
+  it('addTab refuses auth / exception / redirect routes (no Login tab)', () => {
+    const store = useAdminTabStore()
+    for (const name of ['login', 'forbidden', 'not-found', 'server-error', 'admin-root']) {
+      store.addTab(sampleRoute(name, name))
+    }
+    expect(store.tabs).toHaveLength(0)
+    expect(store.activeTabId).toBe('')
+    // a real page still tabs
+    store.addTab(sampleRoute('users', 'Users'))
+    expect(store.tabs.map((t) => t.id)).toEqual(['users'])
+  })
+
+  it('addTab refuses a route flagged meta.hideInTab', () => {
+    const store = useAdminTabStore()
+    store.addTab({ ...sampleRoute('secret-tool', 'Tool'), meta: { title: 'Tool', hideInTab: true } })
+    expect(store.tabs).toHaveLength(0)
+  })
+
   // ── pruneTabs: drop tabs the current user can no longer open ────────────────
   it('pruneTabs removes tabs whose route name is denied and re-points active', () => {
     const store = useAdminTabStore()
@@ -93,7 +111,7 @@ describe('useAdminTabStore', () => {
     const store = useAdminTabStore()
     store.addTab(detailRoute('A'))
     store.addTab(detailRoute('B'))
-    // Two distinct tabs (A and B), keyed by the resolved path — not collapsed
+    // Two distinct tabs (A and B), keyed by the resolved path - not collapsed
     // onto the shared route name 'ai.agents.detail'.
     expect(store.tabs).toHaveLength(2)
     expect(store.tabs.map((t) => t.id)).toEqual([

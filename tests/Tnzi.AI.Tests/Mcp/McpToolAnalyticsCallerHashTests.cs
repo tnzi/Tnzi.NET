@@ -90,7 +90,7 @@ public class McpToolAnalyticsCallerHashTests
 
     /// <summary>
     /// P1 decoupling: per-tool analytics must keep recording even when the audit log
-    /// (IUsageLogService) is disabled — the two are gated independently.
+    /// (IUsageLogService) is disabled - the two are gated independently.
     /// </summary>
     [Fact]
     public async Task AuditLogAsync_AuditDisabledAnalyticsEnabled_StillRecordsAnalytics()

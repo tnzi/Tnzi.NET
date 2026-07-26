@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// Agent 记忆管理控制器 — 管理端为某个 Agent 预置/管理其长期记忆（agent-bound）。
+/// Agent 记忆管理控制器 - 管理端为某个 Agent 预置/管理其长期记忆（agent-bound）。
 /// </summary>
 [DefaultController]
 [Route("admin/agents/{agentId:guid}/memory")]

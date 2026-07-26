@@ -19,32 +19,36 @@
     <!-- side: left vertical menu | right panel -->
     <div v-if="layout === 'side'" class="t-detail-layout__split">
       <div class="t-detail-layout__nav-col">
-        <!-- Optional header above the nav (e.g. a filter/search box). Hidden on
-             the collapsed phone rail where the 60px width can't fit it. -->
-        <div v-if="$slots['nav-header']" class="t-detail-layout__nav-header">
-          <slot name="nav-header" />
+        <div class="t-detail-layout__nav-card">
+          <!-- Optional header INSIDE the nav container (e.g. a filter/search
+               box) - integrated at the top of the menu card, divided from the
+               menu by a hairline. Hidden on the collapsed phone rail where the
+               60px width can't fit it. -->
+          <div v-if="$slots['nav-header']" class="t-detail-layout__nav-header">
+            <slot name="nav-header" />
+          </div>
+          <NMenu
+            ref="navRef"
+            :value="activeSection ?? undefined"
+            :options="menuOptions"
+            mode="vertical"
+            :indent="14"
+            :collapsed="isSm"
+            :collapsed-width="60"
+            :collapsed-icon-size="20"
+            class="t-detail-layout__nav"
+            @update:value="onSection"
+          />
         </div>
-        <NMenu
-          ref="navRef"
-          :value="activeSection ?? undefined"
-          :options="menuOptions"
-          mode="vertical"
-          :indent="14"
-          :collapsed="isSm"
-          :collapsed-width="60"
-          :collapsed-icon-size="20"
-          class="t-detail-layout__nav"
-          @update:value="onSection"
-        />
       </div>
       <div ref="panelRef" class="t-detail-layout__panel">
-        <slot :section="activeSection" />
+        <slot :section="activeSection" :section-icon="activeSectionIcon" />
       </div>
     </div>
 
     <!-- plain + tabs share the single body region -->
     <div v-else ref="bodyRef" class="t-detail-layout__body">
-      <slot :section="activeSection" />
+      <slot :section="activeSection" :section-icon="activeSectionIcon" />
     </div>
 
     <div v-if="$slots.footer" class="t-detail-layout__footer">
@@ -68,7 +72,7 @@ interface Props {
   activeSection?: string | null
   title?: string
   icon?: string
-  /** Back affordance forwarded to the in-layout `TPageHeader` — `true` (history),
+  /** Back affordance forwarded to the in-layout `TPageHeader` - `true` (history),
    *  a string (static push), or `{ fallback }` (smart back). See {@link BackTarget}. */
   back?: boolean | string | { fallback?: string }
   translate?: (key: string) => string
@@ -80,7 +84,7 @@ interface Props {
    * `--tnzi-detail-content-max` CSS var onto the layout root; descendants that
    * opt in via the `.t-detail-content` utility inherit it. Data tables stay
    * full-width by simply not opting in. A number is treated as px; a string
-   * (e.g. '1100px', '80ch', 'none') is used verbatim — `none` lets content
+   * (e.g. '1100px', '80ch', 'none') is used verbatim - `none` lets content
    * fill again. When omitted, `.t-detail-content` falls back to its 920px
    * default.
    */
@@ -111,14 +115,21 @@ defineSlots<{
   title?: () => unknown
   actions?: () => unknown
   footer?: () => unknown
-  /** Rendered above the left nav in `side` layout (e.g. a section search box). */
+  /** Rendered inside the left nav card, above the menu, in `side` layout (e.g. a section search box). */
   'nav-header'?: () => unknown
-  default?: (props: { section: string | null }) => unknown
+  default?: (props: { section: string | null; sectionIcon?: string }) => unknown
 }>()
 
 function label(s: DetailSection): string {
   return maybeTranslateKey(props.translate, s.label, s.label)
 }
+
+// Icon of the currently-active section (from the nav `sections` metadata) so a
+// side/tabs panel header can mirror the menu icon. undefined when the section
+// carries no icon (or none is active).
+const activeSectionIcon = computed<string | undefined>(
+  () => props.sections.find((s) => s.key === props.activeSection)?.icon,
+)
 
 function onSection(key: string): void {
   emit('update:activeSection', key)
@@ -135,7 +146,7 @@ const bodyRef = ref<HTMLElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 
 /**
- * Activate a section and scroll it into view — the public replacement for
+ * Activate a section and scroll it into view - the public replacement for
  * consumers reaching into the layout's private DOM (e.g. `.t-detail-layout__nav`).
  * For `side` layout it brings the selected nav item into view; for every layout
  * it returns the content region to the top so the section starts at the top.
@@ -154,7 +165,7 @@ defineExpose({ onSection, scrollToSection })
 
 /**
  * Badge text for a section that has no `icon`. Used only on the collapsed
- * phone rail (60px) where NMenu shows the icon slot alone — without a fallback
+ * phone rail (60px) where NMenu shows the icon slot alone - without a fallback
  * an icon-less section would render as an indistinguishable blank dot. Prefer
  * the first character of the (translated) label; fall back to the 1-based
  * ordinal when the label is empty so every section stays tellable apart.
@@ -211,15 +222,26 @@ const menuOptions = computed(() => {
 .t-detail-layout__split { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
 .t-detail-layout__nav-col {
   width: 220px; flex-shrink: 0; min-height: 0;
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column;
 }
-.t-detail-layout__nav-header { flex-shrink: 0; }
+/* The search header + menu share ONE bordered card so the search box reads as
+   an integrated top bar of the navigation container rather than a floating box
+   above it. The card is a clipping flex column: header pinned, menu scrolls.
+   No divider under the search + a tight gap so it sits close to the menu. */
+.t-detail-layout__nav-card {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg)); border: 1px solid var(--tnzi-border);
+  border-radius: var(--tnzi-admin-radius, 6px);
+}
+.t-detail-layout__nav-header {
+  flex-shrink: 0; padding: 8px 8px 0;
+}
 .t-detail-layout__nav {
   width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  background: var(--tnzi-container-bg); border: 1px solid var(--tnzi-border);
-  border-radius: var(--tnzi-admin-radius, 6px); padding: 8px 0;
+  background: transparent; border: none; border-radius: 0; padding: 6px 0;
 }
-/* The panel owns no scroll of its own — like BotDetail's `.panel`, it's a
+/* The panel owns no scroll of its own - like BotDetail's `.panel`, it's a
    clipping flex column so the slotted section can pin a fixed header bar and
    let only its body scroll / a flex-height table fill the residual space.
    Slot content is expected to be a full-height flex child (the single
@@ -227,14 +249,14 @@ const menuOptions = computed(() => {
 .t-detail-layout__panel {
   flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column;
-  background: var(--tnzi-container-bg); border: 1px solid var(--tnzi-border);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg)); border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius, 6px);
 }
 .t-detail-layout__footer {
   flex-shrink: 0; display: flex; justify-content: flex-end; gap: 8px;
   padding-top: 12px; border-top: 1px solid var(--tnzi-border);
 }
-/* Fallback badge for icon-less sections on the collapsed phone rail — a small
+/* Fallback badge for icon-less sections on the collapsed phone rail - a small
    letter/ordinal chip that reads like an icon so each section stays distinct.
    Only produced when `isSm` is true (see `menuOptions`), so desktop is unaffected. */
 .t-detail-layout__nav-badge {
@@ -252,7 +274,7 @@ const menuOptions = computed(() => {
      names the active section, so the icon-only rail stays legible. Width tracks
      the NMenu `:collapsed-width` (60). */
   .t-detail-layout__nav-col { width: 60px; }
-  /* The 60px rail can't fit a search box — hide the nav header on phones. */
+  /* The 60px rail can't fit a search box - hide the nav header on phones. */
   .t-detail-layout__nav-header { display: none; }
   .t-detail-layout__nav { width: 60px; padding: 6px 0; }
   /* The 60px rail can't fit group titles like "Setup" / "Operations", so they

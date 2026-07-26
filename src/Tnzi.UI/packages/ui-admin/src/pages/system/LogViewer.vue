@@ -1,11 +1,11 @@
 <template>
   <!--
-    LogViewer — admin read-only viewer for the on-disk log files written
+    LogViewer - admin read-only viewer for the on-disk log files written
     by `Tnzi.Logging` (Serilog file sinks). Two-pane layout:
       - Left:  level navigator + per-level rolling-day file list
       - Right: tail viewer for the selected file (last N lines) + search
 
-    All endpoints under `admin/logs/*` are read-only — there is no delete /
+    All endpoints under `admin/logs/*` are read-only - there is no delete /
     edit UX because log retention is owned server-side by Serilog's
     `RetainedFileCountLimit` per level.
   -->
@@ -230,7 +230,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { NButton, NInput, NPopover, NSelect, NSpin, NTag } from 'naive-ui'
-// NSpin is still used for the sidebar (level/file list) — kept in the import.
+// NSpin is still used for the sidebar (level/file list) - kept in the import.
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
@@ -427,7 +427,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border: 1px solid var(--tnzi-border);
   border-radius: 8px;
   padding: 12px;
@@ -524,7 +524,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border: 1px solid var(--tnzi-border);
   border-radius: 8px;
   padding: 8px 12px;
@@ -548,7 +548,7 @@ onMounted(() => {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  /* Terminal output — intentionally GitHub-dark in both light and dark
+  /* Terminal output - intentionally GitHub-dark in both light and dark
      mode, mirroring how IDEs render log files. The inner line-hover
      and lineno colours below (rgb(255 255 255 / x)) only read correctly
      against this constant dark background. */

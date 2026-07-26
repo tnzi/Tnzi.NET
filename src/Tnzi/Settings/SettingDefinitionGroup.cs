@@ -27,6 +27,14 @@ public sealed class SettingDefinitionGroup
     public int Order { get; init; }
 
     /// <summary>
+    /// 是否为框架内置配置组（来自 <c>Tnzi.*</c> 程序集的 Options 类）。消费应用自己的
+    /// <c>[RuntimeSetting]</c> 组（如 <c>Acme.Blog</c>）为 false。前端「内置菜单」开关关闭时
+    /// 只隐藏内置组，消费方自有配置组始终保留。属性驱动定义由提取器按声明程序集自动判定；
+    /// 手写 provider 缺省 false（保守：不确定即视为消费方，永不误隐）。
+    /// </summary>
+    public bool IsBuiltIn { get; init; }
+
+    /// <summary>
     /// 该组派生的配置权限码归属的权限组 name（如 "chat"、"ai"、"system"）。
     /// 缺省 = <see cref="ModuleName"/> 规范化。详见 <c>SettingsPermissionNaming</c>。
     /// </summary>
@@ -41,7 +49,7 @@ public sealed class SettingDefinitionGroup
     /// <summary>
     /// 该组字段所属的 Options 类型（属性驱动定义时由提取器填充；GROUP MERGE 的组
     /// 携带全部贡献者类型）。配置中心保存前用它们反查已注册的 IValidateOptions&lt;T&gt;，
-    /// 对「合并候选值绑出的实例」跑与运行时绑定完全相同的验证 — 防止字段级校验放行、
+    /// 对「合并候选值绑出的实例」跑与运行时绑定完全相同的验证 - 防止字段级校验放行、
     /// reload 后绑定/验证抛异常。手写 provider 可为 null（跳过 validator 预检）。
     /// </summary>
     public IReadOnlyList<Type>? OptionsTypes { get; init; }

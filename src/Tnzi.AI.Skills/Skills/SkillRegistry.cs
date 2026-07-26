@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能注册表 — 合并 FileSystem（和未来的 Database）双源，按三层作用域优先级排重，支持关键词搜索。
+/// 技能注册表 - 合并 FileSystem（和未来的 Database）双源，按三层作用域优先级排重，支持关键词搜索。
 /// </summary>
 /// <remarks>
 /// <para>作用域优先级：System &gt; Tenant &gt; User（数值越小优先级越高）。</para>
@@ -86,7 +86,7 @@ public class SkillRegistry : ISkillRegistry
         if (fileResult == null) return dbResult;
         if (dbResult == null) return fileResult;
 
-        // Both returned — pick by scope priority (System=0 > Tenant=1 > User=2)
+        // Both returned - pick by scope priority (System=0 > Tenant=1 > User=2)
         return fileResult.Scope <= dbResult.Scope ? fileResult : dbResult;
     }
 

@@ -1,5 +1,5 @@
 /**
- * useSkillBrowser — Skill browsing, search, and activation
+ * useSkillBrowser - Skill browsing, search, and activation
  */
 
 import { ref, readonly, type Ref, type DeepReadonly } from 'vue';

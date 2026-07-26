@@ -6,7 +6,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Mcp;
 
 /// <summary>
-/// McpServerHost 工具列表缓存测试 — 验证 ListToolsAsync 不再每次对每个 Agent 重建
+/// McpServerHost 工具列表缓存测试 - 验证 ListToolsAsync 不再每次对每个 Agent 重建
 /// scope + GetByIdAsync（N+1）；缓存命中复用，expose/remove 主动失效后才重建。
 /// </summary>
 public class McpServerHostToolCacheTests

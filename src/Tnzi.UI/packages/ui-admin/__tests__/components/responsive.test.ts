@@ -1,5 +1,5 @@
 /**
- * Responsive integration tests — assert each P0/P1 fix actually fires
+ * Responsive integration tests - assert each P0/P1 fix actually fires
  * its width / touch-driven branch when window size flips.
  *
  * Strategy:
@@ -145,7 +145,7 @@ const naiveStubs = {
     template: '<div class="n-grid-stub"><slot /></div>',
   }),
   // naive-ui exports `NGi` but the internal component name is
-  // `GridItem` — match that so the stub actually takes over.
+  // `GridItem` - match that so the stub actually takes over.
   GridItem: defineComponent({
     name: 'GridItem',
     props: ['span'],

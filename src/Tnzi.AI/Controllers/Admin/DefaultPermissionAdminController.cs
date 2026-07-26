@@ -56,7 +56,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 评估测试 — 给定上下文返回命中的决策结果（调试用）
+    /// 评估测试 - 给定上下文返回命中的决策结果（调试用）
     /// </summary>
     [HttpPost("rules/evaluate")]
     public virtual ApiResult<PermissionEvaluateResultDto> Evaluate([FromBody] PermissionEvaluateRequestDto request)
@@ -109,7 +109,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
         var entities = await PermissionRuleRepository.AsQueryable()
             .OrderByDescending(e => e.Priority)
             .ThenBy(e => e.Scope)
-            .ToListAsync();
+            .ToListAsync(HttpContext.RequestAborted);
 
         return ApiResult<List<PersistedPermissionRuleDto>>.Ok(entities.MapToList<PersistedPermissionRuleDto>());
     }
@@ -149,7 +149,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
             return ApiResult<PersistedPermissionRuleDto>.Error("Permission rule not found.", 404);
         }
 
-        // In-place field assignment — never re-create the entity (would drop the
+        // In-place field assignment - never re-create the entity (would drop the
         // Id / audit fields / TenantId). Behavior & Scope are persisted as int.
         entity.ToolPattern = input.ToolPattern;
         entity.ToolGroup = input.ToolGroup;

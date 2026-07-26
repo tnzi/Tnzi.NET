@@ -63,7 +63,7 @@
         </footer>
       </article>
 
-      <!-- Totals card — the card counterpart of NDataTable's summary row(s),
+      <!-- Totals card - the card counterpart of NDataTable's summary row(s),
            rendered once at the bottom of the list. -->
       <article v-if="summaryRows.length" class="t-data-cards__card t-data-cards__card--summary">
         <dl
@@ -93,14 +93,14 @@ import TEmpty from './TEmpty.vue'
 
 /**
  * Column descriptor for the mobile card list. A subset of the table column
- * shape — only what's needed to render a `label: value` pair (or a card
+ * shape - only what's needed to render a `label: value` pair (or a card
  * title). `render` receives the row and may return a VNode (badges,
  * relative timestamps, links) or a primitive (rendered as text).
  */
 export interface CardColumn {
   key: string
   title: string
-  /** Pre-rendered label node — used instead of `title` when the source
+  /** Pre-rendered label node - used instead of `title` when the source
    *  column's header is a VNode (e.g. an icon + text), so the card label
    *  keeps its rich content. Falls back to the plain `title` string. */
   labelNode?: VNodeChild
@@ -122,12 +122,12 @@ interface Props {
   /** 1-based serial of the first row on the current page (for the title
    *  fallback when no column qualifies as a title). */
   serialStart?: number
-  /** Row-level attrs/handlers spread onto each card — the card counterpart of
+  /** Row-level attrs/handlers spread onto each card - the card counterpart of
    *  naive's `row-props`. A result carrying an `onClick` handler also gives
    *  the card pointer/hover affordance. */
   cardProps?: (row: Record<string, unknown>, index: number) => Record<string, unknown>
   /** Summary rows (column key → rendered value) shown as a totals card at the
-   *  bottom of the list — the card counterpart of NDataTable's summary row. */
+   *  bottom of the list - the card counterpart of NDataTable's summary row. */
   summaryRows?: Record<string, VNodeChild>[]
 }
 
@@ -150,7 +150,7 @@ defineSlots<{
 
 /**
  * Renders a single cell value. Naive's column `render` returns a VNodeChild
- * which may be a VNode (status badge, link) or a primitive — wrap primitives
+ * which may be a VNode (status badge, link) or a primitive - wrap primitives
  * in a span so the markup is uniform, and drop nullish values.
  */
 const CellNode = defineComponent({
@@ -244,7 +244,7 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: var(--tnzi-container-bg, #fff);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
   border: 1px solid var(--tnzi-border, #e5e7eb);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);

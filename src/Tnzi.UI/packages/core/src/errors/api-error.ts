@@ -67,7 +67,8 @@ export function createFailedApiResult<T>(
     succeeded: false,
     success: false,
     code,
-    data: undefined as T,
+    // No payload on a failure - `ApiResult.data` is optional for exactly this.
+    data: undefined,
     message: options.message,
     errorCode: options.errorCode,
     errorDetails: options.details,

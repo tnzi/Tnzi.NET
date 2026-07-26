@@ -67,7 +67,7 @@ public class BalanceSummaryTests : FinanceIntegrationTestBase
         // Jan 10: USD sale 1000 (Dr 1200 AR / Cr 4100 income)
         (await PostLedgerAsync(SimpleSale(1000m, new DateTime(2026, 1, 10), "s1"))).Succeeded.ShouldBeTrue();
 
-        // Feb 15: USD expense 300 (Dr 5200 / Cr 1120) — reversed below
+        // Feb 15: USD expense 300 (Dr 5200 / Cr 1120) - reversed below
         var exp = await PostLedgerAsync(new LedgerPostingRequest
         {
             PostingDate = new DateTime(2026, 2, 15),
@@ -81,7 +81,7 @@ public class BalanceSummaryTests : FinanceIntegrationTestBase
         });
         exp.Succeeded.ShouldBeTrue(exp.Message);
 
-        // Feb 20: EUR sale 500 @1.20 (Dr 1120 / Cr 4100) — multi-currency, cross-month
+        // Feb 20: EUR sale 500 @1.20 (Dr 1120 / Cr 4100) - multi-currency, cross-month
         (await PostLedgerAsync(Posting(new DateTime(2026, 2, 20), "EUR", 1.20m, "eur1",
             new LedgerPostingLine { AccountCode = "1120", Debit = 500m },
             new LedgerPostingLine { AccountCode = "4100", Credit = 500m }))).Succeeded.ShouldBeTrue();

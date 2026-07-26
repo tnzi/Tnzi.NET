@@ -23,13 +23,11 @@ public class SystemTestDbContext : TnziDbContext<SystemTestDbContext>
     {
     }
 
-    public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<AccessLog> AccessLogs => Set<AccessLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // 应用 System 实体配置
-        modelBuilder.ApplyConfiguration(new Entities.Configs.MenuConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.AccessLogConfiguration());
 
         base.OnModelCreating(modelBuilder);

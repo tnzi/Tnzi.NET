@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// 输入 Guardrail 接口 — 在 AI 执行前验证/过滤用户输入
+/// 输入 Guardrail 接口 - 在 AI 执行前验证/过滤用户输入
 /// </summary>
 public interface IInputGuardrail
 {
@@ -15,7 +15,7 @@ public interface IInputGuardrail
 }
 
 /// <summary>
-/// 输出 Guardrail 接口 — 在返回 AI 响应前验证/过滤输出内容
+/// 输出 Guardrail 接口 - 在返回 AI 响应前验证/过滤输出内容
 /// </summary>
 public interface IOutputGuardrail
 {

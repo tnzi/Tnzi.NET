@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends Record<string, unknown>">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IDataQuery, IDataLoadState, MobileLoadTrigger } from '@tnzi/core/types/shared-ui';
 import { normalizePageSize, updatePageQuery } from '@tnzi/core/headless';
@@ -11,18 +11,18 @@ interface IDataListEmits<T = unknown> {
   itemClick: [item: T, index: number];
 }
 
-interface IMobileDataListEmits<T = unknown> extends IDataListEmits<T> {
-  pullRefresh: [];
-}
-
 const props = withDefaults(defineProps<{
   items: T[];
   query?: IDataQuery;
+  /**
+   * Load state reported by the parent. When `loading` is a boolean, the
+   * pull-to-refresh indicator mirrors it and closes on the `true -> false`
+   * transition; when it is absent the indicator closes as soon as `refresh`
+   * has been emitted, because there is nothing to wait for.
+   */
   loadState?: IDataLoadState;
   itemKey?: string | ((item: T, index: number) => string);
   emptyText?: string;
-  class?: string | string[];
-  style?: string | Record<string, string | number>;
   trigger?: MobileLoadTrigger;
   pullToRefresh?: boolean;
 }>(), {
@@ -34,11 +34,12 @@ const props = withDefaults(defineProps<{
   emptyText: '',
 });
 
-const emit = defineEmits<IMobileDataListEmits<T>>();
+const emit = defineEmits<IDataListEmits<T>>();
 const { t } = useI18n();
 
 const refreshing = ref(false);
 const loading = computed(() => !!props.loadState?.loading);
+const tracksLoading = computed(() => typeof props.loadState?.loading === 'boolean');
 const finished = computed(() => !!props.loadState?.noMore);
 const isEmpty = computed(() => props.items.length === 0 && !loading.value);
 const emptyText = computed(() => props.emptyText || t('common.noData'));
@@ -51,9 +52,7 @@ const resolveKey = (item: T, index: number) => {
   return String(index);
 };
 
-const onRefresh = async () => {
-  refreshing.value = true;
-  emit('pullRefresh');
+const onRefresh = () => {
   emit('refresh');
   const normalizedPageSize = normalizePageSize(
     typeof props.query?.pageSize === 'number' ? props.query.pageSize : undefined
@@ -62,16 +61,25 @@ const onRefresh = async () => {
     ...updatePageQuery(props.query ?? {}, 1, normalizedPageSize),
     cursor: undefined,
   });
-  // 延迟关闭 refreshing，让 pull-to-refresh 动画有时间完成
-  await new Promise<void>(resolve => setTimeout(resolve, 300));
-  refreshing.value = false;
+
+  if (!tracksLoading.value) refreshing.value = false;
 };
+
+// Close the indicator when the parent's load actually finishes. A fixed timer
+// would stop the animation while a slow request is still in flight and leave
+// the stale list on screen.
+watch(
+  () => props.loadState?.loading,
+  (isLoading, wasLoading) => {
+    if (wasLoading && !isLoading) refreshing.value = false;
+  },
+);
 
 const onLoad = () => emit('loadMore');
 </script>
 
 <template>
-  <section class="t-data-list" :class="props.class" :style="props.style">
+  <section class="t-data-list">
     <van-pull-refresh
       v-if="props.pullToRefresh"
       v-model="refreshing"
@@ -119,14 +127,14 @@ const onLoad = () => emit('loadMore');
 
 <style scoped>
 .t-data-list {
-  background: #fff;
+  background: var(--van-background-2);
   border-radius: 12px;
   overflow: hidden;
 }
 
 .item {
   padding: 12px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--van-border-color);
 }
 
 .item:last-child {
@@ -136,7 +144,7 @@ const onLoad = () => emit('loadMore');
 .empty {
   padding: 24px 12px;
   text-align: center;
-  color: #64748b;
+  color: var(--van-text-color-2);
 }
 
 pre {

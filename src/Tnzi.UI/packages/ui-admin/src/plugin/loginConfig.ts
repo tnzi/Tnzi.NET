@@ -1,10 +1,10 @@
 /**
- * `useAdminLoginConfig()` — install-time configuration for the built-in
+ * `useAdminLoginConfig()` - install-time configuration for the built-in
  * `/login/:module(…)?` route shipped by `@tnzi/ui-admin` (Phase I.7+).
  *
  * The login route component (`pages/login/index.vue`) consumes this via
  * `inject()` to fetch consumer-supplied auth callbacks, brand title,
- * demo accounts, etc. Without a config the page still renders — the
+ * demo accounts, etc. Without a config the page still renders - the
  * 5 placeholder modules behave as no-ops and show the "Phase I.7.x will
  * implement" hint.
  *
@@ -40,9 +40,9 @@ import type {
 export interface AdminLoginConfig {
   /**
    * Page layout (2026-06-11 redesign):
-   *   - `'wave'` (default) — brand-tinted background with drifting aurora
+   *   - `'wave'` (default) - brand-tinted background with drifting aurora
    *     blobs + animated dual-layer waves, centered card.
-   *   - `'split'` — brand narrative panel (flowing aurora + tagline) on the
+   *   - `'split'` - brand narrative panel (flowing aurora + tagline) on the
    *     left, white form pane with stacked field labels on the right.
    */
   layout?: 'wave' | 'split'
@@ -51,7 +51,7 @@ export interface AdminLoginConfig {
   /**
    * Component mounted in the admin header's notification slot (e.g. a
    * `THeaderBell`). The shell exposes the real `#header-notification` slot and
-   * renders this component there — replacing the old pattern of Teleporting a
+   * renders this component there - replacing the old pattern of Teleporting a
    * bell into the header's internal DOM because the slot wasn't reachable.
    */
   headerNotification?: Component
@@ -115,7 +115,7 @@ export interface AdminLoginConfig {
   qrComponent?: Component
   /** Translation function (locale-reactive). */
   translate?: (key: string, fallback?: string) => string
-  /** Auth callbacks for each module — `pwdLogin` is the minimum useful set. */
+  /** Auth callbacks for each module - `pwdLogin` is the minimum useful set. */
   callbacks?: LoginCallbacks
   /**
    * Demo accounts rendered by `PwdLoginModule` as quick-fill buttons.
@@ -128,7 +128,7 @@ export interface AdminLoginConfig {
    * "User Center" and "Logout" both navigate / clear the session via the
    * consumer's auth store without each consumer wiring its own avatar.
    *
-   * `userName` is read once at render time — consumers wanting reactivity
+   * `userName` is read once at render time - consumers wanting reactivity
    * (e.g. binding to `auth.user?.name`) should pass a getter via Vue's
    * normal reactivity (provide a computed-ref-like or override the user
    * slot entirely).
@@ -140,7 +140,7 @@ export interface AdminLoginConfig {
     avatarIcon?: string
     /** Click handler for "User Center" dropdown option. */
     onUserCenter?: () => void | Promise<void>
-    /** Click handler for "Logout" — called after the confirm dialog. */
+    /** Click handler for "Logout" - called after the confirm dialog. */
     onLogout?: () => void | Promise<void>
     /** When false, render a "Sign in" button instead of the avatar. */
     signedIn?: boolean
@@ -149,7 +149,7 @@ export interface AdminLoginConfig {
   }
   /**
    * Whether to show the language switcher (`TLangSwitch`) in the login
-   * page toolbar. Defaults to **false** — many deployments are
+   * page toolbar. Defaults to **false** - many deployments are
    * single-locale and the extra button adds visual noise.
    */
   showLangSwitch?: boolean
@@ -181,7 +181,7 @@ export function provideAdminLoginConfig(app: App, config: AdminLoginConfig): voi
 
 /**
  * Inject the consumer-supplied login config. Returns an empty object when
- * no `defineAdminApp({ login: … })` was passed — the route then falls back
+ * no `defineAdminApp({ login: … })` was passed - the route then falls back
  * to its own placeholder defaults.
  */
 export function useAdminLoginConfig(): AdminLoginConfig {

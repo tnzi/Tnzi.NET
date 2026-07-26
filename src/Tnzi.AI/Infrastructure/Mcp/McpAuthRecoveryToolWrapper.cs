@@ -97,7 +97,7 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
             // Invalidate tool cache so tools are re-fetched from the reconnected client
             _toolProvider.InvalidateCache(_serverName);
 
-            // Retry once — do not catch auth failures on retry to avoid infinite loops
+            // Retry once - do not catch auth failures on retry to avoid infinite loops
             try
             {
                 _logger?.LogDebug(

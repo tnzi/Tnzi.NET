@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 资源发现与读取实现 — 通过 IMcpClientFactory 获取 MCP 客户端，调用 resources/list 和 resources/read。
+/// MCP 资源发现与读取实现 - 通过 IMcpClientFactory 获取 MCP 客户端，调用 resources/list 和 resources/read。
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 public class McpResourceProvider : McpProviderBase<McpResourceProvider>, IMcpResourceProvider

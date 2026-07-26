@@ -41,7 +41,7 @@ const fakeBridge = {
 }
 
 // --- Mocks ---
-// TChatWindow no longer constructs a bridge — mock the module so imports resolve
+// TChatWindow no longer constructs a bridge - mock the module so imports resolve
 vi.mock('../../../src/services/bridges/chat-im-bridge', () => ({
   createChatImBridge: () => fakeBridge,
 }))
@@ -79,7 +79,7 @@ const globalConfig = {
   plugins: [] as ReturnType<typeof createPinia>[],
 }
 
-describe('TChatWindow (pure display — orchestration moved to TChatHost)', () => {
+describe('TChatWindow (pure display - orchestration moved to TChatHost)', () => {
   let pinia: ReturnType<typeof createPinia>
 
   beforeEach(() => {
@@ -101,7 +101,7 @@ describe('TChatWindow (pure display — orchestration moved to TChatHost)', () =
       props: { show: true },
       global: { ...globalConfig, plugins: [pinia] },
     })
-    // Window itself does NOT call listConversations — the host does
+    // Window itself does NOT call listConversations - the host does
     fakeBridge.listConversations.mockClear()
     await wrapper.vm.$nextTick()
     expect(fakeBridge.listConversations).not.toHaveBeenCalled()
@@ -119,7 +119,7 @@ describe('TChatWindow (pure display — orchestration moved to TChatHost)', () =
       attachTo: document.body,
     })
     await wrapper.vm.$nextTick()
-    // NModal uses teleport — content renders into document.body
+    // NModal uses teleport - content renders into document.body
     expect(document.body.innerHTML).toContain('t-conv-list')
     wrapper.unmount()
   })

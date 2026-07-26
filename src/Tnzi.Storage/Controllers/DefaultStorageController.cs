@@ -4,6 +4,17 @@ namespace Tnzi.Storage.Controllers;
 /// 存储控制器基类
 /// 提供文件上传、下载、版本、分享、分块上传等 API 的抽象基类
 /// </summary>
+/// <remarks>
+/// 四个读端点带 <c>[AllowAnonymous]</c>,是为了让 <c>FileRecord.IsPublic</c> 的文件
+/// (头像 / 站点素材)能被未登录访客取到 —— 类级 <c>[ApiAuthorize]</c> 会把它们一并挡掉。
+///
+/// **放行的是路由,不是数据**:真正的判定在 <see cref="IFileAccessAuthorizer"/>,由
+/// <see cref="IFileStorageService"/> 在每次按 id 取记录时执行(公开 / 部署级开关 /
+/// 归属 / <c>storage.file.view</c> 四者之一)。不通过一律 404,不泄露该 id 上是否有文件。
+///
+/// 判定刻意不放在控制器:本类是 <c>[DefaultController]</c>,消费方可在同路由注册自己的
+/// 控制器把它整个替换掉,那样挂在这里的任何特性都会随之失效。服务层是唯一必经之处。
+/// </remarks>
 [DefaultController]
 [Route("files")]
 [ApiAuthorize]
@@ -559,7 +570,7 @@ public class DefaultStorageController : ApiControllerBase
     /// <summary>
     /// 把 FileShare 实体投影为对外公开 DTO（绝不包含 PasswordHash）
     /// </summary>
-    private static FileSharePublicDto MapToPublicDto(Tnzi.Storage.Entities.FileShare share)
+    private static FileSharePublicDto MapToPublicDto(FileShare share)
     {
         return new FileSharePublicDto
         {

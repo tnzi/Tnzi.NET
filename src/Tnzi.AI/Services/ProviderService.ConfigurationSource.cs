@@ -6,7 +6,7 @@ namespace Tnzi.AI.Services;
 /// <remarks>
 /// 配置条目以只读形式合并进 admin 列表/详情/options 端点（<c>Source=Configuration</c>），
 /// 解决"agent 实际使用的 provider 来自配置文件，但 admin 列表只显示数据库实体"的可见性断层。
-/// 安全约束：配置中的 <c>ApiKey</c> 明文绝不进入任何 DTO — 仅以 <c>HasApiKey</c> 布尔标志暴露。
+/// 安全约束：配置中的 <c>ApiKey</c> 明文绝不进入任何 DTO - 仅以 <c>HasApiKey</c> 布尔标志暴露。
 /// </remarks>
 public partial class ProviderService
 {
@@ -134,7 +134,7 @@ public partial class ProviderService
 
     /// <summary>
     /// 从配置字典 key（provider 名称）推断展示用 ProviderType。
-    /// 配置条目没有显式类型字段 — ChatClientFactory 按名称精确匹配 IChatClientProvider，
+    /// 配置条目没有显式类型字段 - ChatClientFactory 按名称精确匹配 IChatClientProvider，
     /// 未命中时回退 OpenAI 兼容协议，此处的启发式与该行为保持一致。
     /// </summary>
     private static string InferProviderType(string providerName)

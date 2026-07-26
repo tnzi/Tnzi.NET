@@ -2,12 +2,12 @@
 namespace Tnzi.AspNetCore.Controllers;
 
 /// <summary>
-/// Admin shell controller — serves runtime bootstrap information the admin
+/// Admin shell controller - serves runtime bootstrap information the admin
 /// frontend needs to render correctly, independent of the permission system.
 ///
 /// Deliberately declares NO class-level permission code (bare
 /// <see cref="ApiAdminControllerBase"/> authentication only), because its
-/// signal — which framework modules the host loaded — must be readable by
+/// signal - which framework modules the host loaded - must be readable by
 /// EVERY signed-in admin user, super-admins and permission-exempt paths
 /// included: module-availability menu gating has to hold for them too, and a
 /// technical permission gate (as on the diagnostics manifest) would 403 a
@@ -23,7 +23,7 @@ public class DefaultAdminShellController : ApiAdminControllerBase
     /// the host has loaded, by short name + enabled flag. The admin frontend
     /// gates top-level module menus / routes off this: a module absent here
     /// (never loaded) has its menu hidden and its pages made unreachable, so it
-    /// never surfaces a dead link — and because this is orthogonal to
+    /// never surfaces a dead link - and because this is orthogonal to
     /// permissions, the gating holds for super-admins too. When the endpoint is
     /// unavailable (older backend / network failure) the frontend falls back to
     /// showing everything, so this is purely additive.

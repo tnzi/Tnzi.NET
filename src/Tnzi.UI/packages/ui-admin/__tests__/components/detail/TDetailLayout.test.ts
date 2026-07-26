@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { h } from 'vue'
 import { mount } from '@vue/test-utils'
 import TDetailLayout from '../../../src/components/detail/TDetailLayout.vue'
 
@@ -43,6 +44,32 @@ describe('TDetailLayout', () => {
     })
     expect(w.find('.n-menu-stub').exists()).toBe(true)
     expect(w.find('.t-detail-layout--side').exists()).toBe(true)
+  })
+
+  it('exposes the active section icon as a slot prop (menu icon ⇒ panel title icon)', () => {
+    const iconSections = [
+      { key: 'basic', label: 'Basic', icon: 'mdi:information-outline' },
+      { key: 'perms', label: 'Perms', icon: 'mdi:shield-outline', group: 'security' },
+    ]
+    const w = mount(TDetailLayout, {
+      props: { layout: 'side', sections: iconSections, activeSection: 'perms' },
+      slots: {
+        default: (p: { sectionIcon?: string }) => h('span', { class: 'icon-probe' }, p.sectionIcon ?? ''),
+      },
+      global: { stubs },
+    })
+    expect(w.find('.icon-probe').text()).toBe('mdi:shield-outline')
+  })
+
+  it('section icon slot prop is empty when the active section has no icon', () => {
+    const w = mount(TDetailLayout, {
+      props: { layout: 'side', sections, activeSection: 'basic' },
+      slots: {
+        default: (p: { sectionIcon?: string }) => h('span', { class: 'icon-probe' }, p.sectionIcon ?? ''),
+      },
+      global: { stubs },
+    })
+    expect(w.find('.icon-probe').text()).toBe('')
   })
 
   it('emits update:activeSection when a section is selected', async () => {

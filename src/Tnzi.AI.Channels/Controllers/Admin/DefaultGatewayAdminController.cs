@@ -5,7 +5,7 @@ using Tnzi.AspNetCore.Mvc;
 namespace Tnzi.AI.Channels.Controllers.Admin;
 
 /// <summary>
-/// Gateway 管理控制器 — 提供 Gateway 状态、连接和绑定规则的诊断端点
+/// Gateway 管理控制器 - 提供 Gateway 状态、连接和绑定规则的诊断端点
 /// </summary>
 [DefaultController]
 [Route("admin/gateway")]

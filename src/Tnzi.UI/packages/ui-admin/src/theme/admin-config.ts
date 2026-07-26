@@ -39,10 +39,9 @@ export interface AdminThemeSnapshotV1 {
     fixedTab: boolean
     fixedFooter: boolean
     watermark: WatermarkSettings
-    /** Phase D additions — optional in snapshots written by older
+    /** Phase D additions - optional in snapshots written by older
         versions; readers default to the current store defaults when
         the field is missing. Producing a snapshot always includes them. */
-    recommendColor?: boolean
     infoFollowPrimary?: boolean
     tabCache?: boolean
     breadcrumbShowIcon?: boolean
@@ -53,16 +52,16 @@ export interface AdminThemeSnapshotV1 {
     fullscreenVisible?: boolean
     themeSchemaVisible?: boolean
     reloadVisible?: boolean
-    /** Phase F additions — same versioning rules. */
+    /** Phase F additions - same versioning rules. */
     grayscale?: boolean
     colourWeakness?: boolean
-    /** Phase G addition — same versioning rules. */
+    /** Phase G addition - same versioning rules. */
     closeTabByMiddleClick?: boolean
     /** Tab-bar active-tab auto-scroll animation (smooth vs instant). */
     tabScrollAnimation?: boolean
-    /** Phase H1 — scroll mode (content vs wrapper). */
+    /** Phase H1 - scroll mode (content vs wrapper). */
     scrollMode?: 'content' | 'wrapper'
-    /** Phase H2 — mix-layout specific widths + auto-select toggle. */
+    /** Phase H2 - mix-layout specific widths + auto-select toggle. */
     mixCollapsedWidth?: number
     mixChildMenuWidth?: number
     autoSelectFirstMenu?: boolean
@@ -70,16 +69,36 @@ export interface AdminThemeSnapshotV1 {
         color-scheme picker (palette button in the header). Governed by
         the super admin via the drawer's General → Global section. */
     presetPickerVisible?: boolean
-    /** Theme Drawer additions — radius slider + footer height knob. */
+    /** Theme Drawer additions - radius slider + footer height knob. */
     themeRadius?: number
     footerHeight?: number
-    /** Background color overrides — `null` clears the override (falls back
-        to the default token). `undefined` means the field was missing from
-        an older snapshot and should be skipped (leave current value). */
+    /** Per-surface background overrides - `null` clears the override (falls
+        back to the default token). `undefined` means the field was missing
+        from an older snapshot and should be skipped (leave current value).
+        Each chrome surface adapts its foreground to the chosen color's tone
+        (see theme/surfaceTone.ts). `contentBg` is the page canvas.
+        (The pre-0.2.x `containerBg` field is retired - card/table surfaces
+        follow the light/dark mode, not a free color pick.) */
     siderBg?: string | null
     headerBg?: string | null
+    tabBg?: string | null
+    footerBg?: string | null
     contentBg?: string | null
-    containerBg?: string | null
+    /** Content-area container surfaces - `pageHeaderBg` = the white TPageHeader
+        bar, `cardBg` = the content cards / lists / tables (naive NCard/NDataTable
+        + scoped-CSS card divs). Same `null`/`undefined` semantics as the chrome
+        surfaces; both derive a tone that flips their foreground. */
+    pageHeaderBg?: string | null
+    cardBg?: string | null
+    /** Per-surface foreground (text) color override - `null`/omitted = auto
+        (derive from background luminance); a hex forces the exact text color. */
+    siderTextColor?: string | null
+    headerTextColor?: string | null
+    tabTextColor?: string | null
+    footerTextColor?: string | null
+    contentTextColor?: string | null
+    pageHeaderTextColor?: string | null
+    cardTextColor?: string | null
   }
   ui: {
     mode: 'light' | 'dark' | 'auto'
@@ -112,7 +131,7 @@ export function parseSnapshot(json: string): AdminThemeSnapshot {
 
 /**
  * Copy snapshot JSON to clipboard. Returns true on success.
- * Best-effort — silently returns false if clipboard API unavailable
+ * Best-effort - silently returns false if clipboard API unavailable
  * (insecure context, headless test env, etc.).
  */
 export async function copySnapshotToClipboard(

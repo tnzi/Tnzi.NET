@@ -1,5 +1,5 @@
 /**
- * Logging bridge — wraps `useAdminLogFileApi` (from `@tnzi/core/services/logging`)
+ * Logging bridge - wraps `useAdminLogFileApi` (from `@tnzi/core/services/logging`)
  * so admin pages get the same dependency-injection pattern other bridges use:
  *
  * ```ts
@@ -58,7 +58,7 @@ export function createLoggingBridge(deps: LoggingBridgeDeps = {}): LoggingBridge
 
   const api = useAdminLogFileApi(client)
 
-  // ApiResult-unwrap helper — every endpoint returns `{ data, code, success, message }`;
+  // ApiResult-unwrap helper - every endpoint returns `{ data, code, success, message }`;
   // the page only needs `.data`, mirroring how `system-bridge` unwraps its
   // sub-contracts.
   const unwrap = async <T>(p: Promise<{ data?: T | null } | undefined | null>): Promise<T> => {

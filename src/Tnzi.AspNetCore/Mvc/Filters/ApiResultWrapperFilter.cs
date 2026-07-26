@@ -20,7 +20,7 @@ public class ApiResultWrapperFilter : IResultFilter, IOrderedFilter
     /// </summary>
     public ApiResultWrapperFilter(IOptions<AspNetCoreOptions> options)
     {
-        _options = options.Value;
+        _options = Check.NotNull(options).Value;
     }
 
     /// <summary>

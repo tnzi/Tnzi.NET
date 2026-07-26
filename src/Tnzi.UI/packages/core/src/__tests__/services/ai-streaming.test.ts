@@ -3,7 +3,7 @@ import { streamChat } from '../../services/ai/streaming';
 import type { ChatStreamOptions } from '../../services/ai/streaming';
 
 // ---------------------------------------------------------------------------
-// Helpers — build SSE byte streams from text frames
+// Helpers - build SSE byte streams from text frames
 // ---------------------------------------------------------------------------
 
 /** Encode a string into a Uint8Array (UTF-8). */
@@ -427,7 +427,7 @@ describe('streamChat', () => {
 
     expect(result.completed).toBe(false);
     expect(errorCaught).toBe(false);
-    // AbortError is expected — no error set on result
+    // AbortError is expected - no error set on result
   });
 
   // ----- AbortSignal -----
@@ -445,7 +445,7 @@ describe('streamChat', () => {
   });
 
   it('should not inject any implicit timeout signal (streaming is exempt from HttpClient timeouts)', async () => {
-    // streamChat bypasses HttpClient entirely — a long-lived SSE stream must
+    // streamChat bypasses HttpClient entirely - a long-lived SSE stream must
     // never be killed by the default request timeout. Lock in that the only
     // signal fetch receives is the caller-provided one (here: none).
     fetchSpy.mockResolvedValue(mockStreamResponse([sseDone()]));
@@ -549,5 +549,121 @@ describe('streamChat', () => {
     expect(reasoningDeltas).toEqual(['Thinking about the question', '...']);
     expect(toolCalls).toEqual([['web_search']]);
     expect(doneReceived).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stream lifecycle: trailing frame, error recording, reader release
+// ---------------------------------------------------------------------------
+
+describe('streamChat lifecycle', () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function options(overrides?: Partial<ChatStreamOptions>): ChatStreamOptions {
+    return { url: 'http://localhost/api/chat/stream', body: { message: 'Hi' }, ...overrides };
+  }
+
+  it('processes a trailing frame that has no terminating blank line', async () => {
+    // A server that closes right after its last event leaves that event parked
+    // in the buffer; dropping it made a finished stream look truncated.
+    fetchSpy.mockResolvedValue(
+      mockStreamResponse([
+        sseFrame({ delta: 'partial' }),
+        'data: {"isDone":true,"threadId":"t-9","finishReason":"stop"}',
+      ]),
+    );
+
+    const result = await streamChat(options());
+
+    expect(result.text).toBe('partial');
+    expect(result.finalEvent?.finishReason).toBe('stop');
+    expect(result.threadId).toBe('t-9');
+    expect(result.completed).toBe(true);
+  });
+
+  it('honours a trailing [DONE] with no blank line', async () => {
+    fetchSpy.mockResolvedValue(
+      mockStreamResponse([sseFrame({ delta: 'x' }), 'data: [DONE]']),
+    );
+
+    const result = await streamChat(options());
+
+    expect(result.completed).toBe(true);
+  });
+
+  it('records an isError event on result.error, not just via onError', async () => {
+    const onError = vi.fn();
+    fetchSpy.mockResolvedValue(
+      mockStreamResponse([
+        sseFrame({ isError: true, errorMessage: 'model refused' }),
+        sseDone(),
+      ]),
+    );
+
+    const result = await streamChat(options({ onError }));
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(result.error).toBeInstanceOf(Error);
+    expect(result.error?.message).toBe('model refused');
+  });
+
+  it('releases the body reader when [DONE] returns early', async () => {
+    const cancel = vi.fn(async () => {});
+    const chunks = [sseFrame({ delta: 'a' }), sseDone(), sseFrame({ delta: 'never' })];
+    let index = 0;
+    const reader = {
+      read: async () => (index < chunks.length
+        ? { done: false, value: new TextEncoder().encode(chunks[index++]!) }
+        : { done: true, value: undefined }),
+      cancel,
+    };
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      body: { getReader: () => reader },
+      headers: new Headers(),
+      text: async () => '',
+    } as unknown as Response);
+
+    const result = await streamChat(options());
+
+    expect(result.completed).toBe(true);
+    // Without this the reader stayed locked and the connection un-recycled.
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the body reader on normal completion too', async () => {
+    const cancel = vi.fn(async () => {});
+    let served = false;
+    const reader = {
+      read: async () => {
+        if (served) return { done: true, value: undefined };
+        served = true;
+        return { done: false, value: new TextEncoder().encode(sseFrame({ isDone: true })) };
+      },
+      cancel,
+    };
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      body: { getReader: () => reader },
+      headers: new Headers(),
+      text: async () => '',
+    } as unknown as Response);
+
+    await streamChat(options());
+
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

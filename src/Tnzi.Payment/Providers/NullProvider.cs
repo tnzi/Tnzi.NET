@@ -12,7 +12,7 @@ public class NullProvider : IPaymentProvider
 
     public NullProvider(ILogger<NullProvider> logger)
     {
-        _logger = logger;
+        _logger = Check.NotNull(logger);
     }
 
     public bool IsSupported(PaymentMethod method)
@@ -75,7 +75,8 @@ public class NullProvider : IPaymentProvider
     {
         parameters.TryGetValue("trade_no", out var tradeNo);
         parameters.TryGetValue("amount", out var amountText);
-        decimal.TryParse(amountText, out var amount);
+        // 回调金额一律按 invariant 解析：跟随服务器区域会把 "12.34" 在小数逗号区域解析成 1234
+        decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount);
 
         return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
         {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Abstractions;
 
 /// <summary>
-/// 消息总线 — 连接 Adapter（入站）和 Manager（处理+出站）
+/// 消息总线 - 连接 Adapter（入站）和 Manager（处理+出站）
 /// </summary>
 public interface IChannelMessageBus
 {

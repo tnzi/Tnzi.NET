@@ -30,7 +30,7 @@ public class AuditIgnoredVault : EntityBase<Guid>
 }
 
 /// <summary>
-/// 实体级审计拦截器测试 DbContext — 真实 TnziDbContext + SQLite + 拦截器挂载
+/// 实体级审计拦截器测试 DbContext - 真实 TnziDbContext + SQLite + 拦截器挂载
 /// </summary>
 public class EntityAuditTestDbContext : TnziDbContext<EntityAuditTestDbContext>
 {
@@ -72,7 +72,7 @@ public class EntityAuditTestDbContext : TnziDbContext<EntityAuditTestDbContext>
 }
 
 /// <summary>
-/// EntityAuditSaveChangesInterceptor 集成测试 — 真实 SQLite + TnziDbContext 保存管线
+/// EntityAuditSaveChangesInterceptor 集成测试 - 真实 SQLite + TnziDbContext 保存管线
 /// </summary>
 public class EntityAuditSaveChangesInterceptorTests : IDisposable
 {

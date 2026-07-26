@@ -11,6 +11,7 @@
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="accountFormSchema"
+        :sections="accountFormSections"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
         :field-renderers="fieldRenderers"
@@ -39,7 +40,13 @@ import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer, type FieldRenderContext } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { accountColumns, accountFormSchema, isSystemRoleAccount, type AccountRow } from './account-config'
+import {
+  accountColumns,
+  accountFormSchema,
+  accountFormSections,
+  isSystemRoleAccount,
+  type AccountRow,
+} from './account-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.accounts')

@@ -1,7 +1,7 @@
 namespace Tnzi.Localization.Tests.Json;
 
 /// <summary>
-/// Tests for JsonStringLocalizer.FlattenJsonElement — nested JSON flattening with dot notation
+/// Tests for JsonStringLocalizer.FlattenJsonElement - nested JSON flattening with dot notation
 /// </summary>
 public class JsonStringLocalizerFlattenTests
 {

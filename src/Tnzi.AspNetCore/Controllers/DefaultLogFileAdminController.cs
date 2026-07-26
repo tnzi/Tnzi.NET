@@ -6,12 +6,12 @@ namespace Tnzi.AspNetCore.Controllers;
 /// <summary>
 /// Admin-facing read access to the on-disk log files produced by
 /// <c>Tnzi.Logging</c>'s Serilog file sinks. Routes:
-///   GET /admin/logs/levels                       — list level dirs + summary
-///   GET /admin/logs/files?level=Error            — list files in a level
-///   GET /admin/logs/tail?level=Error&amp;file=...   — last N lines
-///   GET /admin/logs/search?keyword=...&amp;level=…  — case-insensitive grep
+///   GET /admin/logs/levels                       - list level dirs + summary
+///   GET /admin/logs/files?level=Error            - list files in a level
+///   GET /admin/logs/tail?level=Error&amp;file=...   - last N lines
+///   GET /admin/logs/search?keyword=...&amp;level=…  - case-insensitive grep
 ///
-/// All endpoints are read-only — there is no delete/edit because the log
+/// All endpoints are read-only - there is no delete/edit because the log
 /// files are runtime artefacts owned by Serilog (retention is configured
 /// server-side via <c>LoggingOptions.FileOutput.*.RetainedFileCountLimit</c>).
 /// </summary>

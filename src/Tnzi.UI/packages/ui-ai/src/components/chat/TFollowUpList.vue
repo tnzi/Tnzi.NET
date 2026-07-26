@@ -1,14 +1,13 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TFollowUpList — Manus-style "Suggested follow-ups" vertical list.
+ * TFollowUpList - Manus-style "Suggested follow-ups" vertical list.
  *
  * Renders a compact stack of full-width rows, each with a leading icon,
  * the suggestion text, and a trailing arrow. Use after a task completes
  * to nudge the user toward relevant next steps.
  *
- * Distinct from the horizontal `Suggestions` pill chip component —
- * this is a post-task "here's what to try next" list, not a prompt
+ * Distinct from the horizontal `Suggestions` pill chip component - * this is a post-task "here's what to try next" list, not a prompt
  * starter chip row.
  */
 import { Icon } from '@iconify/vue'

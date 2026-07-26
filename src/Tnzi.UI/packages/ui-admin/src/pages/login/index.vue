@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Login route component — registered at `/login/:module(…)?` (see
+ * Login route component - registered at `/login/:module(…)?` (see
  * `router/routes.ts`). Soybean reference:
  * `src/views/_builtin/login/index.vue`.
  *
@@ -65,7 +65,7 @@ const moduleComponents = {
 const route = useRoute()
 const router = useRouter()
 const config = useAdminLoginConfig()
-// Optional — isolated mounts / tests may have no client; the config fetch and
+// Optional - isolated mounts / tests may have no client; the config fetch and
 // OAuth auto-render are simply skipped in that case.
 const client = useAdminClient(false)
 
@@ -93,11 +93,11 @@ const activeModule = computed<LoginModule>(() => {
 })
 
 function toggleLoginModule(name: LoginModule): void {
-  // `replace` (not `push`) so each module switch doesn't pollute history —
+  // `replace` (not `push`) so each module switch doesn't pollute history -
   // matches soybean's `useRouterPush().toggleLoginModule` behaviour.
   // Navigate by route NAME + module param: a literal `/login/${name}` path
   // breaks whenever the login route is mounted under a basePath prefix
-  // (e.g. '/admin/login/...') — names are deployment/prefix-agnostic.
+  // (e.g. '/admin/login/...') - names are deployment/prefix-agnostic.
   // Carry the current query along so the `?next=` deep-link (written by the
   // auth guard / session-expired redirect) survives module switches and the
   // post-login redirect still lands on the original page.
@@ -105,7 +105,7 @@ function toggleLoginModule(name: LoginModule): void {
 }
 
 /**
- * Default translate function — drives the login modules through the bundled
+ * Default translate function - drives the login modules through the bundled
  * `admin.login.*` locale entries. The consumer can override by passing
  * `defineAdminApp({ login: { translate } })`; we only fall back to the
  * built-in resolver when no override was supplied so existing custom
@@ -139,7 +139,7 @@ onMounted(async () => {
       autoThirdParty.value = buildOAuthProviders(res.data.oAuthProviders ?? [], client)
     }
   } catch {
-    // Backend too old / unreachable — keep the merged defaults (everything on).
+    // Backend too old / unreachable - keep the merged defaults (everything on).
   }
 })
 </script>

@@ -1,8 +1,10 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage :state="crud" :all-columns="columns"
+    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="itemFormSchema"
+        :sections="itemFormSections"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
         :field-renderers="fieldRenderers"
@@ -22,13 +24,22 @@ import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { createFinanceOptionSources } from './options'
-import { buildItemColumns, itemFormSchema, type ItemRow } from './item-config'
+import {
+  buildItemSearchFields,
+  buildItemColumns,
+  itemFormSchema,
+  itemFormSections,
+  type ItemRow,
+} from './item-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.items')
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildItemColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildItemSearchFields(t)
 
 function toPayload(d: Record<string, unknown>): UpdateItemDto {
   return {

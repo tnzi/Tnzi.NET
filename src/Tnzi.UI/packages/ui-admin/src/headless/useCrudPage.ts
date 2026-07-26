@@ -14,14 +14,14 @@ import { normalizeCrudPermission, canAction, type CrudActionPermissions } from '
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
  *
  * Field-level alignment with `@tnzi/core`'s `FullPagedQueryDto` shape:
- *  - `pageIndex` / `pageSize` — identical contract (1-based index, items per page)
- *  - `searchText`             — equivalent to FullPagedQueryDto.keyword
- *  - `sortField` + `sortOrder` — equivalent to FullPagedQueryDto.sortBy + sortDescending
- *  - `filters`                — ui-admin-specific (FullPagedQueryDto has no
+ *  - `pageIndex` / `pageSize` - identical contract (1-based index, items per page)
+ *  - `searchText` - equivalent to FullPagedQueryDto.keyword
+ *  - `sortField` + `sortOrder` - equivalent to FullPagedQueryDto.sortBy + sortDescending
+ *  - `filters` - ui-admin-specific (FullPagedQueryDto has no
  *                               typed filter bag; pages typically extend it
  *                               via subclassing on the .NET side)
  *
- * The names diverge from FullPagedQueryDto for backward compatibility — 30+
+ * The names diverge from FullPagedQueryDto for backward compatibility - 30+
  * bridges + 60+ pages built against the legacy shape. The `_mappers.ts`
  * `mapQueryToListRequest` helper bridges the names when calling the backend.
  */
@@ -36,13 +36,13 @@ export interface CrudPageQuery {
 
 /**
  * 0.2.72+ (C4): `CrudPageResult<T>` is now an alias for `@tnzi/core`'s
- * `PagedList<T>` — a strict superset that also carries `totalPages`,
+ * `PagedList<T>` - a strict superset that also carries `totalPages`,
  * `hasPreviousPage`, `hasNextPage` (handy for pagination UI). The legacy
  * minimal shape (items / totalCount / pageIndex / pageSize) stays valid
  * because PagedList includes those four fields.
  *
  * Bridges that previously returned `{ items, totalCount, pageIndex, pageSize }`
- * keep working — the framework's `mapResultToCrud` helper now fills in
+ * keep working - the framework's `mapResultToCrud` helper now fills in
  * the missing `totalPages` / `hasPreviousPage` / `hasNextPage` fields
  * automatically so downstream consumers can rely on the full PagedList
  * surface.
@@ -90,7 +90,7 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    */
   onError?: (err: Error, op: CrudPageOp) => boolean | void
   /**
-   * Retry attempts for `fetchData` on transient failures. Default `3` —
+   * Retry attempts for `fetchData` on transient failures. Default `3` -
    * three retries with exponential backoff, then surface the error. Set
    * to `0` to disable retries.
    *
@@ -102,7 +102,7 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   retryFetch?: number
   /**
    * Base delay (ms) for the exponential retry backoff. Each attempt waits
-   * `retryDelayMs * 2 ** attempt` — defaults give 300 → 600 → 1200ms.
+   * `retryDelayMs * 2 ** attempt` - defaults give 300 → 600 → 1200ms.
    */
   retryDelayMs?: number
   /** Presentation mode for the add/edit/view detail. Default 'modal'. */
@@ -110,7 +110,7 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   /**
    * Two-way sync the add/edit/view overlay (which mode + which record) to a
    * URL query key so it is **deep-linkable, refresh-survivable and
-   * Back-closeable** — `?detail=view:<id>` / `=edit:<id>` / `=new`. On by
+   * Back-closeable** - `?detail=view:<id>` / `=edit:<id>` / `=new`. On by
    * default (key `'detail'`); a string renames the key (only to avoid a clash);
    * `false` opts the page out. Coexists with section deep-links and business
    * query params in the same URL (`?detail=view:42&section=overview`). No-ops
@@ -125,7 +125,7 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    */
   loadDetailById?: (id: string) => Promise<T | null>
   /**
-   * Called whenever the detail opens in **view** mode — both an in-session
+   * Called whenever the detail opens in **view** mode - both an in-session
    * `openView(row)` AND a deep-link / refresh that restores `?detail=view:<id>`.
    * Use it to lazy-load the record's related data for a read-only `#detail`
    * drawer (e.g. the agents using a persona, a thread's messages) without
@@ -133,7 +133,7 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    */
   onView?: (row: T) => void
   /**
-   * Load the first page automatically on construction. Default `true` — the
+   * Load the first page automatically on construction. Default `true` - the
    * hook fires `refresh()` once so pages no longer need the boilerplate
    * `crud.refresh().catch(() => undefined)` line in setup. Set `false` for
    * pages that must configure filters or await a parent resource before the
@@ -196,7 +196,13 @@ export interface UseCrudPageReturn<T, TId = string | number> {
   setSort: (field: string | undefined, order: 'asc' | 'desc' | null) => void
   setFilters: (filters: Record<string, unknown>) => void
   resetQuery: () => void
-  openCreate: () => void
+  /**
+   * Open the create form. `seed` pre-fills fields - used when another page
+   * hands off with context ("Receive payment" from a customer page already
+   * knows the party); without it the operator retypes what the link already
+   * said.
+   */
+  openCreate: (seed?: Partial<T> | MouseEvent) => void
   openEdit: (row: T) => void
   openView: (row: T) => void
   submit: () => Promise<T | null>
@@ -270,7 +276,7 @@ export function useCrudPage<T, TId = string | number>(
   })
   const batchActions = useBatchActions<TId>()
 
-  // The add/edit/view overlay is a `useDetail` instance — the single detail
+  // The add/edit/view overlay is a `useDetail` instance - the single detail
   // engine. useCrudPage keeps its own create/update/refresh business logic
   // (`submit` below) and exposes `detail.form` AS its public `formModal`, so the
   // 60+ consuming pages' API is unchanged while the overlay open-state ⇄ URL
@@ -288,7 +294,7 @@ export function useCrudPage<T, TId = string | number>(
   const detailMode = detail.mode
 
   // Fire `onView` whenever the detail opens (or restores via deep-link) in view
-  // mode, keyed on the viewed record — so a page can lazy-load related data for
+  // mode, keyed on the viewed record - so a page can lazy-load related data for
   // its read-only `#detail` drawer without touching open-state plumbing. Keyed
   // on identity so re-opening the SAME record after a close fires again.
   if (options.onView) {
@@ -306,7 +312,7 @@ export function useCrudPage<T, TId = string | number>(
   /**
    * Run `op` and route any thrown error through `options.onError` plus
    * the global toast fallback. Always re-throws so the caller still sees
-   * the failure — onError is a side channel for messaging, not a swallow.
+   * the failure - onError is a side channel for messaging, not a swallow.
    */
   async function runWithErrorHandling<R>(op: CrudPageOp, fn: () => Promise<R>): Promise<R> {
     try {
@@ -321,42 +327,69 @@ export function useCrudPage<T, TId = string | number>(
     }
   }
 
+  /**
+   * Request sequence token.
+   *
+   * Type a keyword, hit Search, then immediately page: two loads are in flight.
+   * If the first is slower it resolves last and paints page 1's rows while the
+   * pager still reads "2". Every entry point here is fire-and-forget
+   * (`void refresh()` from setPage / setPageSize / the shell's toolbar), so
+   * nothing else serialises them. Only the newest request may write
+   * `items` / `total` / `error` / `loading`.
+   *
+   * The same defect was fixed in `useGlDrilldown` first; this is the base every
+   * list page rides on, so it belongs here rather than in one page's hook.
+   */
+  let seq = 0
+
+  /**
+   * Reload the current page.
+   *
+   * **Never rejects.** Failures land in `error` (and the toast) instead, because
+   * every call site is `void refresh()` - a rejected promise there becomes an
+   * unhandled rejection, which in Vite dev throws a full-screen overlay over an
+   * error the page has already reported properly.
+   */
   async function refresh(): Promise<void> {
+    const token = ++seq
     loading.value = true
     error.value = null
     let lastErr: Error | null = null
-    try {
-      for (let attempt = 0; attempt <= retryAttempts; attempt++) {
-        try {
-          const result = await options.fetchData({ ...query.value })
-          items.value = result.items
-          total.value = result.totalCount
-          options.onRefresh?.()
-          return
-        } catch (rawErr) {
-          lastErr = rawErr instanceof Error ? rawErr : new Error(String(rawErr))
-          if (attempt < retryAttempts) {
-            // Exponential backoff. Skip the wait entirely when base = 0
-            // (typical in tests) so unit assertions can race the loop
-            // without faking timers.
-            if (retryBaseMs > 0) {
-              await sleep(retryBaseMs * 2 ** attempt)
-            }
-            continue
+
+    for (let attempt = 0; attempt <= retryAttempts; attempt++) {
+      try {
+        const result = await options.fetchData({ ...query.value })
+        if (token !== seq) return
+        items.value = result.items
+        total.value = result.totalCount
+        options.onRefresh?.()
+        loading.value = false
+        return
+      } catch (rawErr) {
+        if (token !== seq) return
+        lastErr = rawErr instanceof Error ? rawErr : new Error(String(rawErr))
+        if (attempt < retryAttempts) {
+          // Exponential backoff. Skip the wait entirely when base = 0
+          // (typical in tests) so unit assertions can race the loop
+          // without faking timers.
+          if (retryBaseMs > 0) {
+            await sleep(retryBaseMs * 2 ** attempt)
           }
+          continue
         }
       }
-      // All attempts exhausted — record the error and surface it.
-      const finalErr = lastErr ?? new Error('Unknown fetch error')
-      error.value = finalErr
-      const suppressed = options.onError?.(finalErr, 'fetch') === false
-      if (!suppressed) {
-        getGlobalMessage()?.error(finalErr.message)
-      }
-      throw finalErr
-    } finally {
-      loading.value = false
     }
+
+    if (token !== seq) return
+
+    // All attempts exhausted. Record it and tell the user; do not rethrow.
+    const finalErr = lastErr ?? new Error('Unknown fetch error')
+    error.value = finalErr
+    const suppressed = options.onError?.(finalErr, 'fetch') === false
+    if (!suppressed) {
+      getGlobalMessage()?.error(finalErr.message)
+    }
+    loading.value = false
   }
 
   function dismissError(): void {
@@ -378,7 +411,14 @@ export function useCrudPage<T, TId = string | number>(
   }
 
   function setSort(field: string | undefined, order: 'asc' | 'desc' | null): void {
+    // Sorting is server-side, so a new sort has to refetch. Without this the
+    // function only mutated `query` and nothing ever happened, which is why the
+    // whole sort path read as wired but dead.
+    // The page index is deliberately kept: "page 3 of the new ordering" is a
+    // well-defined place to be, and jumping the reader back to the top on every
+    // header click is more disruptive than useful.
     query.value = { ...query.value, sortField: field, sortOrder: order }
+    void refresh()
   }
 
   function setFilters(filters: Record<string, unknown>): void {
@@ -389,14 +429,19 @@ export function useCrudPage<T, TId = string | number>(
     query.value = makeInitialQuery()
   }
 
-  function openCreate(): void {
-    // Open create with a fresh empty object — `useFormModal.open(mode, null)`
+  function openCreate(seed?: Partial<T> | MouseEvent): void {
+    // Open create with a fresh empty object - `useFormModal.open(mode, null)`
     // would set formData to null, which fast-paths submit() into "close
     // without calling createData" (the `!data` guard). Page form templates
     // typically render `:model="(formData ?? {}) as Record<string, unknown>"`
     // which would otherwise hand the user a throwaway local object whose
     // edits never propagate back to formData.
-    formModal.open('create', {} as T)
+    // `MouseEvent` is in the signature because dozens of pages bind
+    // `@click="crud.openCreate"` directly - the browser hands us the event.
+    // Spreading it would inject `isTrusted` into formData and ship it to the
+    // backend, so events are discarded here rather than at every call site.
+    const safe = seed && typeof seed === 'object' && !(typeof Event !== 'undefined' && seed instanceof Event) ? (seed as Partial<T>) : undefined
+    formModal.open('create', { ...(safe ?? {}) } as T)
   }
 
   function openEdit(row: T): void {

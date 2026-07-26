@@ -5,7 +5,7 @@ import type { AgentExecutionMode } from '@tnzi/core/services/ai'
  * AgentExecutionMode member names, mirrored locally as a const map.
  *
  * The page-layer ESLint guard (`no-restricted-imports`) forbids *value*
- * imports from `@tnzi/core/services/*` — only `import type` is allowed — and
+ * imports from `@tnzi/core/services/*` - only `import type` is allowed - and
  * the ai-bridge does not re-export this enum. The backend serializes the enum
  * as its PascalCase member NAME (global JsonStringEnumConverter), so this local
  * mirror uses the name strings; the `AgentExecutionMode` *type* is still
@@ -24,12 +24,12 @@ const ExecMode = {
  * Field shape derives from @tnzi/core/services/ai AgentDto / CreateAgentDto /
  * UpdateAgentDto. Agents render as a production-grade TCardPage grid (tier
  * badges + health KPI strip + clone + drill-in detail), so the card owns
- * presentation — there are no table columns, only the create/edit form schema,
+ * presentation - there are no table columns, only the create/edit form schema,
  * the keyword + advanced search fields, and a few pure-data lookup maps the
  * card consumes (execution-mode labels, tier labels).
  *
  * useCrudPage is fed an empty `columns: []` by the page (the card slot owns
- * rendering), so this config no longer exports a `columns` table — only the
+ * rendering), so this config no longer exports a `columns` table - only the
  * form schema, search fields, option lists, and label/type helpers.
  */
 
@@ -89,7 +89,7 @@ export function tierLabelKey(tier: number | null | undefined): string {
   return 'tier.high'
 }
 
-/** Naive tag type for a tier badge — low=warning, medium=info, high=success. */
+/** Naive tag type for a tier badge - low=warning, medium=info, high=success. */
 export function tierTagType(tier: number | null | undefined): 'success' | 'info' | 'warning' {
   const n = typeof tier === 'number' ? tier : 0
   if (n <= 1) return 'warning'

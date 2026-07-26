@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流节点执行上下文 — 节点执行时的环境信息
+/// 工作流节点执行上下文 - 节点执行时的环境信息
 /// </summary>
 public class WorkflowNodeContext
 {

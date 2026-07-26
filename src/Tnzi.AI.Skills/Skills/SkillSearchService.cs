@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能搜索服务实现 — Tier 1 关键词加权评分，Tier 2 语义降级（嵌入余弦相似度）。
+/// 技能搜索服务实现 - Tier 1 关键词加权评分，Tier 2 语义降级（嵌入余弦相似度）。
 /// </summary>
 /// <remarks>
 /// 评分权重：Name ×3.0 | Tags ×2.0 | WhenToUse ×1.5 | Description ×1.0
@@ -77,7 +77,7 @@ public class SkillSearchService : ISkillSearchService
             return keywordResults;
         }
 
-        // Tier 2: 语义降级 — 仅在关键词结果不足且嵌入服务可用时触发
+        // Tier 2: 语义降级 - 仅在关键词结果不足且嵌入服务可用时触发
         if (_embeddingService == null)
         {
             return keywordResults;
@@ -143,6 +143,8 @@ public class SkillSearchService : ISkillSearchService
 
             return keywordResults;
         }
+        // 取消必须冒泡，不能被降级为"语义搜索失败"（与 DatabaseSkillStore 同一约定）
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             // 语义搜索失败不应影响关键词结果
@@ -163,7 +165,7 @@ public class SkillSearchService : ISkillSearchService
                 total += NameWeight;
             }
 
-            // Tags match — any tag contains the token
+            // Tags match - any tag contains the token
             if (skill.Tags.Any(tag => tag.Contains(token, StringComparison.OrdinalIgnoreCase)))
             {
                 total += TagWeight;

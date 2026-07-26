@@ -45,7 +45,7 @@
 
     <!-- Touch/phone: a persistent "more" button opens the same quick-action menu
          (pin / mute / mark-read / hide / delete) that right-click opens on
-         desktop — touch devices have no @contextmenu. It reuses the exact same
+         desktop - touch devices have no @contextmenu. It reuses the exact same
          `context-menu` channel: TConversationList reads the click coordinates
          (clientX/clientY of this tap) to anchor its shared NDropdown. Stops
          propagation so tapping it doesn't also select the conversation. -->
@@ -75,13 +75,13 @@ import TGroupAvatar from './TGroupAvatar.vue'
 const props = defineProps<{
   item: ConversationListItemDto
   active: boolean
-  /** Deployment presence toggle — false hides the peer status dot. */
+  /** Deployment presence toggle - false hides the peer status dot. */
   presence?: boolean
 }>()
 
 const emit = defineEmits<{
   select: []
-  /** Right-click (desktop) or the "more" tap (touch) — the list opens the
+  /** Right-click (desktop) or the "more" tap (touch) - the list opens the
    *  quick-action context menu at the event's cursor coordinates. */
   'context-menu': [e: MouseEvent]
 }>()

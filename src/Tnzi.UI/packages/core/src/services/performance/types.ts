@@ -1,10 +1,10 @@
 /**
- * Performance Module Types — mirrors `Tnzi.Performance.Dtos.*` on the .NET side.
+ * Performance Module Types - mirrors `Tnzi.Performance.Dtos.*` on the .NET side.
  *
  * Models the runtime request-timing surface exposed by
  * `Tnzi.Performance/Controllers/DefaultPerformanceAdminController`
  * (`/admin/performance/*`). `Tnzi.Performance` is an optional infrastructure
- * module — when the host app doesn't load it, every endpoint returns 404.
+ * module - when the host app doesn't load it, every endpoint returns 404.
  */
 
 /** Percentile breakdown of request durations over a window. */

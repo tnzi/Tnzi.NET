@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { formatCurrency, formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
@@ -6,7 +7,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { StatusType } from '@tnzi/ui'
 
 /**
- * Orders page config — aligned with the real `PaymentDto`
+ * Orders page config - aligned with the real `PaymentDto`
  * (Tnzi.Payment.Dtos.PaymentDto). The record keys on `tradeNo` (there is no
  * `paymentNo` / `userId` / `amount` / `refundAmount`); money is
  * `originalAmount` / `paidAmount` / `discountAmount`.
@@ -64,13 +65,13 @@ export const orderStatusOptions = Object.keys(STATUS_KEY).map((member) => ({
 
 type Money = number | null | undefined
 function money(amount: Money, currency: string | null | undefined): string {
-  if (amount === null || amount === undefined) return '—'
+  if (amount === null || amount === undefined) return EMPTY_DASH
   return formatCurrency(Number(amount), String(currency || 'USD'))
 }
 
 /**
  * Build the Orders columns. A factory (not a static const) so the enum-label /
- * currency / date renderers resolve through the page translator `t` — mirrors
+ * currency / date renderers resolve through the page translator `t` - mirrors
  * the finance `buildJournalEntryColumns(t)` convention.
  */
 export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
@@ -83,7 +84,7 @@ export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
       width: 120,
       render: (row) => {
         const v = String(row.businessType ?? '')
-        return BUSINESS_TYPE_KEY[v] ? t(`businessType.${BUSINESS_TYPE_KEY[v]}`) : v || '—'
+        return BUSINESS_TYPE_KEY[v] ? t(`businessType.${BUSINESS_TYPE_KEY[v]}`) : v || EMPTY_DASH
       },
     },
     {
@@ -102,7 +103,7 @@ export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
         return h(TStatusBadge, {
           value: v,
           type: STATUS_TONE[v] ?? 'default',
-          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || '—',
+          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || EMPTY_DASH,
         })
       },
     },
@@ -112,7 +113,7 @@ export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
       width: 130,
       render: (row) => {
         const v = String(row.paymentMethod ?? '')
-        return METHOD_KEY[v] ? t(`paymentMethod.${METHOD_KEY[v]}`) : v || '—'
+        return METHOD_KEY[v] ? t(`paymentMethod.${METHOD_KEY[v]}`) : v || EMPTY_DASH
       },
     },
     {
@@ -120,7 +121,7 @@ export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
       title: 'columns.channel',
       width: 120,
       visible: false,
-      render: (row) => (row.channelCode ? String(row.channelCode) : '—'),
+      render: (row) => (row.channelCode ? String(row.channelCode) : EMPTY_DASH),
     },
     {
       key: 'paidTime',

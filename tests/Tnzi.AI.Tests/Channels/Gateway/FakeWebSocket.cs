@@ -51,7 +51,7 @@ public sealed class FakeWebSocket : WebSocket
         cancellationToken.ThrowIfCancellationRequested();
         if (_receiveScript.Count == 0)
         {
-            // Block until cancelled — mimics an idle open connection.
+            // Block until cancelled - mimics an idle open connection.
             await Task.Delay(Timeout.Infinite, cancellationToken);
         }
 

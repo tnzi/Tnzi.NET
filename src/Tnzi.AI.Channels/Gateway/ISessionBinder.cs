@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// 会话绑定解析器 — 根据规则将入站请求映射到 Agent + Scope + SessionKey
+/// 会话绑定解析器 - 根据规则将入站请求映射到 Agent + Scope + SessionKey
 /// </summary>
 [ExperimentalApi(Reason = "Gateway API under active development")]
 public interface ISessionBinder

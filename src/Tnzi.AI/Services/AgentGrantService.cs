@@ -1,10 +1,10 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// Agent 授权服务实现 — 管理 Agent ↔ 工具/技能/知识库的 junction grant。
+/// Agent 授权服务实现 - 管理 Agent ↔ 工具/技能/知识库的 junction grant。
 /// 见 <see cref="IAgentGrantService"/>。reconcile 复刻原 UpdateAgentDto 的 tri-state PATCH 语义，
 /// 删除走仓储软删除（<c>DeleteAsync</c>），保留两侧都存在的现有条目以不丢失 admin 设置的 Priority/IsEnabled。
-/// Agent grant service — manages the Agent ↔ tool/skill/knowledge junction grants. See <see cref="IAgentGrantService"/>.
+/// Agent grant service - manages the Agent ↔ tool/skill/knowledge junction grants. See <see cref="IAgentGrantService"/>.
 /// Reconcile replicates the legacy UpdateAgentDto tri-state PATCH semantics; removals use the repository's
 /// soft-delete (<c>DeleteAsync</c>), and grants present in both old and new sets are left untouched so that
 /// admin-set Priority/IsEnabled are preserved.
@@ -126,7 +126,7 @@ public class AgentGrantService : ApplicationService, IAgentGrantService
             .ToList();
 
     // =====================================================================
-    // Reconcile (write) — tri-state PATCH semantics
+    // Reconcile (write) - tri-state PATCH semantics
     // =====================================================================
 
     public async Task ReconcileToolGroupsAsync(Guid agentId, IReadOnlyList<string>? groups, CancellationToken ct = default)
@@ -313,7 +313,7 @@ public class AgentGrantService : ApplicationService, IAgentGrantService
     }
 
     // =====================================================================
-    // Reverse query — "which agents use resource X"
+    // Reverse query - "which agents use resource X"
     // =====================================================================
 
     public async Task<IReadOnlyList<Guid>> GetAgentsUsingToolAsync(string toolKey, CancellationToken ct = default)

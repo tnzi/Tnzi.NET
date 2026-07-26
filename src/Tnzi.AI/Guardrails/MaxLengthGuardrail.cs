@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// 输入长度限制 Guardrail — 拒绝超过最大长度的输入
+/// 输入长度限制 Guardrail - 拒绝超过最大长度的输入
 /// </summary>
 public class MaxLengthGuardrail : IInputGuardrail, IGuardrailProvider
 {

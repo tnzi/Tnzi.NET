@@ -43,7 +43,7 @@ export function useLoginAccountField(
             translate('admin.login.errorAccountFormat', 'Enter a valid email or phone number'),
           )
     // Tag each rule with key 'account' so the modules' per-field validation
-    // before sending a code — `validate(_, r => r.key === 'account')` — actually
+    // before sending a code - `validate(_, r => r.key === 'account')` - actually
     // matches. naive-ui does NOT inject key/path onto merged rules, so without
     // this the predicate matches zero rules and the account is never validated.
     return base.map((ru) => ({ ...ru, key: 'account' }))

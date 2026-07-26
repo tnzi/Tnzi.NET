@@ -4,6 +4,8 @@
  * Platform-agnostic loading bar adapter.
  */
 
+import { createAdapterSingleton } from './singleton';
+
 export interface LoadingBarAdapter {
   start(): void;
   finish(): void;
@@ -20,17 +22,16 @@ class NoopLoadingBarAdapter implements LoadingBarAdapter {
 // Singleton
 // ============================================
 
-const _fallback: LoadingBarAdapter = new NoopLoadingBarAdapter();
-let _active: LoadingBarAdapter | null = null;
+const _slot = createAdapterSingleton<LoadingBarAdapter>('loading-bar', () => new NoopLoadingBarAdapter());
 
 export function setLoadingBarAdapter(adapter: LoadingBarAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useLoadingBar(): LoadingBarAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetLoadingBarAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

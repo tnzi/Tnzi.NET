@@ -3,7 +3,7 @@ using Tnzi.AI.Services.Interfaces;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// NoOpReranker 单元测试 — 验证透传重排序器原样返回输入
+/// NoOpReranker 单元测试 - 验证透传重排序器原样返回输入
 /// </summary>
 public class NoOpRerankerTests
 {

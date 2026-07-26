@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.ContextProviders;
 
 /// <summary>
-/// 实体记忆上下文提供器 — 从 IEntityMemoryStore 加载已知实体并注入上下文，
+/// 实体记忆上下文提供器 - 从 IEntityMemoryStore 加载已知实体并注入上下文，
 /// 在对话完成后从助手回复中提取新实体并持久化
 /// </summary>
 public sealed class EntityMemoryContextProvider : IContextProvider

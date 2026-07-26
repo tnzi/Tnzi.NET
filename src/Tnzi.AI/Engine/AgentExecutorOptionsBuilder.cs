@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// AgentExecutorOptions 构建器 — 负责构建 AgentExecutorOptions（含 HistoryReducer）。
+/// AgentExecutorOptions 构建器 - 负责构建 AgentExecutorOptions（含 HistoryReducer）。
 /// </summary>
 /// <remarks>
 /// 从 AgentFactory 提取，职责为：

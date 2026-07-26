@@ -25,7 +25,7 @@
       </button>
     </div>
 
-    <!-- Contact list — fixed height on desktop so the dialog footprint never
+    <!-- Contact list - fixed height on desktop so the dialog footprint never
          jumps as the list fills in (shown immediately on open, no need to type
          first). On a phone (isSm) the fixed 300px can be taller than the whole
          viewport once the keyboard is up, so it flexes to a dvh-capped height
@@ -117,7 +117,7 @@ const canSubmit = computed(() => {
 })
 
 // Load the directory list (blank keyword = starting list) so contacts show up
-// the moment the dialog opens — no "type to see anything" dead state.
+// the moment the dialog opens - no "type to see anything" dead state.
 async function load(kw: string) {
   loading.value = true
   try {
@@ -210,7 +210,7 @@ defineExpose({ reset, contacts, selected, selectedIds, groupName, keyword, toggl
 </script>
 
 <style scoped>
-/* Search pill — matches the conversation list search styling */
+/* Search pill - matches the conversation list search styling */
 .t-new-chat__search {
   display: flex;
   align-items: center;

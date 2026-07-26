@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能存储接口（只读）— 从数据源加载技能。
+/// 技能存储接口（只读）- 从数据源加载技能。
 /// 写操作（CRUD）由 ISkillService 通过 IRepository 直接处理。
 /// </summary>
 public interface ISkillStore

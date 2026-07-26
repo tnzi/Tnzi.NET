@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `THeaderBanner` — soybean-style dashboard welcome banner: greeting +
+ * `THeaderBanner` - soybean-style dashboard welcome banner: greeting +
  * username + live datetime on the left, optional decorative SVG / image
  * slot on the right.
  *
@@ -108,7 +108,7 @@ const formattedTime = computed(() => {
   justify-content: space-between;
   gap: 24px;
   /* soybean parity: banner spans the full content width like soybean's
-     home-page hero card — flex default `width: auto` was leaving it
+     home-page hero card - flex default `width: auto` was leaving it
      stuck at content width inside a `flex-direction: column` parent. */
   width: 100%;
   padding: 20px 24px;

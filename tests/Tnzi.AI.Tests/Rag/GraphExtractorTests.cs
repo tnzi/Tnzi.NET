@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// LlmGraphExtractor 单元测试 — 验证知识图谱实体关系提取
+/// LlmGraphExtractor 单元测试 - 验证知识图谱实体关系提取
 /// </summary>
 public class GraphExtractorTests
 {

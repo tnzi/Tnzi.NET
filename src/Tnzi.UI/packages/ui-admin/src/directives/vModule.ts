@@ -1,13 +1,13 @@
 /**
- * `v-module` directive — hide/remove an element when the backend host did NOT
+ * `v-module` directive - hide/remove an element when the backend host did NOT
  * load a required framework module (per `GET /admin/shell/modules`). The
  * module-availability twin of `v-permission`.
  *
  * Use modes:
- *   v-module="'chat'"                 — remove element unless Chat is loaded
- *   v-module="['chat','notification']" — remove unless ALL modules are loaded
- *   v-module.any="['a','b']"          — remove only if NONE is loaded (any-of)
- *   v-module.hide="'chat'"            — set visibility:hidden instead of removing
+ *   v-module="'chat'" - remove element unless Chat is loaded
+ *   v-module="['chat','notification']" - remove unless ALL modules are loaded
+ *   v-module.any="['a','b']" - remove only if NONE is loaded (any-of)
+ *   v-module.hide="'chat'" - set visibility:hidden instead of removing
  *
  * Backed by `useAdminRouteStore.availableModules`. FAIL-OPEN while the signal
  * is unavailable (older backend / probe in flight / `moduleGating` disabled),
@@ -31,7 +31,7 @@ const stopHandles = new WeakMap<HTMLElement, WatchStopHandle>()
 function evaluate(value: ModuleValue, anyMode: boolean): boolean {
   const routeStore = useAdminRouteStore()
   const available = routeStore.availableModules
-  // Fail-open while the loaded-module signal is unavailable — mirrors the
+  // Fail-open while the loaded-module signal is unavailable - mirrors the
   // sidebar module gate. A missing signal must never blank UI.
   if (available === null) return true
   const loaded = (m: string): boolean => available.has(normalizeModuleName(m))
@@ -59,7 +59,7 @@ function apply(el: HTMLElement, binding: DirectiveBinding<ModuleValue>): void {
 export const vModule: Directive<HTMLElement, ModuleValue> = {
   mounted(el, binding) {
     // Reactive: re-apply whenever the module signal changes (it loads after
-    // mount via the install() probe, refreshes after login) — `evaluate`
+    // mount via the install() probe, refreshes after login) - `evaluate`
     // reads reactive store state, so watchEffect tracks it for free.
     stopHandles.set(el, watchEffect(() => apply(el, binding)))
   },

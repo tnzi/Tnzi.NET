@@ -125,7 +125,7 @@ describe('stores/app', () => {
     resetAppRuntime()
   })
 
-  describe('useAppStore — reactive state proxies', () => {
+  describe('useAppStore - reactive state proxies', () => {
     it('exposes theme/language/onlineStatus/initialized/initError', () => {
       managerInstance.theme = 'dark'
       managerInstance.language = 'en-US'
@@ -148,7 +148,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — getters', () => {
+  describe('useAppStore - getters', () => {
     it('proxies isDarkMode/sidebar/fullscreen/loading/notification/modal/connection getters', () => {
       managerInstance.isDarkMode = true
       managerInstance.sidebarCollapsed = true
@@ -183,7 +183,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — theme/language actions', () => {
+  describe('useAppStore - theme/language actions', () => {
     it('setTheme/toggleTheme/setLanguage delegate', () => {
       const s = useAppStore()
       s.setTheme('dark')
@@ -195,7 +195,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — sidebar/fullscreen/loading actions', () => {
+  describe('useAppStore - sidebar/fullscreen/loading actions', () => {
     it('sidebar actions delegate', () => {
       const s = useAppStore()
       s.toggleSidebar()
@@ -223,7 +223,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — notification actions', () => {
+  describe('useAppStore - notification actions', () => {
     it('delegate and return ids from manager', () => {
       const s = useAppStore()
       expect(s.addNotification({ type: 'info', severity: 'low', message: 'a', duration: 0 } as any)).toBe('n1')
@@ -242,7 +242,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — modal actions', () => {
+  describe('useAppStore - modal actions', () => {
     it('delegate and return id', () => {
       const s = useAppStore()
       expect(s.openModal({ component: 'C' } as any)).toBe('m1')
@@ -255,7 +255,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — online/connection/init actions', () => {
+  describe('useAppStore - online/connection/init actions', () => {
     it('delegate', () => {
       const s = useAppStore()
       s.setOnlineStatus('offline' as any)
@@ -271,7 +271,7 @@ describe('stores/app', () => {
     })
   })
 
-  describe('useAppStore — persistence actions', () => {
+  describe('useAppStore - persistence actions', () => {
     it('delegate', async () => {
       const s = useAppStore()
       await s.loadPersistedState()

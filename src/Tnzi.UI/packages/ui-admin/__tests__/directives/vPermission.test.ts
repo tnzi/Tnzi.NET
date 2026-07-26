@@ -73,7 +73,7 @@ describe('vPermission directive', () => {
     expect(el.style.visibility).toBe('hidden')
   })
 
-  it('superuser bypass — always allowed', () => {
+  it('superuser bypass - always allowed', () => {
     seedAuth({ isSuperUser: true, permissions: [] })
     const el = probe('user.delete', undefined)
     expect(el.style.display).toBe('')

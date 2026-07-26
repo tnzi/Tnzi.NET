@@ -19,7 +19,7 @@ describe('resolveAvatarUrl', () => {
       storageApi,
     )
     expect(url).toBe('https://example.com/me.png')
-    // External URL wins — never falls through to the preview endpoint.
+    // External URL wins - never falls through to the preview endpoint.
     expect(storageApi.getPreviewUrl).not.toHaveBeenCalled()
   })
 

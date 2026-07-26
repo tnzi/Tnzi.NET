@@ -1,6 +1,6 @@
 <template>
   <!--
-    Providers — LLM provider catalogue rendered as a TCardPage grid.
+    Providers - LLM provider catalogue rendered as a TCardPage grid.
 
     Each card shows a provider-type glyph, name, default model, an enabled
     badge and a live connection-status badge (idle → testing → ok | error).
@@ -32,7 +32,7 @@
             </span>
             <span class="ai-provider-card__name flex-1">{{ item.name }}</span>
             <!-- Configuration-sourced entries (appsettings AI:Providers) get a
-                 source badge — same muted style as the Skills page's 'File' tag. -->
+                 source badge - same muted style as the Skills page's 'File' tag. -->
             <NTag
               v-if="isConfigSource(item)"
               size="small"
@@ -65,7 +65,7 @@
             <span>{{ item.defaultModel || t('card.noModel') }}</span>
           </div>
 
-          <!-- Connection test is rejected (400) for Configuration entries —
+          <!-- Connection test is rejected (400) for Configuration entries -
                hide the status row alongside the Test action. -->
           <div v-if="!isConfigSource(item)" class="flex items-center gap-6px mt-8px">
             <span class="ai-provider-card__status-label text-12px text-muted">{{ t('test.label') }}:</span>
@@ -92,7 +92,7 @@
           </div>
 
           <!-- Configuration entries are read-only (backend rejects update /
-               delete / testConnection with 400) — omit the actions footer
+               delete / testConnection with 400) - omit the actions footer
                entirely so no dead buttons render. -->
           <template v-if="!isConfigSource(item)" #actions>
             <NButton
@@ -168,7 +168,7 @@ const { can } = usePermissionGuard()
 // tenant-scoped sessions; without tenant context (host admin / MT off) they remain editable.
 function isLocked(item: ProviderDto): boolean {
   // `scope` arrives as the PascalCase member name (JsonStringEnumConverter) or,
-  // for legacy payloads, the numeric ordinal — normalise both.
+  // for legacy payloads, the numeric ordinal - normalise both.
   return isSystemProviderScope(item.scope) && !!authStore.currentTenantId
 }
 

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Observability;
 
 /// <summary>
-/// RAG 模块 ActivitySource — 用于 OpenTelemetry 追踪和指标
+/// RAG 模块 ActivitySource - 用于 OpenTelemetry 追踪和指标
 /// </summary>
 public static class RagActivitySource
 {

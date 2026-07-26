@@ -5,7 +5,7 @@ namespace Tnzi.Chat.Tests.Services;
 
 /// <summary>
 /// Group-member write paths take caller-supplied ids, so they must enforce the same
-/// "no super admins in a business group" rule the contact directory relies on —
+/// "no super admins in a business group" rule the contact directory relies on -
 /// otherwise a maintenance account could be pulled into a group by passing its id
 /// directly, bypassing the (already-filtered) picker. Dropping is silent (not 403):
 /// one stray id shouldn't fail the whole operation, nor disclose that it's a super admin.

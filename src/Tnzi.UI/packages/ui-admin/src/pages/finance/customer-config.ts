@@ -1,6 +1,7 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
-import type { FormSchemaItem } from '../_shared/form-schema'
+import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
@@ -17,13 +18,27 @@ export interface CustomerRow {
   creationTime?: string
 }
 
-export function buildCustomerColumns(t: (key: string) => string): ColumnDef<CustomerRow>[] {
+export function buildCustomerColumns(
+  t: (key: string) => string,
+  onOpen?: (row: CustomerRow) => void,
+): ColumnDef<CustomerRow>[] {
   return [
-    { key: 'code', title: 'columns.code', width: 110, render: (row) => row.code ?? '—' },
-    { key: 'name', title: 'columns.name', minWidth: 180, primary: true },
-    { key: 'email', title: 'columns.email', minWidth: 180, mobileHidden: true, render: (row) => row.email ?? '—' },
-    { key: 'phone', title: 'columns.phone', width: 130, mobileHidden: true, render: (row) => row.phone ?? '—' },
-    { key: 'currency', title: 'columns.currency', width: 90, mobileHidden: true, render: (row) => row.currency ?? '—' },
+    { key: 'code', title: 'columns.code', width: 110, render: (row) => row.code ?? EMPTY_DASH },
+    {
+      key: 'name',
+      title: 'columns.name',
+      minWidth: 180,
+      primary: true,
+      // The name is the drill-in affordance: a real <button>, so it is
+      // keyboard-reachable rather than a div that happens to react to clicks.
+      render: (row) =>
+        onOpen
+          ? h('button', { type: 'button', class: 'fin-party-link', onClick: () => onOpen(row) }, row.name ?? EMPTY_DASH)
+          : (row.name ?? EMPTY_DASH),
+    },
+    { key: 'email', title: 'columns.email', minWidth: 180, mobileHidden: true, render: (row) => row.email ?? EMPTY_DASH },
+    { key: 'phone', title: 'columns.phone', width: 130, mobileHidden: true, render: (row) => row.phone ?? EMPTY_DASH },
+    { key: 'currency', title: 'columns.currency', width: 90, mobileHidden: true, render: (row) => row.currency ?? EMPTY_DASH },
     {
       key: 'isActive',
       title: 'columns.status',
@@ -45,16 +60,30 @@ export function buildCustomerColumns(t: (key: string) => string): ColumnDef<Cust
   ]
 }
 
+/**
+ * A customer record answers four separate questions: who they are, how to reach
+ * them, on what terms we bill them, and where the paper goes. Flat, those
+ * eleven fields read as one undifferentiated column and the reader re-derives
+ * the grouping on every open.
+ */
+export const customerFormSections: FormSchemaSection[] = [
+  { key: 'basics', labelKey: 'admin.shared.formSections.basics', label: 'Basics', icon: 'mdi:account-outline' },
+  { key: 'contact', labelKey: 'admin.shared.formSections.contact', label: 'Contact', icon: 'mdi:card-account-mail-outline' },
+  { key: 'billing', labelKey: 'admin.shared.formSections.billing', label: 'Billing', icon: 'mdi:cash-multiple' },
+  { key: 'address', labelKey: 'admin.shared.formSections.address', label: 'Address', icon: 'mdi:map-marker-outline' },
+  { key: 'notes', labelKey: 'admin.shared.formSections.notes', label: 'Notes', icon: 'mdi:note-text-outline' },
+]
+
 export const customerFormSchema: FormSchemaItem[] = [
-  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
-  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text' },
-  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text' },
-  { key: 'phone', labelKey: 'form.phone', label: 'Phone', type: 'text' },
-  { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
-  { key: 'paymentTermsDays', labelKey: 'form.paymentTermsDays', label: 'Payment Terms (days)', type: 'number' },
-  { key: 'defaultTaxCodeId', labelKey: 'form.defaultTaxCode', label: 'Default Tax Code', type: 'finance-tax-code' },
-  { key: 'billingAddress', labelKey: 'form.billingAddress', label: 'Billing Address', type: 'textarea' },
-  { key: 'shippingAddress', labelKey: 'form.shippingAddress', label: 'Shipping Address', type: 'textarea' },
-  { key: 'notes', labelKey: 'form.notes', label: 'Notes', type: 'textarea' },
-  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'switch' },
+  { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true, section: 'basics' },
+  { key: 'code', labelKey: 'form.code', label: 'Code', type: 'text', section: 'basics' },
+  { key: 'isActive', labelKey: 'form.isActive', label: 'Active', type: 'switch', section: 'basics' },
+  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text', section: 'contact' },
+  { key: 'phone', labelKey: 'form.phone', label: 'Phone', type: 'text', section: 'contact' },
+  { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text', section: 'billing' },
+  { key: 'paymentTermsDays', labelKey: 'form.paymentTermsDays', label: 'Payment Terms (days)', type: 'number', section: 'billing' },
+  { key: 'defaultTaxCodeId', labelKey: 'form.defaultTaxCode', label: 'Default Tax Code', type: 'finance-tax-code', section: 'billing' },
+  { key: 'billingAddress', labelKey: 'form.billingAddress', label: 'Billing Address', type: 'textarea', section: 'address' },
+  { key: 'shippingAddress', labelKey: 'form.shippingAddress', label: 'Shipping Address', type: 'textarea', section: 'address' },
+  { key: 'notes', labelKey: 'form.notes', label: 'Notes', type: 'textarea', section: 'notes' },
 ]

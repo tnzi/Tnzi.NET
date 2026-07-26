@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools.BuiltIn;
 
 /// <summary>
-/// 记忆工具 — 提供跨会话记忆的主动保存、搜索、更新和删除能力
+/// 记忆工具 - 提供跨会话记忆的主动保存、搜索、更新和删除能力
 /// </summary>
 [AIToolGroup("memory", "Memory Tools", "Save, search, update and manage persistent memories across conversations")]
 public partial class MemoryTools : IAIToolProvider
@@ -99,13 +99,16 @@ public partial class MemoryTools : IAIToolProvider
             var scope = BuildScope();
             maxResults = Math.Clamp(maxResults, 1, 20);
 
-            // Search local, project snapshot, and shared memories in parallel.
+            // Search local, project snapshot, and shared memories.
+            // 必须顺序执行：默认 IMemoryStore 是 DatabaseMemoryStore，三次检索共用同一个
+            // 请求作用域的 DbContext，并发会抛 "A second operation was started on this
+            // context instance"（同 SuggestionService 记录的坑）。
             var localScopeKey = scope.ToScopeKey();
 
             // 1. Local user/agent-scoped search
-            var localTask = !string.IsNullOrEmpty(category)
-                ? _memoryStore.SearchByCategoryAsync(localScopeKey, query, category, maxResults, ct)
-                : _memoryStore.SearchAsync(scope, query, maxResults, ct);
+            var localResults = !string.IsNullOrEmpty(category)
+                ? await _memoryStore.SearchByCategoryAsync(localScopeKey, query, category, maxResults, ct)
+                : await _memoryStore.SearchAsync(scope, query, maxResults, ct);
 
             // 2. Project snapshot search (shared per project, read-only)
             var projectSnapshotScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
@@ -115,11 +118,13 @@ public partial class MemoryTools : IAIToolProvider
             var shouldSearchProject = !string.IsNullOrWhiteSpace(projectSnapshotScope)
                 && !string.Equals(projectSnapshotScope, localScopeKey, StringComparison.OrdinalIgnoreCase);
 
-            var projectTask = shouldSearchProject
-                ? (!string.IsNullOrEmpty(category)
-                    ? _memoryStore.SearchByCategoryAsync(projectSnapshotScope!, query, category, maxResults, ct)
-                    : _memoryStore.SearchAsync(projectSnapshotScope!, query, maxResults, ct))
-                : Task.FromResult<IReadOnlyList<MemorySearchResult>>([]);
+            IReadOnlyList<MemorySearchResult> projectResults = [];
+            if (shouldSearchProject)
+            {
+                projectResults = !string.IsNullOrEmpty(category)
+                    ? await _memoryStore.SearchByCategoryAsync(projectSnapshotScope!, query, category, maxResults, ct)
+                    : await _memoryStore.SearchAsync(projectSnapshotScope!, query, maxResults, ct);
+            }
 
             // 3. Shared-scope search (if configured)
             var sharedScope = CurrentMemoryOptions.SharedScope;
@@ -127,34 +132,28 @@ public partial class MemoryTools : IAIToolProvider
                 && !string.Equals(sharedScope, localScopeKey, StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(sharedScope, projectSnapshotScope, StringComparison.OrdinalIgnoreCase);
 
-            var sharedTask = shouldSearchShared
-                ? (!string.IsNullOrEmpty(category)
-                    ? _memoryStore.SearchByCategoryAsync(sharedScope!, query, category, maxResults, ct)
-                    : _memoryStore.SearchAsync(sharedScope!, query, maxResults, ct))
-                : Task.FromResult<IReadOnlyList<MemorySearchResult>>([]);
-
-            await Task.WhenAll(localTask, projectTask, sharedTask);
-
-            var allResults = new List<MemorySearchResult>();
-            allResults.AddRange(localTask.Result);
-
-            if (shouldSearchProject)
-            {
-                foreach (var result in projectTask.Result)
-                {
-                    result.Source ??= projectSnapshotScope;
-                }
-                allResults.AddRange(projectTask.Result);
-            }
-
+            IReadOnlyList<MemorySearchResult> sharedResults = [];
             if (shouldSearchShared)
             {
-                foreach (var result in sharedTask.Result)
-                {
-                    result.Source ??= sharedScope;
-                }
-                allResults.AddRange(sharedTask.Result);
+                sharedResults = !string.IsNullOrEmpty(category)
+                    ? await _memoryStore.SearchByCategoryAsync(sharedScope!, query, category, maxResults, ct)
+                    : await _memoryStore.SearchAsync(sharedScope!, query, maxResults, ct);
             }
+
+            var allResults = new List<MemorySearchResult>();
+            allResults.AddRange(localResults);
+
+            foreach (var result in projectResults)
+            {
+                result.Source ??= projectSnapshotScope;
+            }
+            allResults.AddRange(projectResults);
+
+            foreach (var result in sharedResults)
+            {
+                result.Source ??= sharedScope;
+            }
+            allResults.AddRange(sharedResults);
 
             // Deduplicate by Id, sort by score, take top maxResults
             var results = allResults
@@ -267,7 +266,7 @@ public partial class MemoryTools : IAIToolProvider
 
     /// <summary>
     /// Basic PII pattern detection to prevent accidental storage of personal data.
-    /// Not meant to be comprehensive — just an additional safety layer.
+    /// Not meant to be comprehensive - just an additional safety layer.
     /// </summary>
     private static bool ContainsPiiPattern(string content)
     {

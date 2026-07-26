@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers;
 
 /// <summary>
-/// AI 用户端控制器共享辅助方法 — 集中 GetCurrentUserId 等重复逻辑。
+/// AI 用户端控制器共享辅助方法 - 集中 GetCurrentUserId 等重复逻辑。
 /// </summary>
 internal static class AiControllerHelpers
 {

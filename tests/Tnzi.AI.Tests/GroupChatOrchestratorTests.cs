@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// GroupChatOrchestrator 单元测试 — 验证多 Agent 讨论编排
+/// GroupChatOrchestrator 单元测试 - 验证多 Agent 讨论编排
 /// </summary>
 public class GroupChatOrchestratorTests
 {

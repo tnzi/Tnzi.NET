@@ -1,7 +1,7 @@
 namespace Tnzi.Authorization.Dtos;
 
 /// <summary>
-/// The current user's resolved access profile — the single self-service
+/// The current user's resolved access profile - the single self-service
 /// payload the admin front-end needs after login: the effective permission
 /// codes plus the backend-authoritative super-admin flag. Replaces the
 /// convention-based front-end mirror of <c>Authorization:SuperAdminRoles</c>

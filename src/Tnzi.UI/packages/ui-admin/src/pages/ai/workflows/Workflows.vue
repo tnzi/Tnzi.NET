@@ -1,6 +1,6 @@
 <template>
   <!--
-    Workflows — workflow definition CRUD landing page (Phase J overhaul).
+    Workflows - workflow definition CRUD landing page (Phase J overhaul).
 
     Replaces the previous "empty editor on the menu landing route" UX. Users
     now see a proper list of workflow definitions with:
@@ -81,9 +81,10 @@
   </TCrudPage>
 
   <!-- Run modal: collect a single text input and POST to /workflows/{id}/run.
-       The page intentionally stays on synchronous run (not SSE stream) —
+       The page intentionally stays on synchronous run (not SSE stream) -
        streaming-trace UI lives on the WorkflowRunViewer page where the user
        can also Resume / Approve / Reject. -->
+  <TOverlayTheme>
   <NModal v-model:show="runModal.show" :title="runModalTitle" preset="card" size="small" class="max-w-560px">
     <NForm label-placement="left" label-width="100px">
       <NFormItem :label="t('run.input')" required>
@@ -115,8 +116,10 @@
       </div>
     </template>
   </NModal>
+  </TOverlayTheme>
 
   <!-- Validate result modal -->
+  <TOverlayTheme>
   <NModal v-model:show="validateModal.show" :title="t('validate.title')" preset="card" size="small" class="max-w-520px">
     <div v-if="validateModal.loading" class="t-wf-list__validate-loading">
       <NSpin />
@@ -148,6 +151,7 @@
       </div>
     </template>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
@@ -169,6 +173,7 @@ import {
 } from 'naive-ui'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import TRowActions from '../../../components/crud/TRowActions.vue'
+import { TOverlayTheme } from '../../../components/overlay'
 import { TSvgIcon } from '@tnzi/ui'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
@@ -196,7 +201,7 @@ const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
 // ui-admin shells don't always wrap with NMessage/NDialog providers (and unit
-// tests mount bare), so guard both — `useSafeMessage` no-ops without a provider,
+// tests mount bare), so guard both - `useSafeMessage` no-ops without a provider,
 // and `useDialog` is wrapped so a missing provider falls back to native confirm.
 const message = useSafeMessage()
 const dialog = (() => {
@@ -216,7 +221,7 @@ const crud = useCrudPage<WorkflowDefinitionDto>({
   columns: workflowColumns,
   rowKey: (r) => r.id,
   fetchData: (q) => bridge.workflows.fetch(q),
-  // CreateWorkflowDefinitionDto requires `steps[]` — we default to an empty
+  // CreateWorkflowDefinitionDto requires `steps[]` - we default to an empty
   // array so users can scaffold a definition from the list and then add
   // steps in the dedicated editor (graph + JSON modes).
   createData: async (data) => {
@@ -317,7 +322,7 @@ function handleRowMenu(key: string, row: Row): void {
 
 function confirmDelete(row: Row): void {
   if (!dialog) {
-    // No dialog provider (bare mount / test harness) — fall back to the native
+    // No dialog provider (bare mount / test harness) - fall back to the native
     // confirm so the confirmation gate is never silently skipped.
     if (typeof window !== 'undefined' && window.confirm(t('admin.crud.confirmDelete'))) {
       void crud.handleDelete([row.id])
@@ -351,7 +356,7 @@ const runModal = reactive<{
 })
 
 const runModalTitle = computed(() =>
-  runModal.workflow ? `${t('actions.run')} — ${runModal.workflow.name}` : t('actions.run'),
+  runModal.workflow ? `${t('actions.run')} - ${runModal.workflow.name}` : t('actions.run'),
 )
 
 function openRunModal(row: Row): void {
@@ -369,7 +374,7 @@ async function confirmRun(): Promise<void> {
     const result = await bridge.workflows.run(wf.id, runModal.input.trim(), runModal.userId.trim() || undefined)
     // The backend wraps every response in `ApiResult` (HTTP 200 even on
     // business-level failure) and the bridge unwraps `.data`. When the
-    // service returns `Fail<>(...)`, `data` is null — surface that as a
+    // service returns `Fail<>(...)`, `data` is null - surface that as a
     // toast instead of pretending it succeeded.
     if (!result) {
       message.error(t('run.failed'))

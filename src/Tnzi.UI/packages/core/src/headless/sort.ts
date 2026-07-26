@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/headless/sort
  *
- * 排序控制器 — 响应式无头逻辑。
+ * 排序控制器 - 响应式无头逻辑。
  */
 
 import { reactive } from '@vue/reactivity';
@@ -72,7 +72,7 @@ export function toggleSort(
  */
 export class SortController {
   readonly multiple: boolean;
-  /** 排序字段列表 — 唯一状态源 */
+  /** 排序字段列表 - 唯一状态源 */
   sortFields: SortField[];
 
   constructor(options: SortOptions = {}) {

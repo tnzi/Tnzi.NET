@@ -43,7 +43,7 @@ export type { AgentTaskDto } from './task';
 export { useAdminSubAgentTypeApi, ToolApprovalMode } from './sub-agent-type';
 export type { SubAgentTypeDto, SubAgentTypeInputDto } from './sub-agent-type';
 
-// Channels + Gateway (admin/channels, admin/gateway) — Tnzi.AI.Channels
+// Channels + Gateway (admin/channels, admin/gateway) - Tnzi.AI.Channels
 export { useChannelsAdminApi } from './channels';
 export type {
   ChannelAdapterDto,
@@ -53,7 +53,7 @@ export type {
   SessionBindingRuleDto,
 } from './channels';
 
-// Sandbox (admin/sandbox) — Tnzi.AI.Sandbox
+// Sandbox (admin/sandbox) - Tnzi.AI.Sandbox
 export { useSandboxAdminApi } from './sandbox';
 export type { SandboxStatusDto } from './sandbox';
 

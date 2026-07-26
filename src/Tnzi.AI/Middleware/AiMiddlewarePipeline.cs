@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// AI 中间件管道构建器 — 洋葱模型，按 Order 排序执行
+/// AI 中间件管道构建器 - 洋葱模型，按 Order 排序执行
 /// </summary>
 public class AiMiddlewarePipeline
 {

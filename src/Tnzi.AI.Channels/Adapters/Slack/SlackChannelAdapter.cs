@@ -6,13 +6,12 @@ using System.Text;
 namespace Tnzi.AI.Channels.Adapters.Slack;
 
 /// <summary>
-/// Slack 频道适配器 — 通过 HTTP REST API 收发消息，支持 Webhook 事件接收。
+/// Slack 频道适配器 - 通过 HTTP REST API 收发消息，支持 Webhook 事件接收。
 /// </summary>
 /// <remarks>
 /// 使用纯 HTTP API 调用（无第三方 Slack SDK 依赖）：
-/// - chat.postMessage: 发送消息
-/// - files.upload: 发送文件
-/// - 事件接收通过 Webhook（Event Subscriptions）由 Controller 调用 HandleEventAsync
+/// - chat.postMessage: 发送消息（纯文本；文件附件管线已于 2026-06-20 移除）
+/// - 事件接收通过 Webhook（Event Subscriptions）由 Controller 调用 ProcessWebhookAsync
 /// </remarks>
 public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
@@ -102,7 +101,7 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     /// <summary>
     /// 处理 Slack Events API Webhook 回调（由 ASP.NET Controller 调用）。
-    /// 不含签名验证的兼容重载 — 仅在未配置 SigningSecret 时安全。
+    /// 不含签名验证的兼容重载 - 仅在未配置 SigningSecret 时安全。
     /// </summary>
     public Task HandleEventAsync(string eventJson, CancellationToken ct = default)
     {
@@ -175,7 +174,7 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     public async Task<WebhookProcessResult> ProcessWebhookAsync(
         string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
     {
-        // URL 验证 challenge（Slack Events API 首次验证）— 在验签前回显（Slack 规范允许）。
+        // URL 验证 challenge（Slack Events API 首次验证）- 在验签前回显（Slack 规范允许）。
         if (TryGetSlackChallenge(rawBody, out var challenge))
         {
             return WebhookProcessResult.Challenge(challenge!, "text/plain");
@@ -309,7 +308,7 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         if (!string.IsNullOrWhiteSpace(threadTs))
             payload["thread_ts"] = threadTs;
 
-        // Set Authorization per-request — the named HttpClient is pooled and its
+        // Set Authorization per-request - the named HttpClient is pooled and its
         // DefaultRequestHeaders must not be mutated across concurrent sends.
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/chat.postMessage")
         {

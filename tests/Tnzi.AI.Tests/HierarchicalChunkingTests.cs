@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// HierarchicalChunkingStrategy 单元测试 — 验证父子块关系创建、标题分割、固定大小子块拆分
+/// HierarchicalChunkingStrategy 单元测试 - 验证父子块关系创建、标题分割、固定大小子块拆分
 /// </summary>
 public class HierarchicalChunkingTests
 {

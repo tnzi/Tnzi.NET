@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels;
 
 /// <summary>
-/// IM Channel Bridge 模块 — 将 AI Agent 连接到 Telegram/Feishu/DingTalk 等 IM 平台
+/// IM Channel Bridge 模块 - 将 AI Agent 连接到 Telegram/Feishu/DingTalk 等 IM 平台
 /// </summary>
 [DependsOn(typeof(AIModule))]
 public class AIChannelsModule : TnziApplicationModule
@@ -29,7 +29,7 @@ public class AIChannelsModule : TnziApplicationModule
 
         var services = context.Services;
 
-        // 消息总线（Singleton — 进程内 Channel<T> 队列）
+        // 消息总线（Singleton - 进程内 Channel<T> 队列）
         services.AddSingleton<IChannelMessageBus, InMemoryChannelMessageBus>();
 
         // 线程映射存储
@@ -87,7 +87,7 @@ public class AIChannelsModule : TnziApplicationModule
             services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<DingtalkChannelAdapter>());
         }
 
-        // HostedService — 绑定 Manager + Adapters 生命周期
+        // HostedService - 绑定 Manager + Adapters 生命周期
         services.AddHostedService<ChannelManagerHostedService>();
 
         // --- Gateway 服务注册 ---
@@ -122,7 +122,10 @@ public class AIChannelsModule : TnziApplicationModule
         if (app == null) return Task.CompletedTask;
 
         var options = context.ServiceProvider.GetRequiredService<IOptions<ChannelsModuleOptions>>().Value;
-        if (options.Gateway.Enabled)
+        // Gateway 服务只在 ConfigureServicesAsync 的 options.Enabled 分支里注册，
+        // 因此这里必须同时门控模块开关：否则模块禁用（默认）+ Gateway.Enabled 默认 true 时
+        // WebSocket 端点会被挂上，而 IGateway/IPresenceTracker 从未注册 → 握手即 500。
+        if (options.Enabled && options.Gateway.Enabled)
         {
             // 当 Gateway 接受匿名连接时，发出醒目的启动告警（生产环境应启用认证）
             if (!options.Gateway.RequireAuthentication)

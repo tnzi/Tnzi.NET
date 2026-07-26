@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore.Internal;
 namespace Tnzi.AI.Channels.Store;
 
 /// <summary>
-/// 基于数据库的线程映射存储 — 生产环境推荐
+/// 基于数据库的线程映射存储 - 生产环境推荐
 /// </summary>
 public class DatabaseChannelThreadStore : IChannelThreadStore
 {

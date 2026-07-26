@@ -177,7 +177,7 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
         {
             var depth = 1; // the parent itself is at least depth 1
             var currentId = parentRunId;
-            var maxWalk = options.MaxDepth + 1; // bounded walk — never more than MaxDepth+1 steps
+            var maxWalk = options.MaxDepth + 1; // bounded walk - never more than MaxDepth+1 steps
 
             for (var i = 0; i < maxWalk && currentId.HasValue; i++)
             {

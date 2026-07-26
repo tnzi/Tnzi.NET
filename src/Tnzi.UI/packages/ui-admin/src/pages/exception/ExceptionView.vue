@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Route-level exception page — the wired, router-aware wrapper around the
+ * Route-level exception page - the wired, router-aware wrapper around the
  * reusable {@link TExceptionPage} component. One component serves the `/403`,
  * `/404` and `/500` routes; the concrete error is read from
  * `route.meta.exceptionType` so the three routes share a single wiring point.
@@ -51,7 +51,7 @@ const title = computed(() => tr(`admin.exception.${type.value}.title`, type.valu
 const subtitle = computed(() => tr(`admin.exception.${type.value}.subtitle`, ''))
 const primaryLabel = computed(() => tr('admin.exception.actions.home', 'Back to home'))
 
-// A single "Back to home" CTA — one clear escape hatch instead of a redundant
+// A single "Back to home" CTA - one clear escape hatch instead of a redundant
 // "Back to home" + "Go back" pair (matches soybean-admin's exception pages).
 function onPrimary(): void {
   void router.push({ name: 'dashboard' }).catch(() => undefined)

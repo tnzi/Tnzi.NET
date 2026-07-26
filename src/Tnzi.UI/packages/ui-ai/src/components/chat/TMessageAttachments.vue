@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TMessageAttachments — Attachment display
+ * TMessageAttachments - Attachment display
  *
  * Renders image thumbnails and file badges for message attachments.
  */

@@ -9,8 +9,8 @@ vi.mock('../../../src/services/bridges/notification-bridge', () => ({
     messages: {
       fetch: vi.fn(async () => ({
         items: [
-          { id: 'm1', templateCode: 'WELCOME', recipient: 'user@example.com', channel: 'email', status: 'sent',   sentAt: '2026-01-01T00:00:00Z', error: null },
-          { id: 'm2', templateCode: 'ALERT',   recipient: 'admin@example.com', channel: 'sms',   status: 'failed', sentAt: null, error: 'Connection timeout' },
+          { id: 'm1', subject: 'Welcome aboard', type: 'Email', status: 'Sent', totalRecipientCount: 3, successCount: 3, failureCount: 0, creationTime: '2026-01-01T00:00:00Z', failureReason: null },
+          { id: 'm2', subject: 'Disk almost full', type: 'Sms', status: 'Failed', totalRecipientCount: 1, successCount: 0, failureCount: 1, creationTime: '2026-01-02T00:00:00Z', failureReason: 'Connection timeout' },
         ],
         totalCount: 2,
         pageIndex: 1,
@@ -60,15 +60,19 @@ describe('Messages page (Phase 3.26)', () => {
     const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
     const wrapper = mount(Messages, { global: { stubs } })
     await nextTick()
-    expect(wrapper.find('.t-crud-page').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell').exists()).toBe(true)
   })
 
-  it('renders a data table on load', async () => {
+  // Sends render as document rows: the subject leads and a delivery failure is
+  // visible inline instead of only inside the view drawer.
+  it('renders one row card per send, with the failure reason inline', async () => {
     const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
     const wrapper = mount(Messages, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
+    expect(wrapper.findAll('.t-item-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Welcome aboard')
+    expect(wrapper.find('.nm-error').text()).toContain('Connection timeout')
   })
 })
 

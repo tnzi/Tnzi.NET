@@ -143,6 +143,11 @@ public class AccessLogService : ApplicationService, IAccessLogService
     /// <inheritdoc />
     public async Task<Result> DeleteExpiredAccessLogsAsync(int days = 90)
     {
+        // days <= 0 会把 expireDate 推到当前或未来，删掉全部（甚至尚未过期的）日志。
+        // 与 IAuditOperationService.DeleteExpiredOperationsAsync 同一防护。
+        if (days <= 0)
+            return Fail("Days must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+
         var expireDate = DateTime.UtcNow.AddDays(-days);
 
         var count = await _accessLogRepository.CountAsync(log => log.CreationTime < expireDate);
@@ -192,9 +197,18 @@ public class AccessLogService : ApplicationService, IAccessLogService
                 TotalRequests = g.Count(),
                 SuccessRequests = g.Count(l => l.StatusCode >= 200 && l.StatusCode < 300),
                 ErrorRequests = g.Count(l => l.StatusCode >= 400),
-                UniqueUsers = g.Where(l => l.UserId != null).Select(l => l.UserId).Distinct().Count(),
                 AverageResponseTime = g.Average(l => (double)l.ResponseTime)
             })
+            .ToListAsync(cancellationToken);
+
+        // 独立用户数不能按天汇总相加：跨多天活跃的同一用户会被重复计数（周/月区间尤甚）。
+        // 取数据库端去重的 (天, 用户) 对，再在每个区间内二次去重 —— 行数受"天数 × 活跃用户"
+        // 约束，仍远小于原始日志量。
+        var activeUserDays = await _accessLogRepository.AsQueryable()
+            .AsNoTracking()
+            .Where(l => l.CreationTime >= startDate && l.CreationTime <= endDate && l.UserId != null)
+            .Select(l => new { Date = l.CreationTime.Date, l.UserId })
+            .Distinct()
             .ToListAsync(cancellationToken);
 
         var dataPoints = new List<AccessLogTrendDataPoint>();
@@ -221,7 +235,11 @@ public class AccessLogService : ApplicationService, IAccessLogService
                 TotalRequests = totalRequests,
                 SuccessRequests = bucketDays.Sum(d => d.SuccessRequests),
                 ErrorRequests = bucketDays.Sum(d => d.ErrorRequests),
-                UniqueUsers = bucketDays.Sum(d => d.UniqueUsers),
+                UniqueUsers = activeUserDays
+                    .Where(u => u.Date >= current && u.Date < bucketEnd)
+                    .Select(u => u.UserId)
+                    .Distinct()
+                    .Count(),
                 AverageResponseTime = totalRequests > 0
                     ? bucketDays.Sum(d => d.AverageResponseTime * d.TotalRequests) / totalRequests
                     : 0

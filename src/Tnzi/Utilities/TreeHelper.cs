@@ -362,11 +362,15 @@ public static class TreeHelper
 
         var descendants = new List<T>();
         var stack = new Stack<TKey>();
+        var visited = new HashSet<TKey>();
         stack.Push(targetId);
 
         while (stack.Count > 0)
         {
             var currentId = stack.Pop();
+            if (!visited.Add(currentId))
+                continue; // 防止循环引用（父子互指的脏数据会让遍历无限展开）
+
             if (!childrenMap.TryGetValue(currentId, out var childList))
                 continue;
 

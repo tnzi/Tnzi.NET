@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -40,7 +41,7 @@ interface NotificationMessageRow {
 }
 
 function typeLabel(v?: NotificationType): string {
-  return v != null ? getNotificationTypeLabel(v) : '—'
+  return v != null ? getNotificationTypeLabel(v) : EMPTY_DASH
 }
 function typeBadge(v?: NotificationType): 'info' | 'success' | 'warning' | 'default' {
   switch (v) {
@@ -52,7 +53,7 @@ function typeBadge(v?: NotificationType): 'info' | 'success' | 'warning' | 'defa
 }
 
 function statusLabel(v?: NotificationStatus): string {
-  return v != null ? getNotificationStatusLabel(v) : '—'
+  return v != null ? getNotificationStatusLabel(v) : EMPTY_DASH
 }
 function statusBadge(v?: NotificationStatus): 'warning' | 'info' | 'success' | 'error' | 'default' {
   switch (v) {

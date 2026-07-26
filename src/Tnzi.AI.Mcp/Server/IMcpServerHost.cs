@@ -3,7 +3,7 @@ namespace Tnzi.AI.Mcp.Server;
 
 
 /// <summary>
-/// MCP Server Host — 将 Tnzi.AI 的 Agent 暴露为 MCP Server。
+/// MCP Server Host - 将 Tnzi.AI 的 Agent 暴露为 MCP Server。
 /// 外部 MCP Client（如 Claude Desktop、VS Code）可以调用这些 Agent 作为工具。
 /// </summary>
 public interface IMcpServerHost

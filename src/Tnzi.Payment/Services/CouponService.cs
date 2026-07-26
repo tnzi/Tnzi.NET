@@ -205,7 +205,8 @@ public class CouponService : ApplicationService, ICouponService
             if (promotion == null)
                 return Fail<UserCouponDto>(ErrorCodes.PromotionNotFound, 404);
 
-            // 更新兑换码（事务内原子操作）
+            // 更新兑换码：读-改-写在事务内提交，并发保护取决于数据库隔离级别，
+            // 并非"原子递增"（对比 ApplyCouponAsync 的 UsedCount 走条件更新 CAS）。
             redemptionCode.RedeemedQuantity++;
             if (redemptionCode.TotalQuantity > 0 && redemptionCode.RedeemedQuantity >= redemptionCode.TotalQuantity)
                 redemptionCode.Status = RedemptionCodeStatus.Expired;

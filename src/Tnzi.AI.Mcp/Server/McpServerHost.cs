@@ -5,7 +5,7 @@
 namespace Tnzi.AI.Mcp.Server;
 
 /// <summary>
-/// MCP Server Host 实现 — 将 Agent 和自定义工具暴露为 MCP Server
+/// MCP Server Host 实现 - 将 Agent 和自定义工具暴露为 MCP Server
 /// </summary>
 public partial class McpServerHost : IMcpServerHost
 {
@@ -126,7 +126,7 @@ public partial class McpServerHost : IMcpServerHost
     {
         var version = Interlocked.Read(ref _registrationVersion);
 
-        // 快路径：版本未变且 TTL 未过期，直接返回缓存（无锁读 — 引用赋值原子）
+        // 快路径：版本未变且 TTL 未过期，直接返回缓存（无锁读 - 引用赋值原子）
         var cached = _cachedTools;
         if (cached != null
             && Interlocked.Read(ref _cachedVersion) == version

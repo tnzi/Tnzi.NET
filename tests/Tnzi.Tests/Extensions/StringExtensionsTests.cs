@@ -189,6 +189,33 @@ public class StringExtensionsTests
         Assert.Equal(expected, result);
     }
 
+    [Theory]
+    [InlineData("<p>Hello</p>", "Hello")]
+    [InlineData("No tags", "No tags")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    // Adjacent blocks must not glue into one word - this is why RemoveHtmlTags is not enough.
+    [InlineData("<p>Dear Ann</p><p>Your file is open.</p>", "Dear Ann Your file is open.")]
+    [InlineData("<b>a</b><b>b</b>", "a b")]
+    // Entities are decoded, and the indentation HTML carries is collapsed away.
+    [InlineData("Ben &amp; Co.&nbsp;&copy; open", "Ben & Co. © open")]
+    [InlineData("<div>\n   spaced\n\n   out\n</div>", "spaced out")]
+    // An attribute containing '>' must not end the tag early.
+    [InlineData("<a title=\"a > b\" href=\"#\">link</a>", "link")]
+    public void HtmlToPlainText_ProducesReadableText(string? input, string expected)
+    {
+        Assert.Equal(expected, input.HtmlToPlainText());
+    }
+
+    [Fact]
+    public void HtmlToPlainText_DiffersFromRemoveHtmlTags_OnWordBoundariesAndEntities()
+    {
+        const string html = "<p>a</p><p>b</p>&amp;";
+
+        Assert.Equal("ab&amp;", html.RemoveHtmlTags());
+        Assert.Equal("a b &", html.HtmlToPlainText());
+    }
+
     #endregion
 
     #region 验证测试

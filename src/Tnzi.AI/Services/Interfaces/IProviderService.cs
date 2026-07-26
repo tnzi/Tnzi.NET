@@ -23,7 +23,7 @@ public interface IProviderService
     /// <summary>创建 Provider</summary>
     Task<Result<ProviderDto>> CreateAsync(CreateProviderDto dto, CancellationToken ct = default);
 
-    /// <summary>更新 Provider — ApiKey 为 null 时保留现有密文</summary>
+    /// <summary>更新 Provider - ApiKey 为 null 时保留现有密文</summary>
     Task<Result<ProviderDto>> UpdateAsync(Guid id, UpdateProviderDto dto, CancellationToken ct = default);
 
     /// <summary>软删除 Provider</summary>
@@ -36,7 +36,7 @@ public interface IProviderService
     Task<Result<List<ProviderOptionDto>>> GetOptionsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// 列出指定 Provider 可用的模型 — 优先调用第三方 OpenAI 兼容 <c>/v1/models</c>，
+    /// 列出指定 Provider 可用的模型 - 优先调用第三方 OpenAI 兼容 <c>/v1/models</c>，
     /// 失败时按 ProviderType 返回静态精选兜底列表。
     /// </summary>
     Task<Result<ProviderModelsDto>> ListModelsAsync(Guid id, CancellationToken ct = default);

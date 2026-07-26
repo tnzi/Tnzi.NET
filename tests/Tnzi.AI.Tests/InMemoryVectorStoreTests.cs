@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// InMemoryVectorStore 单元测试 — 验证内存向量存储的搜索、插入、删除和线程安全
+/// InMemoryVectorStore 单元测试 - 验证内存向量存储的搜索、插入、删除和线程安全
 /// </summary>
 public class InMemoryVectorStoreTests
 {

@@ -1,13 +1,12 @@
 /**
- * System bridge — full implementation (Phase 3 Task 3.11).
+ * System bridge - full implementation (Phase 3 Task 3.11).
  *
  * Adapts the system backend APIs to BridgeCrudContract + custom method shapes
  * used by all TCrudPage-based system management pages.
  *
  * Sub-contracts:
- *   - menus         → useAdminMenuApi (full CRUD + reorder)
  *   - settings      → useAdminSettingApi (full CRUD; backs both the Parameter
- *                     and Dictionary pages — same /admin/settings endpoint,
+ *                     and Dictionary pages - same /admin/settings endpoint,
  *                     different UI framing)
  *   - accessLogs    → useAdminAccessLogApi (read-only)
  *   - scheduledJobs → live wiring to /admin/scheduled-jobs (Tnzi.Hangfire
@@ -19,17 +18,12 @@
  *   - settingsCenter→ useAdminSettingsCenterApi (schema-driven module settings)
  */
 import {
-  useAdminMenuApi,
   useAdminSettingApi,
   useAdminAccessLogApi,
   useAdminSettingsCenterApi,
   useAppearanceApi,
   useAdminAppearanceApi,
   type AdminGlobalThemeDto,
-  type MenuInfoDto,
-  type CreateMenuDto,
-  type UpdateMenuDto,
-  type MenuOrderDto,
   type SettingDto,
   type CreateSettingDto,
   type UpdateSettingDto,
@@ -40,11 +34,10 @@ import {
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { ensureOk, mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
 
-type HttpClient = Parameters<typeof useAdminMenuApi>[0]
+type HttpClient = Parameters<typeof useAdminSettingApi>[0]
 
 export interface SystemBridgeDeps {
   client?: HttpClient
-  menuApi?: ReturnType<typeof useAdminMenuApi>
   settingApi?: ReturnType<typeof useAdminSettingApi>
   accessLogApi?: ReturnType<typeof useAdminAccessLogApi>
   settingsCenterApi?: ReturnType<typeof useAdminSettingsCenterApi>
@@ -53,17 +46,14 @@ export interface SystemBridgeDeps {
 }
 
 export interface SystemBridge {
-  menus: BridgeCrudContract<MenuInfoDto, CreateMenuDto, UpdateMenuDto> & {
-    reorder(orders: MenuOrderDto[]): Promise<void>
-  }
   /** Settings (shown as "Parameter" in the UI). */
   settings: BridgeCrudContract<SettingDto, CreateSettingDto, UpdateSettingDto>
-  /** Access logs — read-only. create/update/delete reject. */
+  /** Access logs - read-only. create/update/delete reject. */
   accessLogs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<AccessLogInfoDto>>
   }
   /**
-   * Scheduled jobs — Hangfire recurring-job admin, fully wired via direct
+   * Scheduled jobs - Hangfire recurring-job admin, fully wired via direct
    * HttpClient calls to /admin/scheduled-jobs (Tnzi.Hangfire ships
    * DefaultScheduledJobAdminController). This bypasses the generated factory
    * only because @tnzi/core/services/system has not been regenerated since those
@@ -75,12 +65,12 @@ export interface SystemBridge {
     delete(id: string): Promise<void>
   }
   /**
-   * Feature flags — Tnzi.Feature module's FeatureDefinition/Value admin
+   * Feature flags - Tnzi.Feature module's FeatureDefinition/Value admin
    * surface. Scaffolded in 0.2.8 (Phase E). Endpoints wired in Phase E
    * backend follow-up.
    */
   features: BridgeCrudContract<FeatureDto, CreateFeatureDto, UpdateFeatureDto>
-  /** Settings center — schema-driven module settings (definitions / save / reset). */
+  /** Settings center - schema-driven module settings (definitions / save / reset). */
   settingsCenter: {
     getDefinitions(): Promise<SettingsCenterGroupDto[]>
     saveGroup(groupKey: string, changedValues: Record<string, string | null>): Promise<SettingsCenterGroupDto>
@@ -169,21 +159,13 @@ export interface ScheduledJobDto {
 }
 
 export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
-  const menuApi = deps.menuApi ?? (deps.client ? useAdminMenuApi(deps.client) : null)
   const settingApi = deps.settingApi ?? (deps.client ? useAdminSettingApi(deps.client) : null)
   const accessLogApi = deps.accessLogApi ?? (deps.client ? useAdminAccessLogApi(deps.client) : null)
   const settingsCenterApi = deps.settingsCenterApi ?? (deps.client ? useAdminSettingsCenterApi(deps.client) : null)
 
-  if (!menuApi || !settingApi || !accessLogApi || !settingsCenterApi) {
+  if (!settingApi || !accessLogApi || !settingsCenterApi) {
     const noOp = () => Promise.reject(new Error('createSystemBridge: no deps provided'))
     return {
-      menus: {
-        fetch: noOp as never,
-        create: noOp as never,
-        update: noOp as never,
-        delete: noOp as never,
-        reorder: noOp as never,
-      },
       settings: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never },
       accessLogs: { fetch: noOp as never },
       scheduledJobs: {
@@ -211,21 +193,6 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
   }
   const appearanceApi = deps.appearanceApi ?? (deps.client ? useAppearanceApi(deps.client) : null)
   const adminAppearanceApi = deps.adminAppearanceApi ?? (deps.client ? useAdminAppearanceApi(deps.client) : null)
-
-  const menus: SystemBridge['menus'] = {
-    fetch: async (query: CrudPageQuery): Promise<CrudPageResult<MenuInfoDto>> => {
-      const items = unwrap<MenuInfoDto[]>(await menuApi.getList())
-      return pageArray(items, query)
-    },
-    create: async (data) => unwrap(await menuApi.create(data)) as MenuInfoDto,
-    update: async (id, data) => unwrap(await menuApi.update(String(id), data)) as MenuInfoDto,
-    delete: async (ids) => {
-      ensureOk(await menuApi.batchDelete(ids.map(String)))
-    },
-    reorder: async (orders) => {
-      ensureOk(await menuApi.batchUpdateOrders(orders))
-    },
-  }
 
   const settings: BridgeCrudContract<SettingDto, CreateSettingDto, UpdateSettingDto> = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<SettingDto>> => {
@@ -291,7 +258,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
 
   // Wired directly to /admin/feature-definitions (Tnzi.Feature module).
   // Bypasses @tnzi/core's generated factory because contracts:sync hasn't been
-  // re-run since DefaultFeatureDefinitionAdminController shipped — same pattern
+  // re-run since DefaultFeatureDefinitionAdminController shipped - same pattern
   // as scheduledJobs above. Replace with useAdminFeatureDefinitionApi once the
   // SDK is regenerated.
   const FEATURES_BASE = '/admin/feature-definitions'
@@ -303,7 +270,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       const res = await deps.client.get<FeatureDto[]>(FEATURES_BASE)
       const items = unwrap<FeatureDto[]>(res) ?? []
       // Backend returns the full list; client-side filter by keyword on
-      // name/displayName/group + paginate locally — feature definition
+      // name/displayName/group + paginate locally - feature definition
       // counts are small (typically <100) so this stays cheap.
       const keyword = typeof query.searchText === 'string'
         ? query.searchText.trim().toLowerCase()
@@ -329,7 +296,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
     delete: async (ids) => {
       if (!deps.client) throw new Error('features.delete: HttpClient required')
-      // Backend has no batch endpoint — loop sequentially.
+      // Backend has no batch endpoint - loop sequentially.
       for (const id of ids) {
         ensureOk(await deps.client.delete(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`))
       }
@@ -377,5 +344,5 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
   }
 
-  return { menus, settings, accessLogs, scheduledJobs, features, settingsCenter, appearance }
+  return { settings, accessLogs, scheduledJobs, features, settingsCenter, appearance }
 }

@@ -173,7 +173,7 @@ const emit = defineEmits<{
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
 
-// Popovers/popconfirms must clear the chat NModal — give them a high z-index.
+// Popovers/popconfirms must clear the chat NModal - give them a high z-index.
 const POPOVER_Z = 3000
 // Cap the confirm bubble width so a long sentence wraps to a compact box instead
 // of stretching wide (which, at the panel's right edge, would clip off-screen).
@@ -419,7 +419,7 @@ defineExpose({ detail, isOwner, isGroup, loadDetail })
 
 /* Phone: the panel slides over the whole conversation body, so its content must
    fill the width (the fixed 250px left the messages bleeding through on the
-   right). No left border — there's no adjacent column on a single-column phone. */
+   right). No left border - there's no adjacent column on a single-column phone. */
 @media (max-width: 768px) {
   .t-conv-info {
     width: 100%;

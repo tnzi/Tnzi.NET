@@ -1,5 +1,5 @@
 /**
- * Login security bridge — thin adapter over `@tnzi/core`'s admin
+ * Login security bridge - thin adapter over `@tnzi/core`'s admin
  * login-security API (`useAdminLoginSecurityApi`, wrapping
  * `/admin/login-security/*` exposed by
  * `Tnzi.Identity.Controllers.Admin.DefaultLoginSecurityAdminController`).
@@ -11,8 +11,8 @@
  * consuming pages are unaffected.
  *
  * Read endpoints for the security overview dashboard:
- *   • GET /admin/login-security/overview           — KPIs over a time window
- *   • GET /admin/login-security/frequent-failures  — users hitting failure threshold
+ *   • GET /admin/login-security/overview - KPIs over a time window
+ *   • GET /admin/login-security/frequent-failures - users hitting failure threshold
  */
 import type { HttpClient } from '@tnzi/core/http'
 import {

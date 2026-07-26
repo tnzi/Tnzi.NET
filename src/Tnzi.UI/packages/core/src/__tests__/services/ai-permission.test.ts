@@ -97,17 +97,27 @@ describe('usePermissionAdminApi', () => {
   });
 });
 
+// The backend registers a global JsonStringEnumConverter, so every enum on a
+// response DTO is its PascalCase member NAME on the wire. These enums appear on
+// PermissionRuleItemDto / PermissionEvaluateResultDto, so they must be string
+// enums or a `rule.behavior === PermissionBehavior.Deny` comparison never matches.
 describe('Permission enums', () => {
-  it('PermissionBehavior mirrors backend values', () => {
-    expect(PermissionBehavior.Allow).toBe(0);
-    expect(PermissionBehavior.Ask).toBe(1);
-    expect(PermissionBehavior.Deny).toBe(2);
+  it('PermissionBehavior mirrors the backend member names', () => {
+    expect(PermissionBehavior.Allow).toBe('Allow');
+    expect(PermissionBehavior.Ask).toBe('Ask');
+    expect(PermissionBehavior.Deny).toBe('Deny');
   });
 
-  it('ToolPermissionScope mirrors backend values', () => {
-    expect(ToolPermissionScope.System).toBe(0);
-    expect(ToolPermissionScope.Project).toBe(1);
-    expect(ToolPermissionScope.User).toBe(2);
-    expect(ToolPermissionScope.Session).toBe(3);
+  it('ToolPermissionScope mirrors the backend member names', () => {
+    expect(ToolPermissionScope.System).toBe('System');
+    expect(ToolPermissionScope.Project).toBe('Project');
+    expect(ToolPermissionScope.User).toBe('User');
+    expect(ToolPermissionScope.Session).toBe('Session');
+  });
+
+  it('matches a raw wire payload without any coercion', () => {
+    const wire = JSON.parse('{"behavior":"Deny","scope":"Session"}');
+    expect(wire.behavior).toBe(PermissionBehavior.Deny);
+    expect(wire.scope).toBe(ToolPermissionScope.Session);
   });
 });

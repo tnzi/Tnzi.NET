@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 数据库技能存储 — 加载当前租户级和用户级技能。
+/// 数据库技能存储 - 加载当前租户级和用户级技能。
 /// Scoped 生命周期，每次请求从数据库查询。
 /// </summary>
 public class DatabaseSkillStore : ISkillStore

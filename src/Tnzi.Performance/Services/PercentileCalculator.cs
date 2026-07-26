@@ -3,7 +3,7 @@ namespace Tnzi.Performance.Services;
 
 /// <summary>
 /// Sort-based percentile calculator for request duration metrics.
-/// Uses the nearest-rank method for percentile computation.
+/// Uses linear interpolation between the two ranks straddling the requested percentile.
 /// </summary>
 public static class PercentileCalculator
 {
@@ -44,7 +44,7 @@ public static class PercentileCalculator
     }
 
     /// <summary>
-    /// Calculate a specific percentile value using the nearest-rank method
+    /// Calculate a specific percentile value using linear interpolation
     /// </summary>
     /// <param name="sortedValues">Pre-sorted list of values</param>
     /// <param name="percentile">Percentile to compute (0-100)</param>

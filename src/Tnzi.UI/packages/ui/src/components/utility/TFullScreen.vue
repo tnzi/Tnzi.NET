@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TFullScreen` — toggles document fullscreen. Icon flips on state change.
+ * `TFullScreen` - toggles document fullscreen. Icon flips on state change.
  *
  * Falls back to a no-op if the browser doesn't expose the Fullscreen API
  * (older Safari versions in some sandboxes).

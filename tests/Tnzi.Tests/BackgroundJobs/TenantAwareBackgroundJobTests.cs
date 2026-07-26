@@ -52,11 +52,11 @@ public class TenantAwareBackgroundJobTests
         var type = typeof(ITenantAwareJobArgs);
         var property = type.GetProperty(nameof(ITenantAwareJobArgs.TenantId));
 
-        // Assert — 属性存在
+        // Assert - 属性存在
         Assert.NotNull(property);
-        // Assert — 类型是 Guid?
+        // Assert - 类型是 Guid?
         Assert.Equal(typeof(Guid?), property.PropertyType);
-        // Assert — 可读可写
+        // Assert - 可读可写
         Assert.True(property.CanRead);
         Assert.True(property.CanWrite);
     }
@@ -104,7 +104,7 @@ public class TenantAwareBackgroundJobTests
         // Act
         await job.ExecuteAsync(args);
 
-        // Assert — Change 被调用一次，传入正确的 tenantId
+        // Assert - Change 被调用一次，传入正确的 tenantId
         mockCurrentTenant.Verify(t => t.Change(tenantId, null), Times.Once);
     }
 
@@ -126,7 +126,7 @@ public class TenantAwareBackgroundJobTests
         // Act
         await job.ExecuteAsync(args);
 
-        // Assert — 内部方法确实被执行，参数正确传入
+        // Assert - 内部方法确实被执行，参数正确传入
         Assert.True(job.WasExecuted);
         Assert.Same(args, job.ReceivedArgs);
     }
@@ -147,7 +147,7 @@ public class TenantAwareBackgroundJobTests
         // Act
         await job.ExecuteAsync(args);
 
-        // Assert — Change 不应被调用
+        // Assert - Change 不应被调用
         mockCurrentTenant.Verify(t => t.Change(It.IsAny<Guid?>(), It.IsAny<string>()), Times.Never);
     }
 
@@ -163,7 +163,7 @@ public class TenantAwareBackgroundJobTests
         // Act
         await job.ExecuteAsync(args);
 
-        // Assert — 业务逻辑仍然执行
+        // Assert - 业务逻辑仍然执行
         Assert.True(job.WasExecuted);
         Assert.Same(args, job.ReceivedArgs);
     }
@@ -175,11 +175,11 @@ public class TenantAwareBackgroundJobTests
     [Fact]
     public async Task ExecuteAsync_WithNullCurrentTenant_AndTenantId_StillExecutes()
     {
-        // Arrange — ICurrentTenant 未注册（null）
+        // Arrange - ICurrentTenant 未注册（null）
         var args = new TestJobArgs { TenantId = Guid.NewGuid(), Payload = "orphan" };
         var job = new TestTenantAwareJob(currentTenant: null);
 
-        // Act — 不应抛出任何异常
+        // Act - 不应抛出任何异常
         await job.ExecuteAsync(args);
 
         // Assert
@@ -222,14 +222,14 @@ public class TenantAwareBackgroundJobTests
         // Act
         await job.ExecuteAsync(args);
 
-        // Assert — using 块结束后 Dispose 应被调用一次，确保上下文恢复
+        // Assert - using 块结束后 Dispose 应被调用一次，确保上下文恢复
         mockDisposable.Verify(d => d.Dispose(), Times.Once);
     }
 
     [Fact]
     public async Task ExecuteAsync_WithTenantId_DisposesContextEvenAfterException()
     {
-        // Arrange — 内部抛出异常时，using 块依然会 Dispose
+        // Arrange - 内部抛出异常时，using 块依然会 Dispose
         var tenantId = Guid.NewGuid();
         var args = new TestJobArgs { TenantId = tenantId };
 
@@ -242,10 +242,10 @@ public class TenantAwareBackgroundJobTests
         // 使用会抛异常的具体任务
         var job = new ThrowingTenantJob(mockCurrentTenant.Object);
 
-        // Act & Assert — 异常向上传播
+        // Act & Assert - 异常向上传播
         await Assert.ThrowsAsync<InvalidOperationException>(() => job.ExecuteAsync(args));
 
-        // Assert — Dispose 仍然被调用（using 语义保证）
+        // Assert - Dispose 仍然被调用（using 语义保证）
         mockDisposable.Verify(d => d.Dispose(), Times.Once);
     }
 

@@ -119,7 +119,7 @@ public class SkillSearchServiceTests
         // All 5 skills contain "code" somewhere or general enough query
         var candidates = BuildCandidates();
 
-        // Use "use" — appears in every WhenToUse section
+        // Use "use" - appears in every WhenToUse section
         var results = await service.SearchAsync(candidates, "use", maxResults: 3);
 
         results.Count.ShouldBeLessThanOrEqualTo(3);

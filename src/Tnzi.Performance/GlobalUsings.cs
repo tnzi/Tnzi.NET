@@ -19,6 +19,7 @@ global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Modules;
 global using Tnzi.Options;
+global using Tnzi.Performance.Middleware;
 global using Tnzi.Performance.Models;
 global using Tnzi.Performance.Options;
 global using Tnzi.Performance.Services;

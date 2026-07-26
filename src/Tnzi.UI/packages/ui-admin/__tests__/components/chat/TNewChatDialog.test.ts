@@ -141,7 +141,7 @@ describe('TNewChatDialog', () => {
     //   pre-fix: add → remove → size 0  ← FAILS assertion below
     //   post-fix (only A fires): add → size 1 ← PASSES
 
-    // Assert: exactly one selection — not zero (double-toggle), not two.
+    // Assert: exactly one selection - not zero (double-toggle), not two.
     expect(vm.selectedIds.size).toBe(1)
     expect(vm.selectedIds.has('u1')).toBe(true)
   })

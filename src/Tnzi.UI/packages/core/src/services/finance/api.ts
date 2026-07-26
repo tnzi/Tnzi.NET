@@ -21,6 +21,29 @@ import type {
   UpsertExchangeRateDto,
   ExchangeRateQueryDto,
   FiscalYearDto,
+  PartyLedgerSummaryDto,
+  PartyLedgerEntryDto,
+  PartyLedgerQuery,
+  EstimateDto,
+  CreateEstimateDto,
+  EstimateQueryDto,
+  PurchaseOrderDto,
+  CreatePurchaseOrderDto,
+  PurchaseOrderQueryDto,
+  ConvertOfferDto,
+  ConvertOfferResultDto,
+  BankRuleDto,
+  CreateBankRuleDto,
+  BankRuleQuery,
+  ReorderBankRulesDto,
+  TestBankRuleDto,
+  BankRuleTestResultDto,
+  DocumentAttachmentDto,
+  CreateDocumentAttachmentDto,
+  DocumentCommentDto,
+  CreateDocumentCommentDto,
+  LedgerLockDto,
+  SetLedgerLockDto,
   CreateFiscalYearDto,
   TrialBalanceReportDto,
   BalanceSheetReportDto,
@@ -119,6 +142,19 @@ import type {
   ReceiptQueryDto,
   BalanceSummaryRebuildDto,
   BalanceSummaryVerifyDto,
+  CustomerStatementDto,
+  CustomerStatementQueryDto,
+  DunningCandidateDto,
+  TaxReturnDto,
+  TaxReturnFormDto,
+  RecurringDocumentDto,
+  CreateRecurringDocumentDto,
+  UpdateRecurringDocumentDto,
+  RecurringDocumentQueryDto,
+  RecurringRunDto,
+  RecurringRunQueryDto,
+  RecurrencePreviewDto,
+  RecurringSweepResultDto,
 } from './types';
 import type { SettlementDocType, FinancePartyType, BankTransactionSource } from './metadata';
 
@@ -149,7 +185,7 @@ export function useAdminFinanceAccountApi(client: HttpClient) {
      * Read base-currency balances for a set of accounts, as of end of `asOf`
      * (posted lines only; omit `asOf` for today).
      *
-     * POST carries the id list in the body — a page of account GUIDs overflows a
+     * POST carries the id list in the body - a page of account GUIDs overflows a
      * URL. Shares the reports' aggregation path, so the as-of bound matches the
      * balance sheet exactly (future-dated postings are excluded) and the
      * `Finance:Reports:UseBalanceSummary` fast path applies. Group accounts are
@@ -255,6 +291,17 @@ export function useAdminFiscalYearApi(client: HttpClient) {
     reopen: (id: string) =>
       client.post<void>(`${ADMIN_FISCAL_BASE}/${id}/reopen`),
 
+    /**
+     * Read the rolling closing date (books closed through), plus whether a
+     * password guards changing it.
+     */
+    getClosingDate: () =>
+      client.get<LedgerLockDto>(`${ADMIN_FISCAL_BASE}/closing-date`),
+
+    /** Set / advance / clear the closing date (password required once set). */
+    setClosingDate: (data: SetLedgerLockDto) =>
+      client.put<LedgerLockDto>(`${ADMIN_FISCAL_BASE}/closing-date`, data),
+
     /** Delete a fiscal year */
     delete: (id: string) =>
       client.delete<void>(`${ADMIN_FISCAL_BASE}/${id}`),
@@ -279,9 +326,36 @@ export function useAdminFinanceReportApi(client: HttpClient) {
       client.get<ProfitAndLossReportDto>(`${ADMIN_REPORT_BASE}/profit-and-loss`, { params: { from, to } }),
 
     /** General ledger detail for one account (paged lines) */
-    getGeneralLedger: (accountId: string, from: string, to: string, pageIndex = 1, pageSize = 20) =>
+    /**
+     * General-ledger detail for one account.
+     *
+     * `filter` mirrors the backend's optional `GeneralLedgerFilterDto`:
+     * `keyword` (entry/line memo, entry number, payment reference, issued
+     * cheque number, party name) and `sourceType` push down to SQL, so paging
+     * and `totalCount` are the filtered figures. When a filter is active the
+     * backend sets `isFiltered` and zeroes the running/opening/closing
+     * balances - a filtered row chain has no continuous balance, and reporting
+     * one would be a lie rather than a rounding issue. `descending` flips to
+     * newest-first (online-banking order) without changing any row's balance.
+     */
+    getGeneralLedger: (
+      accountId: string,
+      from: string,
+      to: string,
+      pageIndex = 1,
+      pageSize = 20,
+      filter?: { keyword?: string; sourceType?: string; descending?: boolean },
+    ) =>
       client.get<GeneralLedgerReportDto>(`${ADMIN_REPORT_BASE}/general-ledger/${accountId}`, {
-        params: { from, to, pageIndex, pageSize },
+        params: {
+          from,
+          to,
+          pageIndex,
+          pageSize,
+          ...(filter?.keyword ? { keyword: filter.keyword } : {}),
+          ...(filter?.sourceType ? { sourceType: filter.sourceType } : {}),
+          ...(filter?.descending ? { descending: true } : {}),
+        },
       }),
 
     /** AR aging as of a date */
@@ -338,6 +412,10 @@ const ADMIN_CUSTOMER_BASE = '/admin/finance/customers';
 const ADMIN_VENDOR_BASE = '/admin/finance/vendors';
 const ADMIN_ITEM_BASE = '/admin/finance/items';
 const ADMIN_TAX_BASE = '/admin/finance/taxes';
+const ADMIN_DOC_COLLAB_BASE = '/admin/finance/documents';
+const ADMIN_BANK_RULE_BASE = '/admin/finance/bank-rules';
+const ADMIN_ESTIMATE_BASE = '/admin/finance/estimates';
+const ADMIN_PURCHASE_ORDER_BASE = '/admin/finance/purchase-orders';
 const ADMIN_INVOICE_BASE = '/admin/finance/invoices';
 const ADMIN_BILL_BASE = '/admin/finance/bills';
 const ADMIN_EXPENSE_BASE = '/admin/finance/expenses';
@@ -358,6 +436,17 @@ export function useAdminFinanceCustomerApi(client: HttpClient) {
     create: (data: CreateCustomerDto) => client.post<CustomerDto>(ADMIN_CUSTOMER_BASE, data),
     update: (id: string, data: UpdateCustomerDto) => client.put<CustomerDto>(`${ADMIN_CUSTOMER_BASE}/${id}`, data),
     delete: (id: string) => client.delete<void>(`${ADMIN_CUSTOMER_BASE}/${id}`),
+    /**
+     * Work-surface summary: open balance, overdue, aging buckets, period total.
+     * Ties out with the aging report by construction.
+     */
+    getSummary: (id: string, params?: { asOf?: string; from?: string; to?: string }) =>
+      client.get<PartyLedgerSummaryDto>(`${ADMIN_CUSTOMER_BASE}/${id}/summary`, { params }),
+
+    /** Transaction ledger across document types, newest first. */
+    getTransactions: (id: string, params?: PartyLedgerQuery) =>
+      client.get<PagedList<PartyLedgerEntryDto>>(`${ADMIN_CUSTOMER_BASE}/${id}/transactions`, { params }),
+
   };
 }
 
@@ -371,6 +460,17 @@ export function useAdminFinanceVendorApi(client: HttpClient) {
     create: (data: CreateVendorDto) => client.post<VendorDto>(ADMIN_VENDOR_BASE, data),
     update: (id: string, data: UpdateVendorDto) => client.put<VendorDto>(`${ADMIN_VENDOR_BASE}/${id}`, data),
     delete: (id: string) => client.delete<void>(`${ADMIN_VENDOR_BASE}/${id}`),
+    /**
+     * Work-surface summary: open balance, overdue, aging buckets, period total.
+     * Ties out with the aging report by construction.
+     */
+    getSummary: (id: string, params?: { asOf?: string; from?: string; to?: string }) =>
+      client.get<PartyLedgerSummaryDto>(`${ADMIN_VENDOR_BASE}/${id}/summary`, { params }),
+
+    /** Transaction ledger across document types, newest first. */
+    getTransactions: (id: string, params?: PartyLedgerQuery) =>
+      client.get<PagedList<PartyLedgerEntryDto>>(`${ADMIN_VENDOR_BASE}/${id}/transactions`, { params }),
+
   };
 }
 
@@ -419,6 +519,84 @@ function documentApi<TDto, TCreate, TQuery>(client: HttpClient, basePath: string
     post: (id: string) => client.post<TDto>(`${basePath}/${id}/post`),
     void: (id: string) => client.post<TDto>(`${basePath}/${id}/void`),
   };
+}
+
+/**
+ * Shared surface of the two non-posting documents.
+ *
+ * The lifecycle verbs are business words (send / accept / decline / close), not
+ * `post` / `void`: these documents never reach the ledger, and borrowing the
+ * accounting verbs would suggest they do.
+ */
+function offerApi<TDto, TCreate, TQuery>(client: HttpClient, basePath: string, convertPath: string) {
+  return {
+    getList: (params?: TQuery) => client.get<PagedList<TDto>>(basePath, { params: params as Record<string, unknown> | undefined }),
+    get: (id: string) => client.get<TDto>(`${basePath}/${id}`),
+    createDraft: (data: TCreate) => client.post<TDto>(basePath, data),
+    update: (id: string, data: TCreate) => client.put<TDto>(`${basePath}/${id}`, data),
+    deleteDraft: (id: string) => client.delete<void>(`${basePath}/${id}`),
+    /** Allocates the document number - this is the moment it becomes a fact. */
+    send: (id: string) => client.post<TDto>(`${basePath}/${id}/send`),
+    accept: (id: string) => client.post<TDto>(`${basePath}/${id}/accept`),
+    decline: (id: string) => client.post<TDto>(`${basePath}/${id}/decline`),
+    close: (id: string) => client.post<TDto>(`${basePath}/${id}/close`),
+    /** Produces a DRAFT invoice / bill; posting stays a separate human decision. */
+    convert: (id: string, data: ConvertOfferDto) =>
+      client.post<ConvertOfferResultDto>(`${basePath}/${id}/${convertPath}`, data),
+  };
+}
+
+/**
+ * Attachments and discussion on any finance document.
+ *
+ * Addressed polymorphically by `{docType}/{docId}` using the same source-token
+ * vocabulary as the ledger, so a consuming app's own document types work
+ * without a line of extra code.
+ */
+export function useAdminFinanceDocumentCollaborationApi(client: HttpClient) {
+  return {
+    listAttachments: (docType: string, docId: string) =>
+      client.get<DocumentAttachmentDto[]>(`${ADMIN_DOC_COLLAB_BASE}/${docType}/${docId}/attachments`),
+    attach: (docType: string, docId: string, data: CreateDocumentAttachmentDto) =>
+      client.post<DocumentAttachmentDto>(`${ADMIN_DOC_COLLAB_BASE}/${docType}/${docId}/attachments`, data),
+    removeAttachment: (id: string) =>
+      client.delete<void>(`${ADMIN_DOC_COLLAB_BASE}/attachments/${id}`),
+    /** Paperclip badges for a whole list page in one call. */
+    attachmentCounts: (docType: string, docIds: string[]) =>
+      client.post<Record<string, number>>(`${ADMIN_DOC_COLLAB_BASE}/${docType}/attachment-counts`, docIds),
+
+    listComments: (docType: string, docId: string) =>
+      client.get<DocumentCommentDto[]>(`${ADMIN_DOC_COLLAB_BASE}/${docType}/${docId}/comments`),
+    postComment: (docType: string, docId: string, data: CreateDocumentCommentDto) =>
+      client.post<DocumentCommentDto>(`${ADMIN_DOC_COLLAB_BASE}/${docType}/${docId}/comments`, data),
+    deleteComment: (id: string) =>
+      client.delete<void>(`${ADMIN_DOC_COLLAB_BASE}/comments/${id}`),
+  };
+}
+
+/** Admin Bank Rule API */
+export function useAdminFinanceBankRuleApi(client: HttpClient) {
+  return {
+    getList: (params?: BankRuleQuery) => client.get<PagedList<BankRuleDto>>(ADMIN_BANK_RULE_BASE, { params }),
+    get: (id: string) => client.get<BankRuleDto>(`${ADMIN_BANK_RULE_BASE}/${id}`),
+    create: (data: CreateBankRuleDto) => client.post<BankRuleDto>(ADMIN_BANK_RULE_BASE, data),
+    update: (id: string, data: CreateBankRuleDto) => client.put<BankRuleDto>(`${ADMIN_BANK_RULE_BASE}/${id}`, data),
+    delete: (id: string) => client.delete<void>(`${ADMIN_BANK_RULE_BASE}/${id}`),
+    reorder: (data: ReorderBankRulesDto) => client.post<void>(`${ADMIN_BANK_RULE_BASE}/reorder`, data),
+    /** Dry run: which pending lines this rule would take, and who actually wins them. */
+    test: (id: string, data: TestBankRuleDto) =>
+      client.post<BankRuleTestResultDto>(`${ADMIN_BANK_RULE_BASE}/${id}/test`, data),
+  };
+}
+
+/** Admin Estimate (quote) API */
+export function useAdminFinanceEstimateApi(client: HttpClient) {
+  return offerApi<EstimateDto, CreateEstimateDto, EstimateQueryDto>(client, ADMIN_ESTIMATE_BASE, 'convert-to-invoice');
+}
+
+/** Admin Purchase Order API */
+export function useAdminFinancePurchaseOrderApi(client: HttpClient) {
+  return offerApi<PurchaseOrderDto, CreatePurchaseOrderDto, PurchaseOrderQueryDto>(client, ADMIN_PURCHASE_ORDER_BASE, 'convert-to-bill');
 }
 
 /** Admin Invoice API */
@@ -685,6 +863,9 @@ export function useAdminFinanceReceiptApi(client: HttpClient) {
 }
 
 const ADMIN_BALANCE_SUMMARY_BASE = '/admin/finance/balance-summary';
+const ADMIN_STATEMENT_BASE = '/admin/finance/statements';
+const ADMIN_TAX_RETURN_BASE = '/admin/finance/tax-returns';
+const ADMIN_RECURRING_BASE = '/admin/finance/recurring';
 
 /**
  * Admin balance-summary maintenance API (Batch F). Both endpoints are POST
@@ -696,5 +877,71 @@ export function useAdminFinanceBalanceSummaryApi(client: HttpClient) {
     verify: () => client.post<BalanceSummaryVerifyDto>(`${ADMIN_BALANCE_SUMMARY_BASE}/verify`),
     /** Fully rebuild the current tenant's summary buckets from the ledger. */
     rebuild: () => client.post<BalanceSummaryRebuildDto>(`${ADMIN_BALANCE_SUMMARY_BASE}/rebuild`),
+  };
+}
+
+/**
+ * Admin customer / vendor statement API (P4-5).
+ *
+ * The figures reuse the aging report's own calculation, so what you post out
+ * ties to what your own books say - the worst failure mode here is a statement
+ * that disagrees with your aging by a few cents.
+ */
+export function useAdminFinanceStatementApi(client: HttpClient) {
+  return {
+    get: (partyType: FinancePartyType, partyId: string, params?: CustomerStatementQueryDto) =>
+      client.get<CustomerStatementDto>(`${ADMIN_STATEMENT_BASE}/${partyType}/${partyId}`, { params }),
+    /** Printable statement. 501 when no IStatementRenderer is registered. */
+    download: (partyType: FinancePartyType, partyId: string, params?: CustomerStatementQueryDto) =>
+      client.download(`${ADMIN_STATEMENT_BASE}/${partyType}/${partyId}/document`, { params }),
+    /** Collections worklist, worst first. */
+    dunning: (partyType: FinancePartyType, asOf?: string) =>
+      client.get<DunningCandidateDto[]>(`${ADMIN_STATEMENT_BASE}/${partyType}/dunning`, { params: { asOf } }),
+  };
+}
+
+/**
+ * Admin tax return API (P4-7).
+ *
+ * Returns line amounts, not a filing file: electronic formats change by year
+ * and need registration, so the framework stops at the numbers.
+ */
+export function useAdminFinanceTaxReturnApi(client: HttpClient) {
+  return {
+    /** Which forms this deployment can produce (empty = no country pack loaded). */
+    forms: () => client.get<TaxReturnFormDto[]>(`${ADMIN_TAX_RETURN_BASE}/forms`),
+    get: (country: string, formCode: string, from: string, to: string) =>
+      client.get<TaxReturnDto>(`${ADMIN_TAX_RETURN_BASE}/${country}/${formCode}`, { params: { from, to } }),
+  };
+}
+
+/** Admin recurring document API (P4-6) */
+export function useAdminFinanceRecurringApi(client: HttpClient) {
+  return {
+    getList: (params?: RecurringDocumentQueryDto) =>
+      client.get<PagedList<RecurringDocumentDto>>(ADMIN_RECURRING_BASE, { params }),
+    get: (id: string) => client.get<RecurringDocumentDto>(`${ADMIN_RECURRING_BASE}/${id}`),
+    create: (data: CreateRecurringDocumentDto) => client.post<RecurringDocumentDto>(ADMIN_RECURRING_BASE, data),
+    update: (id: string, data: UpdateRecurringDocumentDto) =>
+      client.put<RecurringDocumentDto>(`${ADMIN_RECURRING_BASE}/${id}`, data),
+    delete: (id: string) => client.delete<void>(`${ADMIN_RECURRING_BASE}/${id}`),
+
+    pause: (id: string) => client.post<RecurringDocumentDto>(`${ADMIN_RECURRING_BASE}/${id}/pause`),
+    resume: (id: string) => client.post<RecurringDocumentDto>(`${ADMIN_RECURRING_BASE}/${id}/resume`),
+    end: (id: string) => client.post<RecurringDocumentDto>(`${ADMIN_RECURRING_BASE}/${id}/end`),
+
+    /** Dates only, nothing written - so the anchor rules can be checked before saving. */
+    preview: (id: string, count = 6) =>
+      client.get<RecurrencePreviewDto>(`${ADMIN_RECURRING_BASE}/${id}/preview`, { params: { count } }),
+    previewSchedule: (data: CreateRecurringDocumentDto, count = 6) =>
+      client.post<RecurrencePreviewDto>(`${ADMIN_RECURRING_BASE}/preview`, data, { params: { count } }),
+
+    runs: (params?: RecurringRunQueryDto) =>
+      client.get<PagedList<RecurringRunDto>>(`${ADMIN_RECURRING_BASE}/runs`, { params }),
+    /** Generate this template's due periods now. Repeat clicks are safe. */
+    run: (id: string, asOf?: string) =>
+      client.post<RecurringSweepResultDto>(`${ADMIN_RECURRING_BASE}/${id}/run`, undefined, { params: { asOf } }),
+    runDue: (asOf?: string) =>
+      client.post<RecurringSweepResultDto>(`${ADMIN_RECURRING_BASE}/run-due`, undefined, { params: { asOf } }),
   };
 }

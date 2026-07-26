@@ -5,6 +5,7 @@
  */
 
 import { useLogger } from '../logger';
+import { createAdapterSingleton } from '../singleton';
 
 // ============================================
 // Type Definitions
@@ -60,7 +61,7 @@ export interface EventBusOptions {
   maxListeners?: number;
 }
 
-// EventBusRuntime removed — use setEventBusAdapter/useEventBus/resetEventBusAdapter instead
+// EventBusRuntime removed - use setEventBusAdapter/useEventBus/resetEventBusAdapter instead
 
 // ============================================
 // Event Bus Implementation
@@ -96,13 +97,19 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
       handlers.add(handler as EventHandler);
       log('subscribed', { event, handlerCount: handlers.size });
 
-      // Return unsubscribe function
+      // Return unsubscribe function. Re-read the Set from the map instead of
+      // closing over the one captured at subscribe time: `off(event)` drops the
+      // whole key, so a later `on(event, ...)` installs a FRESH Set. A stale
+      // closure would then delete its own orphaned handler, observe size 0, and
+      // wipe the live key - silently unsubscribing everyone who subscribed after
+      // the off(). Matches `once()` below.
       return () => {
-        handlers?.delete(handler as EventHandler);
-        if (handlers?.size === 0) {
+        const currentHandlers = listeners.get(event);
+        currentHandlers?.delete(handler as EventHandler);
+        if (currentHandlers?.size === 0) {
           listeners.delete(event);
         }
-        log('unsubscribed', { event, handlerCount: handlers?.size ?? 0 });
+        log('unsubscribed', { event, handlerCount: currentHandlers?.size ?? 0 });
       };
     },
 
@@ -173,17 +180,19 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 // Singleton
 // ============================================
 
-const _fallback: EventBus = createEventBus();
-let _active: EventBus | null = null;
+// The fallback bus is shared through the registry too: a per-chunk copy would
+// route publishers and subscribers that resolved different entry points into
+// separate buses and drop every event between them.
+const _slot = createAdapterSingleton<EventBus>('event-bus', () => createEventBus());
 
 export function setEventBusAdapter(eventBus: EventBus): void {
-  _active = eventBus;
+  _slot.set(eventBus);
 }
 
 export function useEventBus(): EventBus {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetEventBusAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

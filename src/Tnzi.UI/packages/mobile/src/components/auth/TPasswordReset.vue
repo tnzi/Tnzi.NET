@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue';
+import { computed, onUnmounted } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
+import { usePasswordReset } from '../../headless/usePasswordReset';
+
 interface IPasswordResetProps {
   loading?: boolean;
   disabled?: boolean;
@@ -37,55 +39,30 @@ const props = withDefaults(defineProps<IPasswordResetProps>(), {
 
 const emit = defineEmits<IPasswordResetEmits>();
 
-const email = ref('');
-const code = ref('');
-const password = ref('');
-const confirmPassword = ref('');
-const countdown = ref(0);
+// Field state, the resend countdown and its timer cleanup all come from the
+// headless composable; see TLoginForm for why the options are getters.
+const form = usePasswordReset({
+  get countdownSeconds() {
+    return props.countdownSeconds;
+  },
+  onSubmit: (data) => emit('submit', data),
+  onCancel: () => emit('cancel'),
+  onSendCode: (address) => emit('sendCode', address),
+});
+
+const { email, code, password, confirmPassword } = form.fields;
+const { countdown, passwordMismatch } = form;
 
 const isDisabled = computed(() => props.disabled);
-const canSendCode = computed(() => !isDisabled.value && email.value && countdown.value === 0);
-const passwordMismatch = computed(() => confirmPassword.value !== '' && confirmPassword.value !== password.value);
+const isLoading = computed(() => props.loading || form.isSubmitting.value);
+const canSendCode = computed(() => form.canSendCode.value && !props.disabled);
 
-let timer: ReturnType<typeof setInterval> | null = null;
-
-const startCountdown = () => {
-  countdown.value = props.countdownSeconds;
-  timer = setInterval(() => {
-    countdown.value -= 1;
-    if (countdown.value <= 0 && timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  }, 1000);
-};
-
-const handleSendCode = () => {
-  if (!canSendCode.value) return;
-  emit('sendCode', email.value);
-  startCountdown();
-};
-
-const handleSubmit = () => {
-  if (passwordMismatch.value) return;
-  emit('submit', {
-    email: email.value,
-    code: code.value,
-    password: password.value,
-  });
-};
-
-onUnmounted(() => {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
-});
+onUnmounted(() => form.dispose());
 </script>
 
 <template>
-  <div class="rounded-xl bg-white">
-    <van-form @submit="handleSubmit">
+  <div class="rounded-xl bg-van-surface">
+    <van-form @submit="form.submit">
       <van-field
         v-model="email"
         type="email"
@@ -107,7 +84,7 @@ onUnmounted(() => {
             size="small"
             type="primary"
             :disabled="!canSendCode"
-            @click="handleSendCode"
+            @click="form.sendCode"
           >
             <span v-if="countdown > 0">{{ countdown }}s</span>
             <span v-else>{{ props.sendCodeLabel || t('auth.sendCode') }}</span>
@@ -139,8 +116,8 @@ onUnmounted(() => {
           round
           block
           plain
-          :disabled="isDisabled || props.loading"
-          @click="emit('cancel')"
+          :disabled="isDisabled || isLoading"
+          @click="form.cancel"
         >
           {{ props.cancelLabel || t('common.cancel') }}
         </van-button>
@@ -149,7 +126,7 @@ onUnmounted(() => {
           block
           type="primary"
           native-type="submit"
-          :loading="props.loading"
+          :loading="isLoading"
           :disabled="isDisabled || passwordMismatch"
         >
           {{ props.submitLabel || t('auth.resetPassword') }}

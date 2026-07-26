@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Abstractions;
 
 /// <summary>
-/// Channel->Thread 映射存储 — 维护 IM 会话和 AI 线程的对应关系
+/// Channel->Thread 映射存储 - 维护 IM 会话和 AI 线程的对应关系
 /// </summary>
 public interface IChannelThreadStore
 {

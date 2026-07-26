@@ -15,6 +15,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly IPasswordPolicyService? _passwordPolicyService;
     private readonly IUserDetailService? _userDetailService;
     private readonly ITokenService? _tokenService;
+    private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -32,7 +33,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
         IUserDetailService? userDetailService = null,
         ITokenService? tokenService = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ILoginSessionCoordinator? loginSessionCoordinator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -44,6 +46,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         _passwordPolicyService = passwordPolicyService;
         _userDetailService = userDetailService;
         _tokenService = tokenService;
+        _loginSessionCoordinator = loginSessionCoordinator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -125,15 +128,26 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<TokenResult>("Token service is not available", 500);
         }
 
+        // 注册后自动登录：建立登录会话（首登录无既有会话，策略平凡通过）
+        var sessionId = Guid.Empty;
+        if (_loginSessionCoordinator != null)
+        {
+            var sessionResult = await _loginSessionCoordinator.EstablishAsync(user.Id);
+            if (sessionResult.Succeeded)
+            {
+                sessionId = sessionResult.Data;
+            }
+        }
+
         var roles = await GetRolesWithTenantContextAsync(user);
-        var token = _tokenService.GenerateToken(user, roles);
+        var token = _tokenService.GenerateToken(user, roles, sessionId: sessionId == Guid.Empty ? null : sessionId);
         var ipAddress = ScopedContext?.ClientIpAddress ?? string.Empty;
         var userAgent = ScopedContext?.UserAgent ?? string.Empty;
 
         string? refreshToken = null;
         DateTime? refreshTokenExpiresAt = null;
 
-        // 如果启用了RefreshToken，生成并保存
+        // 如果启用了RefreshToken，生成并保存（按会话绑定）
         if (jwtOptions.EnableRefreshToken)
         {
             refreshToken = _tokenService.GenerateRefreshToken();
@@ -147,7 +161,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
                     IdentityConstants.TokenProvider.JWT,
                     IdentityConstants.TokenName.RefreshToken,
                     refreshToken,
-                    refreshTokenExpiresAt);
+                    refreshTokenExpiresAt,
+                    sessionId);
             }
         }
 
@@ -196,7 +211,19 @@ public class RegistrationService : ApplicationService, IRegistrationService
     public async Task<Result<string>> SendQuickRegisterCodeAsync(SendQuickRegisterCodeDto input)
     {
         var registrationOptions = IdentityOptions.Registration;
+        var captchaOptions = IdentityOptions.Captcha;
         var otpOptions = IdentityOptions.Otp;
+
+        // 图形验证码校验(启用注册验证码时,发送短信/邮箱验证码前必须先过图形验证码,
+        // 防机器人刷发码接口造成短信/邮件费用;web admin 的注册走此快速注册流)。
+        if (captchaOptions.EnableCaptchaOnRegister)
+        {
+            var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "register");
+            if (!captchaValid)
+            {
+                return Fail<string>("Invalid or expired captcha", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED);
+            }
+        }
 
         // 检查快速注册是否启用
         var isEmailRequest = !string.IsNullOrWhiteSpace(input.Email);
@@ -237,16 +264,20 @@ public class RegistrationService : ApplicationService, IRegistrationService
         }
 
         // 使用 TwoFactorService 存储并发送验证码（内部已发布 TwoFactorCodeSentEvent）
-        // 无需额外发布 QuickRegisterCodeSentEvent，Hosting 的 handler 已处理通知发送
-        if (_twoFactorService != null)
+        // 无需额外发布 QuickRegisterCodeSentEvent，Hosting 的 handler 已处理通知发送。
+        // 服务缺失时必须报错而不是返回"已发送"：否则调用方以为收到了码，
+        // 而 QuickRegisterAsync 也无从校验（见该方法的 fail-closed 分支）。
+        if (_twoFactorService == null)
         {
-            var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
-            var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
-            var sendResult = await _twoFactorService.SendCodeByAddressAsync(address, type, userId: null);
-            if (!sendResult.Succeeded)
-            {
-                return Fail<string>(sendResult.Message ?? "Failed to send verification code", sendResult.Code ?? 500);
-            }
+            return Fail<string>("Verification code service is not available", 503, ErrorCodes.CONFIGURATION_ERROR);
+        }
+
+        var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
+        var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
+        var sendResult = await _twoFactorService.SendCodeByAddressAsync(address, type, userId: null);
+        if (!sendResult.Succeeded)
+        {
+            return Fail<string>(sendResult.Message ?? "Failed to send verification code", sendResult.Code ?? 500);
         }
 
         return Result<string>.Success("Verification code sent successfully");
@@ -280,23 +311,22 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<QuickRegisterResultDto>("Verification code is required", 400);
         }
 
-        // 验证验证码
-        if (_twoFactorService != null)
+        // 验证验证码。服务缺失时 fail-closed：无法校验就绝不建账号，
+        // 否则任何人都能用任意邮箱/手机号注册出 EmailConfirmed=true 的账号。
+        if (_twoFactorService == null)
         {
-            var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
-            var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
-            var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(address, input.Code, type);
-            if (!verifyResult.Succeeded)
-            {
-                return Fail<QuickRegisterResultDto>(
-                    verifyResult.Message ?? "Invalid or expired verification code",
-                    verifyResult.Code ?? 400);
-            }
+            LogError("TwoFactorService is not available; quick registration is refused because the verification code cannot be validated.");
+            return Fail<QuickRegisterResultDto>("Verification code service is not available", 503, ErrorCodes.CONFIGURATION_ERROR);
         }
-        else
+
+        var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
+        var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
+        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(address, input.Code, type);
+        if (!verifyResult.Succeeded)
         {
-            // TwoFactorService 不可用时，无法验证验证码
-            LogWarning("TwoFactorService is not available, verification code cannot be validated");
+            return Fail<QuickRegisterResultDto>(
+                verifyResult.Message ?? "Invalid or expired verification code",
+                verifyResult.Code ?? 400);
         }
 
         // 检查用户是否已存在

@@ -8,7 +8,7 @@ import type { AdminSettingsConfig } from '../../../src/plugin/settingsConfig'
 const getDefinitions = vi.fn()
 const saveGroup = vi.fn()
 const resetGroup = vi.fn()
-// Parameters.vue (the lazy "advanced" section) consumes bridge.settings.* — the
+// Parameters.vue (the lazy "advanced" section) consumes bridge.settings.* - the
 // mock must stay complete so activating that section never throws.
 const settingsFetch = vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 }))
 
@@ -24,7 +24,6 @@ vi.mock('../../../src/services/bridges/system-bridge', () => ({
       update: vi.fn(),
       delete: vi.fn(),
     },
-    menus: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), reorder: vi.fn() },
     accessLogs: { fetch: vi.fn() },
     scheduledJobs: { fetch: vi.fn(), trigger: vi.fn() },
   }),
@@ -35,6 +34,9 @@ vi.mock('../../../src/services/bridges/system-bridge', () => ({
 import TSettingsPage from '../../../src/components/settings/TSettingsPage.vue'
 import TDetailLayout from '../../../src/components/detail/TDetailLayout.vue'
 import { ADMIN_SETTINGS_CONFIG_KEY } from '../../../src/plugin/settingsConfig'
+import { useAdminRouteStore } from '../../../src/stores/useAdminRouteStore'
+import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 const demoGroup: SettingsCenterGroupDto = {
   key: 'system-general',
@@ -44,6 +46,7 @@ const demoGroup: SettingsCenterGroupDto = {
   description: null,
   icon: 'mdi:web',
   order: 0,
+  isBuiltIn: true,
   fields: [
     {
       key: 'System:SiteName', label: 'Site Name', i18nKey: null, description: null, type: 'String',
@@ -139,7 +142,7 @@ describe('Settings page (TSettingsPage integration)', () => {
 
     expect(saveGroup).toHaveBeenCalledTimes(1)
     expect(saveGroup.mock.calls[0]?.[0]).toBe('system-general')
-    // BoolFlag is untouched — payload contains the changed field only.
+    // BoolFlag is untouched - payload contains the changed field only.
     expect(saveGroup.mock.calls[0]?.[1]).toEqual({ 'System:SiteName': 'New' })
 
     // The resolved group (isOverridden: true) re-hydrates the panel.
@@ -165,7 +168,7 @@ describe('Settings page (TSettingsPage integration)', () => {
     const wrapper = mount(TSettingsPage)
     await flushPromises()
 
-    // Drive the NPopconfirm confirmation the way its action button would —
+    // Drive the NPopconfirm confirmation the way its action button would -
     // emitting positive-click invokes the @positive-click="onReset" binding
     // without simulating the teleported popover in happy-dom.
     const popconfirm = wrapper.findComponent(NPopconfirm)
@@ -177,7 +180,7 @@ describe('Settings page (TSettingsPage integration)', () => {
     expect(resetGroup.mock.calls[0]?.[0]).toBe('system-general')
   })
 
-  it('renders consumer-provided custom sections and switches to them', async () => {
+  it('renders consumer-provided custom sections (custom leads the nav → default active)', async () => {
     const config: AdminSettingsConfig = {
       sections: [
         {
@@ -192,15 +195,15 @@ describe('Settings page (TSettingsPage integration)', () => {
     })
     await flushPromises()
 
-    // The custom section label is only in the left nav until activated.
+    // Custom sections lead the nav now, so the first one is the default panel.
     expect(wrapper.text()).toContain('Biz Section')
-    expect(wrapper.find('.biz-panel').exists()).toBe(false)
-
-    const layout = wrapper.findComponent(TDetailLayout)
-    ;(layout.vm as unknown as { onSection: (k: string) => void }).onSection('custom:biz')
-    await flushPromises()
-
     expect(wrapper.find('.biz-panel').exists()).toBe(true)
+
+    // The built-in schema group is still reachable by activating its nav entry.
+    const layout = wrapper.findComponent(TDetailLayout)
+    ;(layout.vm as unknown as { onSection: (k: string) => void }).onSection('system-general')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Site Name')
   })
 
   it('hideGroups removes the built-in schema group from the nav', async () => {
@@ -214,6 +217,109 @@ describe('Settings page (TSettingsPage integration)', () => {
     expect(wrapper.text()).not.toContain('Site Name')
     // The advanced parameters section is still offered.
     expect(wrapper.text()).toContain('Parameters')
+  })
+
+  it('hideAdvanced drops the built-in Advanced Parameters entry', async () => {
+    const config: AdminSettingsConfig = { hideAdvanced: true }
+    const wrapper = mount(TSettingsPage, {
+      global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } },
+    })
+    await flushPromises()
+
+    // Schema group still renders; the Advanced/Parameters entry is gone.
+    expect(wrapper.text()).toContain('General')
+    expect(wrapper.text()).not.toContain('Parameters')
+  })
+
+  it('orders consumer custom sections before the framework schema groups', async () => {
+    const config: AdminSettingsConfig = {
+      sections: [{ key: 'biz', label: 'Biz Section', component: { template: '<div>biz</div>' } }],
+    }
+    const wrapper = mount(TSettingsPage, {
+      global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } },
+    })
+    await flushPromises()
+
+    const layout = wrapper.findComponent(TDetailLayout)
+    const keys = (layout.props('sections') as { key: string }[]).map((s) => s.key)
+    // Custom section leads; the built-in schema group follows.
+    expect(keys.indexOf('custom:biz')).toBeLessThan(keys.indexOf('system-general'))
+    expect(keys[0]).toBe('custom:biz')
+  })
+
+  it('super admin "built-in menus" OFF hides framework groups + Advanced, keeps consumer config', async () => {
+    useAdminAuthStore().setSuperUser(true)
+    useAdminAppStore().setShowBuiltInMenus(false)
+    // A consumer's own backend [RuntimeSetting] group (isBuiltIn: false) alongside
+    // the framework "System" group (isBuiltIn: true).
+    const consumerGroup: SettingsCenterGroupDto = {
+      key: 'blog-general', moduleName: 'Blog', displayName: 'Blog', i18nKey: null, description: null,
+      icon: 'mdi:post-outline', order: 900, isBuiltIn: false,
+      fields: [makeField({ key: 'Blog:PublicPageSize', label: 'Public Page Size', type: 'Int', value: '12' })],
+    }
+    getDefinitions.mockResolvedValue([clone(demoGroup), consumerGroup])
+    const config: AdminSettingsConfig = {
+      sections: [{ key: 'biz', label: 'Biz Section', component: { template: '<div class="biz-panel">biz</div>' } }],
+    }
+    const wrapper = mount(TSettingsPage, {
+      global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } },
+    })
+    await flushPromises()
+
+    const layout = wrapper.findComponent(TDetailLayout)
+    const keys = (layout.props('sections') as { key: string }[]).map((s) => s.key)
+    // Framework built-in config (schema group + Advanced) is gone.
+    expect(keys).not.toContain('system-general')
+    expect(keys).not.toContain('advanced:parameters')
+    // The consumer's own backend group + custom section both survive.
+    expect(keys).toContain('blog-general')
+    expect(keys).toContain('custom:biz')
+    // Custom sections still lead the nav.
+    expect(keys[0]).toBe('custom:biz')
+  })
+
+  it('super admin "built-in menus" OFF with only framework config shows the empty state', async () => {
+    useAdminAuthStore().setSuperUser(true)
+    useAdminAppStore().setShowBuiltInMenus(false)
+    // Only the framework "System" group exists (isBuiltIn: true) → all hidden.
+    const wrapper = mount(TSettingsPage)
+    await flushPromises()
+
+    const layout = wrapper.findComponent(TDetailLayout)
+    expect((layout.props('sections') as unknown[]).length).toBe(0)
+    // The panel shows the friendly "built-in hidden" empty state, not a blank.
+    expect(wrapper.text()).toContain('Built-in settings are hidden')
+  })
+
+  it('non-super user is unaffected by a persisted built-in-menus OFF', async () => {
+    // Not a super user → the toggle never gates their settings side-nav.
+    useAdminAppStore().setShowBuiltInMenus(false)
+    const wrapper = mount(TSettingsPage)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('General')
+    expect(wrapper.text()).toContain('Parameters')
+  })
+
+  it('gates a custom section on module availability (hidden when module unloaded)', async () => {
+    // availableModules is a Set that excludes 'chat' → the chat-gated section
+    // is filtered out of the nav (fail-CLOSED because the signal IS present).
+    const routeStore = useAdminRouteStore()
+    routeStore.setAvailableModules(new Set(['system']))
+
+    const config: AdminSettingsConfig = {
+      sections: [
+        { key: 'gated', label: 'Chat Extras', module: 'chat', component: { template: '<div>x</div>' } },
+        { key: 'open', label: 'System Extras', module: 'system', component: { template: '<div>y</div>' } },
+      ],
+    }
+    const wrapper = mount(TSettingsPage, {
+      global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Chat Extras')
+    expect(wrapper.text()).toContain('System Extras')
   })
 
   it('global search filters the left nav to matching groups (deep-link engine keeps full list)', async () => {

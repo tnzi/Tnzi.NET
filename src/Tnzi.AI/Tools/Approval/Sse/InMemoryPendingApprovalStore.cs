@@ -75,7 +75,7 @@ public sealed class InMemoryPendingApprovalStore : IPendingApprovalStore, IDispo
         if (!_entries.TryGetValue(id, out var entry))
             return Task.FromResult(ResolveResult.NotFound);
 
-        // Authz: only the request owner may resolve. Null/empty currentUserId is "untrusted caller" — reject.
+        // Authz: only the request owner may resolve. Null/empty currentUserId is "untrusted caller" - reject.
         if (string.IsNullOrEmpty(currentUserId)
             || !string.Equals(entry.Request.UserId, currentUserId, StringComparison.Ordinal))
         {

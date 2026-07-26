@@ -146,7 +146,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
                     try
                     {
                         // Handlers are registered via `AddEventHandler<TEvent, THandler>()` as
-                        // `services.AddScoped<IEventHandler<TEvent>, THandler>()` — i.e. only the
+                        // `services.AddScoped<IEventHandler<TEvent>, THandler>()` - i.e. only the
                         // interface descriptor exists, not a binding for the concrete type.
                         // Resolving by `handlerType` directly returns null and the background
                         // dispatch silently drops the event (regression introduced when sync

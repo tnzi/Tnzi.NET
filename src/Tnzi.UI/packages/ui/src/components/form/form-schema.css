@@ -1,5 +1,5 @@
 /**
- * `.t-form-schema--compact` — global compact overrides for the naive-ui
+ * `.t-form-schema--compact` - global compact overrides for the naive-ui
  * NForm/NFormItem rendered by `TSchemaForm` in admin / CRUD modal forms.
  *
  * Why global (not scoped):
@@ -60,7 +60,7 @@
 
 /* Cap textarea height so a large field value (multi-KB template body)
    can't blow past the modal viewport. naive-ui's `autosize: { maxRows }`
-   sometimes fails to clamp height in modal/readonly contexts — a hard
+   sometimes fails to clamp height in modal/readonly contexts - a hard
    CSS max-height + internal scroll is the reliable belt-and-braces. */
 .t-form-schema--compact textarea {
   max-height: 320px !important;
@@ -72,11 +72,11 @@
 
 /* View-mode (readonly) readability: when a non-editable form modal is open
    the text-style fields use the native `readonly` attribute (renderField in
-   TSchemaForm.ts) — that already keeps text colour normal. Non-text widgets
+   TSchemaForm.ts) - that already keeps text colour normal. Non-text widgets
    (select / switch / date / radio) have no `readonly` prop and fall back to
    `disabled`, which naive-ui renders with a muted ~0.3 alpha. These rules
    restore full opacity + text colour so the rendered content reads the same
-   in view mode as in edit mode — only the affordances (caret, hover ring,
+   in view mode as in edit mode - only the affordances (caret, hover ring,
    click toggle) are suppressed. */
 .t-form-schema--compact .n-base-selection--disabled,
 .t-form-schema--compact .n-select--disabled .n-base-selection-input,
@@ -102,7 +102,7 @@
   background: var(--tnzi-bg-deep, #f6f8fa) !important;
 }
 
-/* label-placement="left" branch — the label cell uses a side-padding
+/* label-placement="left" branch - the label cell uses a side-padding
    instead of a bottom-padding. Pull both label horizontal padding
    and the vertical alignment so the label sits flush with the input. */
 .t-form-schema--compact .n-form-item.n-form-item--label-placement-left
@@ -110,8 +110,76 @@
   padding: 0 12px 0 0;
 }
 
+/* ── Sections ──────────────────────────────────────────────────────────────
+   A schema that declares `sections` renders one titled block per section.
+   Headings are what turn a wall of 14 inputs into a document with structure;
+   the rules below are deliberately quiet (small, muted, hairline rule) so the
+   headings organise without competing with the field labels. */
+.t-form-schema {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.t-form-schema__section-head {
+  margin: 18px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--tnzi-border);
+}
+/* The first section sits directly under the modal/panel title - no rule and no
+   extra top gap above it. */
+.t-form-schema__section:first-child .t-form-schema__section-head {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.t-form-schema__section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+}
+.t-form-schema__section-hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tnzi-base-text-muted, #888);
+}
+
+/* Read-only long text (textarea fields in the `descriptions` layout). Its own
+   scrolling block so a multi-KB template body cannot push the rest of the
+   record off-screen. */
+.t-form-schema__read-block {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--tnzi-border);
+  border-radius: var(--tnzi-admin-radius-sm, 6px);
+  background: var(--tnzi-bg-deep, #f6f8fa);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Per-field hint under the control (schema `hint` / `hintKey`). Sits inside the
+   form item's blank area, above the validation feedback block. */
+.t-form-schema__field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+.t-form-schema__hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--tnzi-base-text-muted, #888);
+}
+
 /* Fallback rendering for an unknown field type (not a builtin + no matching
-   `fieldRenderers` entry) — TSchemaForm renders the raw value in this span
+   `fieldRenderers` entry) - TSchemaForm renders the raw value in this span
    rather than nothing. Styled as a visible diagnostic so a schema `type` typo
    or a missing custom renderer is obvious in the UI instead of silently
    degrading to plain unstyled text. */

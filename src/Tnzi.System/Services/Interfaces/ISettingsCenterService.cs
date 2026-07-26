@@ -1,7 +1,7 @@
 namespace Tnzi.System.Services;
 
 /// <summary>
-/// 配置中心服务 — 聚合各模块注册的 ISettingDefinitionProvider，
+/// 配置中心服务 - 聚合各模块注册的 ISettingDefinitionProvider，
 /// 提供 schema + 生效值查询、按组保存与恢复默认。
 /// </summary>
 public interface ISettingsCenterService

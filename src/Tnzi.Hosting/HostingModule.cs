@@ -13,6 +13,7 @@ namespace Tnzi.Hosting;
     typeof(LocalizationModule)
 )]
 [OptionalDependsOn(typeof(IdentityModule))]
+[OptionalDependsOn(typeof(IdentityPresenceModule))]
 [OptionalDependsOn(typeof(AuthorizationModule))]
 [OptionalDependsOn(typeof(FeatureModule))]
 [OptionalDependsOn(typeof(StorageModule))]
@@ -30,10 +31,13 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(PaymentModule))]
 [OptionalDependsOn(typeof(FinanceModule))]
 [OptionalDependsOn(typeof(FinanceAiModule))]
+[OptionalDependsOn(typeof(FinanceBankingModule))]
 [OptionalDependsOn(typeof(FinanceDocumentsModule))]
+[OptionalDependsOn(typeof(FinanceRecurringModule))]
+[OptionalDependsOn(typeof(FinanceTaxCaModule))]
 [OptionalDependsOn(typeof(PayrollModule))]
 [OptionalDependsOn(typeof(AIRagModule))]
-[OptionalDependsOn(typeof(Tnzi.AI.Sandbox.AISandboxModule))]
+[OptionalDependsOn(typeof(AISandboxModule))]
 [OptionalDependsOn(typeof(AIChannelsModule))]
 public abstract class HostingModule : TnziApplicationModule
 {

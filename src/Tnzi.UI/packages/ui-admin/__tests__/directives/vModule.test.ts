@@ -44,7 +44,7 @@ describe('vModule directive', () => {
     expect(el.style.display).toBe('')
   })
 
-  it('has NO super-user bypass — gating is about the backend, not the user', () => {
+  it('has NO super-user bypass - gating is about the backend, not the user', () => {
     // No auth store seeding at all: even a super admin session hides the
     // element when the backend didn't load the module.
     useAdminRouteStore().setAvailableModules(new Set([]))

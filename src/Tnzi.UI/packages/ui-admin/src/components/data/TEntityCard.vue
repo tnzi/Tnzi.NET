@@ -1,25 +1,4 @@
 <template>
-  <!--
-    TEntityCard — the standard chrome for an entity card inside a TCardPage grid.
-
-    Encapsulates three concerns that every card page repeated (and that are easy
-    to get subtly wrong):
-      1. Whole-card click → "open" the entity (route / detail drawer / edit).
-         Opt in with `clickable`; emits `click`. Keyboard accessible (Enter /
-         Space) with role="button" + tabindex so it's not mouse-only.
-      2. A right-aligned actions footer (the `#actions` slot) whose clicks are
-         stopped from bubbling to the card — so action buttons / popconfirms keep
-         working without triggering the card's own navigation. (The `@click.stop`
-         sits on the footer, an ancestor of the buttons, so the buttons still
-         receive the event first; only the bubble up to the card is cut.)
-      3. Consistent card chrome: rounded border, a static resting shadow, and a
-         hover lift *only* when clickable — so a non-clickable card never offers a
-         misleading "I'm tappable" affordance.
-
-    The card body is the default slot; the page owns its bespoke content. Drop
-    this in place of a raw `<NCard size="small">` and move the action buttons
-    into `#actions`.
-  -->
   <NCard
     size="small"
     class="t-entity-card"
@@ -38,6 +17,31 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * TEntityCard: the standard chrome for an entity card inside a TCardPage grid.
+ *
+ * Encapsulates three concerns that every card page repeated (and that are easy
+ * to get subtly wrong):
+ *   1. Whole-card click opens the entity (route / detail drawer / edit). Opt in
+ *      with `clickable`; emits `click`. Keyboard accessible (Enter / Space) with
+ *      role="button" + tabindex so it is not mouse-only.
+ *   2. A right-aligned actions footer (the `#actions` slot) whose clicks are
+ *      stopped from bubbling to the card, so action buttons / popconfirms keep
+ *      working without triggering the card's own navigation. (The `@click.stop`
+ *      sits on the footer, an ancestor of the buttons, so the buttons still
+ *      receive the event first; only the bubble up to the card is cut.)
+ *   3. Consistent card chrome: rounded border, a static resting shadow, and a
+ *      hover lift *only* when clickable, so a non-clickable card never offers a
+ *      misleading "I'm tappable" affordance.
+ *
+ * The card body is the default slot; the page owns its bespoke content. Drop
+ * this in place of a raw `<NCard size="small">` and move the action buttons
+ * into `#actions`.
+ *
+ * (Doc comment in the script, not above the root element: a leading comment
+ * node in `<template>` makes the component multi-root, which silently drops
+ * class/style/attribute fallthrough from the grid cell onto the card.)
+ */
 import { NCard } from 'naive-ui'
 
 interface Props {

@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * AgentRunMonitor — run trace viewer test.
+ * AgentRunMonitor - run trace viewer test.
  *
  * The page no longer uses a (non-existent) SSE tail endpoint: it fetches the
  * recorded traces through `bridge.agentRuns.getTraces(runId)` and, while the

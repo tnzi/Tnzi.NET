@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// Agent 执行器 — 基于 MEAI IChatClient 的工具调用循环引擎
+/// Agent 执行器 - 基于 MEAI IChatClient 的工具调用循环引擎
 /// </summary>
 /// <remarks>
 /// <para>
@@ -68,16 +68,16 @@ public class AgentExecutor : IAgentExecutor
     }
 
     /// <summary>
-    /// 非流式执行 — tool-calling loop. Context injection (RAG/Memory/Skills/Persona/Profile)
+    /// 非流式执行 - tool-calling loop. Context injection (RAG/Memory/Skills/Persona/Profile)
     /// is fully owned by ContextInjectionMiddleware (Order=400) which runs before this executor
-    /// — AgentExecutor no longer calls IContextProvider directly. History reduction
+    /// - AgentExecutor no longer calls IContextProvider directly. History reduction
     /// (PruneChatReducer / SummarizeChatReducer) still runs inline so configured reducers stay active.
     /// </summary>
     public async Task<AgentResponse> ExecuteAsync(List<ChatMessage> messages, CancellationToken ct = default)
     {
         Check.NotNull(messages);
 
-        // 工作副本 — 不修改调用方传入的列表（不变性规则）
+        // 工作副本 - 不修改调用方传入的列表（不变性规则）
         var working = new List<ChatMessage>(messages);
 
         // 历史压缩（如果 OptionsBuilder 配置了 reducer）
@@ -108,7 +108,7 @@ public class AgentExecutor : IAgentExecutor
             var toolCalls = ExtractToolCalls(response.Messages);
 
             // When enabled, strip TextContent from assistant messages that contain tool calls.
-            // DeepSeek handles content + tool_calls poorly — sending both causes token
+            // DeepSeek handles content + tool_calls poorly - sending both causes token
             // fracturing (\n\n between every token) in the continuation.
             if (_options.StripTextFromToolCallMessages && toolCalls.Count > 0)
             {
@@ -147,7 +147,7 @@ public class AgentExecutor : IAgentExecutor
             working.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
         }
 
-        // 达到最大迭代次数 — 附加提示告知用户 AI 因达到工具调用上限而停止
+        // 达到最大迭代次数 - 附加提示告知用户 AI 因达到工具调用上限而停止
         var lastAssistantText = working.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text;
         var truncationNotice = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]";
         return new AgentResponse
@@ -171,11 +171,11 @@ public class AgentExecutor : IAgentExecutor
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> ExecuteStreamingAsync(
         List<ChatMessage> messages,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
         Check.NotNull(messages);
 
-        // 工作副本 — 不修改调用方传入的列表（不变性规则）
+        // 工作副本 - 不修改调用方传入的列表（不变性规则）
         var working = new List<ChatMessage>(messages);
 
         // 历史压缩（如果 OptionsBuilder 配置了 reducer）
@@ -213,7 +213,7 @@ public class AgentExecutor : IAgentExecutor
                 // 收集内容（TextReasoningContent 为合成类型，不加入 assistantContents）
                 foreach (var content in update.Contents)
                 {
-                    // Reasoning chunks are synthetic — yield them but do not add to the assistant message history
+                    // Reasoning chunks are synthetic - yield them but do not add to the assistant message history
                     if (content is TextReasoningContent reasoning)
                     {
                         accumulatedReasoning.Append(reasoning.Text);
@@ -227,7 +227,7 @@ public class AgentExecutor : IAgentExecutor
                     if (content is FunctionCallContent functionCall)
                     {
                         toolCallContents.Add(functionCall);
-                        // Signal tool call once with tool names — any text already streamed is acceptable
+                        // Signal tool call once with tool names - any text already streamed is acceptable
                         if (!toolCallSignaled)
                         {
                             toolCallSignaled = true;
@@ -265,7 +265,7 @@ public class AgentExecutor : IAgentExecutor
                 }
                 else if (hasReceivedText && !toolCallSignaled && !earlyToolSignalSent)
                 {
-                    // Fallback: text was flowing but stopped — LLM may be generating function call arguments.
+                    // Fallback: text was flowing but stopped - LLM may be generating function call arguments.
                     // After noTextThreshold consecutive updates with no text, emit an early hint.
                     // This covers non-OpenAI providers where RawRepresentation lacks ToolCallUpdates.
                     noTextUpdateCount++;
@@ -288,7 +288,7 @@ public class AgentExecutor : IAgentExecutor
                 finishReason = update.FinishReason ?? finishReason;
 
                 // Stream text chunks immediately for real-time typewriter effect.
-                // Always emit text — even in an iteration that also contains tool calls,
+                // Always emit text - even in an iteration that also contains tool calls,
                 // so the model can output a one-line acknowledgment before/alongside tool use.
                 if (update.Text != null)
                 {
@@ -309,7 +309,7 @@ public class AgentExecutor : IAgentExecutor
 
             // 添加助手消息到历史
             // When enabled, exclude TextContent from the assistant message that has tool calls.
-            // DeepSeek handles content + tool_calls poorly — sending both causes token
+            // DeepSeek handles content + tool_calls poorly - sending both causes token
             // fracturing (\n\n between every token) in the continuation. The text was
             // already streamed to the client, so omitting it from the history is safe.
             var historyContents = _options.StripTextFromToolCallMessages && toolCallContents.Count > 0
@@ -330,7 +330,7 @@ public class AgentExecutor : IAgentExecutor
                 yield break;
             }
 
-            // Intermediate iteration with tool call — tool call indicator was already sent above.
+            // Intermediate iteration with tool call - tool call indicator was already sent above.
 
             // 执行工具（含详情，用于客户端性能基准）
             var (toolResults, toolDetails) = await ExecuteToolCallsWithDetailsAsync(toolCallContents, allTools, ct);
@@ -342,7 +342,7 @@ public class AgentExecutor : IAgentExecutor
             // 注意: RecordToolCall 已在 ExecuteToolCallsCoreAsync 内部调用，此处不重复记录
         }
 
-        // 达到最大迭代次数 — 发送提示文本告知用户
+        // 达到最大迭代次数 - 发送提示文本告知用户
         yield return new AgentStreamChunk
         {
             Text = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]"
@@ -355,7 +355,7 @@ public class AgentExecutor : IAgentExecutor
     }
 
     /// <summary>
-    /// 压缩历史 — invokes the configured IHistoryReducer if any.
+    /// 压缩历史 - invokes the configured IHistoryReducer if any.
     /// </summary>
     private async Task<List<ChatMessage>> ReduceHistoryAsync(List<ChatMessage> messages, CancellationToken ct)
     {
@@ -679,7 +679,7 @@ public class AgentExecutor : IAgentExecutor
     }
 
     /// <summary>
-    /// 标准化工具结果 — 空结果添加标记，防止 LLM 误以为调用失败。
+    /// 标准化工具结果 - 空结果添加标记，防止 LLM 误以为调用失败。
     /// </summary>
     public static object NormalizeToolResult(string toolName, object? result)
     {
@@ -744,7 +744,7 @@ public class AgentExecutor : IAgentExecutor
         }
         catch
         {
-            // Silently ignore — this is a best-effort optimization
+            // Silently ignore - this is a best-effort optimization
         }
         return names;
     }

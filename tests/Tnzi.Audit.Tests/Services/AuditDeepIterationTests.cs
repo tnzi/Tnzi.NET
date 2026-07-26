@@ -2,7 +2,7 @@
 namespace Tnzi.Audit.Tests.Services;
 
 /// <summary>
-/// 审计模块深度迭代测试 — 趋势统计、Top功能、Top用户
+/// 审计模块深度迭代测试 - 趋势统计、Top功能、Top用户
 /// </summary>
 public class AuditDeepIterationTests
 {

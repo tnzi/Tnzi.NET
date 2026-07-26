@@ -3,7 +3,7 @@ using Tnzi.Exceptions;
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// RetryMiddleware 增强功能测试 — 后台任务 429 中止、MaxRetryAfter、AbortBackgroundOn429 默认值
+/// RetryMiddleware 增强功能测试 - 后台任务 429 中止、MaxRetryAfter、AbortBackgroundOn429 默认值
 /// </summary>
 public class RetryMiddlewareEnhancedTests
 {
@@ -35,7 +35,7 @@ public class RetryMiddlewareEnhancedTests
     {
         var mw = CreateMiddleware();
         var context = TestHelpers.CreateMinimalContext();
-        // 不设置 is_background_task — 默认为前台任务
+        // 不设置 is_background_task - 默认为前台任务
         var callCount = 0;
 
         var result = await mw.InvokeAsync(context, (ctx, ct) =>
@@ -73,7 +73,7 @@ public class RetryMiddlewareEnhancedTests
 
     #endregion
 
-    #region 后台任务 429 中止 — AbortBackgroundOn429 禁用时仍重试
+    #region 后台任务 429 中止 - AbortBackgroundOn429 禁用时仍重试
 
     [Fact]
     public async Task ShouldRetry_BackgroundTask429_AbortDisabled_StillRetries()

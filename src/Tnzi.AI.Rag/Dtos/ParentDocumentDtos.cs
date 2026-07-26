@@ -6,7 +6,7 @@ namespace Tnzi.AI.Rag.Dtos;
 public record ParentRetrievalOptions
 {
     /// <summary>
-    /// 窗口大小 — 匹配块前后各扩展的块数（默认 2）
+    /// 窗口大小 - 匹配块前后各扩展的块数（默认 2）
     /// </summary>
     public int WindowSize { get; init; } = 2;
 
@@ -17,7 +17,7 @@ public record ParentRetrievalOptions
 }
 
 /// <summary>
-/// Parent Document Retrieval 结果 — 合并后的扩展上下文块
+/// Parent Document Retrieval 结果 - 合并后的扩展上下文块
 /// </summary>
 public record ParentDocumentResult
 {

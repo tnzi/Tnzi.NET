@@ -124,7 +124,7 @@ public class RuntimeSettingMetadataExtractorTests
 
         var ttl = g.Fields.Single(f => f.Key == "Dur:Ttl");
         Assert.Equal(SettingFieldType.Duration, ttl.Type);
-        // canonical TimeSpan.ToString() — 且必须 TimeSpan.TryParse 可逆（热更新写回不失败）。
+        // canonical TimeSpan.ToString() - 且必须 TimeSpan.TryParse 可逆（热更新写回不失败）。
         var defaultValue = ttl.DefaultValueAccessor!();
         Assert.Equal("00:05:00", defaultValue);
         Assert.True(TimeSpan.TryParse(defaultValue, out var parsed) && parsed == TimeSpan.FromMinutes(5));

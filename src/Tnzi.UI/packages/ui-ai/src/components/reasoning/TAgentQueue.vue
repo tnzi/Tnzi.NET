@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TAgentQueue — Task queue with collapsible sections
+ * TAgentQueue - Task queue with collapsible sections
  */
 
 import { NScrollbar } from 'naive-ui';
@@ -154,7 +154,7 @@ function toggleSection(label: string): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--tnzi-ai-on-accent);
 }
 .t-agent-queue__dot--done {
   border-color: var(--tnzi-primary);

@@ -9,7 +9,7 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// <remarks>
 /// 服务器配置来源由 <see cref="IMcpServerCatalog"/> 物化（部署配置 + DB 注册表合并），
 /// 本工厂只负责按给定 McpServerConfig 建连。信任边界：Stdio（本机子进程）配置只可能来自
-/// 部署配置（AI:Mcp options）— DB 注册表在 catalog/registry 两层均拒绝 stdio。
+/// 部署配置（AI:Mcp options）- DB 注册表在 catalog/registry 两层均拒绝 stdio。
 /// </remarks>
 public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 {
@@ -219,20 +219,21 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
     /// </summary>
     protected internal virtual async Task<IMcpClientAdapter> CreateAndConnectInternalAsync(McpServerConfig config, CancellationToken ct)
     {
-        // OAuth: 获取令牌并注入 Authorization 头
-        // 复制 Headers dict 避免变异共享的 McpServerConfig.Headers
+        // OAuth: 获取令牌并注入 Authorization 头。
+        // 只在本次建连的局部副本上加头：config 实例来自 IMcpServerCatalog 的 30s 快照缓存，
+        // 回写 config.Headers 会把 bearer 令牌留在共享缓存对象里（跨请求可见）。
+        var effectiveHeaders = config.Headers;
         if (config.OAuth != null && _oauthHandler != null)
         {
             var accessToken = await _oauthHandler.GetAccessTokenAsync(config.Name, config.OAuth, ct).ConfigureAwait(false);
-            var headers = new Dictionary<string, string>(config.Headers) { ["Authorization"] = $"Bearer {accessToken}" };
-            config.Headers = headers;
+            effectiveHeaders = new Dictionary<string, string>(config.Headers) { ["Authorization"] = $"Bearer {accessToken}" };
             _logger.LogDebug("OAuth token injected for MCP server '{ServerName}'", config.Name);
         }
 
         IClientTransport transport = config.ConnectionType switch
         {
             McpConnectionType.Stdio => CreateStdioTransport(config),
-            McpConnectionType.Http => CreateHttpTransport(config),
+            McpConnectionType.Http => CreateHttpTransport(config, effectiveHeaders),
             _ => throw new NotSupportedException($"MCP connection type '{config.ConnectionType}' is not supported. Use Stdio or Http.")
         };
 
@@ -293,7 +294,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
         return new StdioClientTransport(options, _loggerFactory);
     }
 
-    private HttpClientTransport CreateHttpTransport(McpServerConfig config)
+    private HttpClientTransport CreateHttpTransport(McpServerConfig config, Dictionary<string, string> headers)
     {
         if (string.IsNullOrWhiteSpace(config.Endpoint) || !Uri.TryCreate(config.Endpoint.TrimEnd('/'), UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -304,12 +305,12 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 
         // 始终为 HTTP transport 配置禁止自动重定向的 HttpClient（防御 SSRF 重定向绕过），
         // 与 A2A 客户端基线一致。SDK 不支持注入 HttpClient 时降级到不带 handler 的默认行为。
-        var configuredHttpClient = TryApplyHttpClientWithHeaders(options, config.Headers);
+        var configuredHttpClient = TryApplyHttpClientWithHeaders(options, headers);
 
-        if (!configuredHttpClient && config.Headers is { Count: > 0 })
+        if (!configuredHttpClient && headers is { Count: > 0 })
         {
-            // 无法注入 HttpClient（即无法应用自定义头/重定向策略）— 尝试 query 降级传递鉴权信息。
-            if (TryApplyHttpQueryFallback(options, config.Headers))
+            // 无法注入 HttpClient（即无法应用自定义头/重定向策略）- 尝试 query 降级传递鉴权信息。
+            if (TryApplyHttpQueryFallback(options, headers))
             {
                 _logger.LogWarning(
                     "MCP server '{ServerName}' configured Headers but HttpClientTransportOptions does not support injecting an HttpClient in this SDK version. Falling back to query-based auth/tenant propagation (redirect protection unavailable).",

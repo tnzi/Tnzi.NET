@@ -6,7 +6,7 @@ using BuiltInMemoryTools = Tnzi.AI.Tools.BuiltIn.MemoryTools;
 namespace Tnzi.AI.Tests.Tools;
 
 /// <summary>
-/// 内置工具集成测试 — 验证所有 IAIToolProvider 工具可实例化且 AIFunction 定义有效
+/// 内置工具集成测试 - 验证所有 IAIToolProvider 工具可实例化且 AIFunction 定义有效
 /// </summary>
 public class BuiltInToolsIntegrationTests
 {

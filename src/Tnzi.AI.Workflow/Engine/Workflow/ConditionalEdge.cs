@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 条件边 — 根据节点输出动态路由到不同的下游节点
+/// 条件边 - 根据节点输出动态路由到不同的下游节点
 /// </summary>
 /// <remarks>
 /// 当 <see cref="ConditionType"/> 为 <see cref="EdgeConditionType.OutputContains"/> 时，

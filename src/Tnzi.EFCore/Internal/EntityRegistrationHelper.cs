@@ -136,18 +136,21 @@ internal static class EntityRegistrationHelper
     private static IEnumerable<IEntityBatchConfiguration>? GetBatchConfigurations(DbContext dbContext, IModuleContainer? moduleContainer)
     {
         var serviceProvider = DbContextServiceResolver.GetServiceProvider(dbContext);
-        IEnumerable<IEntityBatchConfiguration>? configurations = null;
+
+        // 物化为 List：调用方会对每个实体类型遍历一次该集合，直接持有 DI 返回的
+        // IEnumerable 会被反复枚举（延迟实现下等于反复解析服务）
+        List<IEntityBatchConfiguration>? configurations = null;
 
         if (serviceProvider != null)
         {
-            configurations = serviceProvider.GetServices<IEntityBatchConfiguration>();
+            configurations = serviceProvider.GetServices<IEntityBatchConfiguration>().ToList();
         }
 
-        if (configurations == null || !configurations.Any())
+        if (configurations == null || configurations.Count == 0)
         {
             try
             {
-                configurations = dbContext.Database.GetService<IEnumerable<IEntityBatchConfiguration>>();
+                configurations = dbContext.Database.GetService<IEnumerable<IEntityBatchConfiguration>>()?.ToList();
             }
             catch (Exception ex)
             {
@@ -156,17 +159,15 @@ internal static class EntityRegistrationHelper
             }
         }
 
-        if (configurations != null && configurations.Any())
+        if (configurations != null && configurations.Count > 0)
         {
             if (moduleContainer != null)
             {
-                var configList = configurations.ToList();
-                var index = configList.FindIndex(c => c is TableNamePrefixConfiguration);
+                var index = configurations.FindIndex(c => c is TableNamePrefixConfiguration);
                 if (index >= 0)
                 {
-                    configList[index] = new TableNamePrefixConfiguration(moduleContainer);
+                    configurations[index] = new TableNamePrefixConfiguration(moduleContainer);
                 }
-                return configList;
             }
             return configurations;
         }

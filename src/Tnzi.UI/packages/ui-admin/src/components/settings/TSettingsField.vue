@@ -95,7 +95,7 @@ import type { SettingsCenterFieldDto } from '@tnzi/core/services/system'
 import { resolveBackendLabel, translatePageKey } from '../../pages/_shared/translate'
 import { isChatSoundSettingKey } from '../../headless/chatSounds'
 
-// Mirror of TSettingsGroupPanel's FieldValue — the parent owns the form state
+// Mirror of TSettingsGroupPanel's FieldValue - the parent owns the form state
 // and passes the current value down; this component only renders the control.
 type FieldValue = string | number | boolean | null
 

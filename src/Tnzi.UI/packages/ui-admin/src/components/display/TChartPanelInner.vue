@@ -9,7 +9,7 @@ import type { EChartsOption } from 'echarts'
 import { useEcharts } from '../../headless/useEcharts'
 
 /** Internal real-echarts implementation. Loaded only when canvas + ResizeObserver
- *  are available — see TChartPanel.vue for the lazy-load guard. */
+ *  are available - see TChartPanel.vue for the lazy-load guard. */
 interface Props {
   option: EChartsOption | null | undefined
   height?: string | number

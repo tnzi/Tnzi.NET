@@ -98,7 +98,7 @@ public class McpServerHostTests
             NullLogger<McpServerHost>.Instance,
             security);
 
-        // No ListToolsAsync call — cold cache
+        // No ListToolsAsync call - cold cache
         var result = await host.CallToolAsync(
             "Cold_Agent",
             new Dictionary<string, JsonElement> { ["message"] = JsonSerializer.SerializeToElement("hello") });

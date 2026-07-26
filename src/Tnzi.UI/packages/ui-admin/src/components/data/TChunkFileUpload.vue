@@ -1,8 +1,19 @@
 <script lang="ts">
+import type { FileRecordDto } from '@tnzi/core/services/storage'
+
+/**
+ * Uploader contract this component drives.
+ *
+ * Structurally identical to `StorageBridge`'s `ChunkUploader` on purpose: the
+ * component must not import the bridge (that would invert the dependency), so
+ * the shape is restated here. `completeUpload` resolves to the stored record,
+ * not a `{ url }` - the backend's FileRecordDto has never carried a url, so the
+ * old shape handed every caller `{ url: undefined }` on success.
+ */
 export interface ChunkUploader {
   initUpload: (fileMeta: { name: string; size: number; chunkCount: number }) => Promise<{ uploadId: string }>
   uploadChunk: (uploadId: string, chunkIndex: number, chunk: Blob) => Promise<void>
-  completeUpload: (uploadId: string) => Promise<{ url: string }>
+  completeUpload: (uploadId: string) => Promise<FileRecordDto>
 }
 </script>
 
@@ -35,7 +46,9 @@ function triggerFilePicker(): void {
 
 const emit = defineEmits<{
   progress: [percent: number]
-  success: [result: { url: string }]
+  /** The stored record. Build whatever URL you need from `id`; the backend's
+   *  FileRecordDto carries no url of its own. */
+  success: [result: FileRecordDto]
   error: [error: Error]
 }>()
 
@@ -81,7 +94,7 @@ async function onFileChange(event: Event) {
 
 <template>
   <div class="t-chunk-file-upload">
-    <!-- Hidden native input — the browser's default "Choose File / No file
+    <!-- Hidden native input - the browser's default "Choose File / No file
          chosen" widget is visually inconsistent with the rest of the admin
          shell. We render an NButton instead and forward its click to the
          hidden input. The input keeps `display: none` so screen readers

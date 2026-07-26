@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TUpgradeBanner — Soft-background CTA banner for plan / tier upgrades.
+ * TUpgradeBanner - Soft-background CTA banner for plan / tier upgrades.
  *
  * Meant to nudge users toward a higher-tier plan when their current
  * agent hits its limits. Minimal state: a text line, a CTA link, and
- * an optional close button. All rendering is visual — consumers wire
+ * an optional close button. All rendering is visual - consumers wire
  * the actual upgrade flow via the `cta` event.
  *
  * Use the default slot for custom body (e.g. rich text with inline
@@ -82,7 +82,7 @@ const emit = defineEmits<{
   font-weight: 500;
 }
 .t-upgrade-banner__cta {
-  color: #2563eb;
+  color: var(--tnzi-ai-info);
   text-decoration: none;
   font-weight: 500;
   font-size: 13px;

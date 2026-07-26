@@ -93,7 +93,7 @@ public class LocalSandboxTests : IAsyncLifetime
     }
 
     // -------------------------------------------------------------------------
-    // DeniedPatterns — sensitive-file blocklist (P1 fix 2026-06-20)
+    // DeniedPatterns - sensitive-file blocklist (P1 fix 2026-06-20)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -167,7 +167,7 @@ public class LocalSandboxTests : IAsyncLifetime
     }
 
     // -------------------------------------------------------------------------
-    // MaxFileSizeBytes — size precheck + streaming line slicing (P1 fix 2026-06-20)
+    // MaxFileSizeBytes - size precheck + streaming line slicing (P1 fix 2026-06-20)
     // -------------------------------------------------------------------------
 
     [Fact]

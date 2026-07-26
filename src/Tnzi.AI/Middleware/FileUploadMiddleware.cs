@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 文件上传感知中间件 — 将已上传文件信息注入为系统消息
+/// 文件上传感知中间件 - 将已上传文件信息注入为系统消息
 /// </summary>
 public class FileUploadMiddleware : IAiMiddleware
 {

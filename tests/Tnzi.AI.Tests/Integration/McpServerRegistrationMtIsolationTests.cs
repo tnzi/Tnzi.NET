@@ -5,10 +5,10 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// P1 多租户隔离门禁 — 证明 <see cref="McpServerRegistration"/> 是真正的 <see cref="IMultiTenant"/> 实体，
+/// P1 多租户隔离门禁 - 证明 <see cref="McpServerRegistration"/> 是真正的 <see cref="IMultiTenant"/> 实体，
 /// 其凭证承载行（AuthTokenEncrypted）在多租户开启下被 EF Core 全局查询过滤器按租户隔离。
 /// <para>
-/// 与"共享资源 Scope 模式"（Provider/AgentPersona 有意 <b>不</b> 实现 IMultiTenant）相反：
+/// 与"共享资源 Scope 模式"（Provider 有意 <b>不</b> 实现 IMultiTenant）相反：
 /// McpServerRegistration 存储 per-registration 加密凭证，租户私有才是安全默认。它实现 IMultiTenant
 /// 后，全局过滤器 <c>e.TenantId == currentTenant</c> 自动附加 → 一个租户的注册（及其凭证）
 /// 对其他租户不可见，且插入时自动加盖 TenantId。
@@ -53,7 +53,7 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // 证明 A — 租户 A 看见自己的 "srv1"
+    // 证明 A - 租户 A 看见自己的 "srv1"
     // =====================================================================
 
     [Fact]
@@ -70,7 +70,7 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // 证明 B — 租户 B 看不到 A 的 "srv1"（全局过滤器隔离凭证承载行）
+    // 证明 B - 租户 B 看不到 A 的 "srv1"（全局过滤器隔离凭证承载行）
     // =====================================================================
 
     [Fact]
@@ -88,7 +88,7 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
     }
 
     // =====================================================================
-    // 证明 C — 租户 B 可创建同名 "srv1"（唯一 Name 按租户分区，非全局）
+    // 证明 C - 租户 B 可创建同名 "srv1"（唯一 Name 按租户分区，非全局）
     // =====================================================================
 
     [Fact]
@@ -179,7 +179,7 @@ public class McpServerRegistrationMtIsolationTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 仅注册 <see cref="McpServerRegistration"/>，通过显式传入
+/// 测试专用 DbContext - 仅注册 <see cref="McpServerRegistration"/>，通过显式传入
 /// <see cref="MultiTenancyOptions"/> 控制 MT 开关。
 /// </summary>
 internal sealed class McpServerRegistrationMtDbContext : TnziDbContext<McpServerRegistrationMtDbContext>

@@ -1,6 +1,6 @@
 <template>
   <!--
-    Address field group — street / unit / city / region / postal (+ optional
+    Address field group - street / unit / city / region / postal (+ optional
     country) in a responsive grid, v-model'd on one address object. Region and
     country are a filterable select when options are supplied, else free text,
     so it is NOT locale-locked: pass your own subdivision/country lists (or

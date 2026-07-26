@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 工作流节点共享辅助方法 — 封装 Agent 解析与创建的重复模式
+/// 工作流节点共享辅助方法 - 封装 Agent 解析与创建的重复模式
 /// </summary>
 internal static class WorkflowNodeHelper
 {
@@ -77,7 +77,7 @@ internal static class WorkflowNodeHelper
     }
 
     /// <summary>
-    /// 收集上游输入 — 无依赖返回初始输入，单依赖直接返回文本，多依赖以 [depId] 分段拼接
+    /// 收集上游输入 - 无依赖返回初始输入，单依赖直接返回文本，多依赖以 [depId] 分段拼接
     /// </summary>
     internal static string CollectInput(WorkflowNodeContext context)
     {
@@ -121,7 +121,7 @@ internal static class WorkflowNodeHelper
     }
 
     /// <summary>
-    /// 收集所有上游输出 — 无依赖返回初始输入，有依赖时始终以 [depId] 分段拼接（不做单依赖短路）
+    /// 收集所有上游输出 - 无依赖返回初始输入，有依赖时始终以 [depId] 分段拼接（不做单依赖短路）
     /// </summary>
     internal static string CollectAllUpstreamOutputs(WorkflowNodeContext context)
     {

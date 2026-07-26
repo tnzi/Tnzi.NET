@@ -29,6 +29,19 @@ public class StorageOptions
     public bool EnableMd5Validation { get; set; } = true;
 
     /// <summary>
+    /// 获取或设置 是否允许未认证请求读取任意文件。
+    ///
+    /// **默认关闭。** 打开等于让任何人凭文件 id 下载库里的每一个文件,而框架的实体 ID 是
+    /// 顺序 GUID(可预测性远高于随机 GUID),所以这不是"猜不到就安全"。
+    /// 需要公开的单个资源(头像 / 站点素材)把 `FileRecord.IsPublic` 置 true;
+    /// 需要对外分发私密文件走 `FileShare`(token + 可选密码 + 次数上限 + 过期)。
+    /// </summary>
+    [RuntimeSetting(Label = "Allow Anonymous File Read", I18n = "admin.modules.system.settings.fields.storageAllowAnonymousRead",
+        Type = SettingFieldType.Boolean, Subsection = "Files",
+        Description = "Let unauthenticated callers download any file by id. Off by default. Prefer marking individual files public, or share them through a share link.")]
+    public bool AllowAnonymousRead { get; set; } = false;
+
+    /// <summary>
     /// 获取或设置 是否启用文件引用
     /// </summary>
     [RuntimeSetting(Label = "Enable File Reference Tracking", I18n = "admin.modules.system.settings.fields.storageEnableFileReference",

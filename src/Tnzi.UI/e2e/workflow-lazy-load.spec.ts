@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * Phase 6.5 — Workflow lazy-load + bundle split E2E
+ * Phase 6.5 - Workflow lazy-load + bundle split E2E
  *
  * Goal in the original Phase 6 plan: verify that WorkflowEditor (ui-admin
  * Phase 5 Task 5.5) is loaded via defineAsyncComponent so its Vue Flow +
@@ -12,14 +12,14 @@ import { test, expect } from '@playwright/test'
  * require building a routing harness. Phase 6 doesn't include that scope.
  *
  * Substitution strategy:
- * 1. At the @tnzi/ui playground (dev server) level — assert that dynamic
+ * 1. At the @tnzi/ui playground (dev server) level - assert that dynamic
  *    import()s produce network fetches distinct from the main module,
  *    confirming Vite's code-splitting pipeline is intact.
- * 2. At the @tnzi/ui-admin unit-test level — the WorkflowEditor wrapper
+ * 2. At the @tnzi/ui-admin unit-test level - the WorkflowEditor wrapper
  *    already has a test verifying it uses defineAsyncComponent + Suspense
  *    fallback (Phase 5 Task 5.5 regression gate).
  * 3. True production bundle-split verification is a `vite build` + `du -sh
- *    dist/assets/*.js` assertion — deferred to Task 6.9 (size-limit CI
+ *    dist/assets/*.js` assertion - deferred to Task 6.9 (size-limit CI
  *    guardrail) which runs against the rollup output.
  */
 test.describe('Bundle lazy-load behavior (playground)', () => {
@@ -53,7 +53,7 @@ test.describe('Bundle lazy-load behavior (playground)', () => {
     await page.goto('/')
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     // A modern Vite dev server loads dozens of module scripts on initial
-    // page load — sanity check the count is non-trivial (>10) to confirm
+    // page load - sanity check the count is non-trivial (>10) to confirm
     // module-per-file serving is working.
     expect(scriptUrls.size).toBeGreaterThan(10)
   })
@@ -70,7 +70,7 @@ test.describe('Bundle lazy-load behavior (playground)', () => {
     // Touch several non-workflow sections
     await page.locator('.n-menu-item-content').filter({ hasText: /^Auth$/ }).first().click()
     await page.locator('.n-menu-item-content').filter({ hasText: /^Theme$/ }).first().click()
-    // The @tnzi/ui playground doesn't import WorkflowCanvas at all —
+    // The @tnzi/ui playground doesn't import WorkflowCanvas at all -
     // so no workflow/vue-flow/monaco network fetch should appear.
     // This proves the dependency graph excludes workflow deps entirely
     // for consumers that don't use WorkflowCanvas.

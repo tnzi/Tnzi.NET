@@ -6,7 +6,7 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// Per-skill AllowedTools injection tests — validates that SkillConstraintMiddleware
+/// Per-skill AllowedTools injection tests - validates that SkillConstraintMiddleware
 /// injects individually whitelisted tools into AdditionalTools when not already present.
 /// </summary>
 public class PerSkillAllowedToolsTests
@@ -181,7 +181,7 @@ public class PerSkillAllowedToolsTests
 
         var context = CreateContext([skill]);
 
-        // Act — should not throw
+        // Act - should not throw
         await middleware.InvokeAsync(context, (ctx, ct) =>
             Task.FromResult(new AgentRunResult { Response = "done" }));
 
@@ -282,7 +282,7 @@ public class PerSkillAllowedToolsTests
     {
         // Arrange: skill1 declares a whitelist, skill2 declares none. A skill with no
         // AllowedTools imposes NO individual-tool restriction and must NOT collapse the
-        // intersection — so skill1's whitelist still applies in full.
+        // intersection - so skill1's whitelist still applies in full.
         var skill1 = new SkillDefinition
         {
             Slug = "skill-1",

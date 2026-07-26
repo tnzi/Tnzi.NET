@@ -61,10 +61,17 @@ internal static class ReportCsvWriter
         return csv.ToString();
     }
 
-    internal static string Aging(AgingReportDto report)
+    /// <summary>
+    /// 账龄导出。表头随生效的切分点生成：桶已由 <c>Finance:AgingBucketDays</c> 参数化，
+    /// 写死 1To30/31To60/61To90/Over90 会在配了 [7,14,21] 的部署里让列名与列里的数不符。
+    /// 默认切分点 30/60/90 下生成的表头与旧版逐字一致。
+    /// </summary>
+    internal static string Aging(AgingReportDto report, int[] bucketDays)
     {
         var csv = new CsvBuilder(DateFormat);
-        csv.AppendRow("Party", "Current", "Days1To30", "Days31To60", "Days61To90", "Over90", "Total");
+        var (first, second, third) = (bucketDays[0], bucketDays[1], bucketDays[2]);
+        csv.AppendRow("Party", "Current", $"Days1To{first}", $"Days{first + 1}To{second}",
+            $"Days{second + 1}To{third}", $"Over{third}", "Total");
         foreach (var row in report.Rows)
             csv.AppendRow(row.PartyName, row.Current, row.Days1To30, row.Days31To60, row.Days61To90, row.Over90, row.Total);
         var t = report.Totals;

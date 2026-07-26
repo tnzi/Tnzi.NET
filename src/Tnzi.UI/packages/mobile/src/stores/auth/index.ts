@@ -1,7 +1,7 @@
 /**
  * @tnzi/mobile/stores/auth
  *
- * Authentication store — thin Pinia wrapper delegating to core AuthStateManager.
+ * Authentication store - thin Pinia wrapper delegating to core AuthStateManager.
  * All business logic lives in AuthStateManager; this store only proxies reactive state.
  */
 

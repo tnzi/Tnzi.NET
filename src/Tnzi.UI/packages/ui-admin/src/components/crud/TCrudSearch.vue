@@ -4,7 +4,7 @@
     size="small"
     class="t-crud-search t-crud-page__search-card t-crud-page__search"
   >
-    <!-- ── Simple row — ALWAYS visible ──
+    <!-- ── Simple row - ALWAYS visible ──
          Keyword input + Search + (toggle) "Advanced ▾". Clicking the
          toggle expands the advanced grid below; clicking again collapses
          it (chevron flips ▾↔▴). -->
@@ -41,7 +41,7 @@
       </NButton>
     </div>
 
-    <!-- ── Advanced panel — collapsible ── -->
+    <!-- ── Advanced panel - collapsible ── -->
     <NCollapseTransition v-if="hasAdvancedSearch" :show="advancedMode">
       <div class="t-crud-page__search-advanced-wrap">
         <TCrudSearchAdvanced
@@ -63,7 +63,7 @@ import type { FormSchemaItem } from '../../pages/_shared/form-schema'
 
 /**
  * Minimum slice of `UseCrudPageReturn` that the search panel needs.
- * Decouples search from `T` / `TId` generics — the panel only writes back
+ * Decouples search from `T` / `TId` generics - the panel only writes back
  * `searchText` (string) and `filters` (Record<string, unknown>).
  */
 export interface SearchableState {
@@ -76,7 +76,7 @@ export interface SearchableState {
 /**
  * Search panel for {@link TCrudPage}: an always-visible simple keyword row
  * plus a collapsible advanced grid ({@link TCrudSearchAdvanced}). Wired to a
- * `useCrudPage` state — commit-side calls `state.setSearch(...)` /
+ * `useCrudPage` state - commit-side calls `state.setSearch(...)` /
  * `state.setFilters(...)` then `state.refresh()`.
  */
 interface Props {
@@ -133,7 +133,7 @@ const effectiveSearchPlaceholder = computed(
 </script>
 
 <style scoped>
-/* Card chrome — bordered=false NCard still carries a soft shadow +
+/* Card chrome - bordered=false NCard still carries a soft shadow +
    8px border-radius to match soybean. */
 .t-crud-page__search-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
@@ -141,7 +141,7 @@ const effectiveSearchPlaceholder = computed(
   flex-shrink: 0;
 }
 
-/* Simple-mode row — horizontally centered cluster:
+/* Simple-mode row - horizontally centered cluster:
      [🔍 keyword input (clearable)]  [Search]  [Advanced (link)] */
 .t-crud-page__search-simple {
   display: flex;
@@ -175,7 +175,7 @@ const effectiveSearchPlaceholder = computed(
   color: var(--tnzi-primary, #06b6d4);
 }
 
-/* Advanced panel — sits below the simple row, NCollapseTransition handles
+/* Advanced panel - sits below the simple row, NCollapseTransition handles
    the height animation. Top margin separates it from the simple row. */
 .t-crud-page__search-advanced-wrap {
   margin-top: 12px;

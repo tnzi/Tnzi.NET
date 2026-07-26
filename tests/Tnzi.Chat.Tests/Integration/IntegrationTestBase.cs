@@ -45,7 +45,7 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
             .ReturnsAsync(new List<User>());
         services.AddScoped(_ => userRepo.Object);
 
-        // ChatContactService now joins UserDetail for display name + avatar — register
+        // ChatContactService now joins UserDetail for display name + avatar - register
         // an empty mock so DI resolves (names fall back to UserName, avatar null).
         var userDetailRepo = new Mock<IRepository<UserDetail, Guid>>();
         userDetailRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<UserDetail, bool>>>(), It.IsAny<CancellationToken>()))
@@ -59,6 +59,10 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         // exercise the enforcement paths (disabled groups, member cap, file-message toggle).
         services.AddOptions<Tnzi.Chat.Options.ChatOptions>().Configure(o => ConfigureChatOptions(o));
 
+        // Presence options - EnablePresence / AllowInvisible / auto-away now live on the Presence
+        // module and are consumed by ChatConfigService + ChatAdminService via IOptionsSnapshot.
+        services.AddOptions<Tnzi.Identity.Presence.Options.PresenceOptions>().Configure(o => ConfigurePresenceOptions(o));
+
         // Register real UnitOfWorkManager so ExecuteInUnitOfWorkAsync exercises the deferred-save path.
         // IEntityManager mock tells UnitOfWorkManager which DbContext types to discover.
         var entityManagerMock = new Mock<IEntityManager>();
@@ -70,7 +74,7 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         services.AddScoped<IGroupService, GroupService>();
         services.AddScoped<IBroadcastService, BroadcastService>();
 
-        // IPresenceService — mock returning empty list (presence enrichment not under test in integration suite)
+        // IPresenceService - mock returning empty list (presence enrichment not under test in integration suite)
         var presenceMock = new Mock<IPresenceService>();
         presenceMock.Setup(p => p.ResolveEffectiveAsync(It.IsAny<IReadOnlyCollection<Guid>>()))
             .ReturnsAsync(Array.Empty<UserPresenceDto>());
@@ -78,13 +82,13 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
 
         // Chat access gate. No IPermissionChecker / IFunctionAuthorizationService is
         // registered in the integration suite, so ChatAccessService fails open (everyone
-        // may use chat) — enforcement/isolation tests register mocks to flip it on.
+        // may use chat) - enforcement/isolation tests register mocks to flip it on.
         services.AddScoped<IChatAccessService, ChatAccessService>();
 
         services.AddScoped<IChatContactService, ChatContactService>();
         services.AddScoped<IConversationService, ConversationService>();
 
-        // Admin maintenance service — IConnectionManager is an optional ctor dependency
+        // Admin maintenance service - IConnectionManager is an optional ctor dependency
         // (no SignalR in the integration suite), so it falls back to null and online
         // counts resolve to 0 / offline.
         services.AddScoped<IChatAdminService, ChatAdminService>();
@@ -94,6 +98,11 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
 
     /// <summary>Override in a test class to change ChatOptions (defaults = everything enabled).</summary>
     protected virtual void ConfigureChatOptions(Tnzi.Chat.Options.ChatOptions options)
+    {
+    }
+
+    /// <summary>Override in a test class to change PresenceOptions (defaults = presence + auto-away enabled).</summary>
+    protected virtual void ConfigurePresenceOptions(Tnzi.Identity.Presence.Options.PresenceOptions options)
     {
     }
 }
@@ -112,7 +121,7 @@ public class ChatTestDbContext : TnziDbContext<ChatTestDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ConversationConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ConversationMemberConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.ChatMessageConfiguration());
-        modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.UserPresenceConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Identity.Presence.Entities.Configs.UserPresenceConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.BroadcastLogConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Chat.Entities.Configs.MessageBlockConfiguration());
 

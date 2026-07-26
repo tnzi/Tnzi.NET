@@ -42,7 +42,7 @@ vi.mock('@tnzi/ui', () => ({
   }),
 }))
 
-// Stub the login context module — we don't need real context behaviour for toolbar tests
+// Stub the login context module - we don't need real context behaviour for toolbar tests
 vi.mock('../../pages/login/useLoginContext', () => ({
   provideLoginContext: vi.fn(),
 }))
@@ -50,7 +50,7 @@ vi.mock('../../pages/login/useLoginContext', () => ({
 import TLoginPage from '../TLoginPage.vue'
 import type { Component } from 'vue'
 
-/** Minimal valid props for TLoginPage — all modules required. */
+/** Minimal valid props for TLoginPage - all modules required. */
 function makeModuleComponents(): Record<string, Component> {
   const stub = defineComponent({ render: () => h('div') })
   return {

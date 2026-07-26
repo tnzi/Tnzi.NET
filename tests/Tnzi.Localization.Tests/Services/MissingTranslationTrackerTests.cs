@@ -1,7 +1,7 @@
 namespace Tnzi.Localization.Tests.Services;
 
 /// <summary>
-/// Tests for MissingTranslationTracker — tracking, querying, export, and clearing missing translations
+/// Tests for MissingTranslationTracker - tracking, querying, export, and clearing missing translations
 /// </summary>
 public class MissingTranslationTrackerTests
 {
@@ -182,7 +182,7 @@ public class MissingTranslationTrackerTests
         // Act
         _tracker.TrackMissing("en", "Auth.Login");
 
-        // Assert — verify logger was called
+        // Assert - verify logger was called
         _loggerMock.Verify(
             x => x.Log(
                 LogLevel.Warning,
@@ -216,7 +216,7 @@ public class MissingTranslationTrackerTests
         // Act
         prodTracker.TrackMissing("en", "Auth.Login");
 
-        // Assert — no log warning in production
+        // Assert - no log warning in production
         loggerMock.Verify(
             x => x.Log(
                 LogLevel.Warning,

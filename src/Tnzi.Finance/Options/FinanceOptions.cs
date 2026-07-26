@@ -105,6 +105,103 @@ public class FinanceOptions
         Description = "Prefix for credit memo numbers. Change at period boundaries to avoid numbering continuity gaps.")]
     public string CreditMemoNumberPrefix { get; set; } = "CM-";
 
+    /// <summary>
+    /// 账龄分桶的默认切分点（天）。
+    /// </summary>
+    /// <remarks>
+    /// 不作为 <see cref="AgingBucketDays"/> 的属性初始值，理由见该属性。
+    /// </remarks>
+    public static readonly int[] DefaultAgingBucketDays = [30, 60, 90];
+
+    /// <summary>
+    /// 账龄分桶的三个切分点（天），留空表示用 <see cref="DefaultAgingBucketDays"/>（30 / 60 / 90）。
+    /// </summary>
+    /// <remarks>
+    /// 30/60/90 是北美惯例但不是法律：按周结算的行业常用 7/14/21，工程行业按
+    /// 合同里程碑分。桶的**数量固定为五档**（Current + 三段 + 超期），只有切分点
+    /// 可配——桶数可变意味着 DTO 形状可变，那会把每个消费端的报表列都变成动态的。
+    ///
+    /// ★**默认值必须是空数组**：.NET 的配置绑定对数组是**追加**语义（先复制现有元素、
+    /// 再把绑定到的元素接在后面）。若这里预置 [30,60,90]，任何配了
+    /// <c>Finance:AgingBucketDays: [7,14,21]</c> 的部署都会绑成六个元素、随即撞上
+    /// 下面那条"必须恰好三个"的校验而**启动失败**，且错误信息指向操作员那份（正确的）
+    /// 配置。缺省值改在读取处补（见 <see cref="ResolveAgingBucketDays"/>）。
+    ///
+    /// 非法配置（非升序、非正数、数量既不是 0 也不是 3）在启动校验时拒绝，不静默回退：
+    /// 悄悄用回默认值，会让人以为自己配的口径生效了。
+    /// </remarks>
+    public int[] AgingBucketDays { get; set; } = [];
+
+    /// <summary>
+    /// 取生效的账龄切分点：配了就用配的，没配用 <see cref="DefaultAgingBucketDays"/>。
+    /// </summary>
+    public int[] ResolveAgingBucketDays()
+        => AgingBucketDays is { Length: 3 } cuts ? cuts : DefaultAgingBucketDays;
+
+    /// <summary>逾期多少天开始算"已逾期"（低于此值只作友好提醒）</summary>
+    [RuntimeSetting(Label = "Dunning: Overdue After (days)", I18n = "admin.modules.system.settings.fields.dunningOverdueDays",
+        Type = SettingFieldType.Int, Subsection = "Dunning",
+        Description = "Days past due before a receivable is escalated from a reminder to overdue.")]
+    public int DunningOverdueDays { get; set; } = 30;
+
+    /// <summary>逾期多少天发最后通知</summary>
+    [RuntimeSetting(Label = "Dunning: Final Notice After (days)", I18n = "admin.modules.system.settings.fields.dunningFinalNoticeDays",
+        Type = SettingFieldType.Int, Subsection = "Dunning",
+        Description = "Days past due before a receivable is escalated to a final notice.")]
+    public int DunningFinalNoticeDays { get; set; } = 60;
+
+    /// <summary>
+    /// 低于此金额不催。
+    /// </summary>
+    /// <remarks>
+    /// 为了三块钱发最后通知，只会让对方不再认真看这类邮件。
+    /// </remarks>
+    [RuntimeSetting(Label = "Dunning: Minimum Amount", I18n = "admin.modules.system.settings.fields.dunningMinimumAmount",
+        Type = SettingFieldType.Decimal, Subsection = "Dunning",
+        Description = "Overdue amounts below this are not worth chasing and report no dunning level.")]
+    public decimal DunningMinimumAmount { get; set; } = 1m;
+
+    /// <summary>单张单据最多挂几个附件</summary>
+    [RuntimeSetting(Label = "Max Attachments Per Document", I18n = "admin.modules.system.settings.fields.maxAttachmentsPerDocument",
+        Type = SettingFieldType.Int, Subsection = "Attachments",
+        Description = "Upper bound on files attached to a single finance document.")]
+    public int MaxAttachmentsPerDocument { get; set; } = 20;
+
+    /// <summary>
+    /// 允许挂的内容类型白名单；**空 = 不限**。
+    /// </summary>
+    /// <remarks>
+    /// 刻意不设默认白名单：多数部署并不想管这件事，给一份"合理默认"只会让第一个
+    /// 挂 .heic 收据的人撞墙。需要收紧的部署自己列。
+    /// 数组型配置不进设置中心（那里没有数组控件），只从 appsettings 绑定。
+    /// </remarks>
+    public string[] AllowedAttachmentContentTypes { get; set; } = [];
+
+    /// <summary>
+    /// 精确参考号匹配的置信度（默认 1.0）。
+    /// </summary>
+    /// <remarks>
+    /// 置信度是给**人**看的判断依据（界面显示成"精确"/"可能"），不是阈值——引擎
+    /// 只在候选唯一时才建议，所以数值本身不改变匹配结果。放出来是为了让接了自己
+    /// 匹配逻辑的部署能与内置规则用同一把尺子。
+    /// </remarks>
+    public decimal ExactMatchConfidence { get; set; } = 1.0m;
+
+    /// <summary>金额+日期窗口匹配的置信度（默认 0.8）</summary>
+    public decimal AmountDateMatchConfidence { get; set; } = 0.8m;
+
+    /// <summary>报价单编号前缀</summary>
+    [RuntimeSetting(Label = "Estimate Number Prefix", I18n = "admin.modules.system.settings.fields.estimateNumberPrefix",
+        Type = SettingFieldType.String, Subsection = "Numbering",
+        Description = "Prefix for estimate (quote) numbers. Change at period boundaries to avoid numbering continuity gaps.")]
+    public string EstimateNumberPrefix { get; set; } = "EST-";
+
+    /// <summary>采购订单编号前缀</summary>
+    [RuntimeSetting(Label = "Purchase Order Number Prefix", I18n = "admin.modules.system.settings.fields.purchaseOrderNumberPrefix",
+        Type = SettingFieldType.String, Subsection = "Numbering",
+        Description = "Prefix for purchase order numbers. Change at period boundaries to avoid numbering continuity gaps.")]
+    public string PurchaseOrderNumberPrefix { get; set; } = "PO-";
+
     /// <summary>收付款单编号前缀</summary>
     [RuntimeSetting(Label = "Payment Number Prefix", I18n = "admin.modules.system.settings.fields.paymentNumberPrefix",
         Type = SettingFieldType.String, Subsection = "Numbering",
@@ -172,6 +269,42 @@ public class FinanceOptions
         Type = SettingFieldType.String, Required = false, Subsection = "Checks",
         Description = "Filesystem path to an E-13B MICR TrueType font, required only when printing checks on blank stock.")]
     public string? CheckMicrFontPath { get; set; }
+
+    /// <summary>
+    /// 支票抬头的出票公司名（留空 = 取 System General 的 <c>System:CompanyName</c>）。
+    /// </summary>
+    [RuntimeSetting(Label = "Check Issuer Name", I18n = "admin.modules.system.settings.fields.checkIssuerName",
+        Type = SettingFieldType.String, Required = false, Subsection = "Checks",
+        Description = "Company name printed on the check letterhead. Leave empty to use the system-wide company name.")]
+    public string? CheckIssuerName { get; set; }
+
+    /// <summary>
+    /// 支票抬头的出票公司地址（每行一条，留空 = 取 System General 的 <c>System:Address</c>）。
+    /// </summary>
+    [RuntimeSetting(Label = "Check Issuer Address", I18n = "admin.modules.system.settings.fields.checkIssuerAddress",
+        Type = SettingFieldType.Text, Required = false, Subsection = "Checks",
+        Description = "Address printed on the check letterhead, one line per row. Leave empty to use the system-wide address.")]
+    public string? CheckIssuerAddress { get; set; }
+
+    /// <summary>
+    /// 签名图片地址（URL 或 data URI）。留空则只打签名线，由人工手签。
+    /// </summary>
+    [RuntimeSetting(Label = "Check Signature Image", I18n = "admin.modules.system.settings.fields.checkSignatureImageUrl",
+        Type = SettingFieldType.String, Required = false, Subsection = "Checks",
+        Description = "URL or data URI of the authorised-signature image. Leave empty to print an empty signature line for a wet signature.")]
+    public string? CheckSignatureImageUrl { get; set; }
+
+    /// <summary>签名人姓名（印在签名线下方）。</summary>
+    [RuntimeSetting(Label = "Check Signature Name", I18n = "admin.modules.system.settings.fields.checkSignatureName",
+        Type = SettingFieldType.String, Required = false, Subsection = "Checks",
+        Description = "Name printed under the signature line.")]
+    public string? CheckSignatureName { get; set; }
+
+    /// <summary>签名人职务（印在签名人姓名下方）。</summary>
+    [RuntimeSetting(Label = "Check Signature Title", I18n = "admin.modules.system.settings.fields.checkSignatureTitle",
+        Type = SettingFieldType.String, Required = false, Subsection = "Checks",
+        Description = "Job title printed under the signature name.")]
+    public string? CheckSignatureTitle { get; set; }
 
     /// <summary>
     /// 报表是否从 AccountPeriodBalance 月粒度汇总桶读取聚合（默认 false）。

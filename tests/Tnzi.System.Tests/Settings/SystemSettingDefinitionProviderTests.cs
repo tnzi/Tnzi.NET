@@ -1,7 +1,7 @@
 namespace Tnzi.System.Tests.Settings;
 
 /// <summary>
-/// 行为锁定测试 — 验证 AttributeSettingDefinitionProvider（通过 AppDomain 扫描）仍生成等价的 system-general 组。
+/// 行为锁定测试 - 验证 AttributeSettingDefinitionProvider（通过 AppDomain 扫描）仍生成等价的 system-general 组。
 /// </summary>
 public class SystemSettingDefinitionProviderTests
 {
@@ -15,7 +15,7 @@ public class SystemSettingDefinitionProviderTests
         general.Fields.Select(f => f.Key).ShouldContain("System:SiteName");
         general.Fields.Select(f => f.Key).ShouldContain("System:LogoUrl");
         general.Fields.ShouldAllBe(f => f.Key.StartsWith("System:"));
-        // 与 ApplicationOptions 的 12 个属性一一对应 — 新增/删除属性时必须同步本组
+        // 与 ApplicationOptions 的 12 个属性一一对应 - 新增/删除属性时必须同步本组
         general.Fields.Count.ShouldBe(12);
     }
 

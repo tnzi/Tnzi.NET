@@ -18,8 +18,16 @@ export interface ApiResult<T = unknown> {
   success: boolean;
   /** HTTP 状态码 (Result.Code) */
   code: number;
-  /** 响应数据 */
-  data: T;
+  /**
+   * 响应数据。
+   *
+   * Optional on purpose: a failed envelope carries no payload (the client fills
+   * it with `undefined`), and void endpoints return none on success either.
+   * Narrow with `isSuccess(result)` from `@tnzi/core/http` - it is a type
+   * predicate that proves `data` is present, so `result.data` is only reachable
+   * once success has actually been checked.
+   */
+  data?: T;
   /** 消息 */
   message?: string;
   /** 业务错误码 */

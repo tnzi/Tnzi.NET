@@ -107,7 +107,7 @@ const hasAttachments = computed(
       >
         <TToolCallDisplay
           v-for="(tc, i) in message.toolCalls"
-          :key="i"
+          :key="`${tc.name}:${i}`"
           :tool-call="tc"
         />
       </div>

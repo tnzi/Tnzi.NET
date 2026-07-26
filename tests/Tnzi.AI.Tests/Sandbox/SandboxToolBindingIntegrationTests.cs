@@ -5,14 +5,14 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
-/// P0 回归锁定 — 沙箱工具环境参数绑定集成测试。
+/// P0 回归锁定 - 沙箱工具环境参数绑定集成测试。
 /// </summary>
 /// <remarks>
 /// 贯穿真实链路：ToolScanner 扫描 Sandbox 程序集 → ToolRegistry → ToolResolver
 /// （内部 ToolAdapter/AIFunctionFactory）→ 真实 AgentExecutor 工具调用循环 →
 /// SandboxTools 从 IAgentExecutionContextAccessor 解析 SandboxMiddleware 发布的沙箱环境。
 /// 旧形态（方法签名携带 ISandbox sandbox, Guid threadId 且无 [AIFunction]/IAIToolProvider）下，
-/// 扫描发现 0 个工具、schema 暴露不可反序列化的接口参数 — 本文件中的测试必然失败。
+/// 扫描发现 0 个工具、schema 暴露不可反序列化的接口参数 - 本文件中的测试必然失败。
 /// </remarks>
 public class SandboxToolBindingIntegrationTests : IDisposable
 {
@@ -33,7 +33,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // 1. 扫描与 schema — 旧形态下扫描结果为空 / schema 含环境参数
+    // 1. 扫描与 schema - 旧形态下扫描结果为空 / schema 含环境参数
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -66,7 +66,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // 2. 真实 AgentExecutor 工具调用链 — mock chat client 发起 bash toolcall →
+    // 2. 真实 AgentExecutor 工具调用链 - mock chat client 发起 bash toolcall →
     //    沙箱真实执行 → 工具结果回到对话
     // -------------------------------------------------------------------------
 
@@ -110,7 +110,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
         recordingSandbox.ExecutedCommands.ShouldHaveSingleItem();
         recordingSandbox.ExecutedCommands[0].ShouldContain("echo integration");
 
-        // 工具结果回到对话 — 第二次 LLM 请求携带匹配 CallId 的 FunctionResultContent
+        // 工具结果回到对话 - 第二次 LLM 请求携带匹配 CallId 的 FunctionResultContent
         chatClient.Requests.Count.ShouldBe(2);
         var functionResults = chatClient.Requests[1]
             .SelectMany(m => m.Contents)
@@ -125,7 +125,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // 3. 环境缺失（无中间件 — 子代理裸执行器/中间件未运行路径）→
+    // 3. 环境缺失（无中间件 - 子代理裸执行器/中间件未运行路径）→
     //    结构化错误回到对话，整条链不崩溃
     // -------------------------------------------------------------------------
 
@@ -211,7 +211,7 @@ public class SandboxToolBindingIntegrationTests : IDisposable
     }
 }
 
-/// <summary>记录所有执行命令的假沙箱 — 验证工具调用真实抵达沙箱。</summary>
+/// <summary>记录所有执行命令的假沙箱 - 验证工具调用真实抵达沙箱。</summary>
 file sealed class RecordingSandbox : ISandbox
 {
     public List<string> ExecutedCommands { get; } = [];
@@ -249,7 +249,7 @@ file sealed class FixedSandboxProvider(ISandbox sandbox) : ISandboxProvider
 }
 
 /// <summary>
-/// 脚本化 chat client — 第一次调用返回对 bash 的 toolcall，第二次返回最终文本。
+/// 脚本化 chat client - 第一次调用返回对 bash 的 toolcall，第二次返回最终文本。
 /// 记录每次请求的消息快照供断言。
 /// </summary>
 file sealed class ScriptedChatClient : IChatClient

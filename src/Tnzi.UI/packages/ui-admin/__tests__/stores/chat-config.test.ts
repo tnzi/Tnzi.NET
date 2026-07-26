@@ -83,7 +83,7 @@ describe('useChatStore deployment config', () => {
   })
 
   it('forces enabled:false (deny-by-default) when the endpoint throws', async () => {
-    // A load failure must NOT fail-open into enabled:true — that would mount the
+    // A load failure must NOT fail-open into enabled:true - that would mount the
     // chat host for a user we cannot confirm holds chat.use, hitting the
     // 403-guarded /conversations + /presence endpoints. Feature flags still
     // mirror DEFAULT; only `enabled` is forced false.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TSuggestions — Suggestion buttons
+ * TSuggestions - Suggestion buttons
  *
  * Horizontal scroll of pill-shaped suggestion buttons with staggered fade-in.
  */

@@ -263,7 +263,7 @@ describe('AuthStateManager', () => {
 
   describe('applyTokenSession', () => {
     it('establishes a persisted session AND fetches permissions from tokens only', async () => {
-      // permissionsFetchFn is the only thing that populates this.permissions —
+      // permissionsFetchFn is the only thing that populates this.permissions -
       // locks the M1 regression where applyTokenSession skipped it.
       const permissionsFetchFn = vi.fn().mockResolvedValue(['perm.a', 'perm.b']);
       const localDeps = createDeps({ permissionsFetchFn });
@@ -277,7 +277,7 @@ describe('AuthStateManager', () => {
       expect(localDeps.httpClient.setAccessToken).toHaveBeenCalledWith('code-tok');
       // Persisted (unlike setAuth) so a hard refresh can restore the session.
       expect(localDeps.storage.get('tnzi:auth:token')).toBe('code-tok');
-      // Permissions populated — every hasPermission()/guard depends on this.
+      // Permissions populated - every hasPermission()/guard depends on this.
       expect(permissionsFetchFn).toHaveBeenCalled();
       expect(localAuth.permissions).toEqual(['perm.a', 'perm.b']);
     });
@@ -429,6 +429,87 @@ describe('AuthStateManager', () => {
       await expect(localAuth.refreshAccessToken()).rejects.toThrow();
 
       expect(push).toHaveBeenCalledWith('/admin/login');
+    });
+  });
+
+  // ------------------------------------------
+  // restoreAuth (session rehydration on hard reload)
+  // ------------------------------------------
+
+  describe('restoreAuth', () => {
+    const STORED = { token: 'stored-access', refresh: 'stored-refresh' };
+
+    function seedTokens(storage: StorageAdapter): void {
+      storage.set('tnzi:auth:token', STORED.token);
+      storage.set('tnzi:auth:refresh', STORED.refresh);
+      storage.set('tnzi:auth:expiry', new Date(Date.now() + 3600_000).toISOString());
+    }
+
+    beforeEach(() => {
+      authApiMocks.refreshToken.mockReset();
+      profileApiMocks.get.mockReset();
+      seedTokens(deps.storage);
+    });
+
+    it('restores the session when the stored token still works', async () => {
+      profileApiMocks.get.mockResolvedValue({
+        succeeded: true,
+        data: { id: '1', userName: 'alice', roles: ['admin'] },
+      });
+
+      await auth.restoreAuth();
+
+      expect(auth.isAuthenticated).toBe(true);
+      expect(auth.isLoggedIn).toBe(true);
+      expect(auth.user?.userName).toBe('alice');
+      expect(auth.roles).toEqual(['admin']);
+      expect(authApiMocks.refreshToken).not.toHaveBeenCalled();
+    });
+
+    it('restores the session when the profile call fails but refresh succeeds', async () => {
+      // First profile call (stale token) fails, the post-refresh one succeeds.
+      profileApiMocks.get
+        .mockResolvedValueOnce({ succeeded: false, code: 401 })
+        .mockResolvedValueOnce({
+          succeeded: true,
+          data: { id: '1', userName: 'alice', roles: ['admin'] },
+        });
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: true,
+        data: { accessToken: 'fresh', refreshToken: 'fresh-refresh', expiresIn: 3600 },
+      });
+
+      await auth.restoreAuth();
+
+      // The regression: refresh succeeded but nothing set isAuthenticated, so
+      // fetchUserProfile() short-circuited and the guard bounced the user out.
+      expect(auth.isAuthenticated).toBe(true);
+      expect(auth.isLoggedIn).toBe(true);
+      expect(auth.accessToken).toBe('fresh');
+      expect(auth.user?.userName).toBe('alice');
+      expect(auth.userRoles).toEqual(['admin']);
+    });
+
+    it('clears everything when both the profile call and the refresh fail', async () => {
+      profileApiMocks.get.mockResolvedValue({ succeeded: false, code: 401 });
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400 });
+
+      await auth.restoreAuth();
+
+      expect(auth.isAuthenticated).toBe(false);
+      expect(auth.isLoggedIn).toBe(false);
+      expect(auth.user).toBeNull();
+      expect(deps.storage.get('tnzi:auth:token')).toBeNull();
+      expect(deps.storage.get('tnzi:auth:refresh')).toBeNull();
+    });
+
+    it('is a no-op when no tokens are persisted', async () => {
+      deps.storage.clear();
+
+      await auth.restoreAuth();
+
+      expect(auth.isAuthenticated).toBe(false);
+      expect(profileApiMocks.get).not.toHaveBeenCalled();
     });
   });
 

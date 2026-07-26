@@ -1,6 +1,6 @@
 <template>
   <!--
-    Integrity — file-integrity verification dashboard (TContentPage, no back).
+    Integrity - file-integrity verification dashboard (TContentPage, no back).
     A "Verify" button triggers `integrity.batchVerify(maxFiles)`; results land
     in a KPI strip (TotalChecked / Healthy / Missing+Corrupted / Errors) and a
     problem-files table (the backend only returns problematic rows in

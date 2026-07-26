@@ -1,14 +1,15 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// Embedding cache decorator — caches embedding results to avoid redundant API calls.
+/// Embedding cache decorator: caches embedding results to avoid redundant API calls.
 /// <para>
 /// Uses content-based SHA256 hash as cache key. When the same text (with same provider+model)
 /// is embedded again, the cached result is returned without calling the embedding API.
 /// </para>
 /// <para>
 /// Cache is stored using the framework's ICache abstraction (Redis, Memory, etc.).
-/// Cache entries expire after a configurable TTL (default: 7 days).
+/// Cache entries expire after a configurable TTL
+/// (<see cref="EmbeddingCacheOptions.TtlHours"/>, default 720 hours = 30 days).
 /// </para>
 /// </summary>
 public class CachingEmbeddingDecorator : IEmbeddingService
@@ -61,7 +62,7 @@ public class CachingEmbeddingDecorator : IEmbeddingService
             return Result<float[]>.Success(cached);
         }
 
-        // Cache miss — call the real embedding service
+        // Cache miss: call the real embedding service
         var result = await _inner.GenerateEmbeddingAsync(text, options, ct);
 
         if (result.Succeeded && result.Data != null)

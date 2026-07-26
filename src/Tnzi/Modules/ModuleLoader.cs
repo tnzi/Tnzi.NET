@@ -183,7 +183,7 @@ public class ModuleLoader
             {
                 // GetCustomAttributes may throw FileNotFoundException when the attribute
                 // references a type (typeof()) from an assembly that is not loaded.
-                // This is expected for optional dependencies — the assembly may not be present.
+                // This is expected for optional dependencies - the assembly may not be present.
                 optionalAttributes = descriptor.Type.GetCustomAttributes<OptionalDependsOnAttribute>();
             }
             catch (FileNotFoundException)

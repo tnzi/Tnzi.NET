@@ -61,7 +61,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Forward lookup of every super-admin user id — the union of members across
+    /// Forward lookup of every super-admin user id - the union of members across
     /// all roles named in <c>Authorization:SuperAdminRoles</c>. Symmetric with
     /// <see cref="IsSuperAdminAsync"/> (the reverse "is this one user a super admin").
     /// Callers use it to strip super admins out of business-facing user listings
@@ -75,7 +75,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (superRoles is not { Count: > 0 } || _userRoleService == null || _roleRepository == null)
             return new HashSet<Guid>();
 
-        // Match on NormalizedName (upper-cased) — Identity keeps it in sync and the
+        // Match on NormalizedName (upper-cased) - Identity keeps it in sync and the
         // seeder writes it upper-cased, so this is the case-insensitive equivalent
         // of the OrdinalIgnoreCase name match in IsSuperAdminAsync, translated to a
         // single SQL IN. Use the repository ToListAsync(predicate) overload (not
@@ -193,7 +193,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (string.IsNullOrEmpty(permissionName))
             return false;
 
-        // SuperAdmin bypass — short-circuit before touching the function
+        // SuperAdmin bypass - short-circuit before touching the function
         // tables. Everyone else resolves through explicit grants only
         // (deny-by-default): no role is implicitly granted anything.
         if (await IsSuperAdminAsync(userId)) return true;
@@ -235,7 +235,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 一次性获取用户的所有权限名称（带缓存）
         var userPermissions = await GetUserPermissionNamesAsync(userId);
-        // Case-insensitive match — see comment in CheckPermissionAsync for rationale.
+        // Case-insensitive match - see comment in CheckPermissionAsync for rationale.
         var userPermissionSet = ToCaseInsensitiveSet(userPermissions);
 
         return permissionNameList.ToDictionary(
@@ -283,7 +283,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>权限名称集合</returns>
     public async Task<IEnumerable<string>> GetUserPermissionNamesAsync(Guid userId)
     {
-        // SuperAdmin bypass — return the full catalogue of enabled functions so
+        // SuperAdmin bypass - return the full catalogue of enabled functions so
         // both the legacy "has X" check and any caller that enumerates the user's
         // permissions (menu builders, audit, etc.) sees a complete grant set.
         // The catalogue is identical for every super-admin so it lives in a
@@ -300,7 +300,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
     /// <summary>
     /// Explicit effective permission names, tier-independent, with per-user
-    /// cache. Resolution: <c>(RoleFunction ∪ user-allow) − user-deny</c> —
+    /// cache. Resolution: <c>(RoleFunction ∪ user-allow) − user-deny</c> -
     /// a user-level deny row removes a code no matter which role granted it
     /// (user-level wins; super admins short-circuit upstream and are never
     /// affected by deny rows).
@@ -599,7 +599,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // System-managed rows are owned by code — delete attempts via admin
+        // System-managed rows are owned by code - delete attempts via admin
         // UI would resurrect on next startup (seeder re-inserts). Refuse so
         // admin sees the constraint instead of silent "phantom" rebirth.
         if (module.IsSystemManaged)
@@ -1103,7 +1103,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // Category needs guarding around the blanket MapTo below:
         // - system-managed rows: category is a code-owned contract (the seeder
-        //   re-asserts it), protected like Code/ModuleId — admin edits ignored;
+        //   re-asserts it), protected like Code/ModuleId - admin edits ignored;
         // - admin-created rows: apply only when the request explicitly provides
         //   a value. A nullable-with-default would silently downgrade Technical
         //   to Business on any update that omits the field, erasing the
@@ -1381,7 +1381,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             }
         }
 
-        // User-level deny rows override every grant path — drop those users
+        // User-level deny rows override every grant path - drop those users
         // so the reverse query mirrors the actual resolution semantics.
         var deniedUserIds = await _userFunctionRepository
             .Where(uf => uf.FunctionId == function.Id && uf.IsEnabled && !uf.IsGranted)
@@ -1614,11 +1614,16 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Import function assignments to a role from exported data
+    /// Role names configured in <c>Authorization:SuperAdminRoles</c> (read-only).
+    /// The permission-matrix UI renders those roles as read-only explanatory rows,
+    /// because their explicit RoleFunction rows have no effect on members.
     /// </summary>
     public IReadOnlyList<string> GetSuperAdminRoleNames()
         => _options?.Value.SuperAdminRoles ?? [];
 
+    /// <summary>
+    /// Import function assignments to a role from exported data
+    /// </summary>
     public async Task<Result<PermissionImportResultDto>> ImportRolePermissionsAsync(Guid roleId, RolePermissionExportDto importData)
     {
         if (importData.FunctionCodes.Count == 0)
@@ -1748,7 +1753,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Invalidate only the users actually reachable by a single function —
+    /// Invalidate only the users actually reachable by a single function -
     /// users granted that function via either path
     /// (<see cref="RoleFunction"/>+UserRole, direct <see cref="UserFunction"/>),
     /// plus the super-admin catalogue
@@ -1774,7 +1779,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 .Select(uf => uf.UserId)
                 .ToListAsync();
 
-            // (b) Role-scoped grants — collect every role that carries this
+            // (b) Role-scoped grants - collect every role that carries this
             // function via RoleFunction and fan out to their users.
             var roleFunctionRoleIds = await _roleFunctionRepository
                 .Where(rf => rf.FunctionId == functionId && rf.IsEnabled)
@@ -1803,7 +1808,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         catch (Exception ex)
         {
             // Precise invalidation is an optimisation, not a correctness
-            // guarantee — if anything goes wrong (DB transient error etc.),
+            // guarantee - if anything goes wrong (DB transient error etc.),
             // fall back to a global clear so we never leave stale entries.
             Logger.LogWarning(ex,
                 "Precise cache invalidation failed for function {FunctionId}; falling back to global clear.",

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Tools;
 
 /// <summary>
-/// IToolContext 默认实现 — 包装 Scoped ServiceProvider 供工具运行时访问
+/// IToolContext 默认实现 - 包装 Scoped ServiceProvider 供工具运行时访问
 /// </summary>
 internal sealed class ToolContext : IToolContext, IDisposable
 {

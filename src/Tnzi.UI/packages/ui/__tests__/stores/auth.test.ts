@@ -82,7 +82,7 @@ describe('stores/auth', () => {
     resetAuthRuntime()
   })
 
-  describe('useAuthStore — reactive state proxies', () => {
+  describe('useAuthStore - reactive state proxies', () => {
     it('exposes isAuthenticated through the manager', () => {
       managerInstance.isAuthenticated = true
       const store = useAuthStore()
@@ -134,7 +134,7 @@ describe('stores/auth', () => {
     })
   })
 
-  describe('useAuthStore — permission checks', () => {
+  describe('useAuthStore - permission checks', () => {
     it('delegates hasRole to manager', () => {
       const store = useAuthStore()
       expect(store.hasRole('admin')).toBe(true)
@@ -164,7 +164,7 @@ describe('stores/auth', () => {
     })
   })
 
-  describe('useAuthStore — actions', () => {
+  describe('useAuthStore - actions', () => {
     it('login delegates to manager and returns result', async () => {
       const store = useAuthStore()
       const result = await store.login({ username: 'alice', password: 'secret' } as any)

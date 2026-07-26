@@ -3,8 +3,17 @@ namespace Tnzi.EFCore.Extensions;
 
 /// <summary>
 /// Repository 规范扩展方法
-/// 支持通过 Specification 进行查询，自动应用 Where/OrderBy/Include/Paging
 /// </summary>
+/// <remarks>
+/// 应用范围按方法而异：
+/// <list type="bullet">
+/// <item><see cref="GetListAsync"/> / <see cref="FirstOrDefaultAsync"/> / <see cref="SingleOrDefaultAsync"/>
+/// 走完整管线，应用规范的 Where + Include + OrderBy + Paging。</item>
+/// <item><see cref="GetPagedListAsync"/> / <see cref="CountAsync"/> / <see cref="AnyAsync"/>
+/// 只使用规范的 Where 谓词（<c>ToExpression()</c>）。分页重载的排序与分页来自 <c>PagedQuery</c>，
+/// 规范上配置的 Include **不会**生效；需要预加载导航属性时请用 <see cref="GetListAsync"/>。</item>
+/// </list>
+/// </remarks>
 public static class RepositorySpecificationExtensions
 {
     /// <summary>

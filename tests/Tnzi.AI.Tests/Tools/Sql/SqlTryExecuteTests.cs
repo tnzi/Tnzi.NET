@@ -8,7 +8,7 @@ using Xunit;
 namespace Tnzi.AI.Tests.Tools.Sql;
 
 /// <summary>
-/// F5: text-to-SQL error model — QueryResult.Failure + IReadOnlySqlExecutor.TryExecuteAsync
+/// F5: text-to-SQL error model - QueryResult.Failure + IReadOnlySqlExecutor.TryExecuteAsync
 /// (failure becomes a failed result instead of throwing, so callers can tell
 /// "no rows" from "rejected/timed out").
 /// </summary>
@@ -78,7 +78,7 @@ public class SqlTryExecuteTests
     public async Task TryExecute_OnTaskCanceled_StillThrows()
     {
         // TaskCanceledException (what reader.ReadAsync(ct) throws) is an
-        // OperationCanceledException subclass — must propagate, not become Failure.
+        // OperationCanceledException subclass - must propagate, not become Failure.
         IReadOnlySqlExecutor sut = new FakeExecutor(new TaskCanceledException());
 
         await Assert.ThrowsAsync<TaskCanceledException>(() => sut.TryExecuteAsync("SELECT 1"));

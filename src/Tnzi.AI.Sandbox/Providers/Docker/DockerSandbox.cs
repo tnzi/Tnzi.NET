@@ -4,7 +4,7 @@ using Tnzi.AI.Security;
 namespace Tnzi.AI.Sandbox.Providers.Docker;
 
 /// <summary>
-/// Docker container sandbox — executes commands and manages files inside a Docker container
+/// Docker container sandbox - executes commands and manages files inside a Docker container
 /// via the Docker Engine REST API.
 /// </summary>
 public sealed class DockerSandbox : ISandbox
@@ -134,7 +134,7 @@ public sealed class DockerSandbox : ISandbox
 
         var escaped = EscapePath(path);
 
-        // Size precheck — reject before streaming a multi-GB file out of the
+        // Size precheck - reject before streaming a multi-GB file out of the
         // container. `wc -c` is portable across GNU coreutils and busybox.
         if (_maxFileSize > 0)
         {
@@ -151,7 +151,7 @@ public sealed class DockerSandbox : ISandbox
             }
             else
             {
-                // wc failed — most often a missing/inaccessible file, which the read below
+                // wc failed - most often a missing/inaccessible file, which the read below
                 // surfaces as FileNotFound. Log so an unverified size read isn't fully silent.
                 _logger.LogWarning(
                     "Sandbox size precheck (wc -c) failed for {Path} (exit {ExitCode}); size limit not enforced for this read.",
@@ -247,7 +247,7 @@ public sealed class DockerSandbox : ISandbox
 
             var isDirectory = type == "d";
             // Hide sensitive files from listings (mirrors read-time denial). Only
-            // files are filtered — directory names are not matched as patterns.
+            // files are filtered - directory names are not matched as patterns.
             if (!isDirectory && SensitiveFileMatcher.IsDenied(fullPath, _deniedPatterns, out _))
                 continue;
 

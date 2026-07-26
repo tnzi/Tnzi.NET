@@ -69,7 +69,10 @@ internal static class TemplatePathHelper
     }
 
     /// <summary>
-    /// 在搜索路径中查找文件
+    /// 在搜索路径中查找文件。
+    /// 相对路径由模板名/模块名/分类名拼出，这些值可能来自消费方数据（如发票的 TemplateName），
+    /// 因此解析后必须仍落在搜索根内：越界候选一律跳过，避免把根目录外的 .cshtml
+    /// 当模板加载并编译执行。
     /// </summary>
     /// <param name="relativePath">相对路径</param>
     /// <param name="searchRoots">搜索根路径列表</param>
@@ -84,7 +87,9 @@ internal static class TemplatePathHelper
             if (string.IsNullOrWhiteSpace(root))
                 continue;
 
-            var fullPath = Path.Combine(root, relativePath);
+            if (!TryResolveWithinRoot(root, relativePath, out var fullPath))
+                continue;
+
             if (File.Exists(fullPath))
             {
                 return fullPath;
@@ -92,5 +97,38 @@ internal static class TemplatePathHelper
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 把相对路径解析为搜索根内的绝对路径；越界或路径非法时返回 false。
+    /// 前缀比较带上目录分隔符，否则同级的兄弟目录（root 为 "…/app" 时的 "…/app_bak"）会被误判为在根内。
+    /// </summary>
+    private static bool TryResolveWithinRoot(string root, string relativePath, out string fullPath)
+    {
+        fullPath = string.Empty;
+
+        try
+        {
+            var normalizedRoot = Path.GetFullPath(root);
+            var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? normalizedRoot
+                : normalizedRoot + Path.DirectorySeparatorChar;
+
+            var resolved = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath));
+            if (!resolved.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            fullPath = resolved;
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            // 路径含非法字符：视为未找到
+            return false;
+        }
+        catch (PathTooLongException)
+        {
+            return false;
+        }
     }
 }

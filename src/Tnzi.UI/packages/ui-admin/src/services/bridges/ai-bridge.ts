@@ -1,10 +1,10 @@
 /**
- * AI bridge — full fill (Phase 5 Task 5.1).
+ * AI bridge - full fill (Phase 5 Task 5.1).
  *
  * Adapts the @tnzi/core AI admin API factories to the BridgeCrudContract shape
  * used by all TCrudPage-based management pages.
  *
- * IMPORTANT — plan-vs-reality drift (vs 2026-04-12 plan §5.1):
+ * IMPORTANT - plan-vs-reality drift (vs 2026-04-12 plan §5.1):
  *   The original plan assumed 13 service singletons (`AgentService.default`, etc.)
  *   each with a uniform `getPagedList/create/update/deleteMany` shape. The actual
  *   `@tnzi/core/services/ai` exports 19 factory functions (`useAdmin*Api(client)`)
@@ -16,7 +16,7 @@
  *   3. agentRuns       → useAdminAgentRunApi.getList/cancel; tail() rejects (SSE belongs in
  *                        page-level streaming via getRunStreamUrl on the agent api, not here)
  *   4. workflows       → useAdminWorkflowApi.getList/create/update/delete + clone + validate
- *                        + publish (publish wraps batchEnable — IsEnabled IS the framework
+ *                        + publish (publish wraps batchEnable - IsEnabled IS the framework
  *                        publish semantic; see docs/modules/ai.md Workflow section)
  *   5. workflowRuns    → useAdminWorkflowApi.getExecutions/getExecutionDetail (NO separate
  *                        useAdminWorkflowRunApi exists in core); tail() rejects
@@ -29,7 +29,7 @@
  *                        getDefaultModel} endpoints are still exposed for backwards compatibility
  *                        but are NOT used by the bridge.
  *   8. usage           → useAdminUsageAnalyticsApi.{getSummary,getByAgent,getByModel,getTrend}
- *                        — query.filters must supply {startTime,endTime}
+ * - query.filters must supply {startTime,endTime}
  *   9. knowledge       → useAdminKnowledgeBaseApi.{getList,create,update,delete,reindex}
  *                        reindex wired to POST /admin/knowledge-bases/{id}/reindex (Phase 5 prereq)
  *  10. mcpServers      → ENTITY-DRIVEN CRUD (Phase 5 backend prereq):
@@ -41,10 +41,9 @@
  *                        are unrelated to this CRUD surface.
  *  11. quota           → useAdminQuotaApi.{getList,getQuota,setQuota,resetQuota}; fetch() pages
  *                        via POST /admin/quotas/query (Phase 5 prereq)
- *  12. personas        → useAdminPersonaApi.getList/create/update/delete
- *  13. evaluations     → useAdminEvaluationApi.getList/getById/delete + create (POST /run) +
+ *  12. evaluations     → useAdminEvaluationApi.getList/getById/delete + create (POST /run) +
  *                        runBatch (POST /batch); update rejects, run(id) rejects (backend
- *                        creates+runs in one call — use create() instead)
+ *                        creates+runs in one call - use create() instead)
  *
  *   Bridges that "reject not-implemented" follow the chat-bridge / notification-bridge stub
  *   pattern from Phase 3. Pages downstream MUST avoid wiring to those operations until the
@@ -59,7 +58,6 @@ import {
   useAdminProviderApi,
   useAdminUsageAnalyticsApi,
   useAdminQuotaApi,
-  useAdminPersonaApi,
   useAdminEvaluationApi,
   useAdminMcpApi,
   UsageGranularity,
@@ -98,10 +96,6 @@ import {
   type UserQuotaDto,
   type UserQuotaQueryDto,
   type SetQuotaDto,
-  type AgentPersonaDto,
-  type CreateAgentPersonaDto,
-  type UpdateAgentPersonaDto,
-  type AgentPersonaQueryDto,
   type EvaluationRunDto,
   type EvaluationRunDetailDto,
   type EvaluationRunQueryDto,
@@ -193,7 +187,6 @@ export interface AiBridgeDeps {
   knowledgeBaseApi?: ReturnType<typeof useAdminKnowledgeBaseApi>
   mcpApi?: ReturnType<typeof useAdminMcpApi>
   quotaApi?: ReturnType<typeof useAdminQuotaApi>
-  personaApi?: ReturnType<typeof useAdminPersonaApi>
   evaluationApi?: ReturnType<typeof useAdminEvaluationApi>
 }
 
@@ -208,7 +201,7 @@ export interface UsageSummary {
 /**
  * Row exposed to UI for the mcpServers sub-contract.
  * Backed by the AI_McpServerRegistration entity table; the DTO never carries
- * plaintext or ciphertext auth tokens — only a `hasAuthToken` boolean flag.
+ * plaintext or ciphertext auth tokens - only a `hasAuthToken` boolean flag.
  */
 export type McpServerRow = McpServerRegistrationDto
 
@@ -255,7 +248,7 @@ export interface AiBridge {
     getDetail(id: string, messageLimit?: number): Promise<AgentThreadDetailDto>
     /** Export a thread as a JSON payload. */
     exportJson(id: string): Promise<ThreadExportDto>
-    /** Resolve the markdown export URL (file download — caller opens it). */
+    /** Resolve the markdown export URL (file download - caller opens it). */
     getExportMarkdownUrl(id: string): string
   }
   agentRuns: Pick<BridgeCrudContract<AgentRunDto>, 'fetch'> & {
@@ -273,7 +266,7 @@ export interface AiBridge {
     getById(id: string): Promise<WorkflowDefinitionDto>
     /** Deep-copy a workflow definition. */
     clone(id: string): Promise<WorkflowDefinitionDto>
-    /** Toggle isEnabled=true. Workflow has no separate Draft/Published — IsEnabled IS the publish flag. */
+    /** Toggle isEnabled=true. Workflow has no separate Draft/Published - IsEnabled IS the publish flag. */
     publish(id: string): Promise<WorkflowDefinitionDto>
     /** Toggle isEnabled=false. */
     unpublish(id: string): Promise<WorkflowDefinitionDto>
@@ -369,7 +362,7 @@ export interface AiBridge {
     getDocuments(kbId: string, query?: DocumentQueryParams): Promise<PagedList<KnowledgeDocumentDto>>
     /** Poll a single document's ingestion status. */
     getDocumentStatus(kbId: string, docId: string): Promise<KnowledgeDocumentDto>
-    /** Upload a document (multipart); ingestion is async — poll status by docId. */
+    /** Upload a document (multipart); ingestion is async - poll status by docId. */
     uploadDocument(kbId: string, file: File): Promise<DocumentUploadResultDto>
     /** Delete a document from a knowledge base. */
     deleteDocument(kbId: string, docId: string): Promise<void>
@@ -402,7 +395,6 @@ export interface AiBridge {
     /** USD cost budget summary for a tenant/time-range. */
     getBudgetSummary(params?: { tenantId?: string; startTime?: string; endTime?: string }): Promise<BudgetSummaryDto>
   }
-  personas: BridgeCrudContract<AgentPersonaDto, CreateAgentPersonaDto, UpdateAgentPersonaDto>
   evaluations: BridgeCrudContract<EvaluationRunDto, CreateEvaluationRunDto, Partial<EvaluationRunDto>> & {
     run(id: string): Promise<{ runId: string }>
     runBatch(data: BatchEvaluationDto): Promise<BatchEvaluationResultDto>
@@ -425,7 +417,7 @@ function toCrudResult<T>(p: PagedList<T>): CrudPageResult<T> {
 }
 
 const notImplemented = (op: string) => () =>
-  Promise.reject(new Error(`ai-bridge: ${op} is not implemented — backend endpoint not available`))
+  Promise.reject(new Error(`ai-bridge: ${op} is not implemented - backend endpoint not available`))
 
 // ---------------------------------------------------------------------------
 
@@ -441,14 +433,13 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     deps.knowledgeBaseApi ?? (deps.client ? useAdminKnowledgeBaseApi(deps.client) : null)
   const mcpApi = deps.mcpApi ?? (deps.client ? useAdminMcpApi(deps.client) : null)
   const quotaApi = deps.quotaApi ?? (deps.client ? useAdminQuotaApi(deps.client) : null)
-  const personaApi = deps.personaApi ?? (deps.client ? useAdminPersonaApi(deps.client) : null)
   const evaluationApi =
     deps.evaluationApi ?? (deps.client ? useAdminEvaluationApi(deps.client) : null)
   // New capability factories (client-derived; production always passes `client`).
   const skillCategoryApi = deps.client ? useAdminSkillCategoryApi(deps.client) : null
   const mcpAnalyticsApi = deps.client ? useAdminMcpToolAnalyticsApi(deps.client) : null
 
-  // Construction-time guard — fail fast instead of deferring errors to first async call.
+  // Construction-time guard - fail fast instead of deferring errors to first async call.
   // Matches identity-bridge pattern. Production callers pass `client`; tests may inject
   // individual api mocks, but must cover every sub-contract they intend to exercise.
   if (
@@ -462,13 +453,12 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     !kbApi ||
     !mcpApi ||
     !quotaApi ||
-    !personaApi ||
     !evaluationApi
   ) {
     throw new Error(
-      'createAiBridge: provide either `client` (HttpClient) or all 12 api deps ' +
+      'createAiBridge: provide either `client` (HttpClient) or all 11 api deps ' +
         '(agentApi/agentRunApi/threadApi/workflowApi/skillApi/providerApi/usageApi/' +
-        'knowledgeBaseApi/mcpApi/quotaApi/personaApi/evaluationApi)',
+        'knowledgeBaseApi/mcpApi/quotaApi/evaluationApi)',
     )
   }
 
@@ -481,7 +471,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     create: async (data) => unwrap<AgentDto>(await agentApi.create(data)),
     update: async (id, data) => unwrap<AgentDto>(await agentApi.update(String(id), data)),
     delete: async (ids) => {
-      for (const id of ids) await agentApi.delete(String(id))
+      // `ensureOk`, not a bare await: HttpClient never rejects on a business
+      // failure, it RESOLVES `{ succeeded: false }`. Without this a 409 (still
+      // referenced) or 403 came back as success, and the page reported the rows
+      // deleted while they were still there.
+      for (const id of ids) ensureOk(await agentApi.delete(String(id)))
     },
     getById: async (id) => unwrap<AgentDto>(await agentApi.getById(String(id))),
     clone: async (id, name) => unwrap<AgentDto>(await agentApi.clone(String(id), name)),
@@ -567,7 +561,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
     clone: async (id: string) =>
       unwrap<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
-    // batchEnable is the current publish semantic — see docs/modules/ai.md Workflow section.
+    // batchEnable is the current publish semantic - see docs/modules/ai.md Workflow section.
     // batchEnable returns affected-row count; we re-fetch the definition so the contract
     // (Promise<WorkflowDefinitionDto>) is honoured for callers that want the updated entity.
     publish: async (id: string): Promise<WorkflowDefinitionDto> => {
@@ -760,7 +754,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
     byDay: async (q: CrudPageQuery): Promise<UsageTrendPointDto[]> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      // Backend enum is UsageGranularity { Daily=0, Weekly=1, Monthly=2 } — use
+      // Backend enum is UsageGranularity { Daily=0, Weekly=1, Monthly=2 } - use
       // the canonical enum reference rather than a string literal so refactors
       // on the enum are caught at type-check time. Also coalesce empty
       // start/end times so an unconfigured dashboard probe doesn't bounce on
@@ -820,7 +814,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         pageSize: q.pageSize ?? 20,
         keyword: q.searchText || undefined,
       }))
-      // Backend may return either a plain array or PagedList<KbDto> — handle both.
+      // Backend may return either a plain array or PagedList<KbDto> - handle both.
       if (Array.isArray(result)) {
         return createPagedList(
           result as KnowledgeBaseDto[],
@@ -961,25 +955,6 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrap<BudgetSummaryDto>(await quotaApi.getBudgetSummary(params)),
   }
 
-  // ---- personas -----------------------------------------------------------
-  const personas: BridgeCrudContract<
-    AgentPersonaDto,
-    CreateAgentPersonaDto,
-    UpdateAgentPersonaDto
-  > = {
-    fetch: async (q) =>
-      toCrudResult(
-        unwrap<PagedList<AgentPersonaDto>>(await personaApi.getList(
-          mapQuery(q) as unknown as AgentPersonaQueryDto,
-        )),
-      ),
-    create: async (data) => unwrap<AgentPersonaDto>(await personaApi.create(data)),
-    update: async (id, data) => unwrap<AgentPersonaDto>(await personaApi.update(String(id), data)),
-    delete: async (ids) => {
-      for (const id of ids) await personaApi.delete(String(id))
-    },
-  }
-
   // ---- evaluations --------------------------------------------------------
   const evaluations = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<EvaluationRunDto>> =>
@@ -996,14 +971,16 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       data: Partial<EvaluationRunDto>,
     ) => Promise<EvaluationRunDto>,
     delete: async (ids: string[]) => {
-      for (const id of ids) await evaluationApi.delete(String(id))
+      // See agents.delete: a failed delete resolves rather than rejects, so an
+      // unchecked await reports success on a row that never went away.
+      for (const id of ids) ensureOk(await evaluationApi.delete(String(id)))
     },
-    // run(id) of an existing evaluation is not supported — backend creates+runs in one
+    // run(id) of an existing evaluation is not supported - backend creates+runs in one
     // call. Use create() to spawn a fresh run, or runBatch() for multi-target runs.
     run: (_id: string): Promise<{ runId: string }> =>
       Promise.reject(
         new Error(
-          'evaluations.run(id) is not supported — backend creates and runs in one call. ' +
+          'evaluations.run(id) is not supported - backend creates and runs in one call. ' +
             'Use evaluations.create(dto) instead.',
         ),
       ),
@@ -1032,7 +1009,6 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     mcp,
     mcpToolAnalytics,
     quota,
-    personas,
     evaluations,
   }
 }
@@ -1044,7 +1020,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
 export { WorkflowExecutionMode } from '@tnzi/core/services/ai'
 
 /**
- * Workspace-agent helper — used by the read-only `WorkspaceAgents`
+ * Workspace-agent helper - used by the read-only `WorkspaceAgents`
  * page. We expose a minimal `list()` so the page no longer needs to
  * import `useAdminWorkspaceAgentApi` directly. Lives outside the main
  * bridge contract because workspace agents are discovered from YAML

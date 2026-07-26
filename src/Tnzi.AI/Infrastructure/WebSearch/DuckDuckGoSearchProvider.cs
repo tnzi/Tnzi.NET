@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.WebSearch;
 
 /// <summary>
-/// DuckDuckGo Web 搜索提供者 — 通过 HTML 抓取实现，适用于开发/测试场景
+/// DuckDuckGo Web 搜索提供者 - 通过 HTML 抓取实现，适用于开发/测试场景
 /// </summary>
 /// <remarks>
 /// <para>此实现通过抓取 DuckDuckGo HTML 页面获取搜索结果，不需要 API Key。</para>

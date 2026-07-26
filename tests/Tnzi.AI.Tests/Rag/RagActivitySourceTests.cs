@@ -5,7 +5,7 @@ using Tnzi.AI.Rag.Observability;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// RagActivitySource 单元测试 — 验证 ActivitySource/Meter 名称、Activity 创建和指标记录
+/// RagActivitySource 单元测试 - 验证 ActivitySource/Meter 名称、Activity 创建和指标记录
 /// </summary>
 public class RagActivitySourceTests
 {

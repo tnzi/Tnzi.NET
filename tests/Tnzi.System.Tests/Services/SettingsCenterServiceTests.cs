@@ -228,7 +228,7 @@ public class SettingsCenterServiceTests
     public async Task SaveGroup_Should_Reject_Cross_Field_Violation_Via_Options_Validator()
     {
         // 回归：字段级校验放行的跨字段非法组合（B < A）必须在写入前被模块自己的
-        // IValidateOptions 预检拦下 — 否则持久化后 reload 重绑定抛 OptionsValidationException。
+        // IValidateOptions 预检拦下 - 否则持久化后 reload 重绑定抛 OptionsValidationException。
         SetupCrossFieldGroup();
 
         var result = await CreateService().SaveGroupAsync("demo", new Dictionary<string, string?>
@@ -287,7 +287,7 @@ public class SettingsCenterServiceTests
     public async Task SaveGroup_Should_Flush_Pending_Writes_Before_Reading_Back()
     {
         // 回归：写经 ISettingService 滞留在 UoW change tracker（智能保存推迟），
-        // 而回读是 AsNoTracking 直查数据库 — 不先显式 flush 则响应永远是写之前的旧值
+        // 而回读是 AsNoTracking 直查数据库 - 不先显式 flush 则响应永远是写之前的旧值
         //（即「保存后切换分区再切回显示旧数据」的根因）。
         var calls = new List<string>();
         _providers.Add(new FakeProvider(DemoGroup(
@@ -415,7 +415,7 @@ public class SettingsCenterServiceTests
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(500);
         result.Message.ShouldBe("db error");
-        // Demo:A 已写入 — 证实部分写入语义
+        // Demo:A 已写入 - 证实部分写入语义
         _settingServiceMock.Verify(s => s.SetSettingAsync("Demo:A", "1", It.IsAny<string?>(), "demo"), Times.Once);
     }
 

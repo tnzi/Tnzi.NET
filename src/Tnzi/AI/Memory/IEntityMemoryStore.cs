@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// 实体记忆存储接口 — 跨会话追踪命名实体（人物、组织、地点、概念等）
+/// 实体记忆存储接口 - 跨会话追踪命名实体（人物、组织、地点、概念等）
 /// </summary>
 [ExperimentalApi(Reason = "Entity memory is in preview")]
 public interface IEntityMemoryStore

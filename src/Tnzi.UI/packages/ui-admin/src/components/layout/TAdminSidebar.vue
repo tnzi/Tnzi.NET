@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { computed, h, ref, watch, getCurrentInstance } from 'vue'
-import { useRoute, type RouteLocationNormalizedLoaded, type Router } from 'vue-router'
-import { NMenu, NSwitch } from 'naive-ui'
+import { computed, h, ref, watch, getCurrentInstance, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
+import { NMenu } from 'naive-ui'
 import type { MenuOption } from 'naive-ui'
 import {
   useAdminRouteStore,
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
-import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
+import TSidebarSettingsFooter from './TSidebarSettingsFooter.vue'
 import { translatePageKey } from '../../pages/_shared/translate'
 
 /**
@@ -43,7 +42,7 @@ interface Props {
   /**
    * Hide the entire sider header row. Used by TAdminShell in
    * top-hybrid-* / horizontal modes where the brand already lives in
-   * the top header bar — without this the brand renders twice (one
+   * the top header bar - without this the brand renders twice (one
    * stuck in the sider, one in the header). */
   hideHeader?: boolean
   /**
@@ -59,6 +58,13 @@ interface Props {
    * (which only takes effect in light mode + vertical layouts).
    */
   inverted?: boolean
+  /**
+   * Force the sider onto a light surface with dark foreground even under the
+   * global dark mode - used when the user paints the sider a LIGHT custom
+   * color while dark mode is active (otherwise NMenu would render light text
+   * on the light custom surface). Mutually exclusive with `inverted`.
+   */
+  lightSurface?: boolean
   /**
    * Phase E: override the menu items rendered by the sider. Defaults to
    * `routeStore.menus` (full tree). Hybrid layout modes pass the slice of
@@ -88,6 +94,7 @@ const props = withDefaults(defineProps<Props>(), {
   hideHeader: false,
   activeMenuKeyOverride: undefined,
   inverted: false,
+  lightSurface: false,
   items: undefined,
   showSettingsEntry: true,
 })
@@ -98,18 +105,9 @@ const emit = defineEmits<{
 
 const routeStore = useAdminRouteStore()
 const appStore = useAdminAppStore()
-const authStore = useAdminAuthStore()
-
-// Built-in-menus toggle (footer, super admin only): show or hide the
-// framework's preset admin menus (`meta.builtIn` groups), leaving the
-// consumer app's own menus untouched. Display-only: flipping it re-filters
-// the menu tree, never reachability.
-const showBuiltInToggle = computed(() => authStore.isSuperUser)
-const builtInLabel = computed(() => resolveLabel('admin.common.builtInMenus'))
-const builtInTip = computed(() => resolveLabel('admin.common.builtInMenusTip'))
 
 // Phase I.7.6: drive NMenu's active state from the *current vue-router route
-// name* — previously this was wired to `tabStore.activeTabId`, which only
+// name* - previously this was wired to `tabStore.activeTabId`, which only
 // updates when a tab is opened, so the first page load showed no active item.
 //
 // `useRoute()` throws when no router has been installed (e.g. unit tests
@@ -127,53 +125,6 @@ function safeUseRoute(): RouteLocationNormalizedLoaded | null {
 }
 const route = safeUseRoute()
 
-function safeUseRouter(): Router | null {
-  const instance = getCurrentInstance()
-  const router = instance?.appContext.config.globalProperties.$router as Router | undefined
-  return router ?? null
-}
-const router = safeUseRouter()
-
-// The built-in gear must obey the settings ROUTE's reachability with the same
-// fail-open semantics as the menu filter - otherwise a user the matrix locked
-// out of Settings still sees an entry that only bounces to /403. The bundled
-// route uses `meta.anySettingsPermission` (the config center spans many modules
-// with no single code) → `canAnySettings()`; older/custom routes with a plain
-// `meta.permission`/`meta.permissions` still work. It must ALSO obey module
-// availability (the route carries `moduleGate: 'system'`): on a host without the
-// System module the settings route lands in `unavailableRouteNames`, and the
-// gear hides for everyone (no super-user bypass — the module guard bounces the
-// navigation to /403 regardless).
-const { can, canAny, canAnySettings } = usePermissionGuard()
-const hasSettingsRoute = computed(() => {
-  if (!router?.hasRoute('settings')) return false
-  if (routeStore.unavailableRouteNames.has('settings')) return false
-  // Partial router mocks (tests) may lack resolve() - same guard as goSettings.
-  if (typeof router.resolve !== 'function') return true
-  const meta = (router.resolve({ name: 'settings' }).meta ?? {}) as {
-    permission?: unknown
-    permissions?: unknown
-    anySettingsPermission?: unknown
-  }
-  if (meta.anySettingsPermission === true) return canAnySettings()
-  if (typeof meta.permission === 'string' && meta.permission) return can(meta.permission)
-  if (Array.isArray(meta.permissions)) {
-    const plural = meta.permissions.filter((p): p is string => typeof p === 'string' && p !== '')
-    if (plural.length > 0) return canAny(plural)
-  }
-  return true
-})
-const isSettingsActive = computed(() => route?.name === 'settings')
-const settingsLabel = computed(() => resolveLabel('admin.common.settings'))
-
-function goSettings(): void {
-  if (!router) return
-  void router.push({ name: 'settings' })
-  // 以合成菜单项走 menuSelect 通道，让 TAdminShell 的移动端抽屉收起逻辑生效。
-  const path = typeof router.resolve === 'function' ? router.resolve({ name: 'settings' }).path : '/settings'
-  emit('menuSelect', { key: 'settings', label: settingsLabel.value, path })
-}
-
 const activeMenuKey = computed<string>(() => {
   if (props.activeMenuKeyOverride) return props.activeMenuKeyOverride
   // Hidden detail/sub routes (e.g. `ai.agents.detail`) point back to their list
@@ -188,7 +139,7 @@ const activeMenuKey = computed<string>(() => {
 // Walk the menu tree to find ancestor keys of the active item so we can
 // auto-expand the parent group on route change (e.g. landing on
 // `/admin/identity/users` should expand the `identity` group). The
-// `expandedKeys` ref is controlled — `NMenu` v:expanded-keys lets the
+// `expandedKeys` ref is controlled - `NMenu` v:expanded-keys lets the
 // user toggle groups, and we watch the route to *add* (never remove)
 // the active ancestors so navigating into a leaf keeps its parent open.
 const expandedKeys = ref<string[]>([])
@@ -279,7 +230,7 @@ const currentWidth = computed(() =>
 )
 
 /** Phase G follow-up: header should show the icon-only logo (no brand
-    text) whenever the available width can't fit the brand string —
+    text) whenever the available width can't fit the brand string -
     that's true when the sider is collapsed AND when we're in the
     narrow vertical-mix rail. */
 const isHeaderCompact = computed(
@@ -295,22 +246,60 @@ function onSelect(key: string): void {
   const item = menuIndex.value.get(key)
   if (item) emit('menuSelect', item)
 }
+
+// ── Scroll-aware edge shadows ──
+// The logo header / footer only cast their elevation shadow when the menu is
+// actually scrolled (i.e. there is content hidden beneath them). A short,
+// non-scrolling menu shows a clean seamless sider with no shadow.
+const bodyRef = ref<HTMLElement | null>(null)
+const canScrollUp = ref(false)
+const canScrollDown = ref(false)
+function updateScrollShadows(): void {
+  const el = bodyRef.value
+  if (!el) return
+  canScrollUp.value = el.scrollTop > 1
+  canScrollDown.value = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+}
+let resizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  void nextTick(updateScrollShadows)
+  const el = bodyRef.value
+  if (typeof ResizeObserver !== 'undefined' && el) {
+    // Observe the body AND its inner menu so content-height changes
+    // (expanding a submenu, collapse toggle, menu swap) recompute the state.
+    resizeObserver = new ResizeObserver(() => updateScrollShadows())
+    resizeObserver.observe(el)
+    if (el.firstElementChild) resizeObserver.observe(el.firstElementChild)
+  }
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
+watch(() => appStore.siderCollapse, () => void nextTick(updateScrollShadows))
 </script>
 
 <template>
   <aside
     class="t-admin-sidebar"
-    :class="{ 't-admin-sidebar--inverted': inverted }"
+    :class="{
+      't-admin-sidebar--inverted': inverted,
+      't-admin-sidebar--surface-light': lightSurface && !inverted,
+    }"
     :data-mode="mode"
     :style="{ width: `${currentWidth}px` }"
     aria-label="Primary navigation"
   >
-    <div v-if="!hideHeader" class="t-admin-sidebar__header">
+    <div
+      v-if="!hideHeader"
+      class="t-admin-sidebar__header"
+      :class="{ 't-admin-sidebar__header--elevated': canScrollUp }"
+    >
       <slot name="header">
         <!-- Phase G follow-up: vertical-mix rail (~90px) cannot fit the
              "icon + brand text" combo (text alone runs ~96px). Force the
              icon-only layout here so the rail header doesn't horizontally
-             overflow — matches soybean's vertical-mix first-level-menu
+             overflow - matches soybean's vertical-mix first-level-menu
              which only shows the logo. -->
         <TSystemLogo
           :title="isHeaderCompact ? '' : brand"
@@ -322,7 +311,7 @@ function onSelect(key: string): void {
       </slot>
     </div>
 
-    <div class="t-admin-sidebar__body">
+    <div ref="bodyRef" class="t-admin-sidebar__body" @scroll.passive="updateScrollShadows">
       <NMenu
         :options="menuOptions"
         :collapsed="appStore.siderCollapse"
@@ -338,45 +327,22 @@ function onSelect(key: string): void {
       />
     </div>
 
-    <div v-if="$slots.footer" class="t-admin-sidebar__footer">
+    <div
+      v-if="$slots.footer"
+      class="t-admin-sidebar__footer"
+      :class="{ 't-admin-sidebar__footer--elevated': canScrollDown }"
+    >
       <slot name="footer" />
     </div>
-    <div
-      v-else-if="showBuiltInToggle || (showSettingsEntry && hasSettingsRoute)"
-      class="t-admin-sidebar__footer t-admin-sidebar__footer--default"
-    >
-      <button
-        v-if="showBuiltInToggle"
-        type="button"
-        class="t-admin-sidebar__settings t-admin-sidebar__ops"
-        :class="{ 'is-active': isHeaderCompact && appStore.showBuiltInMenus, 't-admin-sidebar__settings--collapsed': isHeaderCompact }"
-        :title="builtInTip"
-        @click="appStore.toggleBuiltInMenus()"
-      >
-        <TSvgIcon icon="mdi:cube-outline" :size="18" />
-        <span v-if="!isHeaderCompact" class="t-admin-sidebar__settings-label">{{ builtInLabel }}</span>
-        <!-- 纯指示器：整行点击是唯一切换入口，避免行/开关双触发 -->
-        <NSwitch
-          v-if="!isHeaderCompact"
-          :value="appStore.showBuiltInMenus"
-          size="small"
-          class="t-admin-sidebar__ops-switch"
-          style="pointer-events: none"
-        />
-      </button>
-      <button
-        v-if="showSettingsEntry && hasSettingsRoute"
-        type="button"
-        class="t-admin-sidebar__settings"
-        :class="{ 'is-active': isSettingsActive, 't-admin-sidebar__settings--collapsed': isHeaderCompact }"
-        :title="settingsLabel"
-        @click="goSettings"
-      >
-        <TSvgIcon icon="mdi:cog-outline" :size="18" />
-        <!-- vertical-mix 窄轨（~90px）与折叠态都只显图标 — 与 isHeaderCompact 同口径 -->
-        <span v-if="!isHeaderCompact" class="t-admin-sidebar__settings-label">{{ settingsLabel }}</span>
-      </button>
-    </div>
+    <!-- Default footer (Settings + built-in toggle). Shared with the
+         vertical-mix rail via TSidebarSettingsFooter so both render the same
+         bottom actions. Renders nothing when the user has neither affordance. -->
+    <TSidebarSettingsFooter
+      v-else
+      :show-settings-entry="showSettingsEntry"
+      :elevated="canScrollDown"
+      @menu-select="(m) => emit('menuSelect', m)"
+    />
   </aside>
 </template>
 
@@ -401,9 +367,18 @@ function onSelect(key: string): void {
   font-weight: 600;
   font-size: 16px;
   color: var(--tnzi-base-text);
-  /* No bottom border — matches soybean's seamless logo-to-menu transition. */
+  /* No hard bottom border (it read as "chopping" the menu). The soft feathered
+     shadow only appears WHILE the menu is scrolled beneath the logo bar (the
+     `--elevated` modifier, toggled by the scroll watcher) - a short menu shows
+     no shadow. `z-index`+`position` let the shadow paint over the menu body. */
+  position: relative;
+  z-index: 2;
+  transition: box-shadow 0.2s ease;
 }
-/* soybean parity — brand title in the sider uses the primary
+.t-admin-sidebar__header--elevated {
+  box-shadow: 0 6px 8px -6px var(--tnzi-admin-sider-edge-shadow, rgba(0, 0, 0, 0.06));
+}
+/* soybean parity - brand title in the sider uses the primary
    theme color (the soybean reference renders "SoybeanAdmin" in
    rgb(100,108,255) 紫). Our previous base-text override was wrong. */
 .t-admin-sidebar__header :deep(.t-system-logo__title) {
@@ -445,7 +420,7 @@ function onSelect(key: string): void {
     background-color 0.15s ease;
 }
 
-/* Active leaf row — primary text + slightly stronger weight. Soybean does
+/* Active leaf row - primary text + slightly stronger weight. Soybean does
    *not* render a left-border accent (despite the I.7.6 brief specifying one);
    the bg highlight alone carries the active state. */
 .t-admin-sidebar__body :deep(.n-menu .n-menu-item-content--selected) {
@@ -454,15 +429,23 @@ function onSelect(key: string): void {
 
 .t-admin-sidebar__footer {
   flex-shrink: 0;
-  border-top: 1px solid var(--tnzi-border, #e5e7eb);
+  /* No hard top border. The soft feathered upward shadow only appears WHILE
+     there is more menu below (scrolled), via the `--elevated` modifier -
+     the smooth, scroll-aware counterpart to the logo bar's shadow. */
+  position: relative;
+  z-index: 2;
+  transition: box-shadow 0.2s ease;
   padding: 12px 16px;
 }
+.t-admin-sidebar__footer--elevated {
+  box-shadow: 0 -6px 8px -6px var(--tnzi-admin-sider-edge-shadow, rgba(0, 0, 0, 0.06));
+}
 
-/* Vertical-mix mode — top-level only, icons centered when present.
+/* Vertical-mix mode - top-level only, icons centered when present.
    Phase G follow-up: NMenu's `:indent` is set to 0 for vertical-mix (see
    the NMenu binding above). We also need !important on `padding-left`
    here because NMenu has internal `padding-left: var(--n-item-padding)`
-   inline styles that win without it — without the override the rail item
+   inline styles that win without it - without the override the rail item
    gets ~18px left padding that overflows the 90px rail. */
 .t-admin-sidebar[data-mode='vertical-mix'] .t-admin-sidebar__body :deep(.n-menu .n-menu-item-content) {
   display: flex;
@@ -490,7 +473,7 @@ function onSelect(key: string): void {
 }
 .t-admin-sidebar[data-mode='vertical-mix'] .t-admin-sidebar__body :deep(.n-menu) {
   --n-item-height: 60px;
-  /* Phase G — soybean uses 10% primary alpha for active and a neutral
+  /* Phase G - soybean uses 10% primary alpha for active and a neutral
      grey for hover (so hover and active are visually distinct). The
      default vertical sider shares the primary-tint hover/active palette;
      vertical-mix differentiates by lowering active alpha + greying
@@ -501,68 +484,58 @@ function onSelect(key: string): void {
   --n-item-color-active-collapsed: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.10);
 }
 
-/* Phase B — inverted (dark) sider variant. Soybean's `themeStore.sider.inverted`
+/* Phase B - inverted (dark) sider variant. Soybean's `themeStore.sider.inverted`
    only takes effect under light mode + vertical layout; the parent shell is
    responsible for that gating (we just react to the prop here). NMenu
    `:inverted` already swaps its own item palette via Naive's inverted theme;
    we only need to flip the surface chrome (sider bg + brand title + border). */
 .t-admin-sidebar--inverted {
-  background: var(--tnzi-admin-sider-inverted-bg, rgb(0, 20, 40));
+  /* Prefer the user's custom sider color when set; fall back to the built-in
+     dark inverted surface (the invertSider default). */
+  background: var(--tnzi-admin-sider-bg, var(--tnzi-admin-sider-inverted-bg, rgb(0, 20, 40)));
   border-right-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  /* Dark-on-dark needs a somewhat stronger shadow than the light-surface
+     default for the (scroll-gated) logo/footer elevation to read. */
+  --tnzi-admin-sider-edge-shadow: rgba(0, 0, 0, 0.3);
+  /* Base text flips to the light inverted tint so descendants that read it -
+     including the footer (TSidebarSettingsFooter, a child component that
+     inherits this custom property across the component boundary) - stay
+     legible on the dark surface. */
+  --tnzi-base-text: var(--tnzi-admin-sider-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
 }
 .t-admin-sidebar--inverted .t-admin-sidebar__header :deep(.t-system-logo__title) {
-  /* Brand text remains primary-tinted but on a dark backdrop the saturated
-     primary reads weak; soybean uses a soft-white tint. */
-  color: var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92));
+  /* Brand text: a custom sider text color wins, else the soft-white inverted
+     tint (the saturated primary reads weak on a dark backdrop). */
+  color: var(--tnzi-admin-sider-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
 }
 .t-admin-sidebar--inverted .t-admin-sidebar__header :deep(.t-system-logo__subtitle) {
   /* Muted sub-line needs a lighter tint on the dark inverted backdrop. */
   color: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.55));
 }
-.t-admin-sidebar--inverted .t-admin-sidebar__footer {
-  border-top-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
-}
-.t-admin-sidebar--inverted .t-admin-sidebar__settings {
-  color: var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92));
+/* A custom sider text color drives the NMenu resting item text; when unset it
+   falls back to a light inverted value (this rule wins over naive's :inverted
+   default, so it MUST carry a fallback - a bare `var()` would resolve invalid
+   and drop the menu text to the inherited dark color = unreadable auto menu). */
+.t-admin-sidebar--inverted .t-admin-sidebar__body :deep(.n-menu) {
+  --n-item-text-color: var(--tnzi-admin-sider-fg, rgba(255, 255, 255, 0.75));
 }
 
-.t-admin-sidebar__footer--default {
-  padding: 8px;
-}
-.t-admin-sidebar__settings {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--tnzi-admin-radius-md, 8px);
-  background: transparent;
+/* Forced light surface - a LIGHT custom sider color under the global dark
+   mode. Without this, NMenu (not inverted) would render its dark-mode light
+   text on the light custom surface. We override the resting item text +
+   base tokens so the sider reads correctly. */
+.t-admin-sidebar--surface-light {
+  --tnzi-base-text: var(--tnzi-admin-sider-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  --tnzi-border: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
   color: var(--tnzi-base-text);
-  font-size: 14px;
-  cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease;
 }
-.t-admin-sidebar__settings:hover {
-  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.06);
-  color: var(--tnzi-primary);
+.t-admin-sidebar--surface-light .t-admin-sidebar__body :deep(.n-menu) {
+  --n-item-text-color: var(--tnzi-admin-sider-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --n-item-text-color-hover: var(--tnzi-primary);
+  --n-item-text-color-active: var(--tnzi-primary);
+  --n-item-color-hover: var(--tnzi-admin-surface-light-hover-bg, rgb(var(--tnzi-primary-rgb) / 0.06));
+  --n-item-color-active: var(--tnzi-admin-surface-light-active-bg, rgb(var(--tnzi-primary-rgb) / 0.1));
 }
-.t-admin-sidebar__settings.is-active {
-  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.1);
-  color: var(--tnzi-primary);
-  font-weight: 500;
-}
-.t-admin-sidebar__settings--collapsed {
-  justify-content: center;
-  padding: 8px 0;
-}
-/* Ops-view row: label takes the flexible width, switch hugs the right edge. */
-.t-admin-sidebar__ops .t-admin-sidebar__settings-label {
-  flex: 1 1 auto;
-  text-align: left;
-}
-.t-admin-sidebar__ops-switch {
-  flex-shrink: 0;
-}
+
 </style>

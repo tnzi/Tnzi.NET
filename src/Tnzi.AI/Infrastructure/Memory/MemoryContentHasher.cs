@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Memory;
 
 /// <summary>
-/// MemoryEntry 内容哈希辅助 — 计算 <see cref="Entities.MemoryEntry.ContentHash"/>。
+/// MemoryEntry 内容哈希辅助 - 计算 <see cref="Entities.MemoryEntry.ContentHash"/>。
 /// 所有写入路径（DatabaseMemoryStore / AgentMemoryService）统一经此计算，
 /// 保证 (Scope, ContentHash) 过滤唯一索引的比较基准一致。
 /// </summary>

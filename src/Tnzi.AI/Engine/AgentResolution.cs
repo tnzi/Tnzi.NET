@@ -24,18 +24,10 @@ public class AgentResolution
     public string? AgentConfiguration { get; init; }
 
     /// <summary>
-    /// Persona FK from the resolved Agent entity. When set, ContextInjectionMiddleware
-    /// loads the persona content via IAgentPersonaService and injects a &lt;soul&gt; block
-    /// into the system prompt. Independent of AgentConfiguration JSON so DB-loaded agents
-    /// don't need to round-trip personaId through the execution config blob.
-    /// </summary>
-    public Guid? PersonaId { get; init; }
-
-    /// <summary>
-    /// Inline persona content already loaded from an out-of-band source
-    /// (e.g. workspace PERSONA.md). Takes precedence over PersonaId — when set,
-    /// ContextInjectionMiddleware injects this content directly without hitting
-    /// IAgentPersonaService. Enables persona for agents that have no DB row.
+    /// Persona (soul) content resolved from the source. For DB agents this is the inline
+    /// <see cref="Entities.Agent.Persona"/> column; for workspace agents it is the
+    /// PERSONA.md body. When set, ContextInjectionMiddleware injects it as a &lt;soul&gt;
+    /// block into the system prompt - a single content-only path, no DB round-trip.
     /// </summary>
     public string? PersonaContent { get; init; }
 
@@ -58,16 +50,16 @@ public class AgentResolution
     public bool IsSuccess => Agent != null;
 
     /// <summary>
-    /// 创建 AgentExecutor 时使用的原始参数 — 供 SkillConstraintMiddleware 触发模型/Provider 覆盖时重建 Executor 使用
+    /// 创建 AgentExecutor 时使用的原始参数 - 供 SkillConstraintMiddleware 触发模型/Provider 覆盖时重建 Executor 使用
     /// </summary>
     public AgentCreationParameters? CreationParameters { get; init; }
 
     /// <summary>
     /// 创建成功结果
     /// </summary>
-    public static AgentResolution Success(IAgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null, Guid? personaId = null, string? personaContent = null, IReadOnlyList<Guid>? knowledgeBaseIds = null, IReadOnlyList<string>? skillSlugs = null)
+    public static AgentResolution Success(IAgentExecutor agent, string provider, string? model, Guid? agentId, string? agentConfiguration = null, AgentExecutionMode executionMode = AgentExecutionMode.Single, AgentCreationParameters? creationParameters = null, string? personaContent = null, IReadOnlyList<Guid>? knowledgeBaseIds = null, IReadOnlyList<string>? skillSlugs = null)
     {
-        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters, PersonaId = personaId, PersonaContent = personaContent, KnowledgeBaseIds = knowledgeBaseIds, SkillSlugs = skillSlugs };
+        return new AgentResolution { Agent = agent, Provider = provider, Model = model, AgentId = agentId, AgentConfiguration = agentConfiguration, ExecutionMode = executionMode, CreationParameters = creationParameters, PersonaContent = personaContent, KnowledgeBaseIds = knowledgeBaseIds, SkillSlugs = skillSlugs };
     }
 
     /// <summary>
@@ -80,7 +72,7 @@ public class AgentResolution
 }
 
 /// <summary>
-/// AgentExecutor 创建时的原始参数快照 — 用于在模型/Provider 覆盖时重建执行器。
+/// AgentExecutor 创建时的原始参数快照 - 用于在模型/Provider 覆盖时重建执行器。
 /// <c>ToolNames</c> 携带 per-tool 授权，使 SkillConstraintMiddleware 重建时保留单工具授权。
 /// </summary>
 public record AgentCreationParameters(

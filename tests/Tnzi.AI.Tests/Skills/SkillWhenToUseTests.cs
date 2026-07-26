@@ -103,7 +103,7 @@ public class SkillWhenToUseTests
     }
 
     // ------------------------------------------------------------------ //
-    // BuildSkillSummary — routing hint prefers WhenToUse, falls back to Description
+    // BuildSkillSummary - routing hint prefers WhenToUse, falls back to Description
     // ------------------------------------------------------------------ //
 
     [Fact]
@@ -127,7 +127,7 @@ public class SkillWhenToUseTests
     [Fact]
     public void Summary_FallsBackToDescription_WhenWhenToUseIsEmpty()
     {
-        // Legacy SKILL.md path — only description is populated.
+        // Legacy SKILL.md path - only description is populated.
         var skill = new SkillDefinition
         {
             Name = "Code Review",

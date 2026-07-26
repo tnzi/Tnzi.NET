@@ -1,5 +1,5 @@
 /**
- * Built-in theme presets — soybean-style four quick-pick themes.
+ * Built-in theme presets - soybean-style four quick-pick themes.
  *
  * Each preset is a flat snapshot of the admin theme tokens consumers can
  * apply via `useAdminThemeStore().applyPreset(preset)` or compose into
@@ -117,7 +117,7 @@ export const themePresets: ThemePreset[] = [
 /**
  * Serialize the full admin theme settings to a JSON string suitable for
  * download / sharing. Consumer is expected to assemble the snapshot
- * (typically `JSON.stringify(themeStore.$state, null, 2)`) — this
+ * (typically `JSON.stringify(themeStore.$state, null, 2)`) - this
  * helper just adds the standard wrapper with a version stamp.
  */
 export function exportThemeConfig(snapshot: Record<string, unknown>): string {

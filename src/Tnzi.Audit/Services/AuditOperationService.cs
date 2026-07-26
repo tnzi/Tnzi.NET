@@ -79,7 +79,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     }
 
     /// <summary>
-    /// 变更类（写操作）HTTP 方法集合 — Logs/Operations 语义分流的判别依据。
+    /// 变更类（写操作）HTTP 方法集合 - Logs/Operations 语义分流的判别依据。
     /// AuditMiddleware 写入的 HttpMethod 为大写（context.Request.Method）。
     /// </summary>
     private static readonly string[] WriteHttpMethods = ["POST", "PUT", "PATCH", "DELETE"];
@@ -89,7 +89,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     /// <remarks>
     /// Logs / Operations 语义分流在查询端实现：写入端是单一管道、单一表
-    /// （AuditMiddleware → Audit_Operation），两个 admin 视图读取同一存储 —
+    /// （AuditMiddleware → Audit_Operation），两个 admin 视图读取同一存储 -
     /// 若在写入端丢弃 GET 类请求，则请求级审计日志（Logs 视图）会丢失数据。
     /// Operations 视图通过 <see cref="AuditOperationQueryDto.IsWriteOperation"/>=true
     /// 过滤出变更类记录。
@@ -97,7 +97,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// 分类来源分两代：新行以采集时定案的 <c>AuditOperation.IsWrite</c> 列为准
     /// （AuditOperationClassifier：[AuditRead] &gt; 方法级操作权限码 &gt;
     /// 三层门约定 admin 面（类级 .view）无操作码=读 &gt; HTTP 方法+伪读启发式）；<c>IsWrite=null</c> 的
-    /// 历史行回退旧的查询时启发式 — (1) query-via-POST 列表查询惯例
+    /// 历史行回退旧的查询时启发式 - (1) query-via-POST 列表查询惯例
     /// （<c>POST .../query</c>，Url 存 Path + QueryString，匹配 "/query" 结尾与
     /// "/query?" 中缀）；(2) 约定无副作用的 <c>Get*</c> 控制器方法
     /// （FunctionName 按 ".Get" 段判别）。

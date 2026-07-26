@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 输入 Guardrail 中间件 — Before only: 检查用户输入是否安全
+/// 输入 Guardrail 中间件 - Before only: 检查用户输入是否安全
 /// </summary>
 public class InputGuardrailMiddleware : IAiMiddleware
 {
@@ -70,7 +70,7 @@ public class InputGuardrailMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 流式路径 — Before: 检查输入安全后再委托给下游。
+    /// 流式路径 - Before: 检查输入安全后再委托给下游。
     /// 将 guardrail 检查从 async iterator 中分离，避免 try/catch + yield 的 C# 限制。
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)

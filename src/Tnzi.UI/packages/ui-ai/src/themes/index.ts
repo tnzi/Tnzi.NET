@@ -1,35 +1,28 @@
+/**
+ * `@tnzi/ui-ai/themes`
+ *
+ * The default light and dark palettes ship as CSS in `@tnzi/ui-ai/style.css`;
+ * dark mode activates from a `.dark` (or `[data-theme="dark"]`) class on the
+ * document element. This module only covers runtime *overrides* on top of it.
+ */
 export {
   type AiThemeTokens,
-  lightTokens,
-  darkTokens,
   applyAiTheme,
+  applyThemeVars,
+  resetAiTheme,
 } from './tokens';
 
-/**
- * Apply custom theme overrides at runtime via raw CSS variable names.
- *
- * @example applyTheme({ 'ai-user-bubble': '220 20% 18%' })
- */
-export function applyTheme(
-  overrides: Partial<Record<string, string>>,
-  target: HTMLElement = document.documentElement,
-): void {
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value != null) {
-      target.style.setProperty(`--${key}`, value);
-    }
-  }
-}
+import { applyThemeVars, resetAiTheme } from './tokens';
 
 /**
- * Remove all custom --ai-* theme overrides.
+ * @deprecated Renamed to `applyThemeVars`. Kept as an alias so existing
+ * imports keep working; it now writes the `--tnzi-ai-*` variables the package
+ * actually reads instead of the never-consumed `--ai-*` ones.
  */
-export function resetTheme(target: HTMLElement = document.documentElement): void {
-  const style = target.style;
-  for (let i = style.length - 1; i >= 0; i--) {
-    const prop = style[i];
-    if (prop?.startsWith('--ai-')) {
-      style.removeProperty(prop);
-    }
-  }
-}
+export const applyTheme = applyThemeVars;
+
+/**
+ * @deprecated Renamed to `resetAiTheme`. Kept as an alias so existing imports
+ * keep working; it now clears `--tnzi-ai-*` instead of `--ai-*`.
+ */
+export const resetTheme = resetAiTheme;

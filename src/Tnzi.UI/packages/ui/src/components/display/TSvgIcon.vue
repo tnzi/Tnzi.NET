@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 
 /**
- * Unified icon component — accepts either an Iconify icon name (e.g.
+ * Unified icon component - accepts either an Iconify icon name (e.g.
  * `mdi:home`) or a local SVG sprite reference (`#sprite-id` or any URL
  * fragment). The Iconify form lazy-loads on first paint via @iconify/vue;
  * the local form renders an inline `<svg><use href=…/></svg>` so consumers
@@ -14,11 +14,11 @@ import { Icon } from '@iconify/vue'
 interface Props {
   /** Iconify icon name, e.g. `mdi:account-circle` or `material-symbols:settings`. */
   icon?: string
-  /** Local SVG sprite reference — pass without the leading `#`. */
+  /** Local SVG sprite reference - pass without the leading `#`. */
   localIcon?: string
   /** Pixel size for both width and height. Defaults to 1em (inherits font-size). */
   size?: number | string
-  /** Color — defaults to `currentColor`. */
+  /** Color - defaults to `currentColor`. */
   color?: string
 }
 

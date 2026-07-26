@@ -42,7 +42,6 @@ global using Tnzi.Utilities;
 global using Tnzi.Finance.Dtos;
 global using Tnzi.Finance.Entities;
 global using Tnzi.Finance.Events;
-global using Tnzi.Finance.Events.Handlers;
 global using Tnzi.Finance.Extensions;
 global using Tnzi.Finance.Seeding;
 global using Tnzi.Finance.Metadata;

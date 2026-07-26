@@ -82,7 +82,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             // 重置配额（如果需要），仅在有变更时更新数据库
             if (ResetQuotaIfNeeded(quota))
             {
-                await _quotaRepository.UpdateAsync(quota);
+                await _quotaRepository.UpdateAsync(quota, ct);
             }
 
             // 如果未启用配额限制，直接允许
@@ -192,7 +192,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             // 重置配额（如果需要），仅在有变更时更新数据库
             if (ResetQuotaIfNeeded(quota))
             {
-                await _quotaRepository.UpdateAsync(quota);
+                await _quotaRepository.UpdateAsync(quota, ct);
             }
 
             var dto = quota.MapTo<UserQuotaDto>();
@@ -230,7 +230,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                     WarningThreshold = warningThreshold ?? 0.8m,
                     CriticalThreshold = criticalThreshold ?? 0.95m
                 };
-                await _quotaRepository.InsertAsync(quota);
+                await _quotaRepository.InsertAsync(quota, ct);
 
                 LogInformation("Created quota for user {UserId}. Daily: {Daily}, Monthly: {Monthly}",
                     userId, dailyLimit, monthlyLimit);
@@ -244,7 +244,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                     quota.WarningThreshold = warningThreshold.Value;
                 if (criticalThreshold.HasValue)
                     quota.CriticalThreshold = criticalThreshold.Value;
-                await _quotaRepository.UpdateAsync(quota);
+                await _quotaRepository.UpdateAsync(quota, ct);
 
                 LogInformation("Updated quota for user {UserId}. Daily: {Daily}, Monthly: {Monthly}",
                     userId, dailyLimit, monthlyLimit);
@@ -288,7 +288,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             }
 
             quota.LastResetDate = DateTime.UtcNow;
-            await _quotaRepository.UpdateAsync(quota);
+            await _quotaRepository.UpdateAsync(quota, ct);
 
             return Ok();
         }
@@ -495,7 +495,7 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 
         try
         {
-            await _quotaRepository.InsertAsync(quota);
+            await _quotaRepository.InsertAsync(quota, ct);
             LogInformation("Created default quota for user {UserId}", userId);
         }
         catch (DbUpdateException)

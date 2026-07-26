@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// AgentTraceService 单元测试 — 覆盖 GetByRunAsync / GetByNodeAsync
+/// AgentTraceService 单元测试 - 覆盖 GetByRunAsync / GetByNodeAsync
 /// </summary>
 public class AgentTraceServiceTests
 {

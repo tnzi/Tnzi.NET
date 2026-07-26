@@ -6,15 +6,18 @@ namespace Tnzi.Finance.Services;
 public class FiscalYearService : ApplicationService, IFiscalYearService
 {
     private readonly IRepository<FiscalYear, Guid> _fiscalYearRepository;
+    private readonly ILedgerLockService _ledgerLock;
     private readonly FinanceOptions _options;
 
     public FiscalYearService(
         IServiceProvider serviceProvider,
         IRepository<FiscalYear, Guid> fiscalYearRepository,
+        ILedgerLockService ledgerLock,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _fiscalYearRepository = Check.NotNull(fiscalYearRepository);
+        _ledgerLock = Check.NotNull(ledgerLock);
         _options = Check.NotNull(options).Value;
     }
 
@@ -118,6 +121,14 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
         return Ok();
     }
 
+    /// <summary>
+    /// 过账日期的唯一漏斗：两把正交的锁 + 可选的"必须落在开放年度内"。
+    /// </summary>
+    /// <remarks>
+    /// 锁一 = 已关闭**会计年度**（按区间）；锁二 = **封账日**（按截止点，可逐月推进，
+    /// 见 <see cref="ILedgerLockService"/>）。任一命中即 409。封账日排在年度之后判：
+    /// 年度关账是更粗的历史事实，先报它给出的信息更有用。
+    /// </remarks>
     public async Task<Result> ValidatePostingDateAsync(DateTime postingDate, CancellationToken cancellationToken = default)
     {
         var date = postingDate.ToUtcDate();
@@ -129,6 +140,10 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
 
         if (closedYearName != null)
             return Fail($"Posting date {date:yyyy-MM-dd} falls within the closed fiscal year '{closedYearName}'.", 409);
+
+        var lockResult = await _ledgerLock.ValidatePostingDateAsync(date, cancellationToken);
+        if (!lockResult.Succeeded)
+            return lockResult;
 
         if (_options.RequireFiscalYearForPosting)
         {

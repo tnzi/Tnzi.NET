@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// ChatMessage 工具方法 — 提供消息文本提取和流式 Token 使用信息解析
+/// ChatMessage 工具方法 - 提供消息文本提取和流式 Token 使用信息解析
 /// </summary>
 public static class ChatMessageHelper
 {

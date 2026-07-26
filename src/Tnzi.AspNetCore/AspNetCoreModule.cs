@@ -219,7 +219,7 @@ public class AspNetCoreModule : TnziFrameworkModule
         {
             context.Services.AddScoped<IRequestValidator, Security.RequestValidator>();
         }
-        // 注册限流服务 — 无条件注册：RateLimitingMiddleware 在 Invoke 内按
+        // 注册限流服务 - 无条件注册：RateLimitingMiddleware 在 Invoke 内按
         // IOptionsMonitor.CurrentValue.Enabled 热判断，boot 门控会让配置中心
         // 的 web-ratelimit 组在默认关闭部署下永远无法热开启。
         context.Services.TryAddScoped<IRateLimitService, Security.RateLimitService>();
@@ -358,7 +358,7 @@ public class AspNetCoreModule : TnziFrameworkModule
                 app.UseMiddleware<HostHttpCryptoMiddleware>();
             }
 
-            // 6. 安全头部中间件 — 无条件加入管道：中间件 Invoke 内按
+            // 6. 安全头部中间件 - 无条件加入管道：中间件 Invoke 内按
             // IOptionsMonitor.CurrentValue.EnableSecurityHeaders 热判断（支持配置中心热开/热关）。
             app.UseMiddleware<SecurityHeadersMiddleware>();
 

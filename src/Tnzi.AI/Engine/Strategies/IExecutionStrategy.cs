@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine.Strategies;
 
 /// <summary>
-/// 执行策略接口 — Pipeline 内可替换的 Agent 执行策略
+/// 执行策略接口 - Pipeline 内可替换的 Agent 执行策略
 /// </summary>
 public interface IExecutionStrategy
 {
@@ -36,7 +36,7 @@ public class ExecutionResult
 }
 
 /// <summary>
-/// 执行策略上下文 — 提供策略所需的依赖
+/// 执行策略上下文 - 提供策略所需的依赖
 /// </summary>
 public class ExecutionStrategyContext
 {

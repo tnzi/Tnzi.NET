@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// SingleAgentStrategy 单元测试 — 验证直通行为
+/// SingleAgentStrategy 单元测试 - 验证直通行为
 /// </summary>
 public class SingleAgentStrategyTests
 {

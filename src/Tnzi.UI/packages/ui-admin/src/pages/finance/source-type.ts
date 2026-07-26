@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { translatePageKey } from '../_shared/translate'
 
 /**
@@ -6,7 +7,7 @@ import { translatePageKey } from '../_shared/translate'
  * `FINANCE_SOURCE_TYPES`).
  *
  * Keys resolve under the shared `finance.docs` namespace so every surface that
- * shows a posting's origin — general ledger, journal list, journal detail —
+ * shows a posting's origin - general ledger, journal list, journal detail -
  * reads the same words.
  *
  * Must cover every token in `FINANCE_SOURCE_TYPES`; `source-type.test.ts` fails
@@ -15,6 +16,23 @@ import { translatePageKey } from '../_shared/translate'
  * token list for a dev-only warning would force every page's bridge mock to
  * re-export it.)
  */
+/**
+ * The wire tokens themselves, named.
+ *
+ * Same strings as core's `FINANCE_SOURCE_TYPES` (which is a readonly array, so
+ * it cannot be dotted into). Pages address attachments / comments / drill-downs
+ * by token, and a named constant keeps those call sites from turning into
+ * scattered magic strings that a rename would silently miss.
+ */
+export const FinanceDocToken = {
+  Invoice: 'Invoice',
+  Bill: 'Bill',
+  CreditMemo: 'CreditMemo',
+  Expense: 'Expense',
+  PaymentEntry: 'PaymentEntry',
+  Transfer: 'Transfer',
+} as const
+
 export const FINANCE_SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
   Invoice: 'sourceType.invoice',
   Bill: 'sourceType.bill',
@@ -31,11 +49,11 @@ export const FINANCE_SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
  *
  * The token set is open, not an enum: consuming apps that post programmatically
  * through `ILedgerPostingService` write their own tokens, so an unknown token
- * falls back to itself rather than being hidden or blanked — a source the
+ * falls back to itself rather than being hidden or blanked - a source the
  * framework does not recognise is still a source the accountant must see.
  * `placeholder` covers manual journal entries, which carry no source at all.
  */
-export function financeSourceTypeLabel(token?: string | null, placeholder = '—'): string {
+export function financeSourceTypeLabel(token?: string | null, placeholder = EMPTY_DASH): string {
   if (!token) return placeholder
   const key = FINANCE_SOURCE_TYPE_LABEL_KEYS[token]
   return key ? translatePageKey('finance.docs', key) : token

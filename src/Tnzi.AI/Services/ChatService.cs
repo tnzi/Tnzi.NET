@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 聊天服务实现 — 委托给 IAgentRuntime 执行，Quota/Guardrails/History/UsageLogging 全部由中间件处理
+/// 聊天服务实现 - 委托给 IAgentRuntime 执行，Quota/Guardrails/History/UsageLogging 全部由中间件处理
 /// </summary>
 public class ChatService : ApplicationService, IChatService
 {

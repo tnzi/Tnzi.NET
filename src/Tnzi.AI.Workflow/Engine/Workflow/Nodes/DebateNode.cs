@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 辩论节点 — 多 Agent 讨论，复用 GroupChatOrchestrator 核心逻辑
+/// 辩论节点 - 多 Agent 讨论，复用 GroupChatOrchestrator 核心逻辑
 /// </summary>
 /// <remarks>
 /// 配置项：

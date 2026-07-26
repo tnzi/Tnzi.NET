@@ -47,7 +47,7 @@ public static class ModuleTestHelper
             }
             catch (Exception ex)
             {
-                // 配置依赖的模块可能初始化失败 — 跳过，不影响依赖审计
+                // 配置依赖的模块可能初始化失败 - 跳过，不影响依赖审计
                 serviceMap[module.Type] = [];
                 System.Diagnostics.Debug.WriteLine(
                     $"[ModuleTestHelper] Skipped {module.Type.Name}: {ex.Message}");

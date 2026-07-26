@@ -1,7 +1,7 @@
 namespace Tnzi.AI.A2A;
 
 /// <summary>
-/// Agent 名片接口 — 描述 Agent 的能力和端点信息
+/// Agent 名片接口 - 描述 Agent 的能力和端点信息
 /// </summary>
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public interface IAgentCard

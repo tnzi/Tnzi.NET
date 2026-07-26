@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// <see cref="McpClientAdapter"/> 的工具相关 partial — 工具列举与 MCP Tool → AIFunction 转换。
+/// <see cref="McpClientAdapter"/> 的工具相关 partial - 工具列举与 MCP Tool → AIFunction 转换。
 /// </summary>
 internal sealed partial class McpClientAdapter
 {

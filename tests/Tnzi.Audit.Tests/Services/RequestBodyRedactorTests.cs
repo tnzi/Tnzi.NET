@@ -106,7 +106,7 @@ public class RequestBodyRedactorTests
         // Arrange
         var json = """{"Password":"secret","TOKEN":"abc","ApiKey":"key"}""";
 
-        // Act — the SensitiveFields HashSet uses OrdinalIgnoreCase
+        // Act - the SensitiveFields HashSet uses OrdinalIgnoreCase
         var result = _redactor.Redact(json, DefaultSensitiveFields);
 
         // Assert
@@ -191,13 +191,13 @@ public class RequestBodyRedactorTests
     [Fact]
     public void Redact_SensitiveFieldWithNonStringValue_RedactsToString()
     {
-        // Arrange — sensitive field has numeric value
+        // Arrange - sensitive field has numeric value
         var json = """{"password":12345}""";
 
         // Act
         var result = _redactor.Redact(json, DefaultSensitiveFields);
 
-        // Assert — value is replaced with redacted string
+        // Assert - value is replaced with redacted string
         result.ShouldContain("\"password\":\"***REDACTED***\"");
         result.ShouldNotContain("12345");
     }
@@ -227,7 +227,7 @@ public class RequestBodyRedactorTests
         // Arrange
         var options = new AuditOptions();
 
-        // Assert — comparer is OrdinalIgnoreCase
+        // Assert - comparer is OrdinalIgnoreCase
         options.SensitiveFields.Contains("PASSWORD").ShouldBeTrue();
         options.SensitiveFields.Contains("Token").ShouldBeTrue();
     }

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cheques</title>
+<style>
+/* ============================================================================
+   Canadian business cheque - CPA Standard 006
+   ---------------------------------------------------------------------------
+   Physical layout only. Every value is pre-formatted by the renderer, so this
+   template can be edited from the Template admin surface without touching code.
+
+   Geometry (Letter 215.9mm x 279.4mm):
+     cheque body   top      0mm .. 88.9mm  (8.5in x 3.5in, within CPA-006 limits)
+     voucher stub1 top   88.9mm .. 184.15mm
+     voucher stub2 top 184.15mm .. 279.4mm
+     MICR clear band = bottom 15.9mm (5/8in) of the cheque body: nothing but the
+     magnetic line may be printed there, or the reader rejects the item.
+
+   Pre-printed stock: the stock already carries the company/bank identity, the
+   cheque number, the "$", "PAY TO THE ORDER OF", "DOLLARS" and the MICR line.
+   Those elements carry Model.PrePrintedClass (= "noprint"), so they stay VISIBLE
+   on screen (full simulation for proof-reading) and become visibility:hidden when
+   printing - hidden but still occupying space, so nothing shifts.
+   ========================================================================= */
+
+@@page { size: auto; margin: 0; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #eef0f3;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+.cheque-page {
+    position: relative;
+    width: 215.9mm;
+    height: 279.4mm;
+    margin: 0 auto 8mm;
+    background: #fff;
+    box-shadow: 0 1mm 3mm rgba(0, 0, 0, .18);
+    overflow: hidden;
+    page-break-after: always;
+}
+.cheque-page:last-child { page-break-after: auto; }
+
+.abs { position: absolute; }
+
+/* ---------- cheque body ---------- */
+.cheque { position: absolute; left: 0; top: 0; width: 215.9mm; height: 88.9mm; }
+.cheque.blank-stock { border-bottom: 0.3mm solid #444; }
+
+.issuer { left: 10mm; top: 5mm; width: 96mm; }
+.issuer-logo { max-height: 11mm; max-width: 45mm; display: block; margin-bottom: 1mm; }
+.issuer-name { font-size: 11pt; font-weight: 700; letter-spacing: .2mm; }
+.issuer-line { font-size: 7pt; line-height: 1.35; color: #222; }
+
+.cheque-no { right: 10mm; top: 5mm; width: 60mm; text-align: right; font-size: 12pt; font-weight: 700; }
+.cheque-no-label { font-size: 7pt; font-weight: 400; color: #444; }
+
+/* CPA-006: the date field is printed 6-8pt with a Y/M/D guide on the stock. */
+.date-block { right: 10mm; top: 17mm; width: 62mm; text-align: right; }
+.date-guide { font-size: 6pt; letter-spacing: 1.1mm; color: #444; }
+.date-value { font-size: 10pt; letter-spacing: 1.1mm; border-bottom: 0.25mm solid #000; padding-top: .6mm; }
+
+.pay-label { left: 10mm; top: 33.5mm; font-size: 6.5pt; text-transform: uppercase; letter-spacing: .3mm; color: #333; }
+.payee { left: 10mm; top: 37mm; width: 132mm; font-size: 11pt; font-weight: 700; border-bottom: 0.25mm solid #000; padding-bottom: .6mm; white-space: nowrap; overflow: hidden; }
+.payee-address { left: 10mm; top: 43.5mm; width: 132mm; font-size: 7pt; line-height: 1.3; color: #222; }
+
+/* Courtesy amount: pre-printed "$" is >= 10pt per CPA-006; the box guards the digits. */
+.courtesy { right: 10mm; top: 35mm; width: 52mm; height: 9mm; }
+.courtesy-box { position: absolute; inset: 0; border: 0.3mm solid #000; }
+.courtesy-sign { position: absolute; left: -5mm; top: 1.4mm; font-size: 11pt; font-weight: 700; }
+.courtesy-value { position: absolute; right: 1.6mm; top: 1.6mm; font-size: 12pt; font-weight: 700; white-space: nowrap; }
+
+.legal { left: 10mm; top: 50mm; width: 166mm; font-size: 9.5pt; border-bottom: 0.25mm solid #000; padding-bottom: .6mm; white-space: nowrap; overflow: hidden; }
+.legal-currency { left: 178mm; top: 50mm; font-size: 8pt; font-weight: 700; letter-spacing: .2mm; }
+
+.bank { left: 10mm; top: 57mm; width: 92mm; font-size: 7.5pt; line-height: 1.35; color: #222; }
+.bank-name { font-weight: 700; font-size: 8.5pt; }
+
+.memo-label { left: 10mm; top: 68mm; font-size: 6.5pt; text-transform: uppercase; letter-spacing: .3mm; color: #333; }
+.memo { left: 25mm; top: 67.5mm; width: 76mm; font-size: 7.5pt; border-bottom: 0.25mm solid #000; padding-bottom: .4mm; white-space: nowrap; overflow: hidden; }
+
+.signature { left: 128mm; top: 56mm; width: 78mm; }
+.signature-image { height: 10mm; display: flex; align-items: flex-end; justify-content: center; }
+.signature-image img { max-height: 10mm; max-width: 70mm; }
+.signature-line { border-top: 0.25mm solid #000; margin-top: .5mm; }
+.signature-name { font-size: 7.5pt; text-align: center; padding-top: .4mm; }
+.signature-title { font-size: 6.5pt; text-align: center; color: #333; }
+
+/* MICR clear band: bottom 5/8in of the cheque, magnetic line only. */
+.micr-band { left: 0; bottom: 0; width: 215.9mm; height: 15.9mm; }
+.micr-line { position: absolute; left: 32mm; bottom: 5mm; font-family: "MICR E13B", "E-13B", "GnuMICR", monospace; font-size: 12pt; letter-spacing: .5mm; white-space: nowrap; }
+.micr-readable { position: absolute; left: 32mm; bottom: 1.2mm; font-size: 5.5pt; letter-spacing: .4mm; color: #555; white-space: nowrap; }
+
+.preview-watermark {
+    left: 0; top: 22mm; width: 215.9mm;
+    text-align: center;
+    font-size: 30pt;
+    font-weight: 700;
+    letter-spacing: 2mm;
+    color: rgba(190, 30, 45, .22);
+    transform: rotate(-12deg);
+    pointer-events: none;
+}
+
+/* ---------- voucher stubs ---------- */
+.stub { left: 0; width: 215.9mm; height: 95.25mm; padding: 8mm 10mm; border-top: 0.2mm dashed #999; }
+.stub-1 { top: 88.9mm; }
+.stub-2 { top: 184.15mm; }
+.stub-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4mm; }
+.stub-issuer { font-size: 10pt; font-weight: 700; }
+.stub-copy { font-size: 7pt; text-transform: uppercase; letter-spacing: .4mm; color: #555; }
+.stub-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+.stub-table th { width: 34mm; text-align: left; font-weight: 400; color: #555; padding: 1.2mm 0; vertical-align: top; }
+.stub-table td { padding: 1.2mm 0; vertical-align: top; }
+.stub-amount { font-weight: 700; }
+
+@@media print {
+    body { background: #fff; }
+    .cheque-page { margin: 0; box-shadow: none; }
+    /* Pre-printed stock: keep the space, drop the ink. */
+    .noprint { visibility: hidden; }
+}
+</style>
+</head>
+<body>
+@foreach (var chk in Model.Checks)
+{
+    <section class="cheque-page" style="@Model.OffsetStyle">
+
+        @* ============================ cheque body ============================ *@
+        <div class="cheque @(Model.IsPrePrinted ? "" : "blank-stock")">
+
+            @if (Model.IsPreview)
+            {
+                <div class="abs preview-watermark">@Model.PreviewLabel</div>
+            }
+
+            @* Issuer letterhead - pre-printed on stock *@
+            @if (Model.Issuer.HasIdentity)
+            {
+                <div class="abs issuer @Model.PrePrintedClass">
+                    @if (!string.IsNullOrWhiteSpace(Model.Issuer.LogoUrl))
+                    {
+                        <img class="issuer-logo" src="@Model.Issuer.LogoUrl" alt="" />
+                    }
+                    <div class="issuer-name">@Model.Issuer.Name</div>
+                    @foreach (var line in Model.Issuer.AddressLines)
+                    {
+                        <div class="issuer-line">@line</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(Model.Issuer.Phone))
+                    {
+                        <div class="issuer-line">@Model.Issuer.Phone</div>
+                    }
+                </div>
+            }
+
+            @* Cheque number - pre-printed on stock *@
+            <div class="abs cheque-no @Model.PrePrintedClass">
+                <span class="cheque-no-label">No.</span> @chk.CheckNumberText
+            </div>
+
+            @* Date - the Y/M/D guide is pre-printed, the value is always ours *@
+            <div class="abs date-block">
+                <div class="date-guide @Model.PrePrintedClass">Y Y Y Y&nbsp;&nbsp;M M&nbsp;&nbsp;D D</div>
+                <div class="date-value">@chk.IssueDateText</div>
+            </div>
+
+            <div class="abs pay-label @Model.PrePrintedClass">Pay to the order of</div>
+            <div class="abs payee">@chk.PayeeName</div>
+            @if (chk.PayeeAddressLines.Count > 0)
+            {
+                <div class="abs payee-address">
+                    @foreach (var line in chk.PayeeAddressLines)
+                    {
+                        <div>@line</div>
+                    }
+                </div>
+            }
+
+            @* Courtesy amount: box + "$" are pre-printed, digits are always ours *@
+            <div class="abs courtesy">
+                <div class="courtesy-box @Model.PrePrintedClass"></div>
+                <div class="courtesy-sign @Model.PrePrintedClass">$</div>
+                <div class="courtesy-value">@chk.AmountText</div>
+            </div>
+
+            <div class="abs legal">@chk.AmountInWordsText</div>
+            <div class="abs legal-currency @Model.PrePrintedClass">@chk.CurrencyLabel</div>
+
+            @* Drawee bank identification - pre-printed on stock *@
+            <div class="abs bank @Model.PrePrintedClass">
+                <div class="bank-name">@Model.Bank.Name</div>
+                @if (!string.IsNullOrWhiteSpace(Model.Bank.RoutingLine))
+                {
+                    <div>@Model.Bank.RoutingLine</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(Model.Bank.AccountName))
+                {
+                    <div>@Model.Bank.AccountName</div>
+                }
+            </div>
+
+            <div class="abs memo-label @Model.PrePrintedClass">Memo</div>
+            <div class="abs memo">@chk.Memo</div>
+
+            <div class="abs signature">
+                <div class="signature-image">
+                    @if (!string.IsNullOrWhiteSpace(Model.Issuer.SignatureImageUrl))
+                    {
+                        <img src="@Model.Issuer.SignatureImageUrl" alt="" />
+                    }
+                </div>
+                <div class="signature-line @Model.PrePrintedClass"></div>
+                <div class="signature-name">@Model.Issuer.SignatureName</div>
+                <div class="signature-title">@Model.Issuer.SignatureTitle</div>
+            </div>
+
+            @* MICR band. Pre-printed stock already carries the magnetic line, so the
+               band stays empty there; blank stock prints it with an E-13B font. *@
+            <div class="abs micr-band">
+                @if (Model.ShowMicr)
+                {
+                    <div class="micr-line">@chk.MicrGlyphs</div>
+                    <div class="micr-readable">@chk.MicrLine</div>
+                }
+            </div>
+        </div>
+
+        @* ============================ voucher stubs ============================ *@
+        <div class="abs stub stub-1">
+            <div class="stub-head">
+                <span class="stub-issuer">@Model.Issuer.Name</span>
+                <span class="stub-copy">Voucher copy 1 - payee</span>
+            </div>
+            <table class="stub-table">
+                <tr><th>Cheque number</th><td>@chk.CheckNumberText</td></tr>
+                <tr><th>Date</th><td>@chk.IssueDateIso</td></tr>
+                <tr><th>Payee</th><td>@chk.PayeeName</td></tr>
+                <tr><th>Amount</th><td class="stub-amount">@chk.AmountText @chk.Currency</td></tr>
+                <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
+                <tr><th>Reference</th><td>@chk.Reference</td></tr>
+                <tr><th>Memo</th><td>@chk.Memo</td></tr>
+            </table>
+        </div>
+
+        <div class="abs stub stub-2">
+            <div class="stub-head">
+                <span class="stub-issuer">@Model.Issuer.Name</span>
+                <span class="stub-copy">Voucher copy 2 - file</span>
+            </div>
+            <table class="stub-table">
+                <tr><th>Cheque number</th><td>@chk.CheckNumberText</td></tr>
+                <tr><th>Date</th><td>@chk.IssueDateIso</td></tr>
+                <tr><th>Payee</th><td>@chk.PayeeName</td></tr>
+                <tr><th>Amount</th><td class="stub-amount">@chk.AmountText @chk.Currency</td></tr>
+                <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
+                <tr><th>Reference</th><td>@chk.Reference</td></tr>
+                <tr><th>Memo</th><td>@chk.Memo</td></tr>
+            </table>
+        </div>
+
+    </section>
+}
+</body>
+</html>

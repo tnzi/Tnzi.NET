@@ -1,7 +1,7 @@
 namespace Tnzi.AI;
 
 /// <summary>
-/// AI 模块 — 开箱即用的 AI 集成：契约、实体、DTO、Options，以及 Agent 执行引擎
+/// AI 模块 - 开箱即用的 AI 集成：契约、实体、DTO、Options，以及 Agent 执行引擎
 /// （Runtime/Executor/Resolver/Factory、中间件管道、内置工具、Guardrails、Agent/Chat/Run 服务、控制器）。
 /// <para>
 /// 可选子模块（Workflow/Skills/Rag 等）的接口在本模块定义并带 NoOp 回退
@@ -35,13 +35,14 @@ public partial class AIModule : TnziApplicationModule
         BindAndValidate<SuggestionOptions, SuggestionOptionsValidator>(context, "AI:Suggestions");
         BindAndValidate<TodoOptions, TodoOptionsValidator>(context, "AI:Todo");
         BindAndValidate<Tools.Sql.SqlToolOptions, Tools.Sql.SqlToolOptionsValidator>(context, "AI:Sql");
+        BindAndValidate<PortAllocatorOptions, PortAllocatorOptionsValidator>(context, "AI:PortAllocator");
 
         // 从环境变量补充 API Key，并回填 Provider Name（用于 Polly pipeline 路由）
         context.Services.PostConfigure<AIOptions>(options =>
         {
             foreach (var (providerName, providerOptions) in options.Providers)
             {
-                // 回填 Name — configuration dictionary key 是权威来源
+                // 回填 Name - configuration dictionary key 是权威来源
                 providerOptions.Name = providerName;
 
                 if (string.IsNullOrWhiteSpace(providerOptions.ApiKey))
@@ -76,7 +77,7 @@ public partial class AIModule : TnziApplicationModule
 
         var services = context.Services;
 
-        // 引擎服务注册 — 拆分到 AIModule.Registration.cs（partial）。
+        // 引擎服务注册 - 拆分到 AIModule.Registration.cs（partial）。
         // ⚠️ 调用顺序必须保持：TryAdd「先注册者胜」语义依赖于此顺序不变。
         ConfigureHttpClients(context, services);
         RegisterChatClientsAndProcessors(services);
@@ -86,10 +87,10 @@ public partial class AIModule : TnziApplicationModule
         RegisterBuiltInToolsAndGuardrails(services);
         RegisterMiddlewarePipeline(services);
         RegisterRuntimeAndRunServices(services);
-        RegisterUtilitiesWorkspaceAndEvents(context, services);
+        RegisterUtilitiesWorkspaceAndEvents(services);
         RegisterSqlToolSuite(services);
 
-        // 核心工具：Shell 命令分析器 — 纯字符串解析工具，被 Sandbox 子模块消费
+        // 核心工具：Shell 命令分析器 - 纯字符串解析工具，被 Sandbox 子模块消费
         services.TryAddSingleton<IShellCommandAnalyzer, ShellCommandAnalyzer>();
 
         return Task.CompletedTask;
@@ -121,7 +122,7 @@ public partial class AIModule : TnziApplicationModule
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();
 
-        // 扫描自身程序集（共享助手 AIToolRegistration — 与子模块同一条扫描-注册-容错路径）
+        // 扫描自身程序集（共享助手 AIToolRegistration - 与子模块同一条扫描-注册-容错路径）
         var assembly = Assembly.GetExecutingAssembly();
         AIToolRegistration.ScanAndRegisterAITools(toolRegistry, toolScanner, assembly, logger);
 

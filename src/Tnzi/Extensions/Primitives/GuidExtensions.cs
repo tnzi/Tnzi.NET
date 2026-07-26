@@ -27,7 +27,7 @@ public static class GuidExtensions
     /// 通过 XOR 操作将 GUID 的16字节压缩为4字节，然后转换为8位十六进制字符串
     /// 注意：此方法仅用于生成简单的标识符，不适用于安全场景
     /// </summary>
-    /// <param name="guid">源 GUID，如果为空则使用新生成的 GUID</param>
+    /// <param name="guid">源 GUID（不做空值替换；需要随机 token 请用 <see cref="NewToken"/>）</param>
     /// <returns>8位十六进制字符串（如 "A1B2C3D4"）</returns>
     public static string ToToken(this Guid guid)
     {

@@ -7,6 +7,19 @@
     :translate="t"
     default-section="queue"
   >
+    <!-- 队列概览：这一屏的钱现在是什么状态（数据源是全量队列，非当前页）。 -->
+    <template #kpis>
+      <TKpiRow cols="1 s:2">
+        <TKpiCard :label="t('queue.kpiCount')" :value="checkQueueKpis.count" icon="mdi:printer-check" />
+        <TKpiCard
+          :label="t('queue.kpiTotal')"
+          :value="fmtMoney(checkQueueKpis.total, checkQueueKpis.currency)"
+          :animated="false"
+          icon="mdi:cash-multiple"
+        />
+      </TKpiRow>
+    </template>
+
     <!-- ── Print queue ─────────────────────────────────────────── -->
     <template #queue>
       <div class="fin-checks__queue">
@@ -59,7 +72,8 @@
         :state="crud"
         :all-columns="columns"
         :title="registerTitle"
-        :row-actions="rowActions"
+        :search-fields="searchFields"
+    :row-actions="rowActions"
         :translate="t"
         :show-header="false"
       >
@@ -198,6 +212,8 @@ import { TSvgIcon } from '@tnzi/ui'
 import { downloadBlob } from '@tnzi/core'
 import TTabsPage from '../../components/layout/TTabsPage.vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TModalShell from '../../components/overlay/TModalShell.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -214,8 +230,8 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
-import { tsToIsoDate } from './money'
-import { buildCheckColumns, buildCheckQueueColumns, type BankCheckRow } from './check-config'
+import { fmtMoney, tsToIsoDate } from './money'
+import { buildCheckSearchFields, buildCheckColumns, buildCheckQueueColumns, type BankCheckRow } from './check-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.checks')
@@ -225,10 +241,16 @@ const { can } = usePermissionGuard()
 const title = 'tnzi.admin.modules.finance.checks.title'
 const registerTitle = 'tnzi.admin.modules.finance.checks.register.title'
 const columns = buildCheckColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildCheckSearchFields(t)
 const queueColumns = buildCheckQueueColumns(t)
 
 const sections = [
-  { name: 'queue', label: t('tabs.queue') },
+  // Mixed blocks (filter bar + a plain table), not a single flex-filling
+  // table, so the pane must own its scroll - otherwise the fill-height chain
+  // shrinks it and the queue is unreachable on a short viewport.
+  { name: 'queue', label: t('tabs.queue'), scroll: true },
   { name: 'register', label: t('tabs.register') },
 ]
 
@@ -269,6 +291,18 @@ watch(queueAccountId, () => {
   checkedQueueKeys.value = []
   void loadQueue()
 })
+
+/**
+ * 队列概览（标准 2「概览区必须回答现在的状态」）。
+ *
+ * 数据源就是队列本身——它是**全量不分页**的，所以这里的合计是真数字，
+ * 不是"当前页加总"那种会被信任然后被发现是错的东西。
+ */
+const checkQueueKpis = computed(() => ({
+  count: queueRows.value.length,
+  total: queueRows.value.reduce((sum, r) => sum + (r.amount ?? 0), 0),
+  currency: queueRows.value[0]?.currency,
+}))
 
 async function loadQueue() {
   if (!queueAccountId.value) {

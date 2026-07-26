@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowEdge — Animated bezier edge (dashed or flowing dot)
+ * TWorkflowEdge - Animated bezier edge (dashed or flowing dot)
  */
 
 import { computed } from 'vue';

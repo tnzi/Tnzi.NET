@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// Guardrail 执行器 — 统一运行所有注册的输入/输出 Guardrails，支持顺序和并行执行模式
+/// Guardrail 执行器 - 统一运行所有注册的输入/输出 Guardrails，支持顺序和并行执行模式
 /// </summary>
 public class GuardrailRunner
 {
@@ -65,7 +65,7 @@ public class GuardrailRunner
     }
 
     /// <summary>
-    /// 顺序执行输入 Guardrails — 遇到第一个拒绝即停止
+    /// 顺序执行输入 Guardrails - 遇到第一个拒绝即停止
     /// </summary>
     private async Task<(string text, GuardrailResult? rejection)> RunInputGuardrailsSequentialAsync(string input, CancellationToken ct)
     {
@@ -94,7 +94,7 @@ public class GuardrailRunner
     }
 
     /// <summary>
-    /// 顺序执行输出 Guardrails — 遇到第一个拒绝即停止
+    /// 顺序执行输出 Guardrails - 遇到第一个拒绝即停止
     /// </summary>
     private async Task<(string text, GuardrailResult? rejection)> RunOutputGuardrailsSequentialAsync(string output, CancellationToken ct)
     {
@@ -123,7 +123,7 @@ public class GuardrailRunner
     }
 
     /// <summary>
-    /// 并行执行输入 Guardrails — 所有 guardrail 同时执行，支持 tripwire 立即中止
+    /// 并行执行输入 Guardrails - 所有 guardrail 同时执行，支持 tripwire 立即中止
     /// </summary>
     private async Task<(string text, GuardrailResult? rejection)> RunInputGuardrailsParallelAsync(string input, CancellationToken ct)
     {
@@ -153,7 +153,7 @@ public class GuardrailRunner
             }
             catch (OperationCanceledException) when (tripwireResult != null)
             {
-                // Tripwire 已触发，其他 guardrail 被取消 — 正常退出
+                // Tripwire 已触发，其他 guardrail 被取消 - 正常退出
             }
         });
 
@@ -163,7 +163,7 @@ public class GuardrailRunner
         }
         catch (OperationCanceledException) when (tripwireResult != null)
         {
-            // Tripwire 导致整体取消 — 已捕获
+            // Tripwire 导致整体取消 - 已捕获
         }
 
         // Tripwire 优先级最高
@@ -198,7 +198,7 @@ public class GuardrailRunner
     }
 
     /// <summary>
-    /// 并行执行输出 Guardrails — 所有 guardrail 同时执行，支持 tripwire 立即中止
+    /// 并行执行输出 Guardrails - 所有 guardrail 同时执行，支持 tripwire 立即中止
     /// </summary>
     private async Task<(string text, GuardrailResult? rejection)> RunOutputGuardrailsParallelAsync(string output, CancellationToken ct)
     {
@@ -228,7 +228,7 @@ public class GuardrailRunner
             }
             catch (OperationCanceledException) when (tripwireResult != null)
             {
-                // Tripwire 已触发，其他 guardrail 被取消 — 正常退出
+                // Tripwire 已触发，其他 guardrail 被取消 - 正常退出
             }
         });
 
@@ -238,7 +238,7 @@ public class GuardrailRunner
         }
         catch (OperationCanceledException) when (tripwireResult != null)
         {
-            // Tripwire 导致整体取消 — 已捕获
+            // Tripwire 导致整体取消 - 已捕获
         }
 
         // Tripwire 优先级最高

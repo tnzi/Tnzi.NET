@@ -279,7 +279,7 @@ public class ApprovalRequestedEventTests
             }
         ]);
 
-        // No event bus passed — should complete without error
+        // No event bus passed - should complete without error
         var wrapper = CreateWrapper(inner, approvalHandler: null, evaluator, eventBus: null);
 
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));

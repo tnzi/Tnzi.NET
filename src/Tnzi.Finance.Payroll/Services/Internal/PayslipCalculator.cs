@@ -175,7 +175,20 @@ public sealed class PayslipCalculator
         int decimals,
         CancellationToken cancellationToken)
     {
-        var attributes = PayrollAttributeHelper.Parse(employee.AttributesJson);
+        string? error = null;
+
+        // 扩展属性是自由 JSON，且写入口不止管理端（country pack 播种、外部同步、直连 SQL）：
+        // 解析失败只该让这一张工资单带错，不该把整批计算炸成 500（有 Error 的批次本就禁止过账）
+        IReadOnlyDictionary<string, string> attributes;
+        try
+        {
+            attributes = PayrollAttributeHelper.Parse(employee.AttributesJson);
+        }
+        catch (Exception ex)
+        {
+            attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            error = $"Employee attributes could not be parsed: {ex.Message}";
+        }
 
         var context = new PayslipCalculationContext(run, employee, structure, assignment.BaseAmount)
         {
@@ -195,11 +208,12 @@ public sealed class PayslipCalculator
             YtdResolver = code => ytdMap.GetValueOrDefault((employee.Id, code.Trim().ToUpperInvariant()), 0m)
         };
 
-        string? error = null;
-
-        var before = await RunHooksAsync(context, isBefore: true, cancellationToken);
-        if (!before.Succeeded)
-            error = before.Message;
+        if (error == null)
+        {
+            var before = await RunHooksAsync(context, isBefore: true, cancellationToken);
+            if (!before.Succeeded)
+                error = before.Message;
+        }
 
         if (error == null)
         {
@@ -224,7 +238,14 @@ public sealed class PayslipCalculator
                         break;
                     }
                     if (!conditionResult.Data)
+                    {
+                        // ★条件不成立的组件按 0 参与后续引用，而不是让它的变量名不存在：
+                        // 结构校验只保证"引用的是更早序号的行"，一个带条件的行被跳过时，
+                        // 引用它的后续公式会以「未知变量」失败 → 该员工整张工资单带错 →
+                        // 整个批次因此不可过账。0 是唯一可用的语义（公式里没有 if 可自保）。
+                        context.Variables[component.Code] = 0m;
                         continue;
+                    }
                 }
 
                 decimal amount;

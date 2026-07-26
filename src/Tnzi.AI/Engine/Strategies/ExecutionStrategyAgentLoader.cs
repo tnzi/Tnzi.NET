@@ -12,7 +12,7 @@ public static class ExecutionStrategyAgentLoader
         var grants = await grantService.GetGrantsAsync(entity.Id, ct);
         var toolGroups = grants.ToolGroups.Count > 0 ? grants.ToolGroups.ToList() : null;
         // per-tool grants (GrantType=Tool): expand to single tool names and flow alongside the
-        // tool groups into the factory — without this a child/target agent in a multi-agent flow
+        // tool groups into the factory - without this a child/target agent in a multi-agent flow
         // silently loses its individually granted tools. null-when-empty mirrors the primary path.
         var toolNames = grants.ToolNames.Count > 0 ? grants.ToolNames.ToList() : null;
 
@@ -23,7 +23,7 @@ public static class ExecutionStrategyAgentLoader
         // pass through that pipeline, so skill-whitelist / KB-scoping has no consumer on this path.
         // IAgentFactory.CreateAgentAsync also has no skillSlugs/knowledgeBaseIds parameters (the primary path
         // delivers them through AgentResolution, not the factory). Honoring skill/KB scoping for child agents
-        // would require routing them through the middleware pipeline — a larger change, out of scope here.
+        // would require routing them through the middleware pipeline - a larger change, out of scope here.
         // Today child agents in strategy execution honor tool grants only (groups + per-tool names).
         return await context.AgentFactory.CreateAgentAsync(
             entity.Provider, entity.Model, entity.Instructions, entity.Name,

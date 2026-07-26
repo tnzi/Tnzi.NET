@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TAgentHandoff — Agent switch animation (A → B)
+ * TAgentHandoff - Agent switch animation (A → B)
  */
 
 import { Icon } from '@iconify/vue';

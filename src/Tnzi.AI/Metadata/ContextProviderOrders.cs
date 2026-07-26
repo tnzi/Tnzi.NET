@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Metadata;
 
 /// <summary>
-/// 上下文提供器执行顺序常量 — 数值越小越先执行
+/// 上下文提供器执行顺序常量 - 数值越小越先执行
 /// </summary>
 public static class ContextProviderOrders
 {

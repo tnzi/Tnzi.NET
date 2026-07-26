@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Payroll Pay Runs page — read-only list with lifecycle actions, payslip
+ * Payroll Pay Runs page - read-only list with lifecycle actions, payslip
  * detail drawer, and pay drawer.
  */
 vi.mock('../../../src/plugin/client', () => ({

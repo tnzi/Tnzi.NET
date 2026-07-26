@@ -23,7 +23,7 @@ public class WorkflowCheckpointStoreDbContext : TnziDbContext<WorkflowCheckpoint
 }
 
 /// <summary>
-/// B13 — verifies DatabaseWorkflowCheckpointStore uses optimistic concurrency
+/// B13 - verifies DatabaseWorkflowCheckpointStore uses optimistic concurrency
 /// (IConcurrencyStamp) plus a step union-merge so two concurrent writers do not
 /// silently drop each other's CompletedSteps / StepOutputs (no last-write-wins),
 /// and a stale-token Update is reloaded + re-merged + retried instead of overwriting.
@@ -82,7 +82,7 @@ public class DatabaseWorkflowCheckpointStoreConcurrencyTests : IntegratedTestBas
 
         await Should.NotThrowAsync(async () => await Task.WhenAll(t1, t2));
 
-        // Read back the persisted union — all three steps + all three outputs survive.
+        // Read back the persisted union - all three steps + all three outputs survive.
         var final = await CreateStore(ServiceProvider).GetCheckpointAsync(executionId);
         final.ShouldNotBeNull();
         final!.CompletedStepIds.ShouldContain("seed");

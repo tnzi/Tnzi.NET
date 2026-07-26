@@ -1,6 +1,6 @@
 <template>
   <!--
-    Performance — wraps /admin/performance/{summary,endpoints,slow-requests}.
+    Performance - wraps /admin/performance/{summary,endpoints,slow-requests}.
     Layout: header (window selector + KPI row) → tabbed table region
     (endpoints | slow-requests). Tabs replaced the stacked two-card
     layout because vertical stacking forced the slow-requests card to
@@ -41,7 +41,7 @@
         <TKpiCard :label="t('kpi.p95')" :value="formatMs(summary?.p95)" />
         <TKpiCard :label="t('kpi.p99')" :value="formatMs(summary?.p99)" />
         <TKpiCard :label="t('kpi.avg')" :value="formatMs(summary?.average)" />
-        <TKpiCard :label="t('kpi.samples')" :value="summary?.sampleCount ?? 0" />
+        <TKpiCard :label="t('kpi.samples')" :value="summary?.sampleCount ?? null" />
       </TKpiRow>
     </template>
 
@@ -82,6 +82,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { TKpiCard, TKpiRow } from '../../components/data'
@@ -130,7 +131,7 @@ const windowOptions = [
 ]
 
 function formatMs(v: number | undefined | null): string {
-  if (v == null) return '—'
+  if (v == null) return EMPTY_DASH
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
   return `${v.toFixed(1)} ms`
 }
@@ -244,7 +245,7 @@ const slowColumns: DataTableColumns<SlowRequestRecordDto> = [
     key: 'userId',
     width: 200,
     ellipsis: { tooltip: true },
-    render: (row) => row.userId ?? '—',
+    render: (row) => row.userId ?? EMPTY_DASH,
   },
 ]
 

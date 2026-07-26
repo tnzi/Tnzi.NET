@@ -11,12 +11,12 @@ namespace Tnzi.Hangfire.Controllers.Admin;
 /// <c>JobStorage.Current.GetConnection().GetRecurringJobs()</c> and
 /// <c>RecurringJob.TriggerJob / RemoveIfExists</c>. Deliberately does NOT
 /// go through <see cref="IBackgroundJobManager"/> because that interface
-/// is immediate-mode oriented and does not expose a list API — adding a
+/// is immediate-mode oriented and does not expose a list API; adding a
 /// list method there would force every alternative implementation (test
 /// doubles, in-memory) to grow surface they do not need.
 ///
 /// Pause/resume is not implemented because Hangfire has no first-class
-/// paused state for recurring jobs — the canonical workaround is to
+/// paused state for recurring jobs, and the canonical workaround is to
 /// delete + recreate, which is a UX decision the admin UI should drive
 /// rather than the backend hiding.
 /// </summary>

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// B4: InputGuardrailMiddleware — verify that when a guardrail returns a Modified result
+/// B4: InputGuardrailMiddleware - verify that when a guardrail returns a Modified result
 /// the EffectiveUserMessage is set on the context so AgentRuntime picks up the redacted text.
 /// Covers both the non-streaming (InvokeAsync) and the streaming (InvokeStreamingAsync) paths.
 /// </summary>
@@ -42,7 +42,7 @@ public class InputGuardrailEffectiveUserMessageTests
     [Fact]
     public async Task InvokeAsync_WhenGuardrailModifiesText_SetsEffectiveUserMessage()
     {
-        // Arrange — guardrail replaces the raw message with a redacted version
+        // Arrange - guardrail replaces the raw message with a redacted version
         const string originalMessage = "My phone is 13800138000";
         const string redactedMessage = "My phone is [REDACTED]";
 

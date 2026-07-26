@@ -113,7 +113,9 @@ public class MemoryCacheService : ICache, IDisposable
 
     public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(_trackedKeys.ContainsKey(key));
+        // 以真实缓存为准，不能查 _trackedKeys：后者只在 MemoryCache 触发驱逐回调时才被清理，
+        // 已过期但尚未被扫描到的键会被误报为存在（例如限流封禁键到期后仍显示封禁）
+        return Task.FromResult(_memoryCache.TryGetValue(key, out _));
     }
 
     public Task<long> IncrementAsync(string key, long increment = 1, CancellationToken cancellationToken = default)
@@ -160,8 +162,9 @@ public class MemoryCacheService : ICache, IDisposable
     {
         lock (_incrementLock)
         {
-            // 检查键是否存在
-            if (_trackedKeys.ContainsKey(key))
+            // 检查键是否存在（以真实缓存为准，理由同 ExistsAsync：
+            // 查 _trackedKeys 会让已过期的键继续占位，SETNX 语义的消费方永远拿不到锁/一次性令牌）
+            if (_memoryCache.TryGetValue(key, out _))
             {
                 return Task.FromResult(false);
             }
@@ -197,6 +200,9 @@ public class MemoryCacheService : ICache, IDisposable
         {
             _memoryCache.Remove(key);
             _trackedKeys.TryRemove(key, out _);
+            // 与 RemoveAsync / RemoveByPatternAsync / RemoveManyAsync 保持一致，
+            // 否则被删键会一直留在标签索引里（内存泄漏 + RemoveByTag 命中已不存在的键）
+            CleanupKeyFromTagIndex(key);
         }
 
         if (keysToRemove.Count > 0)

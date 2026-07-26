@@ -40,7 +40,7 @@ public partial class WorkflowService
             return Fail<WorkflowExecutionResultDto>("Resume is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
         // CAS guard: transition the execution to Running BEFORE invoking the engine.
-        // The optimistic concurrency stamp (B13) is the compare-and-swap token — two
+        // The optimistic concurrency stamp (B13) is the compare-and-swap token - two
         // concurrent Resume POSTs both pass the status guard above, but only one wins the
         // status flip; the loser's UpdateAsync throws DbUpdateConcurrencyException and we
         // return 409 instead of re-running the engine (which would re-execute nodes and

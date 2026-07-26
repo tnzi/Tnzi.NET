@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills.Controllers.Admin;
 
 /// <summary>
-/// 技能管理控制器（管理员） — 提供全局技能管理功能。
+/// 技能管理控制器（管理员） - 提供全局技能管理功能。
 /// </summary>
 [DefaultController]
 [Route("admin/skills")]

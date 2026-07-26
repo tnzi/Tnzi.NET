@@ -9,6 +9,7 @@
 import type { ThemeContext, ThemeColors } from '@tnzi/ui'
 import type { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import type { AdminThemeSnapshot } from './admin-config'
+import { applyAppearancePreset, type AdminThemePreset } from './appearancePresets'
 
 export type AdminThemeStore = ReturnType<typeof useAdminThemeStore>
 
@@ -36,7 +37,6 @@ export function buildThemeSnapshot(themeStore: AdminThemeStore, ctx: ThemeContex
       fixedTab: themeStore.fixedTab,
       fixedFooter: themeStore.fixedFooter,
       watermark: { ...themeStore.watermark },
-      recommendColor: themeStore.recommendColor,
       infoFollowPrimary: themeStore.infoFollowPrimary,
       tabCache: themeStore.tabCache,
       breadcrumbShowIcon: themeStore.breadcrumbShowIcon,
@@ -45,8 +45,9 @@ export function buildThemeSnapshot(themeStore: AdminThemeStore, ctx: ThemeContex
       fullscreenVisible: themeStore.fullscreenVisible,
       themeSchemaVisible: themeStore.themeSchemaVisible,
       reloadVisible: themeStore.reloadVisible,
-      grayscale: themeStore.grayscale,
-      colourWeakness: themeStore.colourWeakness,
+      // NOTE: grayscale / colourWeakness (accessibility filters) are deliberately
+      // NOT serialized - they are a PERSONAL, per-user preference (persisted
+      // locally by the store), never pushed to every user via the global theme.
       closeTabByMiddleClick: themeStore.closeTabByMiddleClick,
       tabScrollAnimation: themeStore.tabScrollAnimation,
       scrollMode: themeStore.scrollMode,
@@ -58,8 +59,18 @@ export function buildThemeSnapshot(themeStore: AdminThemeStore, ctx: ThemeContex
       footerHeight: themeStore.footerHeight,
       siderBg: themeStore.siderBg,
       headerBg: themeStore.headerBg,
+      tabBg: themeStore.tabBg,
+      footerBg: themeStore.footerBg,
       contentBg: themeStore.contentBg,
-      containerBg: themeStore.containerBg,
+      pageHeaderBg: themeStore.pageHeaderBg,
+      cardBg: themeStore.cardBg,
+      siderTextColor: themeStore.siderTextColor,
+      headerTextColor: themeStore.headerTextColor,
+      tabTextColor: themeStore.tabTextColor,
+      footerTextColor: themeStore.footerTextColor,
+      contentTextColor: themeStore.contentTextColor,
+      pageHeaderTextColor: themeStore.pageHeaderTextColor,
+      cardTextColor: themeStore.cardTextColor,
     },
     ui: {
       mode: ctx.settings.value.mode,
@@ -86,15 +97,34 @@ export interface ApplyThemeSnapshotOptions {
 }
 
 /**
- * Re-apply the user's own preset color ON TOP of whatever colors are
- * currently active (the one color knob a non-privileged user owns).
- * Single source of the overlay rules: gated on the picker being enabled,
- * primary plus the info-follows-primary companion.
+ * Re-apply the user's own personal choice ON TOP of the global theme (called
+ * after a global snapshot lands, so a non-privileged user's pick wins).
+ *
+ * Precedence: a full appearance LOOK (`userPresetLook` - the whole coordinated
+ * preset the user picked) beats the legacy color-only overlay (`userPresetColor`).
+ * Both are gated on the preset picker being enabled. `presets` (the resolved
+ * appearance-look list) is required to resolve a look by name.
  */
-export function overlayUserPreset(themeStore: AdminThemeStore, ctx: ThemeContext): void {
-  if (!themeStore.presetPickerVisible || !themeStore.userPresetColor) return
-  ctx.setColor('primary', themeStore.userPresetColor)
-  if (themeStore.infoFollowPrimary) ctx.setColor('info', themeStore.userPresetColor)
+export function overlayUserPreset(
+  themeStore: AdminThemeStore,
+  ctx: ThemeContext,
+  presets?: AdminThemePreset[],
+): void {
+  if (!themeStore.presetPickerVisible) return
+  // A whole personal look wins - surfaces + accent + mode + radius all apply.
+  const lookName = themeStore.userPresetLook
+  if (lookName && presets) {
+    const look = presets.find((p) => p.name === lookName)
+    if (look) {
+      applyAppearancePreset(look, themeStore, ctx)
+      return
+    }
+  }
+  // Legacy: color-only overlay (primary + the info-follows-primary companion).
+  if (themeStore.userPresetColor) {
+    ctx.setColor('primary', themeStore.userPresetColor)
+    if (themeStore.infoFollowPrimary) ctx.setColor('info', themeStore.userPresetColor)
+  }
 }
 
 /**
@@ -125,9 +155,6 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   themeStore.setFixedTab(snapshot.admin.fixedTab)
   themeStore.setFixedFooter(snapshot.admin.fixedFooter)
   themeStore.setWatermark(snapshot.admin.watermark)
-  if (typeof snapshot.admin.recommendColor === 'boolean') {
-    themeStore.setRecommendColor(snapshot.admin.recommendColor)
-  }
   if (typeof snapshot.admin.infoFollowPrimary === 'boolean') {
     themeStore.setInfoFollowPrimary(snapshot.admin.infoFollowPrimary)
   }
@@ -149,12 +176,10 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   if (typeof snapshot.admin.reloadVisible === 'boolean') {
     themeStore.setReloadVisible(snapshot.admin.reloadVisible)
   }
-  if (typeof snapshot.admin.grayscale === 'boolean') {
-    themeStore.setGrayscale(snapshot.admin.grayscale)
-  }
-  if (typeof snapshot.admin.colourWeakness === 'boolean') {
-    themeStore.setColourWeakness(snapshot.admin.colourWeakness)
-  }
+  // grayscale / colourWeakness intentionally NOT applied from a snapshot - they
+  // are a personal per-user accessibility preference (see buildThemeSnapshot),
+  // so a super admin's global save must never toggle them for everyone. Any
+  // value in an older snapshot is ignored.
   if (typeof snapshot.admin.closeTabByMiddleClick === 'boolean') {
     themeStore.setCloseTabByMiddleClick(snapshot.admin.closeTabByMiddleClick)
   }
@@ -182,20 +207,38 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   if (typeof snapshot.admin.footerHeight === 'number') {
     themeStore.setFooterHeight(snapshot.admin.footerHeight)
   }
-  // Background color overrides - `undefined` = absent in an older snapshot
-  // (keep current), `null` = clear the override.
+  // Per-surface background overrides - `undefined` = absent in an older
+  // snapshot (keep current), `null` = clear the override.
   if ('siderBg' in snapshot.admin) {
     themeStore.setSiderBg(snapshot.admin.siderBg ?? null)
   }
   if ('headerBg' in snapshot.admin) {
     themeStore.setHeaderBg(snapshot.admin.headerBg ?? null)
   }
+  if ('tabBg' in snapshot.admin) {
+    themeStore.setTabBg(snapshot.admin.tabBg ?? null)
+  }
+  if ('footerBg' in snapshot.admin) {
+    themeStore.setFooterBg(snapshot.admin.footerBg ?? null)
+  }
   if ('contentBg' in snapshot.admin) {
     themeStore.setContentBg(snapshot.admin.contentBg ?? null)
   }
-  if ('containerBg' in snapshot.admin) {
-    themeStore.setContainerBg(snapshot.admin.containerBg ?? null)
+  if ('pageHeaderBg' in snapshot.admin) {
+    themeStore.setPageHeaderBg(snapshot.admin.pageHeaderBg ?? null)
   }
+  if ('cardBg' in snapshot.admin) {
+    themeStore.setCardBg(snapshot.admin.cardBg ?? null)
+  }
+  // Per-surface foreground (text) color - `undefined` = absent in an older
+  // snapshot (keep current); `null` clears the override (back to auto).
+  if ('siderTextColor' in snapshot.admin) themeStore.setSiderTextColor(snapshot.admin.siderTextColor ?? null)
+  if ('headerTextColor' in snapshot.admin) themeStore.setHeaderTextColor(snapshot.admin.headerTextColor ?? null)
+  if ('tabTextColor' in snapshot.admin) themeStore.setTabTextColor(snapshot.admin.tabTextColor ?? null)
+  if ('footerTextColor' in snapshot.admin) themeStore.setFooterTextColor(snapshot.admin.footerTextColor ?? null)
+  if ('contentTextColor' in snapshot.admin) themeStore.setContentTextColor(snapshot.admin.contentTextColor ?? null)
+  if ('pageHeaderTextColor' in snapshot.admin) themeStore.setPageHeaderTextColor(snapshot.admin.pageHeaderTextColor ?? null)
+  if ('cardTextColor' in snapshot.admin) themeStore.setCardTextColor(snapshot.admin.cardTextColor ?? null)
   // Colors always apply; mode follows the default-vs-user-choice rule
   // documented on ApplyThemeSnapshotOptions.
   if (!options?.modeAsDefault) {

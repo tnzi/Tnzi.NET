@@ -2,9 +2,10 @@
 namespace Tnzi.Performance.Controllers;
 
 /// <summary>
-/// Performance monitoring admin controller base class.
-/// Provides endpoints for viewing performance percentiles, endpoint statistics,
-/// slow request tracking, and clearing collected data.
+/// Default performance monitoring admin controller (activated by HostingModule via
+/// <c>[DefaultController]</c>; applications override it by registering a controller
+/// on the same route). Provides endpoints for viewing performance percentiles,
+/// endpoint statistics, slow request tracking, and clearing collected data.
 /// </summary>
 [Route("admin/performance")]
 [DefaultController]

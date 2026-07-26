@@ -44,7 +44,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  /** A failed message's retry marker was clicked — bubble up to resend. */
+  /** A failed message's retry marker was clicked - bubble up to resend. */
   retry: [message: ChatMessageView]
 }>()
 
@@ -85,7 +85,7 @@ function scrollToBottom() {
 }
 
 // Track whether the user is pinned to the bottom. We only auto-scroll on content
-// growth (new message / an image finishing load) when they already were — so
+// growth (new message / an image finishing load) when they already were - so
 // reading scrolled-up history is never yanked away.
 const innerRef = ref<HTMLElement | null>(null)
 const atBottom = ref(true)
@@ -102,7 +102,7 @@ onMounted(() => {
   void nextTick(scrollToBottom)
   // Images have no height until they load, so the length-watch scroll above fires
   // too early for them. A ResizeObserver on the content re-pins to the bottom once
-  // the image (or any late-growing content) settles — but only if we were at the
+  // the image (or any late-growing content) settles - but only if we were at the
   // bottom, so it doesn't fight a user reading history.
   if (innerRef.value && typeof ResizeObserver !== 'undefined') {
     ro = new ResizeObserver(() => {
@@ -121,7 +121,7 @@ watch(
   () => props.messages.length,
   () => {
     // A brand-new message means the user (almost certainly the sender, or someone
-    // watching) wants to see it — pin to bottom and let the ResizeObserver keep it
+    // watching) wants to see it - pin to bottom and let the ResizeObserver keep it
     // there as media loads.
     atBottom.value = true
     void nextTick(scrollToBottom)

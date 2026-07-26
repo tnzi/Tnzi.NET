@@ -5,7 +5,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Tnzi.AI.Agents.Definitions;
 
 /// <summary>
-/// YAML Agent 定义提供器 — 从文件系统读取 YAML 定义，支持文件监视热重载
+/// YAML Agent 定义提供器 - 从文件系统读取 YAML 定义，支持文件监视热重载
 /// </summary>
 public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
 {

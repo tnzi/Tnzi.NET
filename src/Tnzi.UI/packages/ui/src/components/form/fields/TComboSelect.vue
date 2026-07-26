@@ -1,6 +1,6 @@
 <template>
   <!--
-    "Type or pick" combobox — an `NSelect` in `filterable` + `tag` mode, so the
+    "Type or pick" combobox - an `NSelect` in `filterable` + `tag` mode, so the
     user chooses a suggestion OR types a free-text value (no explicit "Other"
     entry needed). The bound value is ALWAYS a string; a hand-typed value stays
     displayable even when it isn't in the suggestion list. Use for free-text

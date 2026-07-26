@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * `TAdminMixNavRail` — direct port of soybean-admin-example's
+ * `TAdminMixNavRail` - direct port of soybean-admin-example's
  * `first-level-menu.vue` (vertical-mix sidebar rail). Unlike the rest
  * of our sidebar which wraps NMenu, this is a custom div-based list
  * because the rail's "icon on top + label below" layout doesn't fit
- * NMenu's row-based item structure cleanly — soybean wrote it as a
+ * NMenu's row-based item structure cleanly - soybean wrote it as a
  * lightweight reusable template too.
  *
  * Reference: D:\Github\soybean-admin-example\src\layouts\modules\
@@ -17,7 +17,7 @@
  *   - Hover/active/inverted colour logic from `selectedBgColor` +
  *     atomic class bindings.
  *   - SimpleScrollbar wrapping the list (we use native overflow with
- *     custom thin-scrollbar styling — same end result).
+ *     custom thin-scrollbar styling - same end result).
  *   - Brand logo slot at the top + MenuToggler at the bottom.
  *
  * What we adapt:
@@ -25,7 +25,7 @@
  *     because ui-admin doesn't enable UnoCSS itself.
  *   - Icon is rendered via TSvgIcon (our TSvgIcon takes an `icon` string).
  */
-import { computed, h } from 'vue'
+import { computed, h, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { TSvgIcon } from '@tnzi/ui'
 import { TMenuToggler } from '@tnzi/ui'
@@ -47,7 +47,7 @@ interface Props {
   /** Inverted (dark) palette toggle. Mirrors soybean's `inverted` prop. */
   inverted?: boolean
   /**
-   * Mini mode — when the rail collapses, hide the label and only show
+   * Mini mode - when the rail collapses, hide the label and only show
    * icons (height: 0). Soybean wires this to `appStore.siderCollapse`.
    */
   isMini?: boolean
@@ -93,6 +93,32 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   if (!icon) return null
   return h(TSvgIcon, { icon, size: props.isMini ? 16 : 24 })
 }
+
+// ── Scroll-aware edge shadows (mirrors TAdminSidebar) - header/footer only
+// cast their elevation shadow while the rail list is actually scrolled. ──
+const listRef = ref<HTMLElement | null>(null)
+const canScrollUp = ref(false)
+const canScrollDown = ref(false)
+function updateScrollShadows(): void {
+  const el = listRef.value
+  if (!el) return
+  canScrollUp.value = el.scrollTop > 1
+  canScrollDown.value = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+}
+let resizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  void nextTick(updateScrollShadows)
+  const el = listRef.value
+  if (typeof ResizeObserver !== 'undefined' && el) {
+    resizeObserver = new ResizeObserver(() => updateScrollShadows())
+    resizeObserver.observe(el)
+  }
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
+watch(() => props.isMini, () => void nextTick(updateScrollShadows))
 </script>
 
 <template>
@@ -104,12 +130,16 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
     }"
     :style="{ '--t-mix-active-bg': selectedBgColor } as Record<string, string>"
   >
-    <!-- Top slot — soybean places GlobalLogo (icon-only in mix mode) here. -->
-    <div v-if="$slots.header" class="t-admin-mix-rail__header">
+    <!-- Top slot - soybean places GlobalLogo (icon-only in mix mode) here. -->
+    <div
+      v-if="$slots.header"
+      class="t-admin-mix-rail__header"
+      :class="{ 't-admin-mix-rail__header--elevated': canScrollUp }"
+    >
       <slot name="header" />
     </div>
 
-    <div class="t-admin-mix-rail__list">
+    <div ref="listRef" class="t-admin-mix-rail__list" @scroll.passive="updateScrollShadows">
       <div
         v-for="menu in menus"
         :key="menu.key"
@@ -123,10 +153,13 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
       </div>
     </div>
 
-    <!-- Bottom slot — soybean places MenuToggler here. Phase H2 C6:
+    <!-- Bottom slot - soybean places MenuToggler here. Phase H2 C6:
          provide a built-in TMenuToggler so the rail can switch to
          mini mode out of the box; consumer can override via slot. -->
-    <div class="t-admin-mix-rail__footer">
+    <div
+      class="t-admin-mix-rail__footer"
+      :class="{ 't-admin-mix-rail__footer--elevated': canScrollDown }"
+    >
       <slot name="footer">
         <TMenuToggler
           v-if="onToggleCollapse"
@@ -149,8 +182,16 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   overflow: hidden;
 }
 .t-admin-mix-rail--inverted {
-  background: var(--tnzi-admin-sider-inverted-bg, rgb(0, 20, 40));
+  /* Prefer the user's custom sider color when set; else the built-in dark. */
+  background: var(--tnzi-admin-sider-bg, var(--tnzi-admin-sider-inverted-bg, rgb(0, 20, 40)));
   border-right-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  --tnzi-admin-sider-edge-shadow: rgba(0, 0, 0, 0.3);
+  /* Flip base text to the light inverted tint so descendants reading it -
+     notably the footer (TSidebarSettingsFooter, a child that inherits this
+     custom property across the component boundary) - stay legible instead of
+     rendering the default dark text (grey) on the dark rail. Mirrors the fix
+     on `.t-admin-sidebar--inverted`. */
+  --tnzi-base-text: var(--tnzi-admin-sider-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
 }
 
 .t-admin-mix-rail__header {
@@ -159,6 +200,14 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Scroll-aware feathered shadow (matches the main sider) - only while the
+     rail list is scrolled beneath the logo bar; no hard border. */
+  position: relative;
+  z-index: 2;
+  transition: box-shadow 0.2s ease;
+}
+.t-admin-mix-rail__header--elevated {
+  box-shadow: 0 6px 8px -6px var(--tnzi-admin-sider-edge-shadow, rgba(0, 0, 0, 0.06));
 }
 
 .t-admin-mix-rail__list {
@@ -176,7 +225,7 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin: 0 4px 6px;
+  margin: 0 6px 6px;
   padding: 8px 4px;
   border-radius: var(--tnzi-admin-radius-md, 8px);
   background: transparent;
@@ -194,17 +243,21 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   background-color: var(--t-mix-active-bg, color-mix(in srgb, var(--tnzi-primary, #646cff) 10%, #ffffff 90%));
 }
 
-/* Inverted variant: white-on-dark text + primary-fill on active. */
+/* Inverted variant: white-on-dark text + a primary-TINTED pill on active.
+   A solid primary fill under white text breaks with light accents (mint /
+   frost / amber dark-mode primaries measured 1.6-2.6:1) - the 18%-alpha tint
+   keeps the accent visible while the near-white label stays readable on any
+   dark rail, mirroring the sidebar's inverted active treatment. */
 .t-admin-mix-rail--inverted .t-admin-mix-rail__item {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--tnzi-admin-sider-fg, rgba(255, 255, 255, 0.65));
 }
 .t-admin-mix-rail--inverted .t-admin-mix-rail__item:hover {
   color: #ffffff;
   background-color: rgb(255 255 255 / 0.08);
 }
 .t-admin-mix-rail--inverted .t-admin-mix-rail__item--active {
-  color: #ffffff !important;
-  background-color: var(--tnzi-primary, #646cff) !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+  background-color: var(--tnzi-admin-inverted-active-bg, rgb(var(--tnzi-primary-rgb) / 0.18)) !important;
 }
 
 .t-admin-mix-rail__icon {
@@ -230,7 +283,7 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
 }
 .t-admin-mix-rail--mini .t-admin-mix-rail__label {
   height: 0;
-  /* Collapse to zero width too — `visibility: hidden + height: 0` still
+  /* Collapse to zero width too - `visibility: hidden + height: 0` still
      reserves the label's intrinsic text width and can push the rail
      past its inline width unless we also zero the horizontal axis. */
   width: 0;
@@ -240,13 +293,19 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
 
 .t-admin-mix-rail__footer {
   flex-shrink: 0;
+  /* Column so the footer can stack the shared Settings actions above the
+     collapse toggler (was a single 40px centered row when it only held the
+     toggler). Height is intrinsic to its content. */
   display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 40px;
-  border-top: 1px solid var(--tnzi-border, #e5e7eb);
+  flex-direction: column;
+  align-items: stretch;
+  /* No hard top border - scroll-aware upward shadow (matches the main sider
+     footer) only while there is more rail content below. */
+  position: relative;
+  z-index: 2;
+  transition: box-shadow 0.2s ease;
 }
-.t-admin-mix-rail--inverted .t-admin-mix-rail__footer {
-  border-top-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+.t-admin-mix-rail__footer--elevated {
+  box-shadow: 0 -6px 8px -6px var(--tnzi-admin-sider-edge-shadow, rgba(0, 0, 0, 0.06));
 }
 </style>

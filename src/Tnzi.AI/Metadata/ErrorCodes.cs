@@ -141,7 +141,7 @@ public static class ErrorCodes
     public const string GuardrailRejected = "AI_GUARDRAIL_REJECTED";
 
     /// <summary>
-    /// Guardrail tripwire triggered — immediate abort of all parallel guardrails.
+    /// Guardrail tripwire triggered - immediate abort of all parallel guardrails.
     /// </summary>
     public const string GuardrailTripwire = "AI_GUARDRAIL_TRIPWIRE";
 

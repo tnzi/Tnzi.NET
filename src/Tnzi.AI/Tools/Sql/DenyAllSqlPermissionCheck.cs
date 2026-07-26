@@ -4,7 +4,7 @@ namespace Tnzi.AI.Tools.Sql;
 /// Default <see cref="IReadOnlySqlPermissionCheck"/> implementation that rejects every SQL
 /// execution request. Registered by AIModule so applications must explicitly opt into a
 /// permissive implementation (e.g. <see cref="FrameworkPermissionSqlCheck"/>) before AI
-/// agents can run SQL. This is fail-secure by design — when in doubt, deny.
+/// agents can run SQL. This is fail-secure by design - when in doubt, deny.
 /// </summary>
 public sealed class DenyAllSqlPermissionCheck : IReadOnlySqlPermissionCheck
 {

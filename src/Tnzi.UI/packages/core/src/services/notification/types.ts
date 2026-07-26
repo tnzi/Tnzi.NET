@@ -271,7 +271,7 @@ export interface UnreadCountDto {
 
 /**
  * User notification preference read DTO. Backend: NotificationPreferenceDto.
- * The Preference entity IS the subscription model in Tnzi.Notification —
+ * The Preference entity IS the subscription model in Tnzi.Notification -
  * it controls per-channel+category opt-in and carries quiet-hours / rate-limit.
  */
 export interface NotificationPreferenceDto {

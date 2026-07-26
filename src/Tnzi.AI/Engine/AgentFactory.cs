@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// Agent 工厂 — 编排 ChatClient 获取、工具解析和 Options 构建来创建 AgentExecutor
+/// Agent 工厂 - 编排 ChatClient 获取、工具解析和 Options 构建来创建 AgentExecutor
 /// </summary>
 public class AgentFactory : IAgentFactory
 {

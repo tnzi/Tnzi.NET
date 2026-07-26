@@ -88,7 +88,7 @@ public class DependencyRegistrationService
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to scan assembly '{assembly.GetName().Name}' for type '{typeof(TInterface).Name}': {ex.Message}");
+                Debug.WriteLine($"Failed to scan assembly '{assembly.GetName().Name}' for type '{typeof(TInterface).Name}': {ex.Message}");
             }
         }
 
@@ -116,7 +116,7 @@ public class DependencyRegistrationService
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to scan assembly '{assembly.GetName().Name}' for DependencyAttribute types: {ex.Message}");
+                Debug.WriteLine($"Failed to scan assembly '{assembly.GetName().Name}' for DependencyAttribute types: {ex.Message}");
             }
         }
 
@@ -198,7 +198,7 @@ public class DependencyRegistrationService
                 // 输出警告但不阻止注册
                 // 注意：这里无法使用 ILogger，因为此时服务还未完全注册
                 // 可以通过 Console 输出或使用其他方式记录警告
-                System.Diagnostics.Debug.WriteLine($"WARNING: {message}");
+                Debug.WriteLine($"WARNING: {message}");
             }
         }
 

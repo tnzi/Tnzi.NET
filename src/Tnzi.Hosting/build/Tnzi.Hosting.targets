@@ -3,6 +3,12 @@
     TnziModules-driven optional dependency injection.
     Consumer sets <TnziModules>Identity;Storage;...</TnziModules> in their csproj,
     and matching Tnzi.* packages are automatically referenced.
+
+    The match is a substring check, so a sub-module token also pulls in its parent
+    (e.g. "Finance.Payroll" matches both Finance and Finance.Payroll - which is what
+    the sub-module needs anyway). Keep this list in sync with the [OptionalDependsOn]
+    list on HostingModule: a module declared there but missing here is silently not
+    referenced for package consumers.
   -->
 
   <ItemGroup Condition="$(TnziModules.Contains('Identity'))">
@@ -51,6 +57,66 @@
 
   <ItemGroup Condition="$(TnziModules.Contains('SignalR'))">
     <PackageReference Include="Tnzi.SignalR" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Identity.Presence'))">
+    <PackageReference Include="Tnzi.Identity.Presence" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Skills'))">
+    <PackageReference Include="Tnzi.AI.Skills" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Workflow'))">
+    <PackageReference Include="Tnzi.AI.Workflow" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Mcp'))">
+    <PackageReference Include="Tnzi.AI.Mcp" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Rag'))">
+    <PackageReference Include="Tnzi.AI.Rag" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Sandbox'))">
+    <PackageReference Include="Tnzi.AI.Sandbox" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Channels'))">
+    <PackageReference Include="Tnzi.AI.Channels" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment'))">
+    <PackageReference Include="Tnzi.Payment" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance'))">
+    <PackageReference Include="Tnzi.Finance" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Ai'))">
+    <PackageReference Include="Tnzi.Finance.Ai" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Banking'))">
+    <PackageReference Include="Tnzi.Finance.Banking" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Documents'))">
+    <PackageReference Include="Tnzi.Finance.Documents" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Recurring'))">
+    <PackageReference Include="Tnzi.Finance.Recurring" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Tax.Ca'))">
+    <PackageReference Include="Tnzi.Finance.Tax.Ca" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Payroll'))">
+    <PackageReference Include="Tnzi.Finance.Payroll" Version="$(TnziVersion)" />
   </ItemGroup>
 
 </Project>

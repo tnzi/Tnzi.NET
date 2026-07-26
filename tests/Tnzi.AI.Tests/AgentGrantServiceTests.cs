@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// IAgentGrantService 集成测试 — 使用 SQLite 内存库 + 真实 EFCoreRepository（镜像 AgentProviderFkTests 的
+/// IAgentGrantService 集成测试 - 使用 SQLite 内存库 + 真实 EFCoreRepository（镜像 AgentProviderFkTests 的
 /// 自包含模式），因为 reconcile 的 diff 语义、软删除过滤、metadata 保留必须经过真实的 EF Core 查询/写入管道。
 /// </summary>
 public class AgentGrantServiceTests : IDisposable
@@ -236,7 +236,7 @@ public class AgentGrantServiceTests : IDisposable
     }
 
     // =====================================================================
-    // ReconcileToolNames (GrantType=Tool) — independent of ReconcileToolGroups
+    // ReconcileToolNames (GrantType=Tool) - independent of ReconcileToolGroups
     // =====================================================================
 
     [Fact]
@@ -466,8 +466,8 @@ public class AgentGrantServiceTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 注册 grant junction 测试所需的 Agent + Provider + AgentPersona + 三类 grant 实体。
-/// Agent 配置含指向 Provider/AgentPersona 的 FK，故必须一并注册其配置。
+/// 测试专用 DbContext - 注册 grant junction 测试所需的 Agent + Provider + 三类 grant 实体。
+/// Agent 配置含指向 Provider 的 FK，故必须一并注册其配置。
 /// </summary>
 internal sealed class AgentGrantDbContext : TnziDbContext<AgentGrantDbContext>
 {
@@ -482,7 +482,6 @@ internal sealed class AgentGrantDbContext : TnziDbContext<AgentGrantDbContext>
     {
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new AgentToolGrantConfiguration());
         modelBuilder.ApplyConfiguration(new AgentSkillGrantConfiguration());
         modelBuilder.ApplyConfiguration(new AgentKnowledgeGrantConfiguration());

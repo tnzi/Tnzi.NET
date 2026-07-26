@@ -1,6 +1,6 @@
 <template>
   <!--
-    Templates page — notification-scoped template management.
+    Templates page - notification-scoped template management.
     Wired to /admin/notification-templates (DefaultNotificationTemplateAdminController
     in Tnzi.Notification). Preview hits /admin/notifications/preview which
     renders via ITemplateRenderService; Test-send hits create-and-send.
@@ -9,7 +9,7 @@
   -->
   <!--
     row-actions-max-inline=3: read-only (file-system) rows hide Edit/Delete
-    via `show`, leaving exactly Preview + Send Test visible — with the
+    via `show`, leaving exactly Preview + Send Test visible - with the
     default maxInline=2 the auto-width estimator sizes the column for the
     collapsed worst case ([Edit][More]), which is narrower than two fully
     inline buttons, so they wrapped vertically. 3 sizes the column for
@@ -36,7 +36,7 @@
     </template>
   </TCrudPage>
 
-  <!-- Preview overlay — pass templateName + editable variables JSON -->
+  <!-- Preview overlay - pass templateName + editable variables JSON -->
   <TDetailHost :state="previewDetail" :title="previewTitle" :width="720" :footer="false" :translate="t">
     <template #default>
       <NForm label-placement="top" :show-feedback="false">
@@ -71,7 +71,7 @@
             Plain-text content gets escaped via {{ }} interpolation; HTML
             content (the template engine flags it via NotificationPreviewDto.IsHtml)
             gets v-html so the rendered Razor output displays correctly. This
-            matches the backend contract — admins decide trust via the template
+            matches the backend contract - admins decide trust via the template
             channel (email = HTML; sms / push = plain text).
           -->
           <!-- eslint-disable-next-line vue/no-v-html -->
@@ -82,7 +82,7 @@
     </template>
   </TDetailHost>
 
-  <!-- Send-test overlay — pick channel + recipient + variables, then dispatch -->
+  <!-- Send-test overlay - pick channel + recipient + variables, then dispatch -->
   <TDetailHost :state="sendDetail" :title="sendTitle" :width="640" :translate="t">
     <template #default>
       <NForm label-placement="top" :show-feedback="false">
@@ -170,7 +170,7 @@ const message = useMessage()
 const { can } = usePermissionGuard()
 
 /**
- * Templates sub-contract — /admin/notification-templates, backend pins
+ * Templates sub-contract - /admin/notification-templates, backend pins
  * Module="Notification" server-side. Row shape follows TemplateInfoDto
  * on list, TemplateEntityDto on form submit.
  */

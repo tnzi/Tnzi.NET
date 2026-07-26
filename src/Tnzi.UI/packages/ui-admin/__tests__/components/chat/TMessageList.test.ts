@@ -129,7 +129,7 @@ describe('TMessageList', () => {
   })
 })
 
-describe('TMessageBubble — rich system notification', () => {
+describe('TMessageBubble - rich system notification', () => {
   const richNotice: ChatMessageDto = {
     id: 'n1',
     conversationId: 'sys',

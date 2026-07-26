@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TImageBlock — AI generated image display
+ * TImageBlock - AI generated image display
  *
  * Handles both URL and base64-encoded images with lazy loading.
  */

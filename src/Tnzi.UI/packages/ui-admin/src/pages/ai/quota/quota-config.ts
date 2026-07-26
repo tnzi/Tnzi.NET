@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
@@ -13,7 +14,7 @@ import type { UserQuotaDto } from '@tnzi/core/services/ai'
 const WARNING_LEVEL = { None: 0, Warning: 1, Critical: 2 } as const
 
 /**
- * Quotas page config — budget cost dashboard + per-user quota CRUD.
+ * Quotas page config - budget cost dashboard + per-user quota CRUD.
  *
  * Shape derives from @tnzi/core/services/ai UserQuotaDto / SetQuotaDto /
  * UserQuotaQueryDto. The paged list is served by POST /admin/quotas/query and
@@ -27,14 +28,14 @@ const WARNING_LEVEL = { None: 0, Warning: 1, Critical: 2 } as const
  *     shown as a read-only colour-coded badge.
  *   - SetQuotaDto has no `isEnabled` field, so the form cannot toggle it; it is
  *     surfaced as a read-only column. The query filter still supports it.
- *   - Bridge `quota.delete` rejects (notImplemented) — the page omits
+ *   - Bridge `quota.delete` rejects (notImplemented) - the page omits
  *     `deleteData`, so the delete affordance is hidden automatically.
  */
 
 /** Render a 0-1 ratio as a percentage string (e.g. 0.05 → "5%"). */
 export function formatPercent(ratio: unknown): string {
   const n = typeof ratio === 'number' ? ratio : Number(ratio)
-  if (!Number.isFinite(n)) return '—'
+  if (!Number.isFinite(n)) return EMPTY_DASH
   return `${Math.round(n * 1000) / 10}%`
 }
 
@@ -48,7 +49,7 @@ export function percentValue(ratio: unknown): number {
 /** Render a token count compactly (e.g. 2000000 → "2,000,000"). */
 export function formatTokens(value: unknown): string {
   const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n)) return '—'
+  if (!Number.isFinite(n)) return EMPTY_DASH
   return n.toLocaleString('en-US')
 }
 
@@ -62,7 +63,7 @@ const UNLIMITED_THRESHOLD = 1e15
 /** Render a daily/monthly limit; the unlimited sentinel shows a label. */
 export function formatLimit(value: unknown): string {
   const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n)) return '—'
+  if (!Number.isFinite(n)) return EMPTY_DASH
   if (n > UNLIMITED_THRESHOLD) return translatePageKey('ai.quota', 'unlimited')
   return formatTokens(n)
 }
@@ -107,7 +108,7 @@ export function warningLevelValue(row: UserQuotaDto): number {
 /** Render a GUID truncated to its first 8 chars (full value in `title`). */
 function renderShortId(value: unknown) {
   const full = typeof value === 'string' ? value : value == null ? '' : String(value)
-  if (!full) return '—'
+  if (!full) return EMPTY_DASH
   const short = full.length > 8 ? `${full.slice(0, 8)}…` : full
   return h('span', { title: full, class: 'font-mono' }, short)
 }
@@ -154,7 +155,7 @@ export const quotaColumns: ColumnDef[] = [
     render: (row) =>
       formatDateTime(
         (row as { lastModificationTime?: string | null }).lastModificationTime,
-        { fallback: '—' },
+        { fallback: EMPTY_DASH },
       ),
   },
 ]

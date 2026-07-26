@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * UsageDashboard — AI usage analytics page.
+ * UsageDashboard - AI usage analytics page.
  *
  * Routed at /admin/ai/usage. Organised as NTabs:
  *   - Overview : KPI cards + trend line + by-agent pie (TDashboardPage) +
@@ -15,6 +15,7 @@
  * every bridge call with Promise.allSettled so one failed source surfaces in
  * the error banner without dropping the others.
  */
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { reactive, ref, computed, onMounted, h } from 'vue'
 import {
   NCard, NButton, NForm, NFormItem, NGrid, NGi,
@@ -242,7 +243,7 @@ const logColumns = computed<DataTableColumns<UsageLogDto>>(() => [
     key: 'agentId',
     title: t('logs.agent'),
     minWidth: 120,
-    render: (row) => row.agentId ?? '—',
+    render: (row) => row.agentId ?? EMPTY_DASH,
   },
   {
     key: 'tokens',
@@ -256,7 +257,7 @@ const logColumns = computed<DataTableColumns<UsageLogDto>>(() => [
     title: t('logs.cost'),
     minWidth: 100,
     render: (row) =>
-      row.estimatedCostUsd != null ? `$${row.estimatedCostUsd.toFixed(4)}` : '—',
+      row.estimatedCostUsd != null ? `$${row.estimatedCostUsd.toFixed(4)}` : EMPTY_DASH,
   },
   {
     key: 'durationMs',
@@ -517,7 +518,7 @@ defineExpose({
               />
 
               <!-- "Usage trend" + "By agent" are owned by TDashboardPage above
-                   (line chart + cost pie) — only the by-model breakdown is an
+                   (line chart + cost pie) - only the by-model breakdown is an
                    extra block, so it gets the full row. -->
               <NSpin :show="loading">
                 <NCard
@@ -534,7 +535,7 @@ defineExpose({
                       <span>${{ row.totalEstimatedCostUsd.toFixed(4) }}</span>
                       <span>{{ row.totalRequests.toLocaleString() }} req</span>
                     </li>
-                    <li v-if="!topModels.length" class="t-usage-dashboard__empty">—</li>
+                    <li v-if="!topModels.length" class="t-usage-dashboard__empty">{{ EMPTY_DASH }}</li>
                   </ul>
                 </NCard>
               </NSpin>
@@ -639,7 +640,7 @@ defineExpose({
             </div>
     </template>
 
-    <!-- Hidden stat-cards mirror — labels + formatted values so integration
+    <!-- Hidden stat-cards mirror - labels + formatted values so integration
          tests can find them via [data-stat] without depending on the
          TDashboardPage TCountTo animation completing under jsdom. Tab-
          independent, so it lives in #overlays. -->
@@ -652,7 +653,7 @@ defineExpose({
         >
           {{ t(`stats.${card.key}`) }}: {{ card.format ? card.format(card.read(summary)) : card.read(summary) }}
         </div>
-        <!-- Trend mirror — the trend now renders only as the TDashboardPage
+        <!-- Trend mirror - the trend now renders only as the TDashboardPage
              echarts line (no DOM text under jsdom), so the raw points are
              mirrored here for the same reason as the stat cards above. -->
         <div data-test="trend-mirror">

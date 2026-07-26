@@ -1,15 +1,16 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 条件节点 — 评估条件表达式 → 返回 RouteTo 进行条件边路由
+/// 条件节点 - 评估条件表达式 → 返回 RouteTo 进行条件边路由
 /// </summary>
 /// <remarks>
 /// 配置项：
 /// - condition: 条件表达式，支持以下格式：
 ///   - 简单值匹配：直接输出匹配值（如 "accept"）
-///   - 模板变量：{{stepId}} 引用前置步骤输出
-///   - metadata 引用：{{stepId.verdict}} 引用元数据字段
+///   - 模板变量：{{stepId}} 引用前置步骤输出（仅支持整步输出，不支持 {{stepId.field}} 这类字段路径）
 ///   - 默认路由：当条件无法评估时使用 "default" 路由
+/// 上游若带 verdict / route 元数据（ReviewNode / RouterNode 的输出），优先取其作为路由键，
+/// 此时 condition 只用于生成节点输出文本。
 /// </remarks>
 public class ConditionalNode : IWorkflowNode
 {

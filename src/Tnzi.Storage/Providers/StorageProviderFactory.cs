@@ -26,7 +26,7 @@ public class StorageProviderContext
 }
 
 /// <summary>
-/// 存储提供者工厂 — 可扩展的提供者注册表
+/// 存储提供者工厂 - 可扩展的提供者注册表
 /// <para>
 /// 内置提供者: Local, S3, R2, Azure
 /// 自定义提供者: 在模块的 PreConfigureServicesAsync 中调用 <see cref="Register"/> 注册

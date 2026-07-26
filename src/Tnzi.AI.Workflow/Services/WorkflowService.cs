@@ -42,7 +42,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
     public async Task<Result<WorkflowDefinitionDto>> CreateAsync(CreateWorkflowDefinitionDto input)
     {
         Check.NotNull(input);
-        // Construct the entity directly — Mapster can't auto-convert
+        // Construct the entity directly - Mapster can't auto-convert
         // `Steps: List<WorkflowStepDto>` (DTO) to `Steps: string` (entity
         // JSON column) and throws `InvalidCastException` during MapTo.
         // Manual construction keeps the dto/entity column mismatch
@@ -140,7 +140,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         // Steps is stored as a JSON string on the entity but exposed as
         // List<WorkflowStepDto> on the DTO. Mapster's `ProjectTo` runs at
         // the EF Core SQL projection layer and can't deserialize JSON
-        // strings into typed collections — which made GetListAsync throw
+        // strings into typed collections - which made GetListAsync throw
         // a 500 in production. Page the entities first (efficient SQL),
         // then map row-by-row through MapToDto where the JSON
         // deserialization can happen safely in-memory.
@@ -156,7 +156,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
 
     private static WorkflowDefinitionDto MapToDto(WorkflowDefinition entity)
     {
-        // Manual construction — Mapster's `entity.MapTo<WorkflowDefinitionDto>()`
+        // Manual construction - Mapster's `entity.MapTo<WorkflowDefinitionDto>()`
         // throws InvalidCastException trying to convert the entity's
         // `Steps: string` (JSON column) into the DTO's
         // `Steps: List<WorkflowStepDto>`. Even though we overwrite the
@@ -247,6 +247,9 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             RetryDelaySeconds = step.RetryDelaySeconds,
             TimeoutSeconds = step.TimeoutSeconds,
             RequiresApproval = step.RequiresApproval,
+            // OnError 必须一起拷贝：漏掉它会让每个步骤都退回默认 Fail 策略，
+            // 已保存的 Skip/Continue 节点级错误策略在真实执行路径上被静默丢弃。
+            OnError = step.OnError,
             Configuration = configuration
         };
     }

@@ -55,7 +55,7 @@ public class ResultExtensionsTests
     [Fact]
     public void Validate_WhenDataIsNull_ShouldStillRunValidatorWithNull()
     {
-        // Arrange: "success but null" is a legal state — the validator must still run and receive null.
+        // Arrange: "success but null" is a legal state - the validator must still run and receive null.
         var originalResult = Result<string?>.Success(null);
         bool validatorCalled = false;
         string? observed = "sentinel";
@@ -370,7 +370,7 @@ public class ResultExtensionsTests
     [Fact]
     public void OnSuccess_WhenResultSucceededButDataIsNull_ShouldExecuteActionWithNull()
     {
-        // Arrange: "success but null" is a legal state — the action must run and receive null.
+        // Arrange: "success but null" is a legal state - the action must run and receive null.
         var result = Result<string?>.Success(null);
         var actionExecuted = false;
         string? observed = "sentinel";

@@ -4,7 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { Ref } from 'vue'
 
 /**
- * Journal Entries page — read-only TCrudPage with a `#detail` drawer
+ * Journal Entries page - read-only TCrudPage with a `#detail` drawer
  * (onView lazy-loads the full entry), a useDetail-driven line-editor
  * overlay (TDetailHost), and post/reverse/delete lifecycle row actions.
  */

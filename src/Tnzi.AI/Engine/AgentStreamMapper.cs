@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Engine;
 
 /// <summary>
-/// 共享流式事件与失败原因映射工具 — 消除 AgentService / ChatService / AgentRunService 中的重复逻辑。
+/// 共享流式事件与失败原因映射工具 - 消除 AgentService / ChatService / AgentRunService 中的重复逻辑。
 /// </summary>
 public static class AgentStreamMapper
 {

@@ -9,7 +9,7 @@ public interface ISubAgentRunCancellationRegistry
 {
     /// <summary>
     /// Registers a CTS for the given <paramref name="runId"/>.
-    /// The CTS lifetime is managed by the caller — it must call <see cref="Unregister"/>
+    /// The CTS lifetime is managed by the caller - it must call <see cref="Unregister"/>
     /// (typically in a <c>finally</c> block) when the run finishes.
     /// </summary>
     void Register(Guid runId, CancellationTokenSource cts);

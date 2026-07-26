@@ -76,7 +76,7 @@
             {{ t('selectPrompt') }}
           </div>
           <NSpin v-else :show="detailLoading">
-            <div v-if="!detail" class="t-wf-run-page__placeholder">—</div>
+            <div v-if="!detail" class="t-wf-run-page__placeholder">{{ EMPTY_DASH }}</div>
             <div v-else>
               <header class="t-wf-run-page__detail-header">
                 <div>
@@ -185,6 +185,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, reactive, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
@@ -247,7 +248,7 @@ const workflowOptions = computed(() =>
 )
 
 function workflowName(id?: string | null): string {
-  if (!id) return '—'
+  if (!id) return EMPTY_DASH
   return workflows.value.find((w) => w.id === id)?.name ?? id.slice(0, 8)
 }
 

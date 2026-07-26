@@ -1,5 +1,5 @@
 /**
- * Phase 5 Task 5.9 — UsageDashboard pure-data config.
+ * Phase 5 Task 5.9 - UsageDashboard pure-data config.
  *
  * Stat-card definitions, chart option factories, and i18n key catalog.
  * Kept dependency-free so it can be unit-tested without mounting the page.
@@ -47,7 +47,7 @@ export const STAT_CARDS: StatCardDefinition[] = [
 ]
 
 /**
- * Default time range — last 30 days. Returned as ISO strings so callers can
+ * Default time range - last 30 days. Returned as ISO strings so callers can
  * feed straight into the bridge without further conversion.
  */
 export function defaultDateRange(now: Date = new Date()): { startTime: string; endTime: string } {
@@ -57,7 +57,7 @@ export function defaultDateRange(now: Date = new Date()): { startTime: string; e
 }
 
 /**
- * Top-N selector for agent rows by cost. Pure function — easy to unit test
+ * Top-N selector for agent rows by cost. Pure function - easy to unit test
  * if we ever decide to.
  */
 export function topAgentsByCost(rows: AgentUsageDto[], n = 10): AgentUsageDto[] {
@@ -175,7 +175,7 @@ export function sortFeedbackStats(rows: AgentFeedbackStatsDto[]): AgentFeedbackS
 }
 
 /**
- * i18n key catalog — populated as comments only. Locale entries are added in
+ * i18n key catalog - populated as comments only. Locale entries are added in
  * Phase 5 cleanup task 5.16. translatePageKey() falls back to the bare key
  * when no translation is registered, so the page stays functional.
  *

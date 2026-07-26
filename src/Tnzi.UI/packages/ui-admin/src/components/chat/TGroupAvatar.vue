@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 /**
- * `TGroupAvatar` — WeChat-style composite group avatar.
+ * `TGroupAvatar` - WeChat-style composite group avatar.
  *
  * Tiles the first (up to 9) member avatars inside one square using the
  * `groupAvatarLayout` grid (2 columns for 1-4 members, 3 columns for 5-9).
@@ -38,7 +38,7 @@ import { groupAvatarLayout } from './groupAvatar'
 const props = withDefaults(
   defineProps<{
     members: ChatContactDto[]
-    /** Pixel size (width = height). Default 40 — matches TChatAvatar. */
+    /** Pixel size (width = height). Default 40 - matches TChatAvatar. */
     size?: number
   }>(),
   { size: 40 },

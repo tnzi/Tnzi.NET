@@ -3,7 +3,7 @@ import { Comment, defineComponent, Fragment, h, Text, type PropType, type VNode,
 import { NGi, NGrid } from 'naive-ui'
 
 /**
- * TKpiRow — uniform KPI strip container. Wraps an `NGrid`
+ * TKpiRow - uniform KPI strip container. Wraps an `NGrid`
  * (`responsive="screen"`, default `cols="1 s:2 m:4"`, 12px gap) and
  * auto-wraps every default-slot child in an `NGi`, so pages drop
  * `TKpiCard`s in directly (including via `v-for`) without grid-item
@@ -16,7 +16,7 @@ import { NGi, NGrid } from 'naive-ui'
  * </TKpiRow>
  * ```
  *
- * Mobile (375px): the responsive cols string collapses the grid to 1–2
+ * Mobile (375px): the responsive cols string collapses the grid to 1-2
  * columns; pass a custom `cols` to override (Naive screen breakpoints:
  * s:640 / m:1024 / l:1280 / xl:1536).
  */
@@ -31,7 +31,7 @@ export default defineComponent({
   setup(props, { slots }) {
     /**
      * Flatten the slot content into element/component vnodes: `v-for`
-     * produces Fragment wrappers and `v-if="false"` produces comment nodes —
+     * produces Fragment wrappers and `v-if="false"` produces comment nodes -
      * neither may be passed to NGrid directly (it only accepts NGi children).
      */
     function flatten(nodes: VNodeChild[]): VNode[] {

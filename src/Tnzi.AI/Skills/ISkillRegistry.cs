@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能注册表 — 合并双源、三层优先级、搜索
+/// 技能注册表 - 合并双源、三层优先级、搜索
 /// </summary>
 public interface ISkillRegistry
 {

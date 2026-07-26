@@ -42,6 +42,14 @@ describe('mapAuthConfig', () => {
     const off = mapAuthConfig({ ...fullConfig, allowUserNameLogin: false, allowEmailLogin: false, allowSmsLogin: false })
     expect(off.passwordLogin).toBe(false)
   })
+
+  it('maps the captcha flags', () => {
+    expect(mapAuthConfig(fullConfig).captchaOnLogin).toBe(false)
+    expect(mapAuthConfig(fullConfig).captchaOnRegister).toBe(false)
+    const on = mapAuthConfig({ ...fullConfig, enableCaptchaOnLogin: true, enableCaptchaOnRegister: true })
+    expect(on.captchaOnLogin).toBe(true)
+    expect(on.captchaOnRegister).toBe(true)
+  })
 })
 
 describe('mergeFeatures', () => {
@@ -59,6 +67,13 @@ describe('mergeFeatures', () => {
   it('does not mutate the (frozen) base', () => {
     mergeFeatures(DEFAULT_LOGIN_FEATURES, { register: false })
     expect(DEFAULT_LOGIN_FEATURES.register).toBe(true)
+  })
+
+  it('merges the captcha overrides (default off)', () => {
+    expect(DEFAULT_LOGIN_FEATURES.captchaOnLogin).toBe(false)
+    expect(DEFAULT_LOGIN_FEATURES.captchaOnRegister).toBe(false)
+    expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captchaOnLogin: true }).captchaOnLogin).toBe(true)
+    expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captchaOnRegister: true }).captchaOnRegister).toBe(true)
   })
 })
 

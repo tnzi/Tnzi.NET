@@ -27,19 +27,21 @@
 import { computed, useSlots } from 'vue'
 import { useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
 import TPageHeader from './TPageHeader.vue'
+import type { BackTarget } from './backTarget'
 
 interface Props {
   title?: string
   icon?: string
   help?: string
   helpTitle?: string
-  back?: boolean | string
-  /** Force header on/off. Default: auto — on when a title (prop/route) or any header slot exists. */
+  /** Back affordance; `{ fallback }` = smart back (preferred for a drilled-into page). */
+  back?: BackTarget
+  /** Force header on/off. Default: auto - on when a title (prop/route) or any header slot exists. */
   showHeader?: boolean
   /** Render the header as a white surface card. Default true. */
   headerSurface?: boolean
   /** Wrap the body in a white surface card (for pages whose body is a single
-      bare content block). Default false — pages with their own cards leave it off. */
+      bare content block). Default false - pages with their own cards leave it off. */
   card?: boolean
   /** Body scroll behaviour. 'auto' = page scrolls (long-form); 'fill' = body flex-fills, inner element scrolls (tables); 'none' = no scroll mgmt. */
   scroll?: 'auto' | 'fill' | 'none'
@@ -94,7 +96,7 @@ const renderHeader = computed(() => {
   min-height: 0;
 }
 /* Body is a flex column with a 12px gap so stacked sections (KPI strip /
-   progress / table-card / etc.) keep their vertical rhythm — this replaces
+   progress / table-card / etc.) keep their vertical rhythm - this replaces
    the per-page `t-stack-page` gap the migrated pages used to rely on, so
    content no longer sticks to the header or to each other. */
 .t-content-page__body {
@@ -113,7 +115,11 @@ const renderHeader = computed(() => {
    matches the white header instead of sitting on the transparent canvas.
    Pages that render their own cards (dashboards, multi-section) leave it off. */
 .t-content-page__card {
-  background: var(--tnzi-container-bg, #fff);
+  /* Follows the theme drawer's "Card / List" background
+     (`--tnzi-admin-card-bg`) like every other content card; base container
+     color when unset. Dark-card text flip is handled by polish.css
+     (`[data-tnzi-card-tone]`). */
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   padding: 12px;

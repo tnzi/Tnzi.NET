@@ -5,7 +5,7 @@ using System.Text;
 namespace Tnzi.AI.Channels.Adapters.Dingtalk;
 
 /// <summary>
-/// 钉钉频道适配器 — 通过 HTTP REST API 收发消息，使用 Markdown 格式。
+/// 钉钉频道适配器 - 通过 HTTP REST API 收发消息，使用 Markdown 格式。
 /// </summary>
 /// <remarks>
 /// 使用纯 HTTP API 调用（无第三方 SDK 依赖）：
@@ -183,7 +183,7 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     public async Task<WebhookProcessResult> ProcessWebhookAsync(
         string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
     {
-        // 钉钉无 URL 验证握手 — 直接验签。配置了 VerifyWebhookSignature（默认 true）时，
+        // 钉钉无 URL 验证握手 - 直接验签。配置了 VerifyWebhookSignature（默认 true）时，
         // 缺少 timestamp/sign 头或签名不匹配一律拒绝。
         if (_options.VerifyWebhookSignature)
         {
@@ -319,7 +319,7 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             })
         };
 
-        // Set the access-token header per-request — the named HttpClient is pooled and its
+        // Set the access-token header per-request - the named HttpClient is pooled and its
         // DefaultRequestHeaders must not be mutated across concurrent sends (.Add throws on a
         // duplicate header name and the token changes on refresh).
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{NewApiBaseUrl}/v1.0/robot/oToMessages/batchSend")

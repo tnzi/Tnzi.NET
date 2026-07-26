@@ -2,7 +2,7 @@
  * Whether a code chip adds nothing next to a display name.
  *
  * Returns true when the name and code collapse to the same token once case and
- * separators are ignored — e.g. role "SuperAdmin" / "SUPERADMIN", module
+ * separators are ignored - e.g. role "SuperAdmin" / "SUPERADMIN", module
  * "Identity" / "identity", or a surface whose label fell back to its own code.
  * Callers hide the secondary `<code>` chip / tag when this is true so the same
  * word is not printed twice; a code that genuinely differs (e.g. label "Users"

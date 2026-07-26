@@ -36,11 +36,12 @@
     <EmbeddedResource Include="Resources\WelcomePage.html" />
   </ItemGroup>
 
+  <!-- 卫星程序集(语言目录)抑制:仅经 SatelliteResourceLanguages=en 属性(build/buildTransitive props)。
+       此机制仅对 NuGet PackageReference 消费者生效;跨仓 ProjectReference 消费者需在自己的
+       Directory.Build.props 里设置同名属性(见 docs/coding-standards/program.md)。 -->
   <ItemGroup>
     <None Include="build\Tnzi.AspNetCore.props" Pack="true" PackagePath="build/" />
-    <None Include="build\Tnzi.AspNetCore.targets" Pack="true" PackagePath="build/" />
     <None Include="buildTransitive\Tnzi.AspNetCore.props" Pack="true" PackagePath="buildTransitive/" />
-    <None Include="buildTransitive\Tnzi.AspNetCore.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
 
 </Project>

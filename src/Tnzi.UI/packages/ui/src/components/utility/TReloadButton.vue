@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TReloadButton` — refresh icon with a spin-during-loading affordance.
+ * `TReloadButton` - refresh icon with a spin-during-loading affordance.
  *
  * Self-contained: clicks emit `reload`, the consumer flips `loading` (or
  * passes a promise via `onReload`) and the icon rotates 360 degrees once
@@ -12,7 +12,7 @@ import TButtonIcon from '../display/TButtonIcon.vue'
 interface Props {
   /** External loading flag (controlled mode). */
   loading?: boolean
-  /** Async callback — when set, click awaits it and spins automatically. */
+  /** Async callback - when set, click awaits it and spins automatically. */
   onReload?: () => Promise<void>
   translate?: (key: string) => string
 }

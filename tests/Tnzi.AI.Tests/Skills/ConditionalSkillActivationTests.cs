@@ -4,11 +4,11 @@ using Tnzi.AI.Skills.Models;
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// 条件激活 — 资源路径 glob 匹配测试
+/// 条件激活 - 资源路径 glob 匹配测试
 /// </summary>
 public class ConditionalSkillActivationTests
 {
-    #region GlobMatch — Exact Match
+    #region GlobMatch - Exact Match
 
     [Fact]
     public void GlobMatch_ExactMatch_ReturnsTrue()
@@ -24,7 +24,7 @@ public class ConditionalSkillActivationTests
 
     #endregion
 
-    #region GlobMatch — Star Wildcard
+    #region GlobMatch - Star Wildcard
 
     [Fact]
     public void GlobMatch_StarWildcard_MatchesAnyFile()
@@ -53,7 +53,7 @@ public class ConditionalSkillActivationTests
 
     #endregion
 
-    #region GlobMatch — Double Star Wildcard
+    #region GlobMatch - Double Star Wildcard
 
     [Fact]
     public void GlobMatch_DoubleStarWildcard_MatchesRecursive()
@@ -82,7 +82,7 @@ public class ConditionalSkillActivationTests
 
     #endregion
 
-    #region GlobMatch — No Match
+    #region GlobMatch - No Match
 
     [Fact]
     public void GlobMatch_NoMatch_ReturnsFalse()

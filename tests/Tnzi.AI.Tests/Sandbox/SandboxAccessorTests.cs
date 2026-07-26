@@ -3,7 +3,7 @@ using Tnzi.AI.Sandbox.Services;
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
-/// F8: explicit sandbox entry point — ISandboxAccessor exposes the active
+/// F8: explicit sandbox entry point - ISandboxAccessor exposes the active
 /// sandbox published by SandboxMiddleware, replacing direct AsyncLocal reads.
 /// </summary>
 public class SandboxAccessorTests

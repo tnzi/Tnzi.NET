@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services.Interfaces;
 
 /// <summary>
-/// RAG 查询引擎 — 单轮 Q&amp;A（无历史上下文）
+/// RAG 查询引擎 - 单轮 Q&amp;A（无历史上下文）
 /// <para>
 /// 流程：IRagRetriever.RetrieveAsync → 格式化上下文 → 单次 LLM 调用 → 返回回答 + 引用。
 /// 适用于独立问答场景，不维护对话历史。

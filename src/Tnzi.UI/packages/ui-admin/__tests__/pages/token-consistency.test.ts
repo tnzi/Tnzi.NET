@@ -8,8 +8,8 @@ import { join, sep } from 'path'
  * that fell back to hardcoded #06B6D4 cyan instead of following the user's
  * primary color.
  *
- * Rationale: a regression here re-introduces the issue the user reported —
- * "用量统计页面没有白色背景容器 / 评测页面外边距偏大" — where every
+ * Rationale: a regression here re-introduces the issue the user reported -
+ * "用量统计页面没有白色背景容器 / 评测页面外边距偏大" - where every
  * custom page used a parallel set of tokens whose fallbacks happened to
  * render as cyan, hiding the fact they never reacted to theme changes.
  *
@@ -25,7 +25,7 @@ interface BadToken {
 }
 
 const BANNED_TOKENS: BadToken[] = [
-  // -color suffix variants — these have no entry in @tnzi/ui variables.css.
+  // -color suffix variants - these have no entry in @tnzi/ui variables.css.
   { pattern: /--tnzi-primary-color(?!-rgb)\b/, reason: 'use --tnzi-primary (no -color suffix)' },
   { pattern: /--tnzi-success-color\b/, reason: 'use --tnzi-success' },
   { pattern: /--tnzi-warning-color\b/, reason: 'use --tnzi-warning' },
@@ -34,8 +34,8 @@ const BANNED_TOKENS: BadToken[] = [
   // -base-* variants superseded by the canonical names.
   { pattern: /--tnzi-base-border\b/, reason: 'use --tnzi-border' },
   { pattern: /--tnzi-base-fill\b/, reason: 'use --tnzi-layout-bg or --tnzi-container-bg' },
-  { pattern: /--tnzi-font-family-mono\b/, reason: 'use the literal font-stack — no token shipped' },
-  // primary-color-suppl was an aliased rgba — replaced by inline rgb(... / alpha).
+  { pattern: /--tnzi-font-family-mono\b/, reason: 'use the literal font-stack - no token shipped' },
+  // primary-color-suppl was an aliased rgba - replaced by inline rgb(... / alpha).
   { pattern: /--tnzi-primary-color-suppl\b/, reason: 'use rgb(var(--tnzi-primary-rgb) / 0.XX)' },
   // Stray --t-* tokens left over from initial scaffolding (no namespace prefix).
   { pattern: /--t-border\b/, reason: 'use --tnzi-border' },
@@ -62,7 +62,7 @@ describe('page CSS token consistency', () => {
   })
 
   for (const banned of BANNED_TOKENS) {
-    it(`no page references ${banned.pattern.source} — ${banned.reason}`, () => {
+    it(`no page references ${banned.pattern.source} - ${banned.reason}`, () => {
       const offenders: string[] = []
       for (const file of files) {
         const content = readFileSync(file, 'utf8')

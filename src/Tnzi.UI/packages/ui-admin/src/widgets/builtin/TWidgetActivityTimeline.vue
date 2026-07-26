@@ -1,17 +1,18 @@
 <script setup lang="ts">
 /**
- * `TWidgetActivityTimeline` — widget wrapping TProjectTimeline.
+ * `TWidgetActivityTimeline` - widget wrapping TProjectTimeline.
  *
  * Hybrid data model:
- *   - **Props mode** — consumer passes `items: TimelineItem[]` (e.g. a
+ *   - **Props mode** - consumer passes `items: TimelineItem[]` (e.g. a
  *     curated "what's new" list) and the widget renders them as-is.
- *   - **Auto-fetch mode** — consumer omits `items` (default in
+ *   - **Auto-fetch mode** - consumer omits `items` (default in
  *     `defaultWorkbenchWidgets()`) and the widget pulls the most recent
  *     audit log entries via `audit-bridge.logs.fetch(...)`, translating
  *     each entry into a TimelineItem. The Audit module ships with every
  *     `HostingModule` app, so this gives the bundled Workbench a
  *     genuinely live activity feed instead of canned i18n placeholders.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, ref } from 'vue'
 import TProjectTimeline from '../../components/dashboard/TProjectTimeline.vue'
 import type { TimelineItem, TimelineTone } from '../../components/dashboard/TProjectTimeline.vue'
@@ -79,7 +80,7 @@ useWidgetData(async () => {
     dynamicItems.value = (result.items ?? []).map((raw, index) => {
       const r = raw as unknown as Record<string, unknown>
       const user = String(r.userName ?? r.userId ?? 'system')
-      const action = String(r.functionName ?? r.action ?? '—')
+      const action = String(r.functionName ?? r.action ?? EMPTY_DASH)
       return {
         key: String(r.id ?? `audit-${index}`),
         title: `${user} · ${action}`,
@@ -89,7 +90,7 @@ useWidgetData(async () => {
       } as TimelineItem
     })
   } catch {
-    // Audit module not loaded or permission denied — leave empty so the
+    // Audit module not loaded or permission denied - leave empty so the
     // template shows the empty-state copy without throwing.
     dynamicItems.value = []
   }

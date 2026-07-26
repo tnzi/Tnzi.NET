@@ -1,15 +1,15 @@
 <script setup lang="ts">
 /**
- * `TAdminRouterView` — drop-in `<router-view>` replacement that wires up the
+ * `TAdminRouterView` - drop-in `<router-view>` replacement that wires up the
  * three pieces an admin shell needs but that `<router-view>` doesn't give
  * out of the box:
  *
- *   1. `<KeepAlive>` caching — toggled per-route via `meta.keepAlive`,
+ *   1. `<KeepAlive>` caching - toggled per-route via `meta.keepAlive`,
  *      with a max-cache prop (`max`) so the cache doesn't grow forever.
  *      Excluded route names (e.g. login, 404) can be passed in `exclude`.
- *   2. `<Transition>` page transitions — uses the same `tnzi-` keyframe
+ *   2. `<Transition>` page transitions - uses the same `tnzi-` keyframe
  *      family as TAdminContent (fade-slide default, six built-in).
- *   3. `appStore.reloadFlag` reactivity — when the consumer clicks the
+ *   3. `appStore.reloadFlag` reactivity - when the consumer clicks the
  *      header reload button, this view tears down and re-mounts the
  *      current route, blowing the keep-alive cache for that slot.
  *
@@ -57,7 +57,7 @@ const resolvedTransition = computed(() => {
   return `tnzi-${name}`
 })
 
-// The cache include list — route names whose meta.keepAlive is not strictly
+// The cache include list - route names whose meta.keepAlive is not strictly
 // false, are not in `exclude`, and have a name we can use as the cache key.
 const includedNames = computed<string[]>(() => {
   const list: string[] = []
@@ -85,7 +85,7 @@ const wrapperKey = computed(() =>
  * Multi-instance routes (detail pages with dynamic params, or `meta.multiTab`
  * deep-links) key by their per-instance key (param routes → `path`, so volatile
  * `?section=` deep-links don't remount; multiTab+query → `fullPath`) so customer
- * A's detail and customer B's detail mount as SEPARATE component instances —
+ * A's detail and customer B's detail mount as SEPARATE component instances -
  * without this they share one instance (same route name) and B's page would
  * render A's stale data. This stays in lockstep with the tab store's id so a tab
  * and its component instance map 1:1.
@@ -95,7 +95,7 @@ function keyOf(r: RouteLocationNormalizedLoaded): string {
   return (typeof r.name === 'string' ? r.name : undefined) ?? r.fullPath
 }
 
-// Defensive: log a hint if no name attached to current route — keep-alive
+// Defensive: log a hint if no name attached to current route - keep-alive
 // silently skips those entries.
 watchEffect(() => {
   if (typeof route.name === 'string') return
@@ -106,7 +106,7 @@ watchEffect(() => {
 <template>
   <!-- Phase H3 L2 reverted (page-render regression): wrapping the
        lazy `defineAsyncComponent` routes with Suspense + KeepAlive
-       caused the router to stay in a permanent loading state — the
+       caused the router to stay in a permanent loading state - the
        async component setup never resolved inside the nested
        Suspense + KeepAlive + v-if combination. The route progress
        bar stayed at "on" forever and the content area rendered an
@@ -115,7 +115,7 @@ watchEffect(() => {
        component. First-visit splash can come back later as a
        targeted enhancement once we move the route definitions away
        from `defineAsyncComponent()` (Vue Router also warns about
-       this — see the routes.ts cleanup follow-up). -->
+       this - see the routes.ts cleanup follow-up). -->
   <!-- Phase: route-async + Transition + KeepAlive interplay (P0).
        The previous shape (`<Transition mode="out-in"><KeepAlive
        :include><component :is :v-if :key></KeepAlive></Transition>`)
@@ -124,7 +124,7 @@ watchEffect(() => {
        waits for leave to finish before enter, but the new entry is
        still resolving its async chunk while Transition's leave/enter
        state machine and KeepAlive's :include matching race each other,
-       producing a permanent leave-pending state — old DOM stays
+       producing a permanent leave-pending state - old DOM stays
        mounted, new DOM never appears, URL is already the new path.
 
        Dropping `mode` (so enter/leave run together) only made it
@@ -132,7 +132,7 @@ watchEffect(() => {
        because leave never resolved its class transitions.
 
        Fix: split Transition and KeepAlive cleanly. KeepAlive lives
-       inside RouterView's slot but Transition is dropped — the
+       inside RouterView's slot but Transition is dropped - the
        `:key="r.fullPath"` already drives the right unmount/mount on
        navigation, and KeepAlive's `:include` reactivates cached
        instances by component name. Without the Transition wrapper the

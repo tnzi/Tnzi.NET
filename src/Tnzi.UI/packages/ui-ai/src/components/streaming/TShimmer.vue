@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TShimmer — Gradient sweep animation overlay
+ * TShimmer - Gradient sweep animation overlay
  *
  * Wraps slot content with a shimmer gradient animation.
  */

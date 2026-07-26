@@ -14,6 +14,11 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     private const string CacheKeyPrefix = "SlidingCaptcha:";
     private const string FailureCacheKeyPrefix = "captcha:failures:";
 
+    /// <summary>
+    /// 失败计数的保留窗口（分钟）：超过这个时间没有新的失败即视为重新开始
+    /// </summary>
+    private const int FailureWindowMinutes = 30;
+
     public SlidingCaptchaService(
         IServiceProvider serviceProvider,
         IOptions<ImagingOptions> imagingOptions,
@@ -54,8 +59,12 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         // 立即删除（一次性使用，防止 TOCTOU）
         await _cache.RemoveAsync(cacheKey, cancellationToken);
 
+        // 容差由生成时的服务端决策说话：自适应难度调紧的容差、以及配置里的
+        // SlidingCaptcha.Tolerance 都随令牌一起存下，验证时优先采用；
+        // 只有旧令牌（未带容差）才回退到入参。
+        var effectiveTolerance = storedData.Tolerance > 0 ? storedData.Tolerance : tolerance;
         var diff = Math.Abs(userX - storedData.CorrectX);
-        var isSuccess = diff <= tolerance;
+        var isSuccess = diff <= effectiveTolerance;
 
         // 更新失败计数
         if (!string.IsNullOrEmpty(storedData.ClientId))
@@ -97,7 +106,9 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         {
             Width = baseOptions.Width,
             Height = baseOptions.Height,
-            PieceSize = pieceSize,
+            // 难度只会把拼图块变小（更难），不能超过配置的基线尺寸：
+            // 基线是被 ImagingOptionsValidator 校验过与 Width/Height 相容的那个值
+            PieceSize = Math.Min(baseOptions.PieceSize, pieceSize),
             Tolerance = tolerance,
             ExpirationMinutes = baseOptions.ExpirationMinutes
         };
@@ -141,11 +152,16 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         // 生成拼图路径
         var puzzlePath = CreateJigsawPath(correctX, pieceY, pieceSize);
 
+        // 背景与拼图块必须画出逐像素相同的底图，否则拼图块和缺口对不上、验证码不可解。
+        // 两次渲染各自用同一个种子新建 Random：共享一个 Random 实例会因序列已被第一次
+        // 渲染推进而画出完全不同的渐变和装饰元素。
+        var backgroundSeed = random.Next();
+
         // 生成背景图片
-        var backgroundBase64 = GenerateBackgroundImage(width, height, puzzlePath, correctX, pieceY, pieceSize, addNoise, random);
+        var backgroundBase64 = GenerateBackgroundImage(width, height, puzzlePath, addNoise, new Random(backgroundSeed));
 
         // 生成拼图块图片
-        var puzzlePieceBase64 = GeneratePuzzlePiece(width, height, puzzlePath, correctX, pieceY, pieceSize, random);
+        var puzzlePieceBase64 = GeneratePuzzlePiece(width, height, puzzlePath, new Random(backgroundSeed));
 
         // 生成令牌并存储
         var token = Guid.NewGuid().ToString("N");
@@ -155,6 +171,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             var storedData = new SlidingCaptchaStoredData
             {
                 CorrectX = correctX,
+                Tolerance = options.Tolerance,
                 ClientId = clientId
             };
             var cacheKey = GetCacheKey(token);
@@ -207,7 +224,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     /// <summary>
     /// 生成背景图片（含缺口）
     /// </summary>
-    private static string GenerateBackgroundImage(int width, int height, IPath puzzlePath, int correctX, int pieceY, int pieceSize, bool addNoise, Random random)
+    private static string GenerateBackgroundImage(int width, int height, IPath puzzlePath, bool addNoise, Random random)
     {
         using var image = new Image<Rgba32>(width, height);
 
@@ -238,9 +255,13 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     /// <summary>
     /// 生成拼图块图片
     /// </summary>
-    private static string GeneratePuzzlePiece(int width, int height, IPath puzzlePath, int correctX, int pieceY, int pieceSize, Random random)
+    /// <remarks>
+    /// <paramref name="random"/> 必须与 <see cref="GenerateBackgroundImage"/> 用同一个种子新建，
+    /// 这样这里重画的完整底图才与背景逐像素一致（拼图块即背景缺口处被抠出的那一块）。
+    /// </remarks>
+    private static string GeneratePuzzlePiece(int width, int height, IPath puzzlePath, Random random)
     {
-        // 先生成完整背景（与主背景一致）
+        // 重画一份与主背景相同的完整底图（同种子 ⇒ 同渐变、同装饰元素）
         using var fullImage = new Image<Rgba32>(width, height);
 
         fullImage.Mutate(ctx =>
@@ -407,8 +428,16 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     {
         if (_cache == null) return;
         var key = $"{FailureCacheKeyPrefix}{clientId}";
-        var current = await _cache.GetAsync<int>(key, cancellationToken);
-        await _cache.SetAsync(key, current + 1, TimeSpan.FromMinutes(30), cancellationToken);
+        try
+        {
+            // 原子递增：读-改-写在并发失败时会互相覆盖，导致难度升不上去（正是暴力破解的场景）
+            await _cache.IncrementAsync(key, 1, TimeSpan.FromMinutes(FailureWindowMinutes), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // 计数只驱动难度自适应；缓存故障不应把一次正常的"验证失败"变成 500
+            Logger.LogWarning(ex, "Failed to increment sliding captcha failure count for client {ClientId}", clientId);
+        }
     }
 
     /// <summary>
@@ -433,6 +462,11 @@ internal class SlidingCaptchaStoredData
     /// 正确的 X 坐标
     /// </summary>
     public int CorrectX { get; set; }
+
+    /// <summary>
+    /// 生成时决定的验证容差（像素）。0 表示未记录（旧令牌），验证时回退到调用方入参。
+    /// </summary>
+    public int Tolerance { get; set; }
 
     /// <summary>
     /// 客户端标识（用于自适应难度）

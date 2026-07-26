@@ -5,7 +5,7 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// MemoryEntry 精确重复硬防线集成测试 — (Scope, ContentHash) 过滤唯一索引 +
+/// MemoryEntry 精确重复硬防线集成测试 - (Scope, ContentHash) 过滤唯一索引 +
 /// DatabaseMemoryStore 写入路径的哈希填充与插入前查重。
 /// 使用 SQLite 内存库 + 真实 EFCoreRepository（镜像 AgentGrantServiceTests 的自包含模式），
 /// 因为唯一索引约束必须经过真实的 DDL/写入管道验证。
@@ -46,7 +46,7 @@ public class DatabaseMemoryStoreDedupTests : IDisposable
     }
 
     // =====================================================================
-    // 1. 重复写只落一行（Append 路径 — 插入前查重）
+    // 1. 重复写只落一行（Append 路径 - 插入前查重）
     // =====================================================================
 
     [Fact]
@@ -150,7 +150,7 @@ public class DatabaseMemoryStoreDedupTests : IDisposable
     [Fact]
     public async Task UniqueIndex_NullContentHash_LegacyRowsNotConstrained()
     {
-        // 既有行（无哈希）不参与唯一约束 — 过滤索引排除 NULL
+        // 既有行（无哈希）不参与唯一约束 - 过滤索引排除 NULL
         _context.Set<MemoryEntry>().AddRange(
             new MemoryEntry { Scope = "legacy", Content = "same legacy content", ContentHash = null },
             new MemoryEntry { Scope = "legacy", Content = "same legacy content", ContentHash = null });
@@ -192,7 +192,7 @@ public class DatabaseMemoryStoreDedupTests : IDisposable
     }
 
     // =====================================================================
-    // 5. AgentMemoryService（admin 写路径）— 重复创建 409
+    // 5. AgentMemoryService（admin 写路径）- 重复创建 409
     // =====================================================================
 
     [Fact]
@@ -217,7 +217,7 @@ public class DatabaseMemoryStoreDedupTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 仅注册 MemoryEntry（含 (Scope, ContentHash) 过滤唯一索引）。
+/// 测试专用 DbContext - 仅注册 MemoryEntry（含 (Scope, ContentHash) 过滤唯一索引）。
 /// </summary>
 internal sealed class MemoryDedupDbContext : TnziDbContext<MemoryDedupDbContext>
 {

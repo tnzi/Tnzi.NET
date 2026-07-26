@@ -238,7 +238,7 @@ public class WorkflowServiceCheckpointIntegrationTests
 
         var result = await service.ResumeAsync(executionId);
 
-        // The losing writer gets 409 Conflict — the engine never ran (no checkpoint save).
+        // The losing writer gets 409 Conflict - the engine never ran (no checkpoint save).
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(409);
         checkpointStore.Verify(

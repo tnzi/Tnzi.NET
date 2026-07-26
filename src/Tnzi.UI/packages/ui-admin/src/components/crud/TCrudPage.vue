@@ -34,6 +34,7 @@
           :row-actions-max-inline="rowActionsMaxInline"
           :row-actions-collapse="rowActionsCollapse"
           :row-key="rowKey"
+          :row-props="rowProps"
           :translate="translate"
         >
           <template v-if="$slots.rowActions" #rowActions="{ row }">
@@ -128,7 +129,7 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   rowKey?: (row: T) => TId
   /** `page` (default) fills the page height; `container` is content-sized. */
   mode?: 'page' | 'container'
-  /** When false the shell's white header card is not rendered — for pages that
+  /** When false the shell's white header card is not rendered - for pages that
       nest the CRUD block under an outer header (e.g. inside TContentPage tabs)
       where the shell's TPageHeader would duplicate the title bar. */
   showHeader?: boolean
@@ -151,7 +152,7 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   detailWidth?: number | string
   /** Title for the view drawer, derived from the viewed record. */
   detailTitle?: (data: T) => string
-  /** Explicit operation-column width. When set it always wins — including
+  /** Explicit operation-column width. When set it always wins - including
       over the declarative `rowActions` auto-estimate. Leave unset (default)
       to let declarative actions auto-size the column; the legacy
       `#rowActions` slot falls back to a fixed 150px when unset. */
@@ -162,8 +163,15 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   rowActions?: RowAction<T>[]
   /** Max inline action slots before the tail collapses into More▾ (default 2). */
   rowActionsMaxInline?: number
-  /** Disable action collapsing — render every action inline (default true → collapse on). */
+  /** Disable action collapsing - render every action inline (default true → collapse on). */
   rowActionsCollapse?: boolean
+  /**
+   * Per-row attributes, forwarded to the table AND the mobile card list. The
+   * common use is a drill-in: `(row) => ({ style: 'cursor:pointer', onClick:
+   * () => open(row) })`. Prefer this over making one column a link when the
+   * whole row represents one record the reader wants to open.
+   */
+  rowProps?: (row: T) => Record<string, unknown>
   titleHelp?: string
   titleHelpTitle?: string
   translate?: (key: string) => string
@@ -187,7 +195,7 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   formModalWidth: 560,
   detailWidth: 640,
   detailTitle: undefined,
-  // No default width — undefined lets the renderer auto-size declarative
+  // No default width - undefined lets the renderer auto-size declarative
   // rowActions (the old fixed 150 was the source of clipped action cells).
   rowActionsWidth: undefined,
   rowActions: undefined,

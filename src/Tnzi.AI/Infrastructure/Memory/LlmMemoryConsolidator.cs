@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Memory;
 
 /// <summary>
-/// LLM 驱动的记忆合并器 — 通过语义比对决定 ADD/UPDATE/DELETE/NOOP
+/// LLM 驱动的记忆合并器 - 通过语义比对决定 ADD/UPDATE/DELETE/NOOP
 /// </summary>
 /// <remarks>
 /// 所有失败（LLM 超时、速率限制、网络错误、空响应、无效 JSON）均降级为 Add。

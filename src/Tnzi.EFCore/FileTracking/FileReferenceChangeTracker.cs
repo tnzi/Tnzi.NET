@@ -27,19 +27,21 @@ public class FileReferenceChangeTracker
                 continue;
 
             var entityType = entry.Entity.GetType();
-            var entityTypeName = entityType.Name;
-            var entityId = GetEntityId(entry);
 
-            if (string.IsNullOrEmpty(entityId))
-                continue;
-
-            // 获取标记了 FileField 的属性（使用缓存）
+            // 先做带缓存的 [FileField] 判定：绝大多数实体没有文件字段，
+            // 提前退出可避免对每个变更实体都走一遍 GetEntityId 的未缓存反射（SaveChanges 热路径）
             var fileFieldProperties = _fileFieldCache.GetOrAdd(entityType, type =>
                 type.GetProperties()
                     .Where(p => p.GetCustomAttribute<FileFieldAttribute>() != null)
                     .ToArray());
 
             if (fileFieldProperties.Length == 0)
+                continue;
+
+            var entityTypeName = entityType.Name;
+            var entityId = GetEntityId(entry);
+
+            if (string.IsNullOrEmpty(entityId))
                 continue;
 
             foreach (var property in fileFieldProperties)
@@ -167,12 +169,14 @@ public class FileReferenceChangeTracker
     /// </summary>
     public bool HasChanges => _changes.Count > 0;
 
-    private static readonly List<Guid> EmptyGuidList = [];
+    // 只读空实例：曾经是共享的可变 List<Guid> 并作为 List<Guid> 返回，
+    // 调用方一次 Add 就会污染进程内所有后续解析结果
+    private static readonly IReadOnlyList<Guid> EmptyGuidList = Array.Empty<Guid>();
 
     /// <summary>
     /// 解析文件ID
     /// </summary>
-    private static List<Guid> ParseFileIds(object? value, bool isMultiple)
+    private static IReadOnlyList<Guid> ParseFileIds(object? value, bool isMultiple)
     {
         if (value == null)
             return EmptyGuidList;

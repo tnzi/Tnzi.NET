@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TModelSelector — Model selection dialog with search filtering
+ * TModelSelector - Model selection dialog with search filtering
  */
 
 import { NModal, NInput, NButton } from 'naive-ui';

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// WorkflowEngine — 条件边路由、循环处理、检查点、Run 节点管理等辅助方法
+/// WorkflowEngine - 条件边路由、循环处理、检查点、Run 节点管理等辅助方法
 /// </summary>
 public partial class WorkflowEngine
 {
@@ -42,7 +42,7 @@ public partial class WorkflowEngine
             // Runtime backstop for interrupt/HITL nodes. The static HasHitlNode entry guard
             // only catches declared approval nodes (RequiresApproval / nodeType=approval);
             // a custom node can raise an interrupt via CheckInterruptAsync without those
-            // markers. Any interrupt needs a checkpoint store to persist resumable state —
+            // markers. Any interrupt needs a checkpoint store to persist resumable state, and
             // non-DAG modes have none, so setting an awaiting state here would break with no
             // way to resume (silent hang). Fail fast instead.
             if (checkpointStore == null)
@@ -53,22 +53,18 @@ public partial class WorkflowEngine
             }
 
             awaitingInterrupt = result.AwaitingInterrupt;
+            checkpointCreatedAt ??= DateTime.UtcNow;
 
-            // Approval 类型中断保持向后兼容
+            // Approval 类型中断保持向后兼容（checkpointStore 已由上方守卫保证非 null）
             if (awaitingInterrupt.Type == InterruptType.Approval)
             {
                 awaitingApproval = true;
                 awaitingApprovalStepId = stepId;
-                if (checkpointStore != null)
-                {
-                    checkpointCreatedAt ??= DateTime.UtcNow;
-                    await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                        WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
-                }
+                await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
+                    WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
             }
-            else if (checkpointStore != null)
+            else
             {
-                checkpointCreatedAt ??= DateTime.UtcNow;
                 await SaveCheckpointWithInterruptAsync(checkpointStore, executionId, state, completed,
                     awaitingInterrupt, checkpointCreatedAt, cancellationToken);
             }
@@ -212,7 +208,7 @@ public partial class WorkflowEngine
             }
 
             // Nodes belonging to a currently-active loop must NOT be force-marked completed by
-            // branch pruning — loop iteration (HandleLoop) owns their completion lifecycle by
+            // branch pruning: loop iteration (HandleLoop) owns their completion lifecycle by
             // removing them from `completed` to re-run. A loop is "active" when it contains the
             // routing node (fromNodeId) or the selected target. Without this guard, an alternate
             // branch node that happens to live inside the active loop would be wrongly skipped,
@@ -240,7 +236,7 @@ public partial class WorkflowEngine
                         continue;
                     }
 
-                    // Skip nodes inside an active loop — leave their state to HandleLoop.
+                    // Skip nodes inside an active loop: leave their state to HandleLoop.
                     if (activeLoopNodes.Contains(downstream))
                     {
                         _logger.LogDebug("Conditional edge: not skipping '{Node}' (member of an active loop)", downstream);
@@ -359,7 +355,7 @@ public partial class WorkflowEngine
     /// 空/纯空白 = 无条件 → 执行；非空时仅白名单 "true"/"1"/"yes" 判真；
     /// 含未解析模板占位符（{{...}}）或任意其他文本（如 LLM 自由输出）一律判假并告警。
     /// <para>
-    /// 注意：这与 <see cref="Nodes.ConditionalNode"/> 的 <c>ResolveRouteValue</c> 语义不同——
+    /// 注意：这与 <see cref="Nodes.ConditionalNode"/> 的 <c>ResolveRouteValue</c> 语义不同：
     /// 本方法决定「节点是否执行」（布尔门控，fail-closed）；<c>ResolveRouteValue</c> 决定
     /// 「条件边路由到哪个目标节点」（自由值路由键解析）。两者职责不可互换。
     /// </para>

@@ -28,8 +28,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
     <!-- 可选渲染子模块：支票打印测试注册并断言真实 PdfSharpCheckRenderer 的 PDF 输出 -->
     <ProjectReference Include="..\..\src\Tnzi.Finance.Documents\Tnzi.Finance.Documents.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" />
   </ItemGroup>
 
   <ItemGroup>

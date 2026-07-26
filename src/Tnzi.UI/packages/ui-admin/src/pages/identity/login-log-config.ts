@@ -5,7 +5,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * Login log search fields — align with backend `LoginLogQueryDto`:
+ * Login log search fields - align with backend `LoginLogQueryDto`:
  * `userId` / `ipAddress` / `startDate` / `endDate` / `isSuccess`.
  */
 export const loginLogSearchFields: FormSchemaItem[] = [
@@ -61,7 +61,7 @@ export const loginLogColumns: ColumnDef<LoginLogRow>[] = [
   },
 ]
 
-// View-mode form (read-only detail panel — login logs are immutable).
+// View-mode form (read-only detail panel - login logs are immutable).
 export const loginLogFormSchema: FormSchemaItem[] = [
   { key: 'userName', labelKey: 'form.userName', label: 'Username', type: 'text' },
   { key: 'ipAddress', labelKey: 'form.ipAddress', label: 'IP Address', type: 'text' },

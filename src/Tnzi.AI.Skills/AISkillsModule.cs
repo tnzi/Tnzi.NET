@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// AI 技能管理模块 — 提供技能注册、搜索、模板引擎、约束执行等功能
+/// AI 技能管理模块 - 提供技能注册、搜索、模板引擎、约束执行等功能
 /// </summary>
 [DependsOn(typeof(AIModule))]
 public class AISkillsModule : TnziApplicationModule
@@ -10,6 +10,13 @@ public class AISkillsModule : TnziApplicationModule
     /// 加载顺序（在 AIModule(50) 之后）
     /// </summary>
     public override int LoadOrder => 51;
+
+    /// <summary>
+    /// 表名前缀 - 与 AIModule 及其它 AI 子模块统一为 "AI"。
+    /// 本模块的 SkillEntity/SkillCategory 与 AI_Agent/AI_UsageLog 等注册进同一主库 DbContext，
+    /// 必须共用 AI_ 前缀（表名解析按实体所在程序集匹配同程序集模块，故前缀须在本模块声明）。
+    /// </summary>
+    public override string? TableNamePrefix => "AI";
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {

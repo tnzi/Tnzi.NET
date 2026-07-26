@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TFileExplorer` — Finder-style icon grid for the Storage file manager.
+ * `TFileExplorer` - Finder-style icon grid for the Storage file manager.
  *
  * Renders the current directory's sub-folders and files as tiles:
  *  - folder tile: double-click to drill in, drop target for move/upload
@@ -54,7 +54,10 @@ const selectedSet = computed(() => new Set(props.selectedFileIds))
 const isEmpty = computed(() => !props.folders.length && !props.files.length)
 
 function thumbUrl(file: FileRecordDto): string | null {
-  if (file.thumbnailUrl) return file.thumbnailUrl
+  // There is no `thumbnailUrl` on the wire: the backend's FileRecordDto never
+  // carried one, so the branch that used to check it here could never be taken
+  // and thumbnails silently never rendered. The preview endpoint is the only
+  // real source.
   if (isImageType(file.contentType) && props.previewUrl) return props.previewUrl(file.id)
   return null
 }

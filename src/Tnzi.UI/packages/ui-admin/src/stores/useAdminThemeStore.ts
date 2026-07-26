@@ -1,15 +1,16 @@
 import { defineStore } from 'pinia'
-import { hasInjectionContext, inject, ref, watch } from 'vue'
+import { computed, hasInjectionContext, inject, ref, watch } from 'vue'
 import { THEME_CONTEXT_KEY } from '@tnzi/ui'
+import { surfaceTone, isDarkSurface, type SurfaceTone } from '../theme/surfaceTone'
 import 'pinia-plugin-persistedstate'
 
 /**
- * Admin layout modes — 4 variants modeled after soybean-admin.
+ * Admin layout modes - 4 variants modeled after soybean-admin.
  *
- * - `vertical`              — left sidebar (default)
- * - `horizontal`            — top menu only, no sidebar
- * - `vertical-mix`          — narrow first-level sidebar + sub-sidebar with children
- * - `top-hybrid-header-first` — top first-level menu + sidebar with the active
+ * - `vertical` - left sidebar (default)
+ * - `horizontal` - top menu only, no sidebar
+ * - `vertical-mix` - narrow first-level sidebar + sub-sidebar with children
+ * - `top-hybrid-header-first` - top first-level menu + sidebar with the active
  *                               first-level's children (sider hides when it has none)
  *
  * The two header-first/sidebar-first hybrid variants soybean ships were
@@ -17,7 +18,7 @@ import 'pinia-plugin-persistedstate'
  * sider whenever the active first-level had no children (e.g. the Dashboard
  * landing page), and `top-hybrid-sidebar-first` double-rendered the menu
  * (full tree in the sider + second level in the header). Both are redundant
- * under Tnzi's wide-but-shallow (11 top-level × 2 deep) menu — they only pay
+ * under Tnzi's wide-but-shallow (11 top-level × 2 deep) menu - they only pay
  * off with soybean's 3-level menus.
  */
 export type AdminLayoutMode =
@@ -44,17 +45,17 @@ export type PageTransition =
   | 'zoom'
   | 'none'
 
-// Phase G — soybean ships three tab styles: chrome (SVG-arc tabs),
+// Phase G - soybean ships three tab styles: chrome (SVG-arc tabs),
 // button (rounded-rect chip with border), slider (transparent chip with
 // 2px primary bottom border on active). Phase C accidentally dropped
-// 'slider' on the assumption that it was visually identical to chrome —
+// 'slider' on the assumption that it was visually identical to chrome -
 // the diagnosis G2 confirmed slider is independent (no SVG arc, the
 // active accent is a 2px bottom border + 10% primary bg fill).
 export type TabStyle = 'chrome' | 'button' | 'slider'
 
 /**
  * Theme color schema (light / dark / auto). The LIVE value is owned by the
- * `@tnzi/ui` theme context (`settings.mode` — header cycle button and theme
+ * `@tnzi/ui` theme context (`settings.mode` - header cycle button and theme
  * drawer mutate it via `setMode`), but that context has no persistence of its
  * own, so a dark-mode choice used to revert to the app default on every full
  * page reload. This store keeps a persisted mirror and replays it into the
@@ -103,7 +104,7 @@ const DEFAULT_WATERMARK: WatermarkSettings = {
 }
 
 /**
- * Admin theme store — admin-specific theme knobs on top of the base theme
+ * Admin theme store - admin-specific theme knobs on top of the base theme
  * system from `@tnzi/ui` (which owns color tokens + dark mode).
  *
  * This store does NOT own color state. It owns admin-specific layout toggles:
@@ -119,7 +120,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // Layout mode
   const layoutMode = ref<AdminLayoutMode>('vertical')
 
-  // Theme schema (light / dark / auto) — persisted mirror of the theme
+  // Theme schema (light / dark / auto) - persisted mirror of the theme
   // context's `settings.mode`; see the `AdminThemeSchema` type doc above.
   const themeSchema = ref<AdminThemeSchema | null>(null)
 
@@ -137,10 +138,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const footerVisible = ref(true)
   const breadcrumbVisible = ref(true)
 
-  // Sizing — 4-tier sider width system (matches soybean-admin).
+  // Sizing - 4-tier sider width system (matches soybean-admin).
   // 240px chosen so 16-char menu labels (e.g. "Organization Management",
   // "Session Management") fit without truncation. Soybean uses 220px but
-  // its labels are 4-char CJK strings — Tnzi's English labels need more
+  // its labels are 4-char CJK strings - Tnzi's English labels need more
   // horizontal room.
   const siderWidth = ref(220)
   const siderCollapsedWidth = ref(60)
@@ -158,7 +159,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const tabHeight = ref(44)
   const footerHeight = ref(42)
 
-  // Tab style (chrome / button / slider) — defaults to `button` (the
+  // Tab style (chrome / button / slider) - defaults to `button` (the
   // rounded-chip style; least visual noise, no SVG-arc geometry).
   const tabStyle = ref<TabStyle>('button')
 
@@ -166,21 +167,74 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const pageTransition = ref<PageTransition>('fade-slide')
   const pageAnimate = ref(true)
 
-  // Theme radius (Phase I.6.6) — drives --tnzi-admin-radius* globally
+  // Theme radius (Phase I.6.6) - drives --tnzi-admin-radius* globally
   // (sm/md/lg derived by scale in setThemeRadius). 0-16px range.
   const themeRadius = ref(4)
 
-  // Background color overrides — `null` = fall back to default token value.
+  // Background color overrides - `null` = fall back to default token value.
   // When non-null the value is written to the corresponding CSS custom
   // property on `document.documentElement` so it overrides the token binding
   // from variables.css without touching any other property.
+  //
+  // Each chrome surface (sider / header / tab / footer) can be painted an
+  // arbitrary color; the `*Tone` computeds below derive a light/dark tone from
+  // the chosen color so the surface flips its foreground token set and stays
+  // readable (see theme/surfaceTone.ts + the `--inverted` / `--surface-light`
+  // component variants). `contentBg` is the page canvas behind the cards.
   const siderBg = ref<string | null>(null)
   const headerBg = ref<string | null>(null)
+  const tabBg = ref<string | null>(null)
+  const footerBg = ref<string | null>(null)
   const contentBg = ref<string | null>(null)
-  const containerBg = ref<string | null>(null)
+
+  // Content-area CONTAINER surfaces - independent of the chrome above and of
+  // the `contentBg` canvas behind them. These paint the material that sits ON
+  // the canvas:
+  //  - `pageHeaderBg` → the white TPageHeader bar at the top of every content
+  //     page (title / search / actions band).
+  //  - `cardBg`       → every content card / list / table on the canvas: naive
+  //     NCard + NDataTable (repainted via the shell's `naiveOverrides`) plus
+  //     the scoped-CSS card divs (`--tnzi-admin-card-bg`).
+  // Like the chrome surfaces they derive a tone so a dark card flips its inner
+  // text / table cells to light (see `cardTone` + the polish.css tone rules and
+  // the Card/DataTable text overrides in AdminShellRoot).
+  const pageHeaderBg = ref<string | null>(null)
+  const cardBg = ref<string | null>(null)
+
+  // Per-surface foreground (text) color override - `null` = auto (derive the
+  // text tone from the background luminance). A custom color forces the exact
+  // text color, written to `--tnzi-admin-{surface}-fg`; the surrounding token
+  // family (muted / border / hover) follows the CHOSEN color's own tone so the
+  // surface stays coherent.
+  const siderTextColor = ref<string | null>(null)
+  const headerTextColor = ref<string | null>(null)
+  const tabTextColor = ref<string | null>(null)
+  const footerTextColor = ref<string | null>(null)
+  const contentTextColor = ref<string | null>(null)
+  const pageHeaderTextColor = ref<string | null>(null)
+  const cardTextColor = ref<string | null>(null)
+
+  // Derived tone per surface - `null` when the surface has no custom bg AND no
+  // custom text color (it then follows the global light/dark mode). A custom
+  // text color drives the tone by its OWN luminance (so the picker works even
+  // before a background is chosen); otherwise the tone derives from the
+  // background luminance. The shell consumes this to pick the inverted
+  // (dark → light text) or light (light → dark text) variant.
+  function resolveSurfaceTone(bg: string | null, fg: string | null): SurfaceTone | null {
+    if (fg) return isDarkSurface(fg) ? 'light' : 'dark'
+    if (bg) return surfaceTone(bg)
+    return null
+  }
+  const siderTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(siderBg.value, siderTextColor.value))
+  const headerTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(headerBg.value, headerTextColor.value))
+  const tabTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(tabBg.value, tabTextColor.value))
+  const footerTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(footerBg.value, footerTextColor.value))
+  const contentTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(contentBg.value, contentTextColor.value))
+  const pageHeaderTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(pageHeaderBg.value, pageHeaderTextColor.value))
+  const cardTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(cardBg.value, cardTextColor.value))
 
   // Inverted color scheme for sider (orthogonal to global dark mode).
-  // Note: soybean only inverts the sider — the header always follows the
+  // Note: soybean only inverts the sider - the header always follows the
   // global dark/light mode. We removed `invertHeader` because our previous
   // implementation produced black-bg + grey-icon visual garbage (children
   // had higher CSS specificity than the wrapper hack), and there was no
@@ -188,6 +242,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // Defaults to `true`: the shipped theme uses a dark sider on a light
   // body (the common "inverted sider" admin look). Only takes visual effect
   // in light mode + vertical-family layouts (see useAdminShellLayout gating).
+  // Precedence: an explicit `siderBg` override WINS over this toggle - a
+  // custom sider color (light or dark) drives the sider tone via `siderTone`,
+  // and `invertSider` is the "use the built-in dark sider" shorthand that
+  // only applies when no `siderBg` override is set.
   const invertSider = ref(true)
 
   // Fixed positioning
@@ -198,11 +256,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // Watermark
   const watermark = ref<WatermarkSettings>({ ...DEFAULT_WATERMARK })
 
-  // Phase D — additional toggles & settings parity with soybean.
-  /** Whether the swatches list in the appearance tab should suggest a
-      curated palette derived from the current primary color. UI-only
-      (consumers can read this to choose between curated vs preset list). */
-  const recommendColor = ref(true)
+  // Phase D - additional toggles & settings parity with soybean.
   /** When true, info color tracks primary on every primary change. */
   const infoFollowPrimary = ref(false)
   /** Whether keep-alive caching is applied to tab pages (route-based). */
@@ -228,11 +282,18 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       preset picker. Persisted locally - the only color knob a
       non-privileged user owns; applied ON TOP of the global theme. */
   const userPresetColor = ref<string | null>(null)
-  /** Phase F — full-page grayscale filter (accessibility / mourning mode). */
+  /** The user's own chosen appearance LOOK (a whole coordinated preset -
+      accent + mode + surfaces + radius), by name. This is what a non-privileged
+      user picks in the presets drawer; persisted locally and re-applied on top
+      of the global theme at boot (see overlayUserPreset). Supersedes the
+      color-only `userPresetColor` when set. `null` = follow the admin's global
+      theme. */
+  const userPresetLook = ref<string | null>(null)
+  /** Phase F - full-page grayscale filter (accessibility / mourning mode). */
   const grayscale = ref(false)
-  /** Phase F — full-page color-weakness simulation (invert filter). */
+  /** Phase F - full-page color-weakness simulation (invert filter). */
   const colourWeakness = ref(false)
-  /** Phase G — close tab via middle mouse click (soybean's
+  /** Phase G - close tab via middle mouse click (soybean's
       `themeStore.tab.closeTabByMiddleClick`). Defaults to false to
       match soybean. */
   const closeTabByMiddleClick = ref(false)
@@ -240,7 +301,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       into view (so it's never hidden off-screen when there are many tabs).
       This toggle only controls the SCROLL ANIMATION:
       - `false` (default): the tab snaps into view instantly (`behavior:'auto'`)
-        — still visible, no motion. Off by default because the long-distance
+ - still visible, no motion. Off by default because the long-distance
         smooth glide can feel disorienting / uncomfortable for some users.
       - `true`: smooth animated scroll (`behavior:'smooth'`). */
   const tabScrollAnimation = ref(false)
@@ -307,7 +368,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function setFooterHeight(h: number): void {
     footerHeight.value = h
     // CSS var written by the watcher near the bottom of the setup
-    // function — single source of truth.
+    // function - single source of truth.
   }
 
   function setTabStyle(s: TabStyle): void {
@@ -327,75 +388,145 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function setThemeRadius(r: number): void {
     themeRadius.value = Math.max(0, Math.min(16, Math.round(r)))
     // CSS variables are written by the `watch(themeRadius, ...)` block
-    // further down — single source of truth so persisted-state hydration
+    // further down - single source of truth so persisted-state hydration
     // and user setter calls take the same path.
   }
 
-  function applySiderBg(v: string | null): void {
+  // Shared surface-bg applier - writes (or clears) a single CSS custom
+  // property on documentElement. `null` removes the override so the surface
+  // falls back to its component-level default token.
+  function applySurfaceBg(cssVar: string, v: string | null): void {
     if (typeof document === 'undefined') return
     if (v) {
-      document.documentElement.style.setProperty('--tnzi-admin-sider-bg', v)
+      document.documentElement.style.setProperty(cssVar, v)
     } else {
-      document.documentElement.style.removeProperty('--tnzi-admin-sider-bg')
+      document.documentElement.style.removeProperty(cssVar)
     }
+  }
+
+  // The page-header / card container surfaces aren't rendered by the shell, so
+  // they can't receive a tone PROP the way the chrome surfaces do. Instead the
+  // tone is published as a root data-attribute that the global rules in
+  // polish.css key off to flip the surface's foreground token set.
+  function applySurfaceToneAttr(attr: string, tone: SurfaceTone | null): void {
+    if (typeof document === 'undefined') return
+    if (tone) {
+      document.documentElement.setAttribute(attr, tone)
+    } else {
+      document.documentElement.removeAttribute(attr)
+    }
+  }
+
+  function applySiderBg(v: string | null): void {
+    applySurfaceBg('--tnzi-admin-sider-bg', v)
   }
   function setSiderBg(v: string | null): void {
     siderBg.value = v
     applySiderBg(v)
   }
   function resetSiderBg(): void {
-    siderBg.value = null
-    applySiderBg(null)
+    setSiderBg(null)
   }
   function applyHeaderBg(v: string | null): void {
-    if (typeof document === 'undefined') return
-    if (v) {
-      document.documentElement.style.setProperty('--tnzi-admin-header-bg', v)
-    } else {
-      document.documentElement.style.removeProperty('--tnzi-admin-header-bg')
-    }
+    applySurfaceBg('--tnzi-admin-header-bg', v)
   }
   function setHeaderBg(v: string | null): void {
     headerBg.value = v
     applyHeaderBg(v)
   }
   function resetHeaderBg(): void {
-    headerBg.value = null
-    applyHeaderBg(null)
+    setHeaderBg(null)
   }
+  function applyTabBg(v: string | null): void {
+    applySurfaceBg('--tnzi-admin-tab-bg', v)
+  }
+  function setTabBg(v: string | null): void {
+    tabBg.value = v
+    applyTabBg(v)
+  }
+  function resetTabBg(): void {
+    setTabBg(null)
+  }
+  function applyFooterBg(v: string | null): void {
+    applySurfaceBg('--tnzi-admin-footer-bg', v)
+  }
+  function setFooterBg(v: string | null): void {
+    footerBg.value = v
+    applyFooterBg(v)
+  }
+  function resetFooterBg(): void {
+    setFooterBg(null)
+  }
+  // Content = the page canvas behind the cards. Writes ONLY the admin content
+  // token (it deliberately no longer hijacks the broader `--tnzi-layout-bg`,
+  // which also skins the pre-auth body / login layout).
   function applyContentBg(v: string | null): void {
-    if (typeof document === 'undefined') return
-    if (v) {
-      document.documentElement.style.setProperty('--tnzi-admin-content-bg', v)
-      document.documentElement.style.setProperty('--tnzi-layout-bg', v)
-    } else {
-      document.documentElement.style.removeProperty('--tnzi-admin-content-bg')
-      document.documentElement.style.removeProperty('--tnzi-layout-bg')
-    }
+    applySurfaceBg('--tnzi-admin-content-bg', v)
   }
   function setContentBg(v: string | null): void {
     contentBg.value = v
     applyContentBg(v)
   }
   function resetContentBg(): void {
-    contentBg.value = null
-    applyContentBg(null)
+    setContentBg(null)
   }
-  function applyContainerBg(v: string | null): void {
-    if (typeof document === 'undefined') return
-    if (v) {
-      document.documentElement.style.setProperty('--tnzi-container-bg', v)
-    } else {
-      document.documentElement.style.removeProperty('--tnzi-container-bg')
-    }
+  // Page header = the white TPageHeader bar. Writes only the page-header token;
+  // TPageHeader reads it with a `--tnzi-container-bg` fallback so nothing shifts
+  // until a color is picked.
+  function applyPageHeaderBg(v: string | null): void {
+    applySurfaceBg('--tnzi-admin-page-header-bg', v)
   }
-  function setContainerBg(v: string | null): void {
-    containerBg.value = v
-    applyContainerBg(v)
+  function setPageHeaderBg(v: string | null): void {
+    pageHeaderBg.value = v
+    applyPageHeaderBg(v)
   }
-  function resetContainerBg(): void {
-    containerBg.value = null
-    applyContainerBg(null)
+  function resetPageHeaderBg(): void {
+    setPageHeaderBg(null)
+  }
+  // Card = the content cards / lists / tables. Writes the card token (consumed
+  // by the scoped-CSS card divs); naive NCard/NDataTable colors are repainted
+  // in tandem by the shell's `naiveOverrides` (which reads `cardBg`/`cardTone`).
+  function applyCardBg(v: string | null): void {
+    applySurfaceBg('--tnzi-admin-card-bg', v)
+  }
+  function setCardBg(v: string | null): void {
+    cardBg.value = v
+    applyCardBg(v)
+  }
+  function resetCardBg(): void {
+    setCardBg(null)
+  }
+
+  // Per-surface text-color setters - `null` = auto. A custom color is written
+  // to `--tnzi-admin-{surface}-fg` (consumed by the component's inverted /
+  // surface-light variant); the `*Tone` computeds pick the token family.
+  function setSiderTextColor(v: string | null): void {
+    siderTextColor.value = v
+    applySurfaceBg('--tnzi-admin-sider-fg', v)
+  }
+  function setHeaderTextColor(v: string | null): void {
+    headerTextColor.value = v
+    applySurfaceBg('--tnzi-admin-header-fg', v)
+  }
+  function setTabTextColor(v: string | null): void {
+    tabTextColor.value = v
+    applySurfaceBg('--tnzi-admin-tab-fg', v)
+  }
+  function setFooterTextColor(v: string | null): void {
+    footerTextColor.value = v
+    applySurfaceBg('--tnzi-admin-footer-fg', v)
+  }
+  function setContentTextColor(v: string | null): void {
+    contentTextColor.value = v
+    applySurfaceBg('--tnzi-admin-content-fg', v)
+  }
+  function setPageHeaderTextColor(v: string | null): void {
+    pageHeaderTextColor.value = v
+    applySurfaceBg('--tnzi-admin-page-header-fg', v)
+  }
+  function setCardTextColor(v: string | null): void {
+    cardTextColor.value = v
+    applySurfaceBg('--tnzi-admin-card-fg', v)
   }
 
   function toggleInvertSider(): void {
@@ -419,10 +550,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     watermark.value = { ...DEFAULT_WATERMARK }
   }
 
-  // Phase D — setters for the new toggles.
-  function setRecommendColor(v: boolean): void {
-    recommendColor.value = v
-  }
+  // Phase D - setters for the new toggles.
   function setInfoFollowPrimary(v: boolean): void {
     infoFollowPrimary.value = v
   }
@@ -462,8 +590,14 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       if (infoFollowPrimary.value) themeCtx.setColor('info', color)
     }
   }
+  /** Record the user's chosen appearance-look name (the actual surfaces/accent
+      are applied by the caller via applyAppearancePreset). `null` = follow the
+      admin's global theme. */
+  function setUserPresetLook(name: string | null): void {
+    userPresetLook.value = name
+  }
 
-  // Phase F — accessibility filters. Applies/strips the CSS filter on
+  // Phase F - accessibility filters. Applies/strips the CSS filter on
   // documentElement so the entire page renders through the chosen lens.
   // Mirrors soybean's `toggleAuxiliaryColorModes` shared.ts:191-196.
   function applyAuxFilter(): void {
@@ -473,12 +607,17 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     if (colourWeakness.value) filters.push('invert(80%)')
     document.documentElement.style.filter = filters.join(' ') || ''
   }
+  // Grayscale and colour-weakness are mutually exclusive accessibility
+  // lenses - stacking `grayscale(100%)` + `invert(80%)` produces a washed
+  // inverted-grey with no meaning. Turning one on turns the other off.
   function setGrayscale(v: boolean): void {
     grayscale.value = v
+    if (v) colourWeakness.value = false
     applyAuxFilter()
   }
   function setColourWeakness(v: boolean): void {
     colourWeakness.value = v
+    if (v) grayscale.value = false
     applyAuxFilter()
   }
   function setCloseTabByMiddleClick(v: boolean): void {
@@ -492,7 +631,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   }
 
   /**
-   * Apply a theme preset (Phase I.6.6) — partial patch of layout / radius /
+   * Apply a theme preset (Phase I.6.6) - partial patch of layout / radius /
    * scheme / transition. Color values must be applied via the base
    * `@tnzi/ui` theme store (this store doesn't own colors); consumers
    * typically call `themeStore.setPrimary(preset.primaryColor)` themselves
@@ -532,7 +671,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
 
   function reset(): void {
     layoutMode.value = 'vertical'
-    // Back to "no explicit user choice" — the app default mode wins again.
+    // Back to "no explicit user choice" - the app default mode wins again.
     themeSchema.value = null
     lastAppliedDefaultMode.value = null
     themeRadius.value = 4
@@ -557,7 +696,6 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     fixedTab.value = true
     fixedFooter.value = false
     watermark.value = { ...DEFAULT_WATERMARK }
-    recommendColor.value = true
     infoFollowPrimary.value = false
     tabCache.value = true
     breadcrumbShowIcon.value = true
@@ -568,19 +706,26 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     reloadVisible.value = false
     presetPickerVisible.value = true
     userPresetColor.value = null
+    userPresetLook.value = null
     grayscale.value = false
     colourWeakness.value = false
     closeTabByMiddleClick.value = false
     tabScrollAnimation.value = false
     scrollMode.value = 'content'
-    applySiderBg(null)
-    siderBg.value = null
-    applyHeaderBg(null)
-    headerBg.value = null
-    applyContentBg(null)
-    contentBg.value = null
-    applyContainerBg(null)
-    containerBg.value = null
+    setSiderBg(null)
+    setHeaderBg(null)
+    setTabBg(null)
+    setFooterBg(null)
+    setContentBg(null)
+    setPageHeaderBg(null)
+    setCardBg(null)
+    setSiderTextColor(null)
+    setHeaderTextColor(null)
+    setTabTextColor(null)
+    setFooterTextColor(null)
+    setContentTextColor(null)
+    setPageHeaderTextColor(null)
+    setCardTextColor(null)
     if (typeof document !== 'undefined') {
       document.documentElement.style.filter = ''
     }
@@ -615,15 +760,59 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       },
       { immediate: true },
     )
-    // Background color overrides — `immediate: true` covers persisted-state
+    // Header height must ALSO live on the root: the shell writes it inline on
+    // its own element for descendants, but TELEPORTED layers (popovers /
+    // drawers mounted on <body>) can only see root-level values - without
+    // this they'd read the static variables.css default and drift as soon as
+    // the user changes the header height.
+    watch(
+      headerHeight,
+      (h) => {
+        document.documentElement.style.setProperty('--tnzi-admin-header-height', `${h}px`)
+      },
+      { immediate: true },
+    )
+    // Background color overrides - `immediate: true` covers persisted-state
     // hydration (pinia-plugin-persistedstate bypasses setters, so the CSS var
     // would otherwise not be written after a page reload). Normal user
     // interactions go through the setter functions which call the apply*
     // helpers directly and are therefore synchronous.
     watch(siderBg, applySiderBg, { immediate: true })
     watch(headerBg, applyHeaderBg, { immediate: true })
+    watch(tabBg, applyTabBg, { immediate: true })
+    watch(footerBg, applyFooterBg, { immediate: true })
     watch(contentBg, applyContentBg, { immediate: true })
-    watch(containerBg, applyContainerBg, { immediate: true })
+    watch(pageHeaderBg, applyPageHeaderBg, { immediate: true })
+    watch(cardBg, applyCardBg, { immediate: true })
+    // Custom text-color overrides - same hydration story (persisted-state
+    // bypasses the setters, so write the CSS var here on restore).
+    watch(siderTextColor, (v) => applySurfaceBg('--tnzi-admin-sider-fg', v), { immediate: true })
+    watch(headerTextColor, (v) => applySurfaceBg('--tnzi-admin-header-fg', v), { immediate: true })
+    watch(tabTextColor, (v) => applySurfaceBg('--tnzi-admin-tab-fg', v), { immediate: true })
+    watch(footerTextColor, (v) => applySurfaceBg('--tnzi-admin-footer-fg', v), { immediate: true })
+    watch(contentTextColor, (v) => applySurfaceBg('--tnzi-admin-content-fg', v), { immediate: true })
+    watch(pageHeaderTextColor, (v) => applySurfaceBg('--tnzi-admin-page-header-fg', v), { immediate: true })
+    watch(cardTextColor, (v) => applySurfaceBg('--tnzi-admin-card-fg', v), { immediate: true })
+    // Container-surface tones → root data-attributes (consumed by polish.css to
+    // flip page-header / card foreground). `immediate` covers persisted
+    // hydration; `flush: 'sync'` writes the attr in the same tick the bg / fg
+    // ref changes (the tone is a computed, so there is no setter to write it
+    // eagerly the way the bg / fg tokens are written).
+    watch(pageHeaderTone, (t) => applySurfaceToneAttr('data-tnzi-ph-tone', t), { immediate: true, flush: 'sync' })
+    watch(cardTone, (t) => applySurfaceToneAttr('data-tnzi-card-tone', t), { immediate: true, flush: 'sync' })
+    // Sider / header tone as root attrs - polish.css keys off these to pin the
+    // ACTIVE menu item text to a readable near-white on CUSTOM dark chrome
+    // (naive keeps active text in the primary color, which melts into a
+    // same-hue custom sider/header - deep green chrome + green accent). The
+    // attrs are only present for custom surface overrides, so the built-in
+    // inverted sider keeps its stock primary-colored active text.
+    watch(siderTone, (t) => applySurfaceToneAttr('data-tnzi-sider-tone', t), { immediate: true, flush: 'sync' })
+    watch(headerTone, (t) => applySurfaceToneAttr('data-tnzi-header-tone', t), { immediate: true, flush: 'sync' })
+    // Accessibility filters - same hydration story: the setters call
+    // applyAuxFilter directly, but persisted-state hydration bypasses them, so
+    // without this a persisted grayscale / colour-weakness lens would show its
+    // switch ON while the actual page filter stays off after a reload.
+    watch([grayscale, colourWeakness], applyAuxFilter, { immediate: true })
   }
 
   // ── Theme-schema ⇄ @tnzi/ui context sync ──
@@ -699,7 +888,6 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     fixedTab,
     fixedFooter,
     watermark,
-    recommendColor,
     infoFollowPrimary,
     tabCache,
     breadcrumbShowIcon,
@@ -710,6 +898,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     reloadVisible,
     presetPickerVisible,
     userPresetColor,
+    userPresetLook,
     grayscale,
     colourWeakness,
     closeTabByMiddleClick,
@@ -717,8 +906,25 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     scrollMode,
     siderBg,
     headerBg,
+    tabBg,
+    footerBg,
     contentBg,
-    containerBg,
+    pageHeaderBg,
+    cardBg,
+    siderTextColor,
+    headerTextColor,
+    tabTextColor,
+    footerTextColor,
+    contentTextColor,
+    pageHeaderTextColor,
+    cardTextColor,
+    siderTone,
+    headerTone,
+    tabTone,
+    footerTone,
+    contentTone,
+    pageHeaderTone,
+    cardTone,
     // setters
     setLayoutMode,
     setThemeSchema,
@@ -746,7 +952,6 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setFixedFooter,
     setWatermark,
     resetWatermark,
-    setRecommendColor,
     setInfoFollowPrimary,
     setTabCache,
     setBreadcrumbShowIcon,
@@ -757,6 +962,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setReloadVisible,
     setPresetPickerVisible,
     setUserPresetColor,
+    setUserPresetLook,
     setLastAppliedDefaultMode,
     setGrayscale,
     setColourWeakness,
@@ -767,10 +973,23 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     resetSiderBg,
     setHeaderBg,
     resetHeaderBg,
+    setTabBg,
+    resetTabBg,
+    setFooterBg,
+    resetFooterBg,
     setContentBg,
     resetContentBg,
-    setContainerBg,
-    resetContainerBg,
+    setPageHeaderBg,
+    resetPageHeaderBg,
+    setCardBg,
+    resetCardBg,
+    setSiderTextColor,
+    setHeaderTextColor,
+    setTabTextColor,
+    setFooterTextColor,
+    setContentTextColor,
+    setPageHeaderTextColor,
+    setCardTextColor,
     reset,
   }
 }, {
@@ -802,7 +1021,6 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'fixedTab',
       'fixedFooter',
       'watermark',
-      'recommendColor',
       'infoFollowPrimary',
       'tabCache',
       'breadcrumbShowIcon',
@@ -813,6 +1031,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'reloadVisible',
       'presetPickerVisible',
       'userPresetColor',
+      'userPresetLook',
       'grayscale',
       'colourWeakness',
       'closeTabByMiddleClick',
@@ -820,13 +1039,23 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'scrollMode',
       'siderBg',
       'headerBg',
+      'tabBg',
+      'footerBg',
       'contentBg',
-      'containerBg',
+      'pageHeaderBg',
+      'cardBg',
+      'siderTextColor',
+      'headerTextColor',
+      'tabTextColor',
+      'footerTextColor',
+      'contentTextColor',
+      'pageHeaderTextColor',
+      'cardTextColor',
     ],
     // Migration: a user who persisted one of the two removed hybrid layout
     // modes (vertical-hybrid-header-first / top-hybrid-sidebar-first) would
     // hydrate into an unknown mode that renders neither a sider nor a top
-    // menu — i.e. no navigation at all. Coerce any stale/unknown persisted
+    // menu - i.e. no navigation at all. Coerce any stale/unknown persisted
     // mode back to the default vertical layout. Hydration bypasses
     // `setLayoutMode`, so this is the only place that can catch it.
     afterHydrate: (ctx) => {

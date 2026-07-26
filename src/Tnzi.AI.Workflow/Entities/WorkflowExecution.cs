@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Entities;
 
 /// <summary>
-/// 工作流执行实例实体 — 持久化工作流的检查点状态
+/// 工作流执行实例实体 - 持久化工作流的检查点状态
 /// </summary>
 public class WorkflowExecution : CreationAuditedEntity<Guid>, IMultiTenant, IConcurrencyStamp
 {

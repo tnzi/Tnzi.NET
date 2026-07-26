@@ -1,20 +1,21 @@
 <script setup lang="ts">
 /**
- * `ResetPwd` — password recovery / reset module.
+ * `ResetPwd` - password recovery / reset module.
  *
  * Soybean reference: `src/views/_builtin/login/modules/reset-pwd.vue` (82 lines).
  * Endpoints (Tnzi.Identity.DefaultAuthController):
- *   - `POST /auth/password-recovery/send-code` — `SendPasswordRecoveryCodeDto`
- *   - `POST /auth/password-recovery/reset`     — `ResetPasswordByCodeDto`
+ *   - `POST /auth/password-recovery/send-code` - `SendPasswordRecoveryCodeDto`
+ *   - `POST /auth/password-recovery/reset` - `ResetPasswordByCodeDto`
  *
  * Wired via `useLoginContext().callbacks.sendCode` (purpose='reset-pwd') +
- * `callbacks.resetPwd`. The account field accepts email OR phone — rule + label
+ * `callbacks.resetPwd`. The account field accepts email OR phone - rule + label
  * adapt to the backend-enabled channels (`features.codeChannels`) and the
  * `type` is auto-detected per submit. On success the page returns to
  * `pwd-login` so the user can sign in with the new password.
  */
 import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
 import { useFormRules } from '../../../headless/useFormRules'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
 import { useCaptcha } from '../../../headless/useCaptcha'
@@ -61,17 +62,24 @@ async function handleSendCode(): Promise<void> {
   } catch {
     return
   }
+  const sendCode = callbacks.sendCode
+  if (!sendCode) {
+    submitError.value = translate(
+      'admin.login.errorMissingCallback',
+      'Send-code is not configured. Pass `defineAdminApp({ login: { callbacks: { sendCode } } })`.',
+    )
+    return
+  }
   submitError.value = ''
-  await getCaptcha(async () => {
-    if (!callbacks.sendCode) {
-      submitError.value = translate(
-        'admin.login.errorMissingCallback',
-        'Send-code is not configured. Pass `defineAdminApp({ login: { callbacks: { sendCode } } })`.',
-      )
-      throw new Error('sendCode callback missing')
-    }
-    await callbacks.sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'reset-pwd' })
-  })
+  try {
+    await getCaptcha(async () => {
+      await sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'reset-pwd' })
+    })
+  } catch (err) {
+    // Surface backend rejections (e.g. 429 "sent too frequently") in the UI -
+    // getCaptcha re-throws so the countdown never starts on failure.
+    submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Request failed')
+  }
 }
 
 async function handleSubmit(): Promise<void> {
@@ -118,9 +126,15 @@ async function handleSubmit(): Promise<void> {
     </NFormItem>
     <NSpace vertical :size="18" class="w-full">
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
+        <template #icon>
+          <TSvgIcon icon="mdi:lock-reset" :size="18" />
+        </template>
         {{ translate('admin.login.submitResetPwd', 'Reset password') }}
       </NButton>
       <NButton size="large" :round="ui.pill" block @click="toggleLoginModule('pwd-login')">
+        <template #icon>
+          <TSvgIcon icon="mdi:arrow-left" :size="18" />
+        </template>
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>

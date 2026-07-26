@@ -93,9 +93,9 @@ const props = defineProps<{
   myStatus?: UserPresenceStatus
   myName?: string
   myAvatarFileId?: string
-  /** Deployment presence toggle — false hides status dots and the status picker. */
+  /** Deployment presence toggle - false hides status dots and the status picker. */
   presence?: boolean
-  /** Deployment invisible toggle — false drops "Invisible" from the status picker. */
+  /** Deployment invisible toggle - false drops "Invisible" from the status picker. */
   allowInvisible?: boolean
 }>()
 
@@ -230,7 +230,7 @@ const ordered = computed(() => {
   flex-shrink: 0;
 }
 
-/* ── Search (custom, neutral focus — no themed ring) ─────────────────────── */
+/* ── Search (custom, neutral focus - no themed ring) ─────────────────────── */
 .t-conv-list__search {
   flex: 1;
   min-width: 0;

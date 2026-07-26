@@ -34,8 +34,9 @@ public class HealthChecksOptions
     public string ReadinessPath { get; set; } = "/health/ready";
 
     /// <summary>
-    /// 是否输出详细信息（仅在非生产环境）
-    /// 默认：true
+    /// 是否输出详细的 JSON 检查结果（逐项状态、耗时、描述与异常消息）。
+    /// 默认：true。注意：探针端点是匿名可访问的，详细输出会把各检查项的异常消息
+    /// 暴露给任何调用方；生产环境如不希望外泄内部错误细节，请显式设为 false。
     /// </summary>
     public bool DetailedOutput { get; set; } = true;
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TFilePreviewModal` — inline file preview for the Storage file manager.
+ * `TFilePreviewModal` - inline file preview for the Storage file manager.
  *
  * Replaces the old `window.open` preview with an in-page modal: images render
  * in an `NImage` lightbox (zoom/rotate toolbar), PDFs in an iframe, audio/video

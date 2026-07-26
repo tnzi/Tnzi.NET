@@ -38,7 +38,7 @@ export function formatDateTime(
   options?: { fallback?: string },
 ): string {
   if (value === null || value === undefined || value === '') return options?.fallback ?? '';
-  // `new Date(invalid)` does not throw — it yields an Invalid Date whose
+  // `new Date(invalid)` does not throw - it yields an Invalid Date whose
   // toLocaleString() is the literal "Invalid Date". Guard explicitly so
   // unparseable input falls back to the original string (or fallback).
   const d = new Date(value);

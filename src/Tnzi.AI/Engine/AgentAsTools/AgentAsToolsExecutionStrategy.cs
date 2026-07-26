@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Engine.AgentAsTools;
 
 /// <summary>
-/// AgentAsTools 执行策略 — 将子 Agent 作为工具注入父 Agent，由 LLM 决定调用
+/// AgentAsTools 执行策略 - 将子 Agent 作为工具注入父 Agent，由 LLM 决定调用
 /// 支持 SemaphoreSlim 并发限制 + 单子 Agent 超时 + SSE progress events
 /// </summary>
 public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDisposable
@@ -164,7 +164,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         }
         catch (OperationCanceledException)
         {
-            throw; // Parent cancellation — propagate
+            throw; // Parent cancellation - propagate
         }
         catch (Exception ex)
         {

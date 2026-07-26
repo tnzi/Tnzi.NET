@@ -12,7 +12,7 @@ interface Props {
 const props = defineProps<Props>()
 const treeData = computed(() => props.data as unknown as TreeOption[])
 
-// Touch/phone (isSm): disable drag-reorder — dragging a block-line tree node
+// Touch/phone (isSm): disable drag-reorder - dragging a block-line tree node
 // on touch is unreliable and fights the vertical scroll. Reordering stays a
 // desktop affordance.
 const { isSm } = useBreakpoint()

@@ -1,6 +1,6 @@
 <template>
   <!--
-    Horizontal bar-rank widget — a labelled row per item with a value and a bar
+    Horizontal bar-rank widget - a labelled row per item with a value and a bar
     scaled to the largest value (or an explicit `max`). Fills the gap the admin
     KPI/pie widgets leave for "top-N by X" breakdowns. Pure props-driven.
   -->

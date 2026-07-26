@@ -1,5 +1,5 @@
 /*
- * Playground globals — inherit `@tnzi/ui-ai` tokens + load the display
+ * Playground globals - inherit `@tnzi/ui-ai` tokens + load the display
  * font + minimal page reset. All chat-surface tokens come from the
  * package's `style.css` (auto-imported below); the playground does not
  * redefine them.

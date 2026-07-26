@@ -92,15 +92,18 @@ describe('Orders page (Phase 3.32)', () => {
     const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
     const wrapper = mount(Orders, { global: { stubs } })
     await nextTick()
-    expect(wrapper.find('.t-crud-page').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell').exists()).toBe(true)
   })
 
-  it('renders data table after fetch', async () => {
+  // Payments render as document rows: trade number leads, state/channel are
+  // chips, the amount is right-aligned.
+  it('renders one row card per payment', async () => {
     const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
     const wrapper = mount(Orders, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
+    expect(wrapper.findAll('.t-item-card').length).toBeGreaterThan(0)
+    expect(wrapper.text()).toContain('TRADE-001')
   })
 
   it('renders statistics banner with stats cards', async () => {

@@ -11,7 +11,7 @@ public class AgentAsTools_ConcurrencyTests
             Agents = new() { ["agent1"] = Guid.NewGuid() }
         };
         var strategy = new AgentAsToolsExecutionStrategy(config);
-        // Should not throw — clamped to [2,4]
+        // Should not throw - clamped to [2,4]
         Assert.NotNull(strategy);
     }
 

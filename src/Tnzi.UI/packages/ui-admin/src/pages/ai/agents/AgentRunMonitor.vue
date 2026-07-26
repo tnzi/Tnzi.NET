@@ -1,13 +1,13 @@
 <template>
   <!--
-    AgentRunMonitor — run trace viewer.
-    Routed at /admin/ai/agents/:agentId/runs/:runId? — pure monitor (no CRUD).
+    AgentRunMonitor - run trace viewer.
+    Routed at /admin/ai/agents/:agentId/runs/:runId? - pure monitor (no CRUD).
 
     Trace delivery: the backend exposes GET /admin/agent-runs/{runId}/traces
-    (DefaultAgentRunAdminController) returning the recorded AgentRunTrace list —
+    (DefaultAgentRunAdminController) returning the recorded AgentRunTrace list -
     there is no SSE tail endpoint. So the page fetches traces through the bridge
     and, while the selected run is non-terminal, polls every 3s; polling stops
-    on a terminal transition and on unmount. Read-only view — no CRUD, inline
+    on a terminal transition and on unmount. Read-only view - no CRUD, inline
     status banners instead of a message provider.
   -->
   <TContentPage
@@ -127,6 +127,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { makePageTranslator } from '../../_shared/translate'
@@ -144,10 +145,10 @@ const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 
 // Locale keys live under `ai.runMonitor.monitor.*` (nested), so pin the page
-// namespace there — the page uses short keys like t('title')/t('back').
+// namespace there - the page uses short keys like t('title')/t('back').
 const t = makePageTranslator('ai.runMonitor.monitor')
 
-// suppress unused — referenced in template via runStatusClass binding
+// suppress unused - referenced in template via runStatusClass binding
 void runStatusClass
 
 const runs = ref<AgentRunDto[]>([])
@@ -168,7 +169,7 @@ const cancelStatus = ref<{ kind: 'ok' | 'err'; message: string } | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const POLL_INTERVAL_MS = 3000
 
-// Terminal run states — no further traces will arrive, so polling stops.
+// Terminal run states - no further traces will arrive, so polling stops.
 const TERMINAL_STATUSES = new Set(['Completed', 'Failed', 'Cancelled'])
 
 const agentId = computed(() => {
@@ -192,7 +193,7 @@ function shortId(id: string): string {
 }
 
 function formatTime(s: string | null | undefined): string {
-  if (!s) return '—'
+  if (!s) return EMPTY_DASH
   try {
     return new Date(s).toLocaleString()
   } catch {
@@ -378,8 +379,8 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
 <style scoped>
 /* Master/detail split, responsive stacking and pane fill-height come from
    <TMasterDetailLayout>. Only page-specific content styling stays here. */
-/* The run list is its own white panel — symmetric with the detail NCard on
-   the right — so the master column doesn't sit bare on the page canvas.
+/* The run list is its own white panel - symmetric with the detail NCard on
+   the right - so the master column doesn't sit bare on the page canvas.
    `overflow: hidden` clips the rows to the rounded corners; the inner list
    scrolls. Mirrors the detail card's radius + soft shadow. */
 .t-run-monitor__list {
@@ -388,7 +389,7 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--tnzi-container-bg, #fff);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }

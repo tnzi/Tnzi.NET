@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// ChatHistoryHelper 单元测试 — GroupMessagesByTurns / BuildCallIdToToolNameMap / FormatMessageText
+/// ChatHistoryHelper 单元测试 - GroupMessagesByTurns / BuildCallIdToToolNameMap / FormatMessageText
 /// </summary>
 public class ChatHistoryHelperTests
 {

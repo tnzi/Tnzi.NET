@@ -210,6 +210,51 @@ public class NotificationServiceTemplateTests
         result.Data.Category.ShouldBe("Marketing");
     }
 
+    [Theory]
+    [InlineData(NotificationType.Sms, "Sms")]
+    [InlineData(NotificationType.Email, "Email")]
+    public async Task CreateAsync_WithTemplate_NoCategory_Defaults_LookupCategory_To_Channel(
+        NotificationType type, string expectedCategory)
+    {
+        // Regression: framework notification templates ship under channel
+        // subdirs (Templates/Notification/{Email|Sms}/TwoFactorCode.cshtml) so
+        // the lookup Category must be the channel. The 2FA/welcome/reset event
+        // handlers set Type but not Category; without the channel default the
+        // lookup used a flat path, missed the file, and sent an empty body.
+        _templateRenderServiceMock
+            .Setup(x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
+            {
+                Subject = string.Empty,
+                Content = "Your code is 123456",
+                TemplateName = "TwoFactorCode"
+            }));
+
+        var request = new CreateNotificationRequest
+        {
+            Type = type,
+            TemplateName = "TwoFactorCode",
+            // Category deliberately omitted, mirroring the framework handlers.
+            TemplateVariables = new Dictionary<string, object> { ["Code"] = "123456" },
+            Recipients = new List<RecipientInput>
+            {
+                new RecipientInput { Address = "recipient@example.com", Name = "TestUser" }
+            }
+        };
+
+        // Act
+        var result = await _service.CreateAsync(request);
+
+        // Assert - body rendered (non-empty) because the channel-derived
+        // category resolved the template.
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldNotBeNull();
+        result.Data.Content.ShouldBe("Your code is 123456");
+        _templateRenderServiceMock.Verify(
+            x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Fact]
     public async Task CreateAsync_WithoutTemplate_Should_Use_Raw_Content()
     {

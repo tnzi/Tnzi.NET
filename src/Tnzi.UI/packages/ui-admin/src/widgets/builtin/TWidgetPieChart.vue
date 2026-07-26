@@ -1,19 +1,19 @@
 <script setup lang="ts">
 /**
- * `TWidgetPieChart` — reusable pie/donut chart widget.
+ * `TWidgetPieChart` - reusable pie/donut chart widget.
  *
- * Use this for "distribution by category" panels — top sources, channel
+ * Use this for "distribution by category" panels - top sources, channel
  * split, value-by-owner, time-of-day breakdown. Donut by default (inner
  * radius 40%); pass `:donut="false"` for a flat pie.
  *
  * Presentation is customisable so apps don't re-roll their own echarts
  * wrapper just to change the palette / legend placement / tooltip text:
- *   - `palette` — brand slice colours.
- *   - `legend` — where the legend sits (`left` default / `bottom` / `right`
+ *   - `palette` - brand slice colours.
+ *   - `legend` - where the legend sits (`left` default / `bottom` / `right`
  *     / `top` / `none`). `bottom` uses a scrollable horizontal legend, handy
  *     for many small slices.
- *   - `valueFormatter` — format the tooltip value (e.g. money / percentage).
- *   - `radius` / `center` — override the donut geometry.
+ *   - `valueFormatter` - format the tooltip value (e.g. money / percentage).
+ *   - `radius` / `center` - override the donut geometry.
  */
 import { computed, watch } from 'vue'
 import { useEcharts } from '../../headless/useEcharts'
@@ -28,7 +28,7 @@ interface Props {
   height?: number
   /** Donut (inner radius) vs flat pie. Default `true`. */
   donut?: boolean
-  /** Slice colours — cycles through for each segment. Defaults to the echarts theme palette. */
+  /** Slice colours - cycles through for each segment. Defaults to the echarts theme palette. */
   palette?: string[]
   /** Legend placement. Default `left`. `bottom` = scrollable horizontal legend. */
   legend?: PieLegendPosition

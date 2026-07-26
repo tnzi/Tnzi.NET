@@ -7,7 +7,7 @@ namespace Tnzi.Data;
 /// <remarks>
 /// Originally declared <c>abstract</c> so every concrete subclass had to
 /// supply its own defaults. That broke ASP.NET model binding for any
-/// controller that took <c>[FromQuery] PagedQueryDto query</c> directly —
+/// controller that took <c>[FromQuery] PagedQueryDto query</c> directly -
 /// the binder throws <c>InvalidOperationException: Model bound complex
 /// types must not be abstract or value types</c> and the request 500s.
 ///

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// Parent Document Retriever 实现 — 将细粒度匹配块扩展为更大的上下文窗口
+/// Parent Document Retriever 实现 - 将细粒度匹配块扩展为更大的上下文窗口
 /// <para>
 /// 对每个匹配块，加载同一文档中相邻的块（ChunkIndex ± windowSize），
 /// 将重叠/相邻的匹配块合并为一个连续的上下文块，减少冗余并提供更完整的上下文。
@@ -85,19 +85,17 @@ public class ParentDocumentRetriever : ApplicationService, IParentDocumentRetrie
                 if (max > globalMax) globalMax = max;
             }
 
-            // 4. 批量加载文档名称 + 所有相关块（单次查询）
-            var docNamesTask = LoadDocumentNamesAsync(docIds, ct);
-            var chunksTask = _chunkRepository.AsQueryable()
+            // 4. 批量加载文档名称 + 所有相关块（各一次查询）。
+            // 两个查询共用本 scope 的 RagDbContext，必须顺序执行：并发使用同一 DbContext 会抛
+            // "A second operation was started on this context" 并被下方 catch 吞成空结果。
+            var docNames = await LoadDocumentNamesAsync(docIds, ct);
+            var allChunks = await _chunkRepository.AsQueryable()
                 .Where(c => docIds.Contains(c.DocumentId)
                             && c.ChunkIndex >= globalMin
                             && c.ChunkIndex <= globalMax)
                 .OrderBy(c => c.DocumentId).ThenBy(c => c.ChunkIndex)
                 .Select(c => new { c.DocumentId, c.ChunkIndex, c.Content })
                 .ToListAsync(ct);
-
-            await Task.WhenAll(docNamesTask, chunksTask);
-            var docNames = docNamesTask.Result;
-            var allChunks = chunksTask.Result;
 
             // 5. 按文档分组块数据
             var chunksByDoc = allChunks

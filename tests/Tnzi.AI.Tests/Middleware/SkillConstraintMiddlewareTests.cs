@@ -201,7 +201,7 @@ public class SkillConstraintMiddlewareTests
 
     #endregion
 
-    #region Test 5: Multiple skills — intersection of allowed groups
+    #region Test 5: Multiple skills - intersection of allowed groups
 
     [Fact]
     public async Task InvokeAsync_MultipleSkills_TakesIntersection()

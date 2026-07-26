@@ -338,28 +338,30 @@ public class InvoiceService : ApplicationService, IInvoiceService
     }
 
     /// <summary>
-    /// 内置 Fallback HTML 渲染（无模板模块依赖）
+    /// 内置 Fallback HTML 渲染（无模板模块依赖）。
+    /// 所有取自数据的文本字段一律 HTML 编码：客户名/备注/明细描述等均可由外部录入，
+    /// 直接插值会把标记注入进邮件正文与 /api/invoices/{id}/pdf 的返回内容。
     /// </summary>
     private static string RenderFallbackHtml(InvoicePdfDto model)
     {
         var inv = model.Invoice;
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         sb.AppendLine("<!DOCTYPE html><html><head><meta charset='UTF-8'/>");
         sb.AppendLine("<style>body{font-family:sans-serif;margin:40px}table{width:100%;border-collapse:collapse}th,td{padding:8px;text-align:left;border-bottom:1px solid #ddd}th{background:#f5f5f5}.right{text-align:right}.total{font-weight:bold;font-size:1.2em}</style>");
         sb.AppendLine("</head><body>");
-        sb.AppendLine($"<h1>{model.CompanyName}</h1>");
+        sb.AppendLine($"<h1>{Escape(model.CompanyName)}</h1>");
         if (!string.IsNullOrEmpty(model.CompanyAddress))
-            sb.AppendLine($"<p>{model.CompanyAddress}</p>");
-        sb.AppendLine($"<h2>Invoice #{inv.InvoiceNo}</h2>");
-        sb.AppendLine($"<p>Date: {inv.InvoiceDate:yyyy-MM-dd} | Status: {inv.Status} | Currency: {inv.Currency}</p>");
-        sb.AppendLine($"<p><strong>Bill To:</strong> {inv.CustomerName}");
+            sb.AppendLine($"<p>{Escape(model.CompanyAddress)}</p>");
+        sb.AppendLine($"<h2>Invoice #{Escape(inv.InvoiceNo)}</h2>");
+        sb.AppendLine($"<p>Date: {inv.InvoiceDate:yyyy-MM-dd} | Status: {inv.Status} | Currency: {Escape(inv.Currency)}</p>");
+        sb.AppendLine($"<p><strong>Bill To:</strong> {Escape(inv.CustomerName)}");
         if (!string.IsNullOrEmpty(inv.CustomerEmail))
-            sb.Append($" ({inv.CustomerEmail})");
+            sb.Append($" ({Escape(inv.CustomerEmail)})");
         sb.AppendLine("</p>");
         sb.AppendLine("<table><thead><tr><th>Description</th><th class='right'>Qty</th><th class='right'>Unit Price</th><th class='right'>Amount</th></tr></thead><tbody>");
         foreach (var item in model.LineItems)
         {
-            sb.AppendLine($"<tr><td>{item.Description}</td><td class='right'>{item.Quantity:N2}</td><td class='right'>{item.UnitPrice:N2}</td><td class='right'>{item.Amount:N2}</td></tr>");
+            sb.AppendLine($"<tr><td>{Escape(item.Description)}</td><td class='right'>{item.Quantity:N2}</td><td class='right'>{item.UnitPrice:N2}</td><td class='right'>{item.Amount:N2}</td></tr>");
         }
         sb.AppendLine("</tbody></table>");
         sb.AppendLine($"<p class='right'>Subtotal: {inv.Amount:N2}</p>");
@@ -367,12 +369,15 @@ public class InvoiceService : ApplicationService, IInvoiceService
             sb.AppendLine($"<p class='right'>Discount: -{inv.DiscountAmount:N2}</p>");
         if (inv.TaxAmount > 0)
             sb.AppendLine($"<p class='right'>Tax: {inv.TaxAmount:N2}</p>");
-        sb.AppendLine($"<p class='right total'>Total Due: {inv.Currency} {inv.DueAmount:N2}</p>");
+        sb.AppendLine($"<p class='right total'>Total Due: {Escape(inv.Currency)} {inv.DueAmount:N2}</p>");
         if (!string.IsNullOrEmpty(inv.Notes))
-            sb.AppendLine($"<p><em>Notes: {inv.Notes}</em></p>");
+            sb.AppendLine($"<p><em>Notes: {Escape(inv.Notes)}</em></p>");
         sb.AppendLine("</body></html>");
         return sb.ToString();
     }
+
+    private static string Escape(string? value)
+        => string.IsNullOrEmpty(value) ? string.Empty : WebUtility.HtmlEncode(value);
 
     public async Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {

@@ -6,7 +6,7 @@
  *  - fade-slide (horizontal slide-in / slide-out)
  *  - fade-bottom (slide up / slide down)
  *  - fade-scale (zoom in lightly)
- *  - zoom-fade (subtle scale + fade — snappy)
+ *  - zoom-fade (subtle scale + fade - snappy)
  *  - zoom-out (drop in from center, used for modals)
  *
  * Plus three legacy aliases for backwards compat with 0.2.11 (`slide-left`,
@@ -129,7 +129,7 @@
   transform: scale(0.96);
 }
 
-/* ===== Collapse — used for sider expand / submenu open ===== */
+/* ===== Collapse - used for sider expand / submenu open ===== */
 .tnzi-collapse-enter-active,
 .tnzi-collapse-leave-active {
   transition:
@@ -148,7 +148,7 @@
   opacity: 1;
 }
 
-/* ===== Tab badge pulse — for unread / new indicators ===== */
+/* ===== Tab badge pulse - for unread / new indicators ===== */
 @keyframes tnzi-pulse {
   0%,
   100% {
@@ -164,7 +164,7 @@
   animation: tnzi-pulse 1.4s var(--tnzi-admin-motion-ease-in-out, ease-in-out) infinite;
 }
 
-/* ===== Spin — used for refresh / loading icons ===== */
+/* ===== Spin - used for refresh / loading icons ===== */
 @keyframes tnzi-spin {
   to {
     transform: rotate(360deg);
@@ -198,7 +198,7 @@
 /* ===== Route progress bar (soybean nprogress-like, pure CSS) =====
  * Toggled via `useRouteProgress(router)` setting
  * `<html data-tnzi-route-loading="on">`. While loading, the bar grows from
- * 0% → ~80% over 8s (a soft asymptote — soybean reaches ~90 before route
+ * 0% → ~80% over 8s (a soft asymptote - soybean reaches ~90 before route
  * resolves). On removal we fade out and clean up.
  */
 html::before {

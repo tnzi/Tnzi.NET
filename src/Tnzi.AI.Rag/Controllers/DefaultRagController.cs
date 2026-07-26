@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Controllers;
 
 /// <summary>
-/// RAG 控制器 — 提供检索增强生成的查询和聊天 API
+/// RAG 控制器 - 提供检索增强生成的查询和聊天 API
 /// <para>
 /// Query: 单轮 Q&amp;A（无历史上下文），适合独立问答。
 /// Chat: 多轮对话（带历史上下文），支持流式响应。

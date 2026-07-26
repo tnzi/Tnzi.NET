@@ -66,7 +66,7 @@ describe('TCrudSearch', () => {
   it('commits an empty keyword + refresh when the input clears', async () => {
     const state = makeState({ query: ref({ searchText: 'previous' }) } as never)
     const wrapper = mount(TCrudSearch, { props: { state } })
-    // NInput's clear() invokes the `clear` event handler — emulate by
+    // NInput's clear() invokes the `clear` event handler - emulate by
     // toggling the value to empty + triggering Enter (the test path uses
     // the keydown.enter handler that mirrors the same flow).
     const input = wrapper.find('.t-crud-page__search-simple-input input')
@@ -101,7 +101,7 @@ describe('TCrudSearch', () => {
     // `hasAdvancedSearch` is `!hideSimpleMode && !!searchFields`, so the
     // advanced panel only renders when simple mode is also reachable.
     // hideSimpleMode without an alternative panel is effectively
-    // "no search UI at all" — pages wanting advanced-only should pass
+    // "no search UI at all" - pages wanting advanced-only should pass
     // a `#search` slot to the parent TCrudPage instead.
     expect(wrapper.find('.t-crud-page__search-advanced').exists()).toBe(false)
   })

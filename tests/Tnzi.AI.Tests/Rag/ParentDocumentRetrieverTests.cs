@@ -3,7 +3,7 @@ using Tnzi.AI.Rag.Dtos;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// ParentDocumentRetriever 单元测试 — 验证块扩展、合并、去重和 Token 截断
+/// ParentDocumentRetriever 单元测试 - 验证块扩展、合并、去重和 Token 截断
 /// </summary>
 public class ParentDocumentRetrieverTests
 {

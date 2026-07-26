@@ -1,6 +1,6 @@
 <template>
   <!--
-    HealthChecks — read-only viewer for `Tnzi.HealthChecks` JSON output.
+    HealthChecks - read-only viewer for `Tnzi.HealthChecks` JSON output.
     Tnzi.HealthChecks doesn't ship a controller (it uses `MapHealthChecks`
     directly), so this page hits the configured endpoint (`/health/ready` by
     default) which sits outside the `/api` prefix. When the module isn't
@@ -72,6 +72,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
@@ -142,7 +143,7 @@ const overallLabel = computed(() => {
 })
 
 function formatMs(v: number | undefined | null): string {
-  if (v == null) return '—'
+  if (v == null) return EMPTY_DASH
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
   return `${v.toFixed(1)} ms`
 }
@@ -178,7 +179,7 @@ const columns: DataTableColumns<HealthEntry> = [
     title: () => t('cols.description'),
     key: 'description',
     ellipsis: { tooltip: true },
-    render: (row) => row.description ?? row.exception ?? '—',
+    render: (row) => row.description ?? row.exception ?? EMPTY_DASH,
   },
 ]
 

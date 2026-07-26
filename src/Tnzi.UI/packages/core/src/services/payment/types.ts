@@ -44,7 +44,7 @@ export {
 // ============================================
 
 /**
- * Payment record DTO — mirrors Tnzi.Payment.Dtos.PaymentDto exactly.
+ * Payment record DTO - mirrors Tnzi.Payment.Dtos.PaymentDto exactly.
  *
  * NOTE: the backend DTO keys the record on `tradeNo` (there is no `paymentNo`),
  * carries no `userId` / `finalAmount` / `refundAmount` fields, and exposes the
@@ -138,12 +138,12 @@ export interface PaymentQueryDto extends SortedPagedQueryDto {
 // ============================================
 
 /**
- * Refund DTO — mirrors Tnzi.Payment.Dtos.RefundDto exactly.
+ * Refund DTO - mirrors Tnzi.Payment.Dtos.RefundDto exactly.
  *
  * NOTE: the backend keys the refund on `tradeNo` (the related payment's trade
  * number, mapped from `Refund.Payment.TradeNo`). There is no `paymentId` /
  * `paymentNo` / `amount` / `channelRefundId` / `refundedTime` / `operator*`
- * field — the amount is `refundAmount`.
+ * field - the amount is `refundAmount`.
  */
 export interface RefundDto {
   id: string;

@@ -109,8 +109,8 @@ public class HttpSmsSender : ISmsSender
 
             if (response.IsSuccessStatusCode)
             {
-                // 解析响应获取Message SID
-                var responseJson = JsonDocument.Parse(responseContent);
+                // 解析响应获取Message SID（JsonDocument 持有池化缓冲，必须释放）
+                using var responseJson = JsonDocument.Parse(responseContent);
                 var messageSid = responseJson.RootElement.GetProperty("sid").GetString();
 
                 _logger.LogInformation("SMS sent via Twilio HTTP to {PhoneNumber}, Status: {StatusCode}, SID: {MessageSid}",
@@ -188,8 +188,8 @@ public class HttpSmsSender : ISmsSender
 
             if (response.IsSuccessStatusCode)
             {
-                // 解析响应获取Message UUID
-                var responseJson = JsonDocument.Parse(responseContent);
+                // 解析响应获取Message UUID（JsonDocument 持有池化缓冲，必须释放）
+                using var responseJson = JsonDocument.Parse(responseContent);
                 var messageUuids = responseJson.RootElement.GetProperty("message_uuid").EnumerateArray();
 
                 if (messageUuids.Any())

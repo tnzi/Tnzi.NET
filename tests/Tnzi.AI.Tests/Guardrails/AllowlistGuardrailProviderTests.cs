@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// AllowlistGuardrailProvider 单元测试 — 工具白名单/黑名单防护
+/// AllowlistGuardrailProvider 单元测试 - 工具白名单/黑名单防护
 /// </summary>
 public class AllowlistGuardrailProviderTests
 {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Playground AppShell — slim consumer of `@tnzi/ui-ai/chat`'s `TChatApp`.
+ * Playground AppShell - slim consumer of `@tnzi/ui-ai/chat`'s `TChatApp`.
  *
  * The point of this file is to show that a playground / demo app can pick
  * up the canonical `TChatApp` shell and only contribute the bits that are
@@ -11,9 +11,8 @@
  *   - standalone command palette + settings dialog (driven imperatively by
  *     the playground store so command actions can open them)
  *
- * The chat surface — sidebar chrome, landing empty state, message thread,
- * composer, reasoning trace, artifact panel, stop button, theme tokens —
- * comes entirely from `<TChatApp>`. No Manus markup is re-implemented here.
+ * The chat surface - sidebar chrome, landing empty state, message thread,
+ * composer, reasoning trace, artifact panel, stop button, theme tokens - * comes entirely from `<TChatApp>`. No Manus markup is re-implemented here.
  */
 import { computed, ref, shallowRef, watch, onUnmounted } from 'vue'
 import { TChatApp, type ThemePref, type LandingChip } from '@tnzi/ui-ai/chat'
@@ -71,7 +70,7 @@ onUnmounted(disposeEngine)
 function renderCitations(citations: readonly CitationMock[] | undefined): string {
   if (!citations || citations.length === 0) return ''
   const lines = citations.map((c, i) => {
-    const tail = c.url ? ` — ${c.url}` : ''
+    const tail = c.url ? ` - ${c.url}` : ''
     return `[${i + 1}] ${c.title}${tail}`
   })
   return `\n\nReferences:\n${lines.join('\n')}`
@@ -138,13 +137,13 @@ const speed = computed(() => engine.value?.state.speed.value ?? 1)
 const isStreaming = computed(() => playbackState.value === 'playing')
 
 // ---------------------------------------------------------------------------
-// Theme — store is 'light' | 'dark'; TChatApp accepts ThemePref incl. 'system'
+// Theme - store is 'light' | 'dark'; TChatApp accepts ThemePref incl. 'system'
 // ---------------------------------------------------------------------------
 
 const themePref = computed<ThemePref>(() => store.theme.value)
 
 function onThemeChange(next: ThemePref): void {
-  // Ignore 'system' — playground store does not persist that mode.
+  // Ignore 'system' - playground store does not persist that mode.
   if (next === 'light' || next === 'dark') store.theme.value = next
 }
 
@@ -157,7 +156,7 @@ function onSelectThread(id: string): void {
 }
 
 function onSend(text: string): void {
-  // Playground is read-only — composer "send" is a no-op past skipping ahead.
+  // Playground is read-only - composer "send" is a no-op past skipping ahead.
   if (!text.trim()) return
   engine.value?.controls.skipToEnd()
   inputText.value = ''
@@ -189,7 +188,7 @@ function onSpeed(next: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// Settings dialog (standalone — store-driven open + section navigation)
+// Settings dialog (standalone - store-driven open + section navigation)
 // ---------------------------------------------------------------------------
 
 const settingsSections = [
@@ -218,7 +217,7 @@ const themeOptions = [
       :show-landing="messages.length === 0"
       :landing-greeting="landingGreeting"
       :landing-chips="landingChips"
-      composer-placeholder="Composer is read-only — replay drives the conversation"
+      composer-placeholder="Composer is read-only - replay drives the conversation"
       :thread-title="threadTitle"
       agent-name="Mock Assistant"
       agent-label="DEMO"

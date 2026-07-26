@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// WorkflowService.GetExecutionsAsync 测试 — 验证分页查询返回真实的
+/// WorkflowService.GetExecutionsAsync 测试 - 验证分页查询返回真实的
 /// CompletedStepCount / AwaitingApprovalCount（由 JSON 列反序列化得出，
 /// 而非旧实现的 JSON 字符串字符数冒充）。
 /// </summary>

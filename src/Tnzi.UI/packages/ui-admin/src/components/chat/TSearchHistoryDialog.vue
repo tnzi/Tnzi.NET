@@ -35,7 +35,7 @@
         @click="onResultClick(m.id)"
       >
         <div class="t-search-history__meta">
-          <span class="t-search-history__sender">{{ m.senderName || '—' }}</span>
+          <span class="t-search-history__sender">{{ m.senderName || EMPTY_DASH }}</span>
           <span class="t-search-history__time">{{ formatDateTime(m.sentAt) }}</span>
         </div>
         <div class="t-search-history__content">{{ m.content }}</div>
@@ -48,6 +48,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NScrollbar } from 'naive-ui'

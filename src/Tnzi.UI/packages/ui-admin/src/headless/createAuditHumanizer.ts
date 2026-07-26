@@ -1,13 +1,14 @@
 /**
- * `createAuditHumanizer` — turn the framework audit wire shape into business
+ * `createAuditHumanizer` - turn the framework audit wire shape into business
  * language. The audit trail records `functionName` ("Identity.Update"), CLR
  * entity type names, bookkeeping columns (Id / ConcurrencyStamp / CreatorId …),
- * and raw GUID / ISO string values — none of which read well to a business user.
+ * and raw GUID / ISO string values - none of which read well to a business user.
  * Any consumer surfacing an audit view re-implements the same translation, so
  * this ships it once: action verb + icon + tone, friendly entity label, hidden
  * bookkeeping columns filtered out, and value formatting (dates, booleans,
  * GUID shortening, empty → em-dash). The domain label tables stay app-supplied.
  */
+import { EMPTY_DASH } from '../utils/placeholders'
 import type { StatusType } from '@tnzi/ui'
 import { formatDateTime } from '@tnzi/core'
 import { EntityChangeType } from '@tnzi/core/services/audit'
@@ -104,7 +105,7 @@ export function createAuditHumanizer(options: AuditHumanizerOptions = {}): Audit
     value(raw, prop) {
       const custom = options.formatValue?.(raw, prop)
       if (custom !== undefined) return custom
-      if (raw === null || raw === undefined || raw === '') return '—'
+      if (raw === null || raw === undefined || raw === '') return EMPTY_DASH
       if (raw === 'true') return 'Yes'
       if (raw === 'false') return 'No'
       if (ISO_RE.test(raw)) return formatDateTime(raw, { fallback: raw })

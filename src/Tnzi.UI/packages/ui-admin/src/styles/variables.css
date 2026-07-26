@@ -51,29 +51,38 @@
   --tnzi-admin-radius-full: 9999px;
 
   /* ------ Admin-specific surfaces ------ */
-  --tnzi-admin-header-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-sider-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-tab-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-footer-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  /* Content area background — soybean uses the layout color directly (no
-     primary tint). Earlier comment claimed soybean mixes 5% primary; that
-     was wrong (soybean's `bg-layout` is the flat container surface). Mixing
-     primary made content area drift toward whichever theme color was active
-     (cold purple by default), which never matched soybean's neutral grey. */
-  --tnzi-admin-content-bg: var(--tnzi-layout-bg);
+  /* The per-surface background tokens (--tnzi-admin-{sider,header,tab,footer}-bg
+     and --tnzi-admin-content-bg) are intentionally NOT defined here. Each
+     surface component reads them with a default fallback baked in
+     (e.g. `var(--tnzi-admin-sider-bg, var(--tnzi-container-bg))`), and the
+     theme store writes the token ONLY when the user picks a custom color -
+     removing it on reset. Keeping them unset here is what lets the inverted
+     sider fall back to `--tnzi-admin-sider-inverted-bg` when there is no user
+     override, and lets a null override truly clear. */
 
   /* ------ NProgress (route loading bar) ------ */
   --tnzi-admin-nprogress-color: var(--tnzi-primary);
   --tnzi-admin-nprogress-height: 2px;
 
-  /* Inverted (dark) sider — used when invertSider toggles independent of
-     global theme mode. Header always follows the global mode (no invert). */
+  /* Inverted (dark) surface tokens - applied by any surface whose background
+     resolves to a DARK tone (the default inverted sider, or a custom dark
+     sider/header/tab/footer/content color). Flips foreground to light so the
+     surface stays readable. */
   --tnzi-admin-sider-inverted-bg: rgb(0, 20, 40);
   --tnzi-admin-inverted-text: rgba(255, 255, 255, 0.92);
   --tnzi-admin-inverted-text-muted: rgba(255, 255, 255, 0.6);
   --tnzi-admin-inverted-border: rgba(255, 255, 255, 0.12);
   --tnzi-admin-inverted-hover-bg: rgba(255, 255, 255, 0.08);
   --tnzi-admin-inverted-active-bg: rgb(var(--tnzi-primary-rgb) / 0.18);
+
+  /* On-light surface tokens - applied by any surface whose background resolves
+     to a LIGHT tone while the global mode is dark (e.g. a white custom header
+     under dark mode). Forces dark foreground so light-on-light never happens. */
+  --tnzi-admin-surface-light-text: rgba(0, 0, 0, 0.88);
+  --tnzi-admin-surface-light-text-muted: rgba(0, 0, 0, 0.5);
+  --tnzi-admin-surface-light-border: rgba(0, 0, 0, 0.1);
+  --tnzi-admin-surface-light-hover-bg: rgb(var(--tnzi-primary-rgb) / 0.06);
+  --tnzi-admin-surface-light-active-bg: rgb(var(--tnzi-primary-rgb) / 0.1);
 
   /* Menu item visual states */
   --tnzi-admin-menu-item-height: 44px;
@@ -87,13 +96,10 @@
   --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.45);
 }
 
-/* Dark mode adjustments — surfaces become container/layout dark equivalents */
+/* Dark mode adjustments - the per-surface bg tokens stay unset (surfaces read
+   their own dark defaults via the component fallback → `--tnzi-container-bg`,
+   which is already dark in `.dark`). Only the inverted/menu accents shift. */
 .dark {
-  --tnzi-admin-header-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-sider-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-tab-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-  --tnzi-admin-footer-bg: rgb(var(--tnzi-container-bg-rgb) / 1);
-
   --tnzi-admin-sider-inverted-bg: rgb(12, 12, 12);
 
   --tnzi-admin-menu-item-hover-bg: rgb(var(--tnzi-primary-rgb) / 0.12);
@@ -107,10 +113,10 @@
    ripples across every layout component without per-file media queries.
 
    Breakpoint plan (mirrors Tailwind):
-     xs  <  640  — phones in portrait, tightest paddings
-     sm  640-767 — phablets, slightly looser
-     md  768-1023 — tablets, content padding ramps back up
-     lg+ ≥ 1024  — desktops, baseline tokens above
+     xs  <  640 - phones in portrait, tightest paddings
+     sm  640-767 - phablets, slightly looser
+     md  768-1023 - tablets, content padding ramps back up
+     lg+ ≥ 1024 - desktops, baseline tokens above
 
    Heights step down on phones because the header chrome competes with
    the URL bar / status bar for vertical space. */

@@ -19,7 +19,7 @@ public class HttpContextScopedContext : Tnzi.ScopedContext.ScopedContext
 
     public HttpContextScopedContext(IHttpContextAccessor httpContextAccessor)
     {
-        _httpContextAccessor = httpContextAccessor;
+        _httpContextAccessor = Check.NotNull(httpContextAccessor);
     }
 
     private HttpContext? HttpContext => _httpContextAccessor.HttpContext;

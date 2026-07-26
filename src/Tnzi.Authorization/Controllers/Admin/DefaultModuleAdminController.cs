@@ -50,7 +50,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     /// Stamps each module's transient <see cref="FunctionModule.IsBuiltIn"/> flag
     /// from the running module graph so the role-permission matrix can list a
     /// consumer application's own modules first and separate the framework
-    /// built-in catalogue. The flag is not persisted — it is a view concern
+    /// built-in catalogue. The flag is not persisted - it is a view concern
     /// resolved fresh per request from <see cref="ITnziApplication"/>.
     /// </remarks>
     /// <returns>模块列表</returns>

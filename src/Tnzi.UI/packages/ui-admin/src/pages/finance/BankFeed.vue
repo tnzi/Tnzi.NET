@@ -1,7 +1,6 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns" :title="title" :row-actions="rowActions" :translate="t">
-    <!-- Workspace controls: account picker + status filter. -->
-    <template #toolbarLeft>
+  <TContentPage :title="title" icon="mdi:bank-transfer" :translate="t" scroll="fill">
+    <template #actions>
       <NSelect
         v-model:value="accountId"
         :options="sources.fundsAccountOptions.value"
@@ -11,33 +10,45 @@
         clearable
         class="fin-feed__account"
       />
-      <NRadioGroup v-model:value="statusFilter" size="small" class="fin-feed__status">
-        <NRadioButton :value="BankTransactionStatus.Pending">{{ t('status.pending') }}</NRadioButton>
-        <NRadioButton :value="BankTransactionStatus.Matched">{{ t('status.matched') }}</NRadioButton>
-        <NRadioButton :value="BankTransactionStatus.Excluded">{{ t('status.excluded') }}</NRadioButton>
-      </NRadioGroup>
     </template>
 
-    <!-- Workspace actions. -->
-    <template #primary>
-      <NButton v-if="canImport" size="small" type="primary" :disabled="!accountId" @click="openImport">
-        <template #icon><TSvgIcon icon="mdi:file-upload-outline" :size="16" /></template>
-        {{ t('workspace.import') }}
-      </NButton>
-      <NButton v-if="canImport" size="small" :disabled="!accountId || pulling" :loading="pulling" @click="runPull">
-        <template #icon><TSvgIcon icon="mdi:cloud-download-outline" :size="16" /></template>
-        {{ t('workspace.pull') }}
-      </NButton>
-      <NButton v-if="canMatch" size="small" :disabled="!accountId" :loading="suggesting" @click="runSuggest">
-        <template #icon><TSvgIcon icon="mdi:auto-fix" :size="16" /></template>
-        {{ t('workspace.suggest') }}
-      </NButton>
-      <NButton size="small" quaternary :disabled="!accountId" @click="openBatches">
-        <template #icon><TSvgIcon icon="mdi:format-list-bulleted" :size="16" /></template>
-        {{ t('workspace.batches') }}
-      </NButton>
-    </template>
-  </TCrudPage>
+    <TEmpty v-if="!accountId" :text="t('workspace.selectAccount')" />
+
+    <TReconcileWorkspace
+      v-else
+      ref="workspace"
+      :bridge="bridge"
+      :account-id="accountId"
+      :has-draft-reconciliation="hasDraft"
+      :expense-account-options="sources.expenseAccountOptions.value"
+      :funds-account-options="sources.fundsAccountOptions.value"
+      :customer-options="sources.customerOptions.value"
+      :vendor-options="sources.vendorOptions.value"
+      :can-match="canMatch"
+      :can-create-document="canCreateDoc"
+      :t="t"
+      @create-reconciliation="createDraftReconciliation"
+    >
+      <template #actions>
+        <NButton v-if="canImport" size="small" type="primary" @click="openImport">
+          <template #icon><TSvgIcon icon="mdi:file-upload-outline" :size="16" /></template>
+          {{ t('workspace.import') }}
+        </NButton>
+        <NButton v-if="canImport" size="small" :loading="pulling" @click="runPull">
+          <template #icon><TSvgIcon icon="mdi:cloud-download-outline" :size="16" /></template>
+          {{ t('workspace.pull') }}
+        </NButton>
+        <NButton v-if="canMatch" size="small" :loading="suggesting" @click="runSuggest">
+          <template #icon><TSvgIcon icon="mdi:auto-fix" :size="16" /></template>
+          {{ t('workspace.suggest') }}
+        </NButton>
+        <NButton size="small" quaternary @click="openBatches">
+          <template #icon><TSvgIcon icon="mdi:format-list-bulleted" :size="16" /></template>
+          {{ t('workspace.batches') }}
+        </NButton>
+      </template>
+    </TReconcileWorkspace>
+  </TContentPage>
 
   <!-- Import statement (OFX / CSV). -->
   <TDetailHost :state="importDetail" :title="t('import.title')" :width="560" :footer="false" :translate="t">
@@ -102,76 +113,6 @@
     </div>
   </TDetailHost>
 
-  <!-- Candidate picker (Pending rows with multiple matches). -->
-  <TDetailHost :state="candidateDetail" :title="t('candidates.title')" :width="640" :footer="false" :translate="t">
-    <div class="fin-feed__candidates">
-      <TResponsiveTable
-        :columns="candidateColumns"
-        :data="candidates"
-        :row-key="(r: BankMatchCandidateDto) => r.journalLineId"
-        size="small"
-        mobile="scroll"
-        :pagination="false"
-        :bordered="false"
-      />
-      <p v-if="candidates.length === 0" class="fin-feed__empty">{{ t('candidates.empty') }}</p>
-    </div>
-  </TDetailHost>
-
-  <!-- Create document from a transaction. -->
-  <TDetailHost :state="createDocDetail" :title="t('createDoc.title')" :width="480" :footer="false" :translate="t">
-    <NForm label-placement="top" size="small" class="fin-feed__create-doc">
-      <NFormItem :label="t('createDoc.docType')" :show-feedback="false">
-        <NRadioGroup v-model:value="docType" size="small">
-          <NRadioButton :value="BankFeedDocType.Expense">{{ t('createDoc.expense') }}</NRadioButton>
-          <NRadioButton :value="BankFeedDocType.PaymentEntry">{{ t('createDoc.payment') }}</NRadioButton>
-          <NRadioButton :value="BankFeedDocType.Transfer">{{ t('createDoc.transfer') }}</NRadioButton>
-        </NRadioGroup>
-      </NFormItem>
-      <NFormItem
-        v-if="docType === BankFeedDocType.Expense || docType === BankFeedDocType.Transfer"
-        :label="t('createDoc.counterAccount')"
-        :show-feedback="false"
-      >
-        <NSelect
-          v-model:value="counterAccountId"
-          :options="docType === BankFeedDocType.Transfer ? sources.fundsAccountOptions.value : sources.leafAccountOptions.value"
-          :placeholder="t('createDoc.counterAccount')"
-          filterable
-          clearable
-        />
-      </NFormItem>
-      <NFormItem v-if="docType === BankFeedDocType.PaymentEntry" :label="t('createDoc.party')" :show-feedback="false">
-        <NSelect
-          v-model:value="partyId"
-          :options="partyOptions"
-          :placeholder="t('createDoc.party')"
-          filterable
-          clearable
-        />
-      </NFormItem>
-      <NFormItem
-        v-if="docType === BankFeedDocType.Expense || docType === BankFeedDocType.PaymentEntry"
-        :label="t('createDoc.method')"
-        :show-feedback="false"
-      >
-        <NSelect
-          v-model:value="paymentMethod"
-          :options="methodOptions"
-          :placeholder="t('createDoc.method')"
-          clearable
-          tag
-          filterable
-        />
-      </NFormItem>
-      <div class="fin-feed__create-doc-actions">
-        <NButton size="small" @click="createDocDetail.close()">{{ t('createDoc.cancel') }}</NButton>
-        <NButton size="small" type="primary" :loading="creatingDoc" :disabled="creatingDoc" @click="submitCreateDoc">
-          {{ t('createDoc.submit') }}
-        </NButton>
-      </div>
-    </NForm>
-  </TDetailHost>
 
   <!-- Import batches. -->
   <TDetailHost :state="batchesDetail" :title="t('batches.title')" :width="720" :footer="false" :translate="t">
@@ -188,24 +129,30 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * Bank feed = the reconcile workspace, not a transaction grid.
+ *
+ * This page owns statement ingestion (import / provider pull / batch ledger)
+ * and hands the actual review to `TReconcileWorkspace`, where the Xero
+ * one-line-at-a-time flow lives. See the finance UX plan under
+ * `docs/superpowers/specs/`.
+ */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, ref, watch, h } from 'vue'
-import { NButton, NSelect, NRadioGroup, NRadioButton, NForm, NFormItem, useDialog, type DataTableColumns } from 'naive-ui'
+import { NButton, NSelect, NRadioGroup, NRadioButton, useDialog, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
-import TCrudPage from '../../components/crud/TCrudPage.vue'
+
+import TContentPage from '../../components/layout/TContentPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import { useCrudPage } from '../../headless/useCrudPage'
+import TEmpty from '../../components/data/TEmpty.vue'
+import TReconcileWorkspace from '../../components/finance/TReconcileWorkspace.vue'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { type RowAction } from '../../headless/rowActions'
 import {
   createFinanceBridge,
-  BankTransactionStatus,
   BankTransactionSource,
-  BankFeedDocType,
-  PAYMENT_METHODS,
-  type BankMatchCandidateDto,
+  ReconciliationStatus,
   type BankImportBatchDto,
   type CsvMappingDto,
 } from '../../services/bridges/finance-bridge'
@@ -214,8 +161,8 @@ import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtMoney, tsToIsoDate } from './money'
-import { buildBankTransactionColumns, csvParseFormSchema, csvColumnFormSchema, type BankTransactionRow } from './bank-feed-config'
+import { tsToIsoDate, fmtDate } from './money'
+import { csvParseFormSchema, csvColumnFormSchema } from './bank-feed-config'
 import { peekCsv, guessColumns, type CsvPeek } from './csv-preview'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -225,47 +172,72 @@ const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 // Workspace write operations are custom (import / match), not CRUD callbacks,
-// so gate them on the module's permission codes directly (fail-open for
+// so gate them on the module permission codes directly (fail-open for
 // super-admin / unloaded; the backend [ApiAuthorize] is the real wall).
 const canImport = computed(() => can('finance.bankFeed.create'))
 const canMatch = computed(() => can('finance.bankFeed.update'))
 // Create-document delegates to the document workflow (backend gate = finance.document.create).
 const canCreateDoc = computed(() => can('finance.document.create'))
 
-const columns = buildBankTransactionColumns(t)
 const title = 'tnzi.admin.modules.finance.bankFeed.title'
 
 const accountId = ref<string | null>(null)
-const statusFilter = ref<BankTransactionStatus>(BankTransactionStatus.Pending)
-
-const crud = useCrudPage<BankTransactionRow>({
-  pageId: 'finance.bankFeed',
-  permission: 'finance.bankFeed',
-  columns,
-  rowKey: (r) => String(r.id ?? ''),
-  // Wait for an account before the first fetch (workspace flow).
-  autoLoad: false,
-  fetchData: (q) => bridge.bankFeed.transactions(q),
-})
-
-// Account / status changes drive the transaction query (setFilters does not
-// auto-refresh, so trigger it explicitly).
-watch([accountId, statusFilter], () => {
-  if (!accountId.value) return
-  crud.setFilters({ accountId: accountId.value, status: statusFilter.value })
-  void crud.refresh()
-})
+const workspace = ref<{ reload: () => Promise<void> } | null>(null)
 
 void sources.ensureFundsAccounts()
-void sources.ensureLeafAccounts()
+void sources.ensureExpenseAccounts()
 void sources.ensureCustomers()
 void sources.ensureVendors()
 
 async function refreshList() {
-  if (accountId.value) await crud.refresh()
+  await workspace.value?.reload()
 }
 
-// ── Import ──────────────────────────────────────────────────────
+// -- Draft reconciliation gate ----------------------------------
+// Confirming a match writes a cleared line into the account open
+// reconciliation, so the workspace has to know up front whether one exists.
+// Otherwise every OK would 400 and the operator would learn the rule by
+// failing at it.
+const hasDraft = ref(false)
+
+async function checkDraft() {
+  if (!accountId.value) {
+    hasDraft.value = false
+    return
+  }
+  try {
+    const page = await bridge.reconciliations.fetch({
+      pageIndex: 1,
+      pageSize: 1,
+      filters: { accountId: accountId.value, status: ReconciliationStatus.Draft },
+    })
+    hasDraft.value = page.items.length > 0
+  } catch {
+    // Fail OPEN: a failed probe must not raise a banner telling the operator to
+    // create a reconciliation that may well already exist. The backend 400 is
+    // the real gate.
+    hasDraft.value = true
+  }
+}
+
+watch(accountId, () => void checkDraft(), { immediate: true })
+
+async function createDraftReconciliation() {
+  if (!accountId.value) return
+  try {
+    await bridge.reconciliations.create({
+      accountId: accountId.value,
+      statementDate: tsToIsoDate(Date.now()),
+      statementEndingBalance: 0,
+    })
+    hasDraft.value = true
+    message.success(t('noDraft.created'))
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  }
+}
+
+// -- Import -----------------------------------------------------
 const importDetail = useDetail<{ id: string }>({ mode: 'modal', url: 'import' })
 const importSource = ref<BankTransactionSource>(BankTransactionSource.Csv)
 const importFile = ref<File | null>(null)
@@ -280,7 +252,7 @@ function mappingStorageKey(id: string): string {
 /** Head of the chosen file, cached so re-parsing on a delimiter change costs no re-read. */
 const fileHead = ref('')
 const peek = ref<CsvPeek>({ headers: [], rows: [] })
-/** A mapping restored from localStorage is the user's own prior correction - do not overwrite it with a guess. */
+/** A mapping restored from localStorage is the user own prior correction - do not overwrite it with a guess. */
 const hadSavedMapping = ref(false)
 
 /** Only the first chunk is read: enough to show a preview, never the whole statement. */
@@ -420,7 +392,7 @@ async function submitImport() {
   }
 }
 
-// ── Pull / Suggest ──────────────────────────────────────────────
+// -- Pull / Suggest ---------------------------------------------
 const suggesting = ref(false)
 const pulling = ref(false)
 
@@ -452,12 +424,7 @@ async function runSuggest() {
   }
 }
 
-// ── Confirm / candidates ────────────────────────────────────────
-const dialog = safeDialog()
-const candidateDetail = useDetail<{ id: string }>({ mode: 'modal', url: 'candidates' })
-const candidates = ref<BankMatchCandidateDto[]>([])
-const candidateTxnId = ref<string | null>(null)
-
+// -- Batches ----------------------------------------------------
 function safeDialog() {
   try {
     return useDialog()
@@ -466,141 +433,7 @@ function safeDialog() {
   }
 }
 
-async function openCandidates(row: BankTransactionRow) {
-  candidateTxnId.value = String(row.id ?? '')
-  candidates.value = []
-  void candidateDetail.open('create')
-  try {
-    candidates.value = await bridge.bankFeed.candidates(String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
-const candidateColumns: DataTableColumns<BankMatchCandidateDto> = [
-  { key: 'postingDate', title: t('candidates.date'), width: 110, render: (r) => formatDateOnly(r.postingDate, { utc: true }) },
-  { key: 'entryNumber', title: t('candidates.entry'), width: 120, render: (r) => r.entryNumber ?? '—' },
-  { key: 'memo', title: t('candidates.memo'), minWidth: 160, render: (r) => r.memo ?? '—' },
-  { key: 'amount', title: t('candidates.amount'), width: 120, render: (r) => amountCell(fmtMoney(r.amount)) },
-  {
-    key: 'pick',
-    title: '',
-    width: 90,
-    render: (r) => h(NButton, { size: 'tiny', type: 'primary', onClick: () => void pickCandidate(r) }, { default: () => t('candidates.pick') }),
-  },
-]
-
-async function pickCandidate(candidate: BankMatchCandidateDto) {
-  if (!candidateTxnId.value) return
-  await confirmMatch(candidateTxnId.value, candidate.journalLineId)
-  candidateDetail.close()
-}
-
-/** Confirm a match; when the account has no draft reconciliation the backend
- *  400s - guide the user to create one and retry. */
-async function confirmMatch(txnId: string, journalLineId?: string) {
-  try {
-    await bridge.bankFeed.confirm(txnId, { journalLineId: journalLineId ?? null })
-    message.success(t('confirmSuccess'))
-    await refreshList()
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
-    if (/reconcil|draft/i.test(msg) && accountId.value) {
-      promptCreateDraft(txnId, journalLineId)
-      return
-    }
-    message.error(msg)
-  }
-}
-
-function promptCreateDraft(txnId: string, journalLineId?: string) {
-  const run = async () => {
-    if (!accountId.value) return
-    try {
-      await bridge.reconciliations.create({
-        accountId: accountId.value,
-        statementDate: tsToIsoDate(Date.now()),
-        statementEndingBalance: 0,
-      })
-      await bridge.bankFeed.confirm(txnId, { journalLineId: journalLineId ?? null })
-      message.success(t('confirmSuccess'))
-      await refreshList()
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : String(err))
-    }
-  }
-  if (dialog) {
-    dialog.warning({
-      title: t('noDraft.title'),
-      content: t('noDraft.content'),
-      positiveText: t('noDraft.create'),
-      negativeText: t('noDraft.cancel'),
-      positiveButtonProps: { type: 'primary' },
-      onPositiveClick: () => void run(),
-    })
-  } else {
-    void run()
-  }
-}
-
-async function runRowAction(action: () => Promise<unknown>, successKey: string) {
-  try {
-    await action()
-    message.success(t(successKey))
-    await refreshList()
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
-// ── Create document ─────────────────────────────────────────────
-const createDocDetail = useDetail<{ id: string }>({ mode: 'modal', url: 'createDoc' })
-const docType = ref<BankFeedDocType>(BankFeedDocType.Expense)
-const counterAccountId = ref<string | null>(null)
-const partyId = ref<string | null>(null)
-const paymentMethod = ref<string | null>(null)
-const creatingDoc = ref(false)
-const createDocTxn = ref<BankTransactionRow | null>(null)
-
-const methodOptions = PAYMENT_METHODS.map((m) => ({ label: m, value: m }))
-
-// Deposit (positive) → customer; withdrawal → vendor. The backend infers the
-// party type from the transaction sign, so only the correct list is offered.
-const partyOptions = computed(() =>
-  (createDocTxn.value?.amount ?? 0) >= 0 ? sources.customerOptions.value : sources.vendorOptions.value,
-)
-
-function openCreateDoc(row: BankTransactionRow) {
-  createDocTxn.value = row
-  docType.value = (row.amount ?? 0) >= 0 ? BankFeedDocType.PaymentEntry : BankFeedDocType.Expense
-  counterAccountId.value = null
-  partyId.value = null
-  paymentMethod.value = null
-  void createDocDetail.open('create')
-}
-
-async function submitCreateDoc() {
-  const id = createDocTxn.value?.id
-  if (!id) return
-  creatingDoc.value = true
-  try {
-    await bridge.bankFeed.createDocument(String(id), {
-      docType: docType.value,
-      counterAccountId: docType.value === BankFeedDocType.PaymentEntry ? null : counterAccountId.value,
-      partyId: docType.value === BankFeedDocType.PaymentEntry ? partyId.value : null,
-      paymentMethod: docType.value === BankFeedDocType.Transfer ? null : paymentMethod.value,
-    })
-    message.success(t('createDoc.success'))
-    createDocDetail.close()
-    await refreshList()
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  } finally {
-    creatingDoc.value = false
-  }
-}
-
-// ── Batches ─────────────────────────────────────────────────────
+const dialog = safeDialog()
 const batchesDetail = useDetail<{ id: string }>({ mode: 'drawer', url: 'batches' })
 const batches = ref<BankImportBatchDto[]>([])
 
@@ -645,9 +478,9 @@ function deleteBatch(batch: BankImportBatchDto) {
 }
 
 const batchColumns: DataTableColumns<BankImportBatchDto> = [
-  { key: 'creationTime', title: t('batches.imported'), width: 120, render: (r) => formatDateOnly(r.creationTime, { utc: true }) },
+  { key: 'creationTime', title: t('batches.imported'), width: 120, render: (r) => fmtDate(r.creationTime) },
   { key: 'source', title: t('batches.source'), width: 90, render: (r) => String(r.source) },
-  { key: 'fileName', title: t('batches.fileName'), minWidth: 160, render: (r) => r.fileName ?? '—' },
+  { key: 'fileName', title: t('batches.fileName'), minWidth: 160, render: (r) => r.fileName ?? EMPTY_DASH },
   { key: 'importedCount', title: t('batches.count'), width: 90, render: (r) => String(r.importedCount) },
   { key: 'matchedCount', title: t('batches.matched'), width: 90, render: (r) => String(r.matchedCount) },
   {
@@ -658,55 +491,6 @@ const batchColumns: DataTableColumns<BankImportBatchDto> = [
       r.matchedCount > 0
         ? h('span', { class: 'fin-feed__locked' }, t('batches.locked'))
         : h(NButton, { size: 'tiny', type: 'error', quaternary: true, onClick: () => void deleteBatch(r) }, { default: () => t('batches.delete') }),
-  },
-]
-
-// ── Row actions (conditional on status) ─────────────────────────
-const isPending = (r: BankTransactionRow) => r.status === BankTransactionStatus.Pending
-const isMatched = (r: BankTransactionRow) => r.status === BankTransactionStatus.Matched
-const isExcluded = (r: BankTransactionRow) => r.status === BankTransactionStatus.Excluded
-
-const rowActions: RowAction<BankTransactionRow>[] = [
-  {
-    key: 'confirm',
-    label: 'actions.confirm',
-    type: 'primary',
-    show: (r) => canMatch.value && isPending(r) && !!r.suggestedJournalLineId,
-    onClick: (r) => void confirmMatch(String(r.id ?? '')),
-  },
-  {
-    key: 'candidates',
-    label: 'actions.candidates',
-    show: (r) => canMatch.value && isPending(r),
-    onClick: (r) => void openCandidates(r),
-  },
-  {
-    key: 'createDoc',
-    label: 'actions.createDoc',
-    show: (r) => canCreateDoc.value && isPending(r),
-    onClick: (r) => openCreateDoc(r),
-  },
-  {
-    key: 'exclude',
-    label: 'actions.exclude',
-    type: 'warning',
-    show: (r) => canMatch.value && isPending(r),
-    confirm: 'confirmExclude',
-    onClick: (r) => void runRowAction(() => bridge.bankFeed.exclude(String(r.id ?? '')), 'excludeSuccess'),
-  },
-  {
-    key: 'unmatch',
-    label: 'actions.unmatch',
-    type: 'warning',
-    show: (r) => canMatch.value && isMatched(r),
-    confirm: 'confirmUnmatch',
-    onClick: (r) => void runRowAction(() => bridge.bankFeed.unmatch(String(r.id ?? '')), 'unmatchSuccess'),
-  },
-  {
-    key: 'restore',
-    label: 'actions.restore',
-    show: (r) => canMatch.value && isExcluded(r),
-    onClick: (r) => void runRowAction(() => bridge.bankFeed.restore(String(r.id ?? '')), 'restoreSuccess'),
   },
 ]
 </script>

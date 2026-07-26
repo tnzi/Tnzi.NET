@@ -128,7 +128,7 @@ public class LoggingModule : TnziInfrastructureModule
 
         // Read-only admin access to the on-disk log files. Powers the
         // `admin/logs/*` controller exposed by Tnzi.AspNetCore.
-        context.Services.AddSingleton<Services.Interfaces.ILogFileService, Services.LogFileService>();
+        context.Services.AddSingleton<ILogFileService, LogFileService>();
 
         return Task.CompletedTask;
     }
@@ -183,27 +183,27 @@ public class LoggingModule : TnziInfrastructureModule
         var options = configuration.GetSection("Logging").Get<LoggingOptions>() ?? new LoggingOptions();
 
         // 启用请求日志
+        // MessageTemplate 是可选项（留空即用 Serilog 默认模板），但 Level 与
+        // SlowRequestThresholdSeconds 必须无条件生效：早先只在配了模板时才装 GetLevel，
+        // 导致默认配置下这两项静默失效（慢请求不升级、Level 被忽略）。
         if (options.RequestLogging.Enabled)
         {
-            if (!string.IsNullOrEmpty(options.RequestLogging.MessageTemplate))
+            app.UseSerilogRequestLogging(opts =>
             {
-                app.UseSerilogRequestLogging(opts =>
+                if (!string.IsNullOrEmpty(options.RequestLogging.MessageTemplate))
                 {
                     opts.MessageTemplate = options.RequestLogging.MessageTemplate;
-                    // elapsed 参数单位为毫秒，SlowRequestThresholdSeconds 单位为秒，需转换
-                    var slowThresholdMs = options.RequestLogging.SlowRequestThresholdSeconds * 1000;
-                    opts.GetLevel = (httpContext, elapsed, ex) =>
-                        ex != null
-                            ? LogEventLevel.Error
-                            : elapsed > slowThresholdMs
-                                ? LogEventLevel.Warning
-                                : options.RequestLogging.Level;
-                });
-            }
-            else
-            {
-                app.UseSerilogRequestLogging();
-            }
+                }
+
+                // elapsed 参数单位为毫秒，SlowRequestThresholdSeconds 单位为秒，需转换
+                var slowThresholdMs = options.RequestLogging.SlowRequestThresholdSeconds * 1000;
+                opts.GetLevel = (httpContext, elapsed, ex) =>
+                    ex != null
+                        ? LogEventLevel.Error
+                        : elapsed > slowThresholdMs
+                            ? LogEventLevel.Warning
+                            : options.RequestLogging.Level;
+            });
         }
 
         return Task.CompletedTask;

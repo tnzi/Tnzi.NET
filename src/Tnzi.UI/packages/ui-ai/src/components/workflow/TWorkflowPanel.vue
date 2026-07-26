@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowPanel — Canvas floating panel
+ * TWorkflowPanel - Canvas floating panel
  */
 
 defineProps<{

@@ -1,5 +1,5 @@
 /**
- * fileIconForName — map a filename to a lucide icon by extension.
+ * fileIconForName - map a filename to a lucide icon by extension.
  *
  * Pure and business-agnostic. Shared by composer attachment chips and message
  * attachment lists so the icon mapping lives in one place.

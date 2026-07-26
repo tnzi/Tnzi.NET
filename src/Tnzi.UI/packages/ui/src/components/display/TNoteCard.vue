@@ -29,7 +29,7 @@ withDefaults(
     authorSeed?: string | null
     /** Timestamp string (already formatted). */
     time?: string | null
-    /** Body text — used when the default slot is empty. */
+    /** Body text - used when the default slot is empty. */
     content?: string | null
     /** Avatar size. Default 32. */
     size?: number

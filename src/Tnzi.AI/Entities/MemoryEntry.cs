@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 记忆条目实体 — 持久化 Agent 记忆内容
+/// 记忆条目实体 - 持久化 Agent 记忆内容
 /// </summary>
 public class MemoryEntry : CreationAuditedEntity<Guid>, IMultiTenant
 {
@@ -18,7 +18,7 @@ public class MemoryEntry : CreationAuditedEntity<Guid>, IMultiTenant
     public string Content { get; set; } = string.Empty;
 
     /// <summary>
-    /// 内容 SHA256 哈希（64 位 hex，小写）— 精确重复的硬防线。
+    /// 内容 SHA256 哈希（64 位 hex，小写）- 精确重复的硬防线。
     /// </summary>
     /// <remarks>
     /// 可空：既有行不强制 backfill；为 null 的行不参与唯一索引（过滤索引排除 NULL）。

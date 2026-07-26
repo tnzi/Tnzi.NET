@@ -4,9 +4,10 @@ import type { ThemeAdapter } from './theme/index';
 import { useMessage, setMessageAdapter, resetMessageAdapter } from './message';
 import { useDialog, setDialogAdapter, resetDialogAdapter } from './dialog';
 import { createNoopThemeAdapter } from './theme/index';
+import { createAdapterSingleton } from './singleton';
 
 /**
- * Composite UI adapter — aggregates Message + Dialog + Theme.
+ * Composite UI adapter - aggregates Message + Dialog + Theme.
  * Each UI package (shadcn/naive-ui/vant) provides a single factory.
  */
 export interface IUiAdapter {
@@ -28,8 +29,7 @@ function createDefaultUiAdapter(): IUiAdapter {
   };
 }
 
-const _fallback: IUiAdapter = createDefaultUiAdapter();
-let _active: IUiAdapter | null = null;
+const _slot = createAdapterSingleton<IUiAdapter>('ui', createDefaultUiAdapter);
 
 /**
  * Set the active composite UI adapter.
@@ -37,18 +37,18 @@ let _active: IUiAdapter | null = null;
  * (useMessage(), useDialog() still work).
  */
 export function setActiveUiAdapter(adapter: IUiAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
   // Sync individual runtimes for backward compat
   setMessageAdapter(adapter.message);
   setDialogAdapter(adapter.dialog);
 }
 
 export function useUiAdapter(): IUiAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetUiAdapter(): void {
-  _active = null;
+  _slot.reset();
   resetMessageAdapter();
   resetDialogAdapter();
 }

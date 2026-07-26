@@ -14,7 +14,7 @@ export * from "./services/index";
 // Types
 export * from "./types/index";
 
-// Shared UI DTOs (formerly components — Props/Emits moved to UI packages)
+// Shared UI DTOs (formerly components - Props/Emits moved to UI packages)
 export * from "./types/shared-ui";
 
 // HTTP

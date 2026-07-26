@@ -5,7 +5,7 @@ using Tnzi.AI.Rag.Metadata;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// RAG 管道端到端集成测试 — 验证 Ingest→Chunk→Embed→Store→Search 完整流程
+/// RAG 管道端到端集成测试 - 验证 Ingest→Chunk→Embed→Store→Search 完整流程
 /// </summary>
 /// <remarks>
 /// <para>使用 InMemoryVectorStore + 真实 FixedSizeChunkingStrategy + 确定性 Mock Embedding。</para>
@@ -62,17 +62,17 @@ public class RagPipelineIntegrationTests : IDisposable
             MaxTopK = 100
         };
 
-        // 配置 Mock Embedding — 基于文本内容生成确定性嵌入
+        // 配置 Mock Embedding - 基于文本内容生成确定性嵌入
         SetupDeterministicEmbeddings();
 
-        // 配置 Reranker — 直通（NoOp 行为）
+        // 配置 Reranker - 直通（NoOp 行为）
         _rerankerMock
             .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(),
                 It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, List<VectorSearchResult> results, int topK, CancellationToken _) =>
                 results.Take(topK).ToList());
 
-        // 配置 chunk repository — 拦截 InsertManyAsync 并同步到 InMemoryVectorStore
+        // 配置 chunk repository - 拦截 InsertManyAsync 并同步到 InMemoryVectorStore
         SetupChunkRepository();
 
         // 配置 doc repository
@@ -113,7 +113,7 @@ public class RagPipelineIntegrationTests : IDisposable
     [Fact]
     public async Task IngestThenSearch_ReturnsRelevantChunks()
     {
-        // Arrange — 创建知识库并摄取一个文档
+        // Arrange - 创建知识库并摄取一个文档
         var kbId = Guid.NewGuid();
         var docId = Guid.NewGuid();
         SetupKnowledgeBase(kbId, "Test KB");
@@ -124,11 +124,11 @@ public class RagPipelineIntegrationTests : IDisposable
             "Deep learning is a branch of machine learning using neural networks. " +
             "Training requires large datasets and significant compute resources.");
 
-        // Act — 摄取文档
+        // Act - 摄取文档
         var ingestResult = await _ingestionService.IngestAsync(
             kbId, docId, CreateStream(content), "ml-guide.txt");
 
-        // Assert — 摄取成功，产生了 chunk
+        // Assert - 摄取成功，产生了 chunk
         ingestResult.Succeeded.ShouldBeTrue();
         ingestResult.ChunkCount.ShouldBeGreaterThan(0);
 
@@ -155,7 +155,7 @@ public class RagPipelineIntegrationTests : IDisposable
     [Fact]
     public async Task MultipleDocuments_SearchFindsResultsFromBoth()
     {
-        // Arrange — 两个文档在同一个知识库
+        // Arrange - 两个文档在同一个知识库
         var kbId = Guid.NewGuid();
         SetupKnowledgeBase(kbId, "Multi-doc KB");
 
@@ -171,7 +171,7 @@ public class RagPipelineIntegrationTests : IDisposable
             "Jupiter is the largest planet in our solar system. " +
             "Stars produce energy through nuclear fusion.");
 
-        // Act — 摄取两个文档
+        // Act - 摄取两个文档
         var result1 = await _ingestionService.IngestAsync(
             kbId, doc1Id, CreateStream(doc1Content), "cooking.txt");
         var result2 = await _ingestionService.IngestAsync(
@@ -214,7 +214,7 @@ public class RagPipelineIntegrationTests : IDisposable
                       "It contains enough text to be meaningful for chunking purposes.";
         var contentBytes = System.Text.Encoding.UTF8.GetBytes(content);
 
-        // 第一次上传 — 注册文档并摄取
+        // 第一次上传 - 注册文档并摄取
         var doc1Id = Guid.NewGuid();
         var doc1 = new KnowledgeDocument
         {
@@ -228,12 +228,12 @@ public class RagPipelineIntegrationTests : IDisposable
         _storedDocuments.Add(doc1);
         UpdateDocRepoQueryable();
 
-        // Act — 尝试第二次上传相同内容
+        // Act - 尝试第二次上传相同内容
         var stream = new MemoryStream(contentBytes);
         var uploadResult = await _knowledgeBaseService.UploadDocumentAsync(
             kbId, stream, "dedup-test-copy.txt", "text/plain", contentBytes.Length);
 
-        // Assert — 返回成功但标记为重复
+        // Assert - 返回成功但标记为重复
         uploadResult.Succeeded.ShouldBeTrue();
         uploadResult.Data.ShouldNotBeNull();
         uploadResult.Data!.IsDuplicate.ShouldBeTrue();
@@ -302,7 +302,7 @@ public class RagPipelineIntegrationTests : IDisposable
     [Fact]
     public async Task SearchRelevance_TopicAQuery_ReturnsPrimarilyTopicAChunks()
     {
-        // Arrange — 两个话题截然不同的文档
+        // Arrange - 两个话题截然不同的文档
         var kbId = Guid.NewGuid();
         SetupKnowledgeBase(kbId, "Relevance KB");
 
@@ -332,7 +332,7 @@ public class RagPipelineIntegrationTests : IDisposable
 
         await SyncChunksToVectorStoreAsync();
 
-        // Act — 搜索编程相关内容
+        // Act - 搜索编程相关内容
         var searchResult = await _knowledgeBaseService.SearchAsync(
             kbId, "programming language Python JavaScript", topK: 3);
 
@@ -368,7 +368,7 @@ public class RagPipelineIntegrationTests : IDisposable
     [Fact]
     public async Task Ingest_RespectsKnowledgeBaseChunkSettings()
     {
-        // Arrange — 知识库配置自定义 chunk 大小
+        // Arrange - 知识库配置自定义 chunk 大小
         var kbId = Guid.NewGuid();
         SetupKnowledgeBase(kbId, "Custom Chunk KB", chunkSize: 100, chunkOverlap: 10);
 
@@ -381,7 +381,7 @@ public class RagPipelineIntegrationTests : IDisposable
         var result = await _ingestionService.IngestAsync(
             kbId, Guid.NewGuid(), CreateStream(content), "custom-chunk.txt");
 
-        // Assert — 至少产生 2 个 chunk
+        // Assert - 至少产生 2 个 chunk
         result.Succeeded.ShouldBeTrue();
         result.ChunkCount.ShouldBeGreaterThanOrEqualTo(2);
     }
@@ -391,7 +391,7 @@ public class RagPipelineIntegrationTests : IDisposable
     #region Helper Methods
 
     /// <summary>
-    /// 配置确定性 Embedding — 基于文本内容的简单哈希生成固定维度向量，
+    /// 配置确定性 Embedding - 基于文本内容的简单哈希生成固定维度向量，
     /// 确保语义相似的文本产生相似的向量
     /// </summary>
     private void SetupDeterministicEmbeddings()
@@ -500,7 +500,7 @@ public class RagPipelineIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// 配置 chunk repository — 拦截 InsertManyAsync 并记录所有插入的 chunk
+    /// 配置 chunk repository - 拦截 InsertManyAsync 并记录所有插入的 chunk
     /// </summary>
     private void SetupChunkRepository()
     {
@@ -541,7 +541,7 @@ public class RagPipelineIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// 配置 doc repository — 支持文档查询和插入
+    /// 配置 doc repository - 支持文档查询和插入
     /// </summary>
     private void SetupDocRepository()
     {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Mcp.Server;
 
 /// <summary>
-/// MCP Server Host — Agent 暴露与调用相关方法
+/// MCP Server Host - Agent 暴露与调用相关方法
 /// </summary>
 public partial class McpServerHost
 {

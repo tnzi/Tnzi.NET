@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Infrastructure.Stores;
 
 /// <summary>
-/// 数据库工作流检查点存储 — 基于 IRepository 持久化工作流执行状态
+/// 数据库工作流检查点存储 - 基于 IRepository 持久化工作流执行状态
 /// </summary>
 public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
 {
@@ -55,13 +55,13 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 if (entity == null)
                 {
                     entity = BuildNewEntity(checkpoint);
-                    await _repository.InsertAsync(entity);
+                    await _repository.InsertAsync(entity, ct);
                     _logger.LogDebug("Created workflow checkpoint for execution {ExecutionId}", checkpoint.ExecutionId);
                 }
                 else
                 {
                     ApplyCheckpoint(entity, checkpoint);
-                    await _repository.UpdateAsync(entity);
+                    await _repository.UpdateAsync(entity, ct);
                     _logger.LogDebug("Updated workflow checkpoint for execution {ExecutionId}, status: {Status}",
                         checkpoint.ExecutionId, checkpoint.Status);
                 }
@@ -254,7 +254,7 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
 
         if (entity != null)
         {
-            await _repository.DeleteAsync(entity);
+            await _repository.DeleteAsync(entity, ct);
             _logger.LogDebug("Deleted workflow checkpoint for execution {ExecutionId}", executionId);
         }
     }

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
-/// 工作流中断处理器 — 处理需要人工审批的步骤中断
+/// 工作流中断处理器 - 处理需要人工审批的步骤中断
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,7 +25,7 @@ public interface IWorkflowInterruptHandler
 }
 
 /// <summary>
-/// 工作流中断上下文 — 提供中断发生时的步骤信息
+/// 工作流中断上下文 - 提供中断发生时的步骤信息
 /// </summary>
 [ExperimentalApi(Reason = "Workflow HITL is in preview")]
 public class WorkflowInterruptContext

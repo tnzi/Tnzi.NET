@@ -9,7 +9,7 @@ namespace Tnzi.AI.Sandbox.Security;
 ///
 /// <list type="number">
 ///   <item>
-///     <b>Prefix list (token-level)</b> — match the first token of any
+///     <b>Prefix list (token-level)</b> - match the first token of any
 ///     pipeline segment against a list of denied binaries (e.g. <c>mkfs</c>,
 ///     <c>shutdown</c>). Immune to quote- and whitespace-bypass attacks like
 ///     <c>'rm' -rf /</c> or <c>rm  -rf  /</c>, because the analyzer already
@@ -18,7 +18,7 @@ namespace Tnzi.AI.Sandbox.Security;
 ///     around the binary name.
 ///   </item>
 ///   <item>
-///     <b>Substring list</b> — backwards-compatible substring match against
+///     <b>Substring list</b> - backwards-compatible substring match against
 ///     the full command. Preserves the behaviour of the original
 ///     <c>DeniedCommands</c> config so existing rules keep working.
 ///   </item>
@@ -44,7 +44,7 @@ public static class DeniedCommandMatcher
         if (string.IsNullOrWhiteSpace(command))
             return false;
 
-        // Token-level prefix check — only available when the AI module registered
+        // Token-level prefix check - only available when the AI module registered
         // the analyzer. Sandbox can be used in isolation (tests, scripts) where
         // the DI graph stops at AISandboxModule; fall back to substring-only.
         if (analyzer != null && deniedPrefixes.Count > 0)

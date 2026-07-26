@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 用量日志中间件 — After only: 记录 UsageLog + 发送 OTel 指标
+/// 用量日志中间件 - After only: 记录 UsageLog + 发送 OTel 指标
 /// </summary>
 public class UsageLoggingMiddleware : IAiMiddleware
 {
@@ -228,7 +228,7 @@ public class UsageLoggingMiddleware : IAiMiddleware
         }
         catch (ObjectDisposedException)
         {
-            // Request scope already disposed (streaming scenario) — retry with independent scope
+            // Request scope already disposed (streaming scenario) - retry with independent scope
             try
             {
                 using var scope = _scopeFactory.CreateScope();

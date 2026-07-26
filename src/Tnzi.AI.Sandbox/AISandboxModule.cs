@@ -7,7 +7,7 @@ using Tnzi.Audit;
 namespace Tnzi.AI.Sandbox;
 
 /// <summary>
-/// 沙箱执行环境模块 — 提供 Local/Docker/Kubernetes 三层沙箱
+/// 沙箱执行环境模块 - 提供 Local/Docker/Kubernetes 三层沙箱
 /// </summary>
 /// <remarks>
 /// <c>[OptionalDependsOn(AuditModule)]</c> ensures audit infrastructure loads
@@ -34,14 +34,14 @@ public class AISandboxModule : TnziApplicationModule
         // provider up on startup (no-op when Authorization is not loaded).
         context.Services.AddTransient<IPermissionDefinitionProvider, SandboxPermissions>();
 
-        // Virtual path translator — resolve options via IOptions at DI resolution time
+        // Virtual path translator - resolve options via IOptions at DI resolution time
         context.Services.AddSingleton<IVirtualPathTranslator>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
             return new VirtualPathTranslator(opts.DataRoot);
         });
 
-        // Sandbox provider — determine at registration time from config
+        // Sandbox provider - determine at registration time from config
         var providerName = context.Configuration.GetSection("AI:Sandbox:Provider").Value?.ToLowerInvariant() ?? "local";
         switch (providerName)
         {
@@ -62,7 +62,7 @@ public class AISandboxModule : TnziApplicationModule
 
         // Tools
         context.Services.AddScoped<SandboxTools>();
-        // Explicit accessor for the active sandbox (F8) — lets consumers inject
+        // Explicit accessor for the active sandbox (F8) - lets consumers inject
         // ISandboxAccessor instead of reaching into the AsyncLocal channel.
         // Stateless (reads the singleton AsyncLocal accessor live) → Singleton.
         context.Services.AddSingleton<ISandboxAccessor, SandboxAccessor>();
@@ -71,7 +71,7 @@ public class AISandboxModule : TnziApplicationModule
         context.Services.AddScoped<IAiMiddleware, ThreadDataMiddleware>();
         context.Services.AddScoped<IAiMiddleware, SandboxMiddleware>();
 
-        // Events — sandbox command execution audit (uses optional IAuditSender)
+        // Events - sandbox command execution audit (uses optional IAuditSender)
         context.Services.AddEventHandler<SandboxCommandExecutedEvent, SandboxCommandAuditHandler>();
 
         return Task.CompletedTask;
@@ -82,7 +82,7 @@ public class AISandboxModule : TnziApplicationModule
         var logger = context.ServiceProvider.GetRequiredService<ILogger<AISandboxModule>>();
         var options = context.ServiceProvider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
 
-        // Register sandbox tools only when the sandbox is enabled — a disabled
+        // Register sandbox tools only when the sandbox is enabled - a disabled
         // sandbox must not surface tools that can never obtain an environment.
         if (options.Enabled)
         {

@@ -3,12 +3,12 @@
  *
  * Models the on-disk Serilog file outputs surfaced by the admin
  * `LogFileService` (per-level rolling-day files under `LoggingOptions.BasePath`).
- * All endpoints are read-only — the log files are runtime artefacts
+ * All endpoints are read-only - the log files are runtime artefacts
  * owned by Serilog (retention controlled by `RetainedFileCountLimit`).
  */
 
 /**
- * Single log level summary — one of the per-level directories that
+ * Single log level summary - one of the per-level directories that
  * `LoggingModule` creates (Information / Warning / Error / Fatal / Debug).
  * Drives the left-side level navigator in the admin log viewer.
  */
@@ -42,7 +42,7 @@ export interface LogFileInfoDto {
 }
 
 /**
- * Tail-read result — last N lines of a single log file.
+ * Tail-read result - last N lines of a single log file.
  */
 export interface LogTailResultDto {
   /** Resolved level. */
@@ -77,11 +77,11 @@ export interface LogSearchHitDto {
 export interface LogSearchResultDto {
   /** Levels that were actually scanned. */
   levels: string[];
-  /** Start of the search window (inclusive, UTC) — null = open-ended. */
+  /** Start of the search window (inclusive, UTC) - null = open-ended. */
   fromUtc: string | null;
-  /** End of the search window (inclusive, UTC) — null = open-ended. */
+  /** End of the search window (inclusive, UTC) - null = open-ended. */
   toUtc: string | null;
-  /** The keyword that was searched (verbatim — match is case-insensitive). */
+  /** The keyword that was searched (verbatim - match is case-insensitive). */
   keyword: string;
   /** Matching lines, capped by the request's `maxResults` parameter. */
   hits: LogSearchHitDto[];

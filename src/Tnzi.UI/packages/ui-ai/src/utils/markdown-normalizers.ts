@@ -1,5 +1,5 @@
 /**
- * Markdown normalizers — pure text-transform utilities for LLM output post-processing.
+ * Markdown normalizers - pure text-transform utilities for LLM output post-processing.
  *
  * These are framework-agnostic: no dependencies, no side effects, no Vue reactivity.
  * Ported from Fabrikam as standalone utilities so any consumer can use them directly.
@@ -27,7 +27,7 @@ function isCjk(cp: number): boolean {
  * Adds a space between CJK (Chinese/Japanese/Korean) characters and
  * surrounding Latin / ASCII characters, since LLM output often omits them.
  *
- * Operates idempotently — running it twice produces the same result.
+ * Operates idempotently - running it twice produces the same result.
  *
  * @example
  * normalizeCjkSpacing('你好world')  // '你好 world'
@@ -122,16 +122,16 @@ export function stripInvisibleControlChars(text: string): string {
  * normalizeTimeFormat('2026-04-16T10:30:00Z')  // '2026-04-16T10:30:00Z'
  */
 export function normalizeTimeFormat(text: string): string {
-  // Remove spaces around colons in HH:MM — "10 : 30" → "10:30"
+  // Remove spaces around colons in HH:MM - "10 : 30" → "10:30"
   let result = text.replace(/(\d{1,2})\s*:\s*(\d{2})/g, '$1:$2');
 
-  // Add dash between AM/PM time ranges — "9 AM to 5 PM" → "9 AM - 5 PM"
+  // Add dash between AM/PM time ranges - "9 AM to 5 PM" → "9 AM - 5 PM"
   result = result.replace(
     /(\b\d{1,2}\s?(?:AM|PM))\s+(?:to|-)\s+(\d{1,2}\s?(?:AM|PM)\b)/gi,
     '$1 - $2',
   );
 
-  // Remove spaces inside parenthetical time ranges — "( 9:00 - 10:00 )" → "(9:00-10:00)"
+  // Remove spaces inside parenthetical time ranges - "( 9:00 - 10:00 )" → "(9:00-10:00)"
   result = result.replace(
     /\(\s*(\d{1,2}:\d{2})\s*(?:[-]\s*)?(\d{1,2}:\d{2})\s*\)/g,
     '($1-$2)',

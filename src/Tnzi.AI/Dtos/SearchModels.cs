@@ -16,7 +16,7 @@ public class TextSearchFilter
     public Guid? AgentId { get; set; }
 
     /// <summary>
-    /// 知识库 ID 范围过滤 — 仅在这些知识库内检索（空/null = 跨所有启用知识库）。
+    /// 知识库 ID 范围过滤 - 仅在这些知识库内检索（空/null = 跨所有启用知识库）。
     /// 用于按 Agent 分配的知识库限定 RAG 检索范围。
     /// </summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }

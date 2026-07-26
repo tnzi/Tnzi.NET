@@ -35,6 +35,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h, ref, watch } from 'vue'
 import { NButton, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -88,7 +89,7 @@ async function load() {
 watch(() => props.partyId, () => void load(), { immediate: true })
 
 function maskedCell(masked?: string | null): string {
-  if (!masked) return '—'
+  if (!masked) return EMPTY_DASH
   return masked.length <= 4 ? `••••${masked}` : masked
 }
 
@@ -102,8 +103,8 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const columns: DataTableColumns<PartyBankAccountDto> = [
-  { key: 'label', title: props.t('remitTo.columns.label'), minWidth: 140, render: (r) => r.label ?? r.bankName ?? '—' },
-  { key: 'bankName', title: props.t('remitTo.columns.bankName'), minWidth: 120, render: (r) => r.bankName ?? '—' },
+  { key: 'label', title: props.t('remitTo.columns.label'), minWidth: 140, render: (r) => r.label ?? r.bankName ?? EMPTY_DASH },
+  { key: 'bankName', title: props.t('remitTo.columns.bankName'), minWidth: 120, render: (r) => r.bankName ?? EMPTY_DASH },
   { key: 'scheme', title: props.t('remitTo.columns.scheme'), width: 100, render: (r) => props.t(SCHEME_LABEL[String(r.scheme)] ?? '') || String(r.scheme) },
   { key: 'accountNumberMasked', title: props.t('remitTo.columns.accountNumber'), width: 120, render: (r) => maskedCell(r.accountNumberMasked) },
   { key: 'accountType', title: props.t('remitTo.columns.type'), width: 100, render: (r) => props.t(TYPE_LABEL[String(r.accountType)] ?? '') || String(r.accountType) },
@@ -111,7 +112,7 @@ const columns: DataTableColumns<PartyBankAccountDto> = [
     key: 'isDefault',
     title: props.t('remitTo.columns.default'),
     width: 90,
-    render: (r) => (r.isDefault ? h(TStatusBadge, { value: 'default', type: 'success', label: props.t('remitTo.default') }) : '—'),
+    render: (r) => (r.isDefault ? h(TStatusBadge, { value: 'default', type: 'success', label: props.t('remitTo.default') }) : EMPTY_DASH),
   },
 ]
 
@@ -188,7 +189,7 @@ function openAdd() {
 
 function openEdit(row: PartyBankAccountDto) {
   editingId.value = row.id
-  // Account number is never echoed back — leave blank to keep the current one.
+  // Account number is never echoed back - leave blank to keep the current one.
   form.value = {
     label: row.label,
     bankName: row.bankName,

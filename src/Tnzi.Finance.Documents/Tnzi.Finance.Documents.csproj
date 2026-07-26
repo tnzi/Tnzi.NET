@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Description>PDF document rendering for the Tnzi.NET finance module: the default ICheckDocumentRenderer backed by PDFsharp (voucher / three-per-page check layouts, MICR line, calibration ruler). Optional module; load it to make finance check printing work out of the box.</Description>
+    <Description>Document rendering for the Tnzi.NET finance module: the default template-driven ICheckDocumentRenderer (Razor cheque templates from the Tnzi.Template store, CPA Standard 006 Canadian business cheque seeded out of the box) plus a PdfSharp-backed alternative. Optional module; load it to make finance check printing and preview work out of the box.</Description>
     <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
@@ -12,12 +12,29 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <!-- 支票渲染契约与 MICR 原语随银行域走：渲染的是银行票据，不是会计凭证 -->
+    <ProjectReference Include="..\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
+    <!-- 模板驱动渲染：支票版式是入库可编辑的 Razor 模板，不是硬编码坐标 -->
+    <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- 支票 PDF 渲染（纯托管、MIT）；把 PdfSharp 依赖从 Finance 核心收进本可选子模块，
          纯会计消费者不再被传递拉入 PdfSharp。EFT 文件为纯文本，不经此渲染。 -->
     <PackageReference Include="PdfSharp" Version="6.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内置支票模板随程序集分发（启动时幂等播种进 Tnzi.Template 存储），
+         嵌入而非拷贝到输出目录，避免依赖发布布局。 -->
+    <None Remove="Templates\**\*.cshtml" />
+    <EmbeddedResource Include="Templates\**\*.cshtml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 支票模板渲染测试须访问 internal 的模型工厂/播种器（同 Tnzi.Finance 的 friend 声明，
+         src 下全部强命名同一 key，故 PublicKey 必须带上）。 -->
+    <InternalsVisibleTo Include="Tnzi.Finance.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
 </Project>

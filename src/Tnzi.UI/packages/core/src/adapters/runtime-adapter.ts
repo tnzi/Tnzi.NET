@@ -2,9 +2,10 @@ import type { RouterAdapter } from './router/index';
 import type { StorageAdapter } from './storage';
 import { createNoopRouterAdapter } from './router/index';
 import { createMemoryStorageAdapter } from './storage';
+import { createAdapterSingleton } from './singleton';
 
 /**
- * Composite runtime adapter — aggregates Router + Storage.
+ * Composite runtime adapter - aggregates Router + Storage.
  * Store adapter is kept separate (Pinia integration is complex).
  */
 export interface IRuntimeAdapter {
@@ -19,17 +20,16 @@ function createDefaultRuntimeAdapter(): IRuntimeAdapter {
   };
 }
 
-const _fallback: IRuntimeAdapter = createDefaultRuntimeAdapter();
-let _active: IRuntimeAdapter | null = null;
+const _slot = createAdapterSingleton<IRuntimeAdapter>('runtime', createDefaultRuntimeAdapter);
 
 export function setActiveRuntimeAdapter(adapter: IRuntimeAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useRuntimeAdapter(): IRuntimeAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetRuntimeAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

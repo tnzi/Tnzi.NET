@@ -149,6 +149,58 @@ describe('createStorageAdapter', () => {
     adapter.setItem('key', 'val');
     expect(adapter.getItem('key')).toBeNull(); // no window.sessionStorage
   });
+
+  it('should honour the prefix on a memory adapter', () => {
+    // The prefix used to be parsed out of the options and then dropped on the
+    // floor for `type: 'memory'`, so two "namespaced" adapters shared one space.
+    const a = createStorageAdapter({ type: 'memory', prefix: 'app-a:' });
+    const b = createStorageAdapter({ type: 'memory', prefix: 'app-b:' });
+
+    a.set('token', 'from-a');
+
+    expect(a.get('token')).toBe('from-a');
+    expect(b.get('token')).toBeNull();
+    expect(b.has('token')).toBe(false);
+  });
+
+  it('should strip the prefix from memory keys()', () => {
+    const adapter = createStorageAdapter({ type: 'memory', prefix: 'ns:' });
+    adapter.set('one', 1);
+    adapter.set('two', 2);
+    expect(adapter.keys().sort()).toEqual(['one', 'two']);
+  });
+
+  it('should only clear its own prefixed memory keys', () => {
+    const scoped = createMemoryStorageAdapter('ns:');
+    const other = createMemoryStorageAdapter('other:');
+    scoped.set('a', 1);
+    other.set('b', 2);
+
+    scoped.clear();
+
+    expect(scoped.get('a')).toBeNull();
+    expect(other.get('b')).toBe(2);
+  });
+
+  it('should route get/set through a custom serializer', () => {
+    // `serializer` was declared on StorageOptions and never destructured, so a
+    // caller-supplied codec was silently ignored.
+    const seen: string[] = [];
+    const serializer = {
+      serialize: (value: unknown) => {
+        const encoded = `v1:${JSON.stringify(value)}`;
+        seen.push(encoded);
+        return encoded;
+      },
+      deserialize: (value: string) => JSON.parse(value.replace(/^v1:/, '')),
+    };
+    const adapter = createStorageAdapter({ type: 'memory', serializer });
+
+    adapter.set('user', { id: 7 });
+
+    expect(seen).toEqual(['v1:{"id":7}']);
+    expect(adapter.get('user')).toEqual({ id: 7 });
+  });
 });
 
 // ------------------------------------------

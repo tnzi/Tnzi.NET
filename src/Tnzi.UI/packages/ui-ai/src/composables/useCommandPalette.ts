@@ -46,7 +46,7 @@ function scoreAction(action: CommandAction, query: string): number {
  * Manages a command palette over a dynamic action registry.
  *
  * Uses plain case-insensitive substring matching with keyword/category
- * boost — intentionally dependency-free (no Fuse.js). Exposes keyboard
+ * boost - intentionally dependency-free (no Fuse.js). Exposes keyboard
  * navigation helpers and an activate() that runs the highlighted action
  * and closes the palette.
  */

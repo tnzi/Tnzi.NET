@@ -13,7 +13,7 @@ import type {
 } from '@tnzi/core/types/shared-ui';
 import type { FormSchemaItem } from '@tnzi/ui';
 
-// IUserCardProps and IStatCardProps are UI contracts — define locally for demo usage
+// IUserCardProps and IStatCardProps are UI contracts - define locally for demo usage
 interface IUserCardUser {
   id: string | number;
   name: string;

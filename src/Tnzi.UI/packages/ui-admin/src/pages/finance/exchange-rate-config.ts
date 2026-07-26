@@ -1,9 +1,10 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import { TRelativeTime } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
-import { amountCell } from './money'
+
+import { amountCell, fmtDate } from './money'
 
 /** All-optional row shape (house pattern). */
 export interface RateRow {
@@ -25,8 +26,8 @@ export const exchangeRateColumns: ColumnDef<RateRow>[] = [
     width: 140,
     render: (row) => amountCell(String(row.rate), true),
   },
-  { key: 'rateDate', title: 'columns.rateDate', width: 130, render: (row) => formatDateOnly(row.rateDate, { utc: true }) },
-  { key: 'source', title: 'columns.source', minWidth: 120, render: (row) => row.source ?? '—' },
+  { key: 'rateDate', title: 'columns.rateDate', width: 130, render: (row) => fmtDate(row.rateDate) },
+  { key: 'source', title: 'columns.source', minWidth: 120, render: (row) => row.source ?? EMPTY_DASH },
   {
     key: 'creationTime',
     title: 'columns.creationTime',

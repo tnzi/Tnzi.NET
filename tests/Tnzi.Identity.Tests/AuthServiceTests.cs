@@ -20,6 +20,10 @@ public class AuthServiceTests
     private readonly Mock<ILoginSecurityService> _loginSecurityServiceMock;
     private readonly Mock<ITwoFactorService> _twoFactorServiceMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
+    // The 2FA temp token is persisted through a *fresh scope* (independent of the
+    // request's rolled-back UnitOfWork) - this mock backs that scope so tests can
+    // assert the token is saved there, not on the ambient _authTokenServiceMock.
+    private readonly Mock<IAuthTokenService> _scopedAuthTokenServiceMock;
 
     private readonly AuthService _authService;
 
@@ -72,6 +76,21 @@ public class AuthServiceTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
+        // Wire a scope factory so AuthService.PersistTwoFactorTempTokenAsync's
+        // `ServiceProvider.CreateScope()` resolves a scoped IAuthTokenService - the
+        // 2FA temp token is saved in a fresh scope to survive the request's
+        // UnitOfWork rollback (the challenge returns a 403 failure envelope).
+        _scopedAuthTokenServiceMock = new Mock<IAuthTokenService>();
+        var scopedProvider = new Mock<IServiceProvider>();
+        scopedProvider.Setup(x => x.GetService(typeof(IAuthTokenService)))
+            .Returns(_scopedAuthTokenServiceMock.Object);
+        var scope = new Mock<IServiceScope>();
+        scope.Setup(x => x.ServiceProvider).Returns(scopedProvider.Object);
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(x => x.CreateScope()).Returns(scope.Object);
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IServiceScopeFactory)))
+            .Returns(scopeFactory.Object);
+
         _authService = new AuthService(
             _userManagerMock.Object,
             _signInManagerMock.Object,
@@ -91,7 +110,7 @@ public class AuthServiceTests
     [Fact]
     public void GetAuthConfig_MapsOptionsToDto_AndFiltersEnabledOAuthProviders()
     {
-        // Arrange — specific switches + two OAuth providers with full creds, one empty.
+        // Arrange - specific switches + two OAuth providers with full creds, one empty.
         var options = new IdentityOptions
         {
             SignIn = { AllowUserNameLogin = true, AllowEmailLogin = true, AllowSmsLogin = false, UseEmailAsUserName = true },
@@ -111,7 +130,7 @@ public class AuthServiceTests
         // Act
         var result = _authService.GetAuthConfig();
 
-        // Assert — each flag maps from the right option.
+        // Assert - each flag maps from the right option.
         Assert.True(result.Succeeded);
         var dto = result.Data!;
         Assert.True(dto.AllowUserNameLogin);
@@ -130,7 +149,7 @@ public class AuthServiceTests
         Assert.True(dto.EnableCaptchaOnLogin);
         Assert.False(dto.EnableCaptchaOnRegister);
 
-        // Only providers with BOTH ClientId + ClientSecret are listed — no secrets leak.
+        // Only providers with BOTH ClientId + ClientSecret are listed - no secrets leak.
         Assert.Equal(2, dto.OAuthProviders.Count);
         Assert.Contains(dto.OAuthProviders, p => p.Provider == "github" && p.DisplayName == "GitHub");
         Assert.Contains(dto.OAuthProviders, p => p.Provider == "google" && p.DisplayName == "Google");
@@ -249,6 +268,37 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task LoginAsync_WhenCaptchaRequiredAndMissing_ReturnsCaptchaRequiredWithFreshImage()
+    {
+        // Arrange - captcha enabled AND the adaptive gate says a captcha is now
+        // required (failure threshold reached), but the client sent none.
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = { EnableCaptchaOnLogin = true },
+        });
+        _captchaServiceMock.Setup(x => x.IsCaptchaRequiredAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _captchaServiceMock.Setup(x => x.IsCacheAvailable).Returns(true);
+        _captchaServiceMock.Setup(x => x.GenerateAsync("login")).ReturnsAsync(new CaptchaResult
+        {
+            CaptchaId = "fresh-cid",
+            ImageBytes = [1, 2, 3],
+            ExpirationSeconds = 300,
+        });
+
+        // Act
+        var result = await _authService.LoginAsync(new LoginDto { UserName = "u", Password = "p" });
+
+        // Assert - dedicated error code + a fresh captcha the UI can render inline.
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        var captcha = Assert.IsType<CaptchaDto>(result.ErrorDetails);
+        Assert.Equal("fresh-cid", captcha.CaptchaId);
+        Assert.False(string.IsNullOrEmpty(captcha.ImageBase64));
+        // The password is never checked when the captcha gate fails first.
+        _userManagerMock.Verify(x => x.FindByNameAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task LoginWithRefreshTokenAsync_WithValidCredentials_ReturnsTokenResult()
     {
         // Arrange
@@ -312,6 +362,98 @@ public class AuthServiceTests
         Assert.NotNull(result.Data);
         Assert.NotNull(result.Data.AccessToken);
         Assert.NotNull(result.Data.RefreshToken);
+    }
+
+    [Fact]
+    public async Task LoginWithRefreshTokenAsync_When2FaEnabled_PersistsTempTokenInFreshScope_AndReturnsChallenge()
+    {
+        // Arrange - a valid password login for a 2FA-enabled user.
+        var username = "testuser";
+        var password = "Password123!";
+        var user = new User { Id = Guid.NewGuid(), UserName = username, Email = "test@example.com", EmailConfirmed = true };
+
+        _captchaServiceMock.Setup(x => x.IsCaptchaRequiredAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.FindByNameAsync(username)).ReturnsAsync(user);
+        _signInManagerMock.Setup(x => x.CheckPasswordSignInAsync(user, password, It.IsAny<bool>()))
+            .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
+        _loginSecurityServiceMock.Setup(x => x.DetectAbnormalLoginAsync(user.Id, It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(AbnormalLoginResult.Normal());
+        _passwordPolicyServiceMock.Setup(x => x.CheckPasswordExpirationAsync(user.Id))
+            .ReturnsAsync(new PasswordExpirationResult { IsExpired = false });
+        // 2FA is on → login must return a challenge, not tokens.
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(user))
+            .ReturnsAsync(new List<TwoFactorType> { TwoFactorType.Totp, TwoFactorType.Email });
+
+        // Act
+        var result = await _authService.LoginWithRefreshTokenAsync(new LoginDto { UserName = username, Password = password });
+
+        // Assert - challenge returned (403 / 2FA_REQUIRED), no tokens.
+        Assert.False(result.Succeeded);
+        Assert.Equal("2FA_REQUIRED", result.ErrorCode);
+
+        // The temp token MUST be saved in the FRESH scope (survives the request's
+        // UnitOfWork rollback), never on the ambient (rolled-back) token service.
+        _scopedAuthTokenServiceMock.Verify(
+            x => x.SaveTokenAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
+            Times.Once);
+        _authTokenServiceMock.Verify(
+            x => x.SaveTokenAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task LoginWithRefreshTokenAsync_When2FaEnabledButNoUsableMethod_SignsInWithoutChallenge()
+    {
+        // Arrange - the 2FA master flag is on, but every enabled method's channel
+        // is disabled at the deployment level (GetEnabledTwoFactorTypesAsync returns
+        // empty) → treat as 2FA off and sign in normally, never challenge.
+        var username = "testuser";
+        var password = "Password123!";
+        var user = new User { Id = Guid.NewGuid(), UserName = username, Email = "test@example.com", EmailConfirmed = true };
+
+        _captchaServiceMock.Setup(x => x.IsCaptchaRequiredAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.FindByNameAsync(username)).ReturnsAsync(user);
+        _signInManagerMock.Setup(x => x.CheckPasswordSignInAsync(user, password, It.IsAny<bool>()))
+            .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
+        _loginSecurityServiceMock.Setup(x => x.DetectAbnormalLoginAsync(user.Id, It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(AbnormalLoginResult.Normal());
+        _passwordPolicyServiceMock.Setup(x => x.CheckPasswordExpirationAsync(user.Id))
+            .ReturnsAsync(new PasswordExpirationResult { IsExpired = false });
+
+        // Master flag on, but no method is currently usable.
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(user))
+            .ReturnsAsync(new List<TwoFactorType>());
+
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string> { "User" });
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 },
+            SignIn = new TnziSignInOptions(),
+            MultiLogin = new MultiLoginOptions { AllowMultiLogin = true },
+            Captcha = new CaptchaOptions(),
+            Registration = new RegistrationOptions()
+        });
+        _tokenServiceMock.Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>())).Returns("access_token");
+        _authTokenServiceMock.Setup(x => x.SaveTokenAsync(user.Id, "JWT", "RefreshToken", It.IsAny<string>(), It.IsAny<DateTime?>()))
+            .ReturnsAsync(Guid.NewGuid());
+        _sessionServiceMock.Setup(x => x.CreateSessionAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(Guid.NewGuid());
+        _eventBusMock.Setup(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.UserLoggedInEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.LoginWithRefreshTokenAsync(new LoginDto { UserName = username, Password = password });
+
+        // Assert - full login (tokens), no 2FA challenge, no temp token persisted.
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.NotNull(result.Data.AccessToken);
+        Assert.NotEqual("2FA_REQUIRED", result.ErrorCode);
+        _scopedAuthTokenServiceMock.Verify(
+            x => x.SaveTokenAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
+            Times.Never);
     }
 
     [Fact]
@@ -387,6 +529,89 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task RefreshTokenAsync_WhenBoundSessionRevoked_Returns401AndDoesNotRotate()
+    {
+        // Arrange - a refresh token bound to a session that has since been revoked.
+        var refreshToken = "session_bound_refresh";
+        var userId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "testuser" };
+        var tokenEntry = new AuthToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Value = refreshToken,
+            SessionId = sessionId,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            IsUsed = false
+        };
+
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("JWT", "RefreshToken", refreshToken))
+            .ReturnsAsync(tokenEntry);
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Jwt = new JwtOptions { RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
+        });
+        // Session is gone (revoked/expired) → refresh must be rejected.
+        _sessionServiceMock.Setup(x => x.IsSessionValidAsync(sessionId)).ReturnsAsync(false);
+
+        // Act
+        var result = await _authService.RefreshTokenAsync(refreshToken);
+
+        // Assert - 401, session-revoked code, and the token is NOT rotated.
+        Assert.False(result.Succeeded);
+        Assert.Equal(401, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_SESSION_REVOKED, result.ErrorCode);
+        _authTokenServiceMock.Verify(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshTokenAsync_WhenBoundSessionValid_RotatesAndRenewsSession()
+    {
+        // Arrange - a refresh token bound to a still-valid session.
+        var refreshToken = "session_bound_refresh_ok";
+        var userId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "testuser" };
+        var tokenEntry = new AuthToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Value = refreshToken,
+            SessionId = sessionId,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            IsUsed = false
+        };
+
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("JWT", "RefreshToken", refreshToken))
+            .ReturnsAsync(tokenEntry);
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string> { "User" });
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
+        });
+        _sessionServiceMock.Setup(x => x.IsSessionValidAsync(sessionId)).ReturnsAsync(true);
+        _sessionServiceMock.Setup(x => x.RenewSessionAsync(sessionId, It.IsAny<DateTime>())).ReturnsAsync(Result.Success());
+        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(tokenEntry.Id)).ReturnsAsync(true);
+        // The rotated access token + refresh token stay bound to the same session.
+        _tokenServiceMock.Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>(), null, sessionId))
+            .Returns("rotated_access");
+        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("rotated_refresh");
+        _authTokenServiceMock.Setup(x => x.SaveTokenAsync(userId, "JWT", "RefreshToken", It.IsAny<string>(), It.IsAny<DateTime?>(), sessionId))
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _authService.RefreshTokenAsync(refreshToken);
+
+        // Assert - rotated, and the session was renewed (sliding expiry).
+        Assert.True(result.Succeeded);
+        Assert.Equal("rotated_access", result.Data!.AccessToken);
+        _sessionServiceMock.Verify(x => x.RenewSessionAsync(sessionId, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Fact]
     public async Task LogoutAsync_WithValidUserId_ReturnsSuccess()
     {
         // Arrange
@@ -436,9 +661,12 @@ public class AuthServiceTests
             Type = TwoFactorType.Email
         });
 
-        // Assert
+        // Assert - challenge succeeds and now surfaces CodeSent + a masked
+        // destination so the login page can show "sent to t***@example.com".
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Assert.True(result.Data!.CodeSent);
+        Assert.Equal("t***@example.com", result.Data.MaskedAddress);
     }
 
     [Fact]

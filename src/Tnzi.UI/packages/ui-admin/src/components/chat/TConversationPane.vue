@@ -37,7 +37,7 @@
     </div>
 
     <!-- Body row: message column + slide-in info panel (panel never overlays
-         the messages — the message column shrinks/keeps its own scroll while
+         the messages - the message column shrinks/keeps its own scroll while
          the panel takes a fixed 250px on the right). -->
     <div class="t-conv-pane__body">
       <div class="t-conv-pane__col">
@@ -112,7 +112,7 @@ const props = defineProps<{
   uploadKind?: 'image' | 'file'
   uploadName?: string
   infoShow?: boolean
-  /** Deployment file-message toggle — false hides the attachment entry. */
+  /** Deployment file-message toggle - false hides the attachment entry. */
   attachments?: boolean
 }>()
 
@@ -132,7 +132,7 @@ const emit = defineEmits<{
 const t = (k: string) => translatePageKey('chat', k)
 const { isSm } = useBreakpoint()
 
-// Group title carries the member count in parentheses — `Team (5)` — matching
+// Group title carries the member count in parentheses - `Team (5)` - matching
 // the direct-chat title style (no separate "N Members" subtitle).
 const headerTitle = computed(() => {
   const c = props.conversation
@@ -140,7 +140,7 @@ const headerTitle = computed(() => {
   return c.type === ConversationType.Group ? `${c.title} (${c.memberCount})` : c.title
 })
 
-// System conversations are read-only announcements — no info panel to open.
+// System conversations are read-only announcements - no info panel to open.
 const showInfoToggle = computed(
   () => !!props.conversation && props.conversation.type !== ConversationType.System,
 )
@@ -235,7 +235,7 @@ const showInfoToggle = computed(
   overflow: hidden;
 }
 
-/* Message column (list + composer) — always visible, shrinks as the panel
+/* Message column (list + composer) - always visible, shrinks as the panel
    opens but keeps its own scroll instead of being covered. */
 .t-conv-pane__col {
   flex: 1;
@@ -246,7 +246,7 @@ const showInfoToggle = computed(
 }
 
 /* Slide-in info panel: collapses to width 0 (hidden) ↔ 250px (open) with a
-   transition. Never an overlay — messages stay visible alongside it. */
+   transition. Never an overlay - messages stay visible alongside it. */
 .t-conv-pane__info {
   flex-shrink: 0;
   width: 0;
@@ -285,7 +285,7 @@ const showInfoToggle = computed(
 }
 
 /* Touch: enlarge the header icon buttons (back / info gear) to a ≥40px tap
-   target — the visible glyphs stay their small size, the hit area grows around
+   target - the visible glyphs stay their small size, the hit area grows around
    them. Placed after the base rules so it overrides the 30px / 22px defaults.
    Coarse-pointer only, so desktop keeps the compact 30px / 22px chrome. */
 @media (pointer: coarse) {
@@ -297,7 +297,7 @@ const showInfoToggle = computed(
 }
 
 /* Phone: the window is one column, so an open panel would crush the message
-   column. Let it cover the body (absolute, full-width) instead — desktop keeps
+   column. Let it cover the body (absolute, full-width) instead - desktop keeps
    the side-by-side slide-in. */
 @media (max-width: 768px) {
   /* Match the conversation list's 12px edge padding so the back arrow sits on

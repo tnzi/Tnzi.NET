@@ -7,7 +7,7 @@ using Tnzi.Exceptions;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultArtifactController 单元测试 — 覆盖线程所有权 A1 安全修复的授权执行
+/// DefaultArtifactController 单元测试 - 覆盖线程所有权 A1 安全修复的授权执行
 /// </summary>
 public class DefaultArtifactControllerTests
 {
@@ -35,7 +35,7 @@ public class DefaultArtifactControllerTests
     }
 
     // -------------------------------------------------------------------------
-    // GetByThread — ownership enforcement
+    // GetByThread - ownership enforcement
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -70,7 +70,7 @@ public class DefaultArtifactControllerTests
 
         ex.HttpStatusCode.ShouldBe(404);
         ex.Code.ShouldBe(Tnzi.AI.Metadata.ErrorCodes.ThreadNotFound);
-        // Artifact service must NOT be called — ownership check short-circuits
+        // Artifact service must NOT be called - ownership check short-circuits
         _artifactService.Verify(s => s.GetByThreadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -87,7 +87,7 @@ public class DefaultArtifactControllerTests
     }
 
     // -------------------------------------------------------------------------
-    // GetById — ownership enforcement
+    // GetById - ownership enforcement
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -140,7 +140,7 @@ public class DefaultArtifactControllerTests
     }
 
     // -------------------------------------------------------------------------
-    // GetByRun — owner-scoped delegation
+    // GetByRun - owner-scoped delegation
     // -------------------------------------------------------------------------
 
     [Fact]

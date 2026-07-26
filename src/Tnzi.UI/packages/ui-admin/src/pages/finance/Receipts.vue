@@ -1,5 +1,6 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage :state="crud" :all-columns="columns"
+    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
     <template #primary>
       <NButton v-if="canCreate" size="small" type="primary" :loading="uploading" @click="triggerUpload">
         <template #icon><TSvgIcon icon="mdi:upload-outline" :size="16" /></template>
@@ -119,7 +120,7 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createFinanceOptionSources } from './options'
 import { tsToIsoDate } from './money'
-import { buildReceiptColumns, receiptExtractionFormSchema, RECEIPT_STATUS_META, type ReceiptRow } from './receipt-config'
+import { buildReceiptSearchFields, buildReceiptColumns, receiptExtractionFormSchema, RECEIPT_STATUS_META, type ReceiptRow } from './receipt-config'
 
 const client = useAdminClient()
 const bridge = createFinanceBridge({ client })
@@ -131,6 +132,9 @@ const sources = createFinanceOptionSources(bridge)
 
 const title = 'tnzi.admin.modules.finance.receipts.title'
 const columns = buildReceiptColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildReceiptSearchFields(t)
 
 const canCreate = computed(() => can('finance.receipt.create'))
 const canUpdate = computed(() => can('finance.receipt.update'))

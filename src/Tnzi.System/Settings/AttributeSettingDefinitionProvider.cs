@@ -1,5 +1,3 @@
-using System.Threading;
-
 namespace Tnzi.System.Settings;
 
 /// <summary>扫描已加载模块程序集中带 [RuntimeSetting] 的 Options，自动派生配置中心分组定义。</summary>
@@ -124,6 +122,9 @@ public sealed class AttributeSettingDefinitionProvider : ISettingDefinitionProvi
             {
                 Key = contributors[0].Key,
                 Order = contributors.Min(c => c.Order),
+                // Built-in only when every contributor is a framework group - a single
+                // consumer contribution keeps the merged group visible under the toggle.
+                IsBuiltIn = contributors.All(c => c.IsBuiltIn),
                 ModuleName = FirstNonEmpty(contributors.Select(c => c.ModuleName)) ?? contributors[0].ModuleName,
                 DisplayName = FirstNonEmpty(contributors.Select(c => c.DisplayName)) ?? contributors[0].DisplayName,
                 I18nKey = FirstNonEmpty(contributors.Select(c => c.I18nKey)),
@@ -131,7 +132,7 @@ public sealed class AttributeSettingDefinitionProvider : ISettingDefinitionProvi
                 Description = FirstNonEmpty(contributors.Select(c => c.Description)),
                 PermissionGroup = FirstNonEmpty(contributors.Select(c => c.PermissionGroup)),
                 PermissionSlug = FirstNonEmpty(contributors.Select(c => c.PermissionSlug)),
-                // 合并组携带全部贡献者的 Options 类型 — validator 预检要对每个类型分别
+                // 合并组携带全部贡献者的 Options 类型 - validator 预检要对每个类型分别
                 // 绑定候选并验证，只留第一个会让其余贡献者的字段静默跳过预检。
                 OptionsTypes = contributors
                     .SelectMany(c => c.OptionsTypes ?? [])

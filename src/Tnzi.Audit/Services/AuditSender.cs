@@ -10,7 +10,7 @@ public class AuditSender : IAuditSender, IAuditConsumer
 
     // 队列容量固化进 Channel 是刻意的（BoundedChannel 容量运行时不可变）；
     // 用 Monitor 在实例创建时点读一次，语义等价且不触发热消费审计告警。
-    public AuditSender(IOptionsMonitor<Audit.Options.AuditOptions> options)
+    public AuditSender(IOptionsMonitor<AuditOptions> options)
     {
         Check.NotNull(options);
 

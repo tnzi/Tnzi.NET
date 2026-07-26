@@ -13,6 +13,50 @@ export const en = {
     errorGeneric: 'Something went wrong. Please try again.',
     errorNetwork: 'Network error. Please check your connection.',
     errorRateLimit: 'Rate limit exceeded. Please wait a moment.',
+    generationStopped: 'Generation stopped',
+    regenerate: 'Regenerate',
+    like: 'Like',
+    dislike: 'Dislike',
+    deleteConversation: 'Delete conversation',
+    streaming: 'Streaming',
+  },
+  sidebar: {
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
+    show: 'Show sidebar',
+    settings: 'Settings',
+    commandPalette: 'Command palette',
+  },
+  composer: {
+    attach: 'Attach files',
+    removeAttachment: 'Remove attachment',
+    voiceInput: 'Voice input',
+    stopRecording: 'Stop recording',
+    send: 'Send',
+    /** {size} = human-readable limit, {names} = comma-separated file names. */
+    filesTooLarge: 'Not attached, larger than {size}: {names}',
+    dismiss: 'Dismiss',
+  },
+  account: {
+    signOut: 'Sign out',
+    email: 'Email',
+    emailHint: 'Your login email address',
+    role: 'Role',
+    roleHint: 'Your system role and permissions',
+    fallbackName: 'User',
+  },
+  settings: {
+    appearance: 'Appearance',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    themeSystem: 'Follow System',
+    /** {brand} = brand name passed to TChatApp. */
+    poweredBy: 'Powered by Tnzi.NET, a modular AI framework.',
+  },
+  palette: {
+    placeholder: 'Type a command or search...',
+    noResults: 'No matching actions.',
+    escHint: 'Esc',
   },
   reasoning: {
     thinking: 'Thinking...',
@@ -199,6 +243,8 @@ export const en = {
     all: 'All',
     user: 'User',
     actions: 'Actions',
+    yes: 'Yes',
+    no: 'No',
   },
 };
 

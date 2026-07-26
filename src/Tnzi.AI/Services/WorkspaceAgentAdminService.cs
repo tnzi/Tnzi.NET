@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// Default implementation — delegates the actual scanning to
+/// Default implementation - delegates the actual scanning to
 /// <see cref="IWorkspaceAgentProvider"/> and projects the parsed
 /// <see cref="WorkspaceAgentDefinition"/> shapes to admin DTOs.
 /// </summary>
@@ -49,7 +49,7 @@ public class WorkspaceAgentAdminService : IWorkspaceAgentAdminService
         {
             return Result<List<WorkspacePersonaDto>>.Success([]);
         }
-        // Personas live next to AGENT.md files — discover via the same path
+        // Personas live next to AGENT.md files - discover via the same path
         // walk and surface the `PersonaContent` field when present.
         var agents = await ListAgentsAsync(cancellationToken);
         if (!agents.Succeeded || agents.Data == null)
@@ -93,7 +93,7 @@ public class WorkspaceAgentAdminService : IWorkspaceAgentAdminService
         catch
         {
             // Discover failures (permissions, malformed files) shouldn't block
-            // the admin endpoint — workspace agents are an optional surface.
+            // the admin endpoint - workspace agents are an optional surface.
         }
     }
 

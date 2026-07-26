@@ -1,18 +1,20 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TCollapsibleSidebar — three-mode sidebar frame for chat applications.
+ * TCollapsibleSidebar - three-mode sidebar frame for chat applications.
  *
  * Modes:
  *   - expanded: full-width sidebar with all slots visible
  *   - icon: collapsed rail showing only icons (uses `rail` slot)
  *   - hidden: off-canvas; on mobile renders as an overlay drawer
  *
- * Slot-only design — consumers provide header/nav/content/footer/rail markup.
- * Use `@tnzi/ui-ai/composables/useSidebarState` for the state machine.
+ * Slot-only design: consumers provide header/nav/content/footer/rail markup.
+ * Import `useSidebarState` from `@tnzi/ui-ai/composables` (or
+ * `@tnzi/ui-ai/shell`) for the state machine.
  */
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import type { SidebarMode } from '@/composables/useSidebarState'
+import { useBodyScrollLock } from '@/composables/useBodyScrollLock'
 
 const props = withDefaults(
   defineProps<{
@@ -40,6 +42,12 @@ const currentWidth = computed(() => {
 
 const isDrawer = computed(() => props.isMobile && props.modelValue !== 'hidden')
 
+/* Hidden mode collapses the sidebar to `width: 0` + `overflow: hidden`, which
+   hides it visually but leaves its buttons in the tab order. `inert` takes
+   them out of the tab order and the a11y tree together, so `aria-hidden` no
+   longer contradicts what a keyboard user can reach. */
+const isFullyHidden = computed(() => props.modelValue === 'hidden' && !isDrawer.value)
+
 function closeFromBackdrop(): void {
   if (isDrawer.value) {
     emit('update:modelValue', 'hidden')
@@ -48,7 +56,7 @@ function closeFromBackdrop(): void {
 
 /**
  * In icon (collapsed) mode, clicking an empty area of the rail expands the
- * sidebar — matches Manus's "whole nav is a cursor-e-resize click target"
+ * sidebar - matches Manus's "whole nav is a cursor-e-resize click target"
  * behavior. Clicks that land on an interactive descendant (button / link /
  * input / [role=button]) keep their own semantics and DO NOT expand.
  */
@@ -59,10 +67,11 @@ function handleRailClick(e: MouseEvent): void {
   emit('update:modelValue', 'expanded')
 }
 
-watch(isDrawer, (val) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = val ? 'hidden' : ''
-})
+/* The mobile drawer covers the page, so the page behind it must not scroll.
+   The shared lock restores whatever overflow the host had and releases on
+   unmount: without that, unmounting mid-drawer (a route change while the
+   drawer is open) left the page permanently unscrollable. */
+useBodyScrollLock(isDrawer)
 </script>
 
 <template>
@@ -83,7 +92,8 @@ watch(isDrawer, (val) => {
       't-collapsible-sidebar--drawer': isDrawer,
     }"
     :style="{ width: `${currentWidth}px` }"
-    :aria-hidden="modelValue === 'hidden' && !isDrawer"
+    :aria-hidden="isFullyHidden"
+    :inert="isFullyHidden || undefined"
     @click="handleRailClick"
   >
     <div class="t-collapsible-sidebar__inner">
@@ -134,13 +144,13 @@ watch(isDrawer, (val) => {
   background: var(--tnzi-ai-sidebar-bg, transparent);
   border-right: var(--tnzi-ai-sidebar-border, none);
   /* Manus-matched easing: width-only transition on the standard Material
-     decelerate curve. Only width animates — label nodes are conditionally
+     decelerate curve. Only width animates - label nodes are conditionally
      rendered (v-if) so there is nothing else to animate during the swap. */
   transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 /* Collapsed rail: whole sidebar reads as "push me east". Clicking any empty
-   area (non-interactive target) expands the sidebar — see handleRailClick. */
+   area (non-interactive target) expands the sidebar - see handleRailClick. */
 .t-collapsible-sidebar--icon {
   cursor: e-resize;
 }

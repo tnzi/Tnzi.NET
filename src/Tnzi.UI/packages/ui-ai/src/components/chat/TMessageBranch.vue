@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TMessageBranch — Branch navigation
+ * TMessageBranch - Branch navigation
  *
  * Shows branch navigation arrows and current position (e.g. 1/3).
  * Only renders when there are multiple branches.

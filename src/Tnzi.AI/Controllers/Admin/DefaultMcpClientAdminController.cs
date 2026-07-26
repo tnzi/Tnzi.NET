@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// MCP Client 管理控制器 — 管理外部 MCP Server 注册条目（client-side catalogue）
+/// MCP Client 管理控制器 - 管理外部 MCP Server 注册条目（client-side catalogue）
 /// </summary>
 /// <remarks>
 /// 这些端点管理 Tnzi 作为 MCP Client 连接外部 MCP Server 的注册信息，

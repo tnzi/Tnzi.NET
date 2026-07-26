@@ -35,7 +35,7 @@ public class SubAgentRegistryPersistenceTests
         // Act
         await _registry.LoadFromStoreAsync(_mockRepo.Object);
 
-        // Assert — built-in types still present
+        // Assert - built-in types still present
         _registry.Get("general-purpose").ShouldNotBeNull();
         _registry.Get("bash").ShouldNotBeNull();
         _registry.Get("researcher").ShouldNotBeNull();
@@ -78,7 +78,7 @@ public class SubAgentRegistryPersistenceTests
         // Act
         await _registry.LoadFromStoreAsync(_mockRepo.Object);
 
-        // Assert — built-in bash is overridden
+        // Assert - built-in bash is overridden
         var bash = _registry.Get("bash");
         bash.ShouldNotBeNull();
         bash.Description.ShouldBe("Custom bash agent with extended tools");
@@ -150,7 +150,7 @@ public class SubAgentRegistryPersistenceTests
         // Act
         await _registry.LoadFromStoreAsync(_mockRepo.Object);
 
-        // Assert — null 列表归一化为空列表
+        // Assert - null 列表归一化为空列表
         var type = _registry.Get("minimal-type");
         type.ShouldNotBeNull();
         type.ToolGroups.Count.ShouldBe(0);

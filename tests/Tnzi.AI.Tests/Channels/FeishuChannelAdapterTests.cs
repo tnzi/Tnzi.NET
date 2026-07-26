@@ -149,7 +149,7 @@ public class FeishuChannelAdapterTests
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
         var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
-        // 10 minutes ago — exceeds 5 minute window
+        // 10 minutes ago - exceeds 5 minute window
         var staleTimestamp = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 600).ToString();
         var nonce = "abc123";
         var signature = ComputeSha256Hex(staleTimestamp + nonce + TestEncryptKey + body);

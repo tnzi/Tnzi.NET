@@ -4,7 +4,7 @@ using Tnzi.AI.Mcp.Services;
 namespace Tnzi.AI.Tests.Mcp;
 
 /// <summary>
-/// McpToolAnalyticsService 单元测试 — P95 小样本边界、most-used / errors 聚合、
+/// McpToolAnalyticsService 单元测试 - P95 小样本边界、most-used / errors 聚合、
 /// cleanup retentionDays 下限校验。查询路径用 MockQueryable 提供异步 EF 操作符。
 /// </summary>
 public class McpToolAnalyticsServiceTests
@@ -44,7 +44,7 @@ public class McpToolAnalyticsServiceTests
         CreationTime = created ?? DateTime.UtcNow
     };
 
-    // ─── GetToolStatsAsync — P95 small-sample boundary ───────────────────────
+    // ─── GetToolStatsAsync - P95 small-sample boundary ───────────────────────
 
     [Fact]
     public async Task GetToolStatsAsync_NoRecords_ReturnsEmptyStatsForTool()
@@ -112,7 +112,7 @@ public class McpToolAnalyticsServiceTests
         result.Data.UniqueCallers.ShouldBe(2);         // c1, c2
     }
 
-    // ─── GetMostUsedToolsAsync — aggregation + ordering ──────────────────────
+    // ─── GetMostUsedToolsAsync - aggregation + ordering ──────────────────────
 
     [Fact]
     public async Task GetMostUsedToolsAsync_OrdersByCallCountDescending_AndComputesSuccessRate()
@@ -153,7 +153,7 @@ public class McpToolAnalyticsServiceTests
         result.Data.Select(d => d.ToolName).ShouldBe(["a", "b"]);
     }
 
-    // ─── GetToolErrorsAsync — aggregation by error message ───────────────────
+    // ─── GetToolErrorsAsync - aggregation by error message ───────────────────
 
     [Fact]
     public async Task GetToolErrorsAsync_GroupsByMessage_OrdersByCount_ExcludesSuccesses()
@@ -178,7 +178,7 @@ public class McpToolAnalyticsServiceTests
         result.Data[1].Count.ShouldBe(1);
     }
 
-    // ─── CleanupOldRecordsAsync — retentionDays lower-bound guard ────────────
+    // ─── CleanupOldRecordsAsync - retentionDays lower-bound guard ────────────
 
     [Fact]
     public async Task CleanupOldRecordsAsync_ZeroRetention_RejectedWithoutTouchingRepository()

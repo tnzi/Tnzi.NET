@@ -6,16 +6,16 @@ namespace Tnzi.Finance.Ai;
 /// </summary>
 /// <remarks>
 /// Optional. The <see cref="IReceiptExtractor"/> contract and its 501 guide stay in Finance core (which
-/// keeps zero AI/Storage references — the contract passes a <c>FileId</c>, not a byte stream). Loading
+/// keeps zero AI/Storage references - the contract passes a <c>FileId</c>, not a byte stream). Loading
 /// this module binds the vision + PDF-text implementation; a consumer may still register its own
 /// <see cref="IReceiptExtractor"/> to override (the default is registered via <c>TryAddScoped</c>). No
 /// entities/tables, so no <c>TableNamePrefix</c> and <see cref="TnziCustomModule"/> is the right base.
 /// </remarks>
-[DependsOn(typeof(FinanceModule), typeof(AIModule), typeof(StorageModule))]
+[DependsOn(typeof(FinanceModule), typeof(FinanceBankingModule), typeof(AIModule), typeof(StorageModule))]
 public class FinanceAiModule : TnziCustomModule
 {
     /// <inheritdoc />
-    public override int LoadOrder => 56;
+    public override int LoadOrder => 58;
 
     /// <inheritdoc />
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)

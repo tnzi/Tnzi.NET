@@ -1,4 +1,5 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 export interface RegisterData {
   email: string
@@ -34,6 +35,8 @@ export interface UseRegisterFormReturn {
 }
 
 export function useRegisterForm(options: UseRegisterFormOptions = {}): UseRegisterFormReturn {
+  const { t } = useI18n()
+
   const email = ref('')
   const userName = ref('')
   const phoneNumber = ref('')
@@ -56,11 +59,15 @@ export function useRegisterForm(options: UseRegisterFormOptions = {}): UseRegist
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {}
-    if (!email.value) newErrors.email = 'Email is required'
-    if (!password.value) newErrors.password = 'Password is required'
-    if (passwordMismatch.value) newErrors.confirmPassword = 'Passwords do not match'
-    if (options.showUsername && !userName.value) newErrors.userName = 'Username is required'
-    if (options.showPhone && !phoneNumber.value) newErrors.phoneNumber = 'Phone number is required'
+    if (!email.value) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
+    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
+    if (passwordMismatch.value) newErrors.confirmPassword = t('auth.passwordMismatch')
+    if (options.showUsername && !userName.value) {
+      newErrors.userName = t('auth.pleaseEnter', { field: t('auth.username') })
+    }
+    if (options.showPhone && !phoneNumber.value) {
+      newErrors.phoneNumber = t('auth.pleaseEnter', { field: t('auth.phone') })
+    }
     errors.value = newErrors
     return Object.keys(newErrors).length === 0
   }

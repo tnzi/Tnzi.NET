@@ -10,7 +10,7 @@ namespace Tnzi.AI.Tools.Approval.Sse;
 public sealed class ApprovalRequestCollector
 {
     /// <summary>
-    /// Bounded channel — sized to comfortably accommodate concurrent destructive tool calls
+    /// Bounded channel - sized to comfortably accommodate concurrent destructive tool calls
     /// from a single agent run without blocking the writer. If callers consistently fill it
     /// the SSE consumer is too slow / disconnected and writers will wait (which is the correct
     /// back-pressure behavior).

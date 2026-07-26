@@ -16,6 +16,7 @@
     "@iconify/vue": "catalog:",
     "@vitejs/plugin-vue": "^6.0.7",
     "typescript": "^6.0.3",
+    "unocss": "^66.7.2",
     "vite": "^7.3.5"
   }
 }

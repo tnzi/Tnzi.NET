@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Chunking;
 
 /// <summary>
-/// 异步分块策略接口 — 支持需要 I/O 操作（如嵌入计算）的分块策略
+/// 异步分块策略接口 - 支持需要 I/O 操作（如嵌入计算）的分块策略
 /// </summary>
 /// <remarks>
 /// <para>

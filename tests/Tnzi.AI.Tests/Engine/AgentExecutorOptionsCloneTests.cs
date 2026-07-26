@@ -36,7 +36,7 @@ public class AgentExecutorOptionsCloneTests
             .Where(p => p.CanWrite)
             .ToList();
 
-        // 自检：每个可写属性都必须被上面赋成非默认值 — 新增属性会让这里先红，
+        // 自检：每个可写属性都必须被上面赋成非默认值 - 新增属性会让这里先红，
         // 强制把它纳入克隆守卫（MemberwiseClone 本身不会漏，但守卫要跟上）。
         var defaults = new AgentExecutorOptions();
         foreach (var prop in writableProps)
@@ -51,7 +51,7 @@ public class AgentExecutorOptionsCloneTests
         foreach (var prop in writableProps)
         {
             prop.GetValue(clone).ShouldBe(prop.GetValue(options),
-                $"Clone must copy {prop.Name} — a dropped member silently changes executor behavior after tool merge");
+                $"Clone must copy {prop.Name} - a dropped member silently changes executor behavior after tool merge");
         }
     }
 }

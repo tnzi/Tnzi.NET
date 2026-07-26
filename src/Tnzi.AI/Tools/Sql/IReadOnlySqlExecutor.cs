@@ -14,7 +14,7 @@ public interface IReadOnlySqlExecutor
     /// <summary>
     /// Executes like <see cref="ExecuteAsync"/> but converts validation /
     /// permission / execution failures into a failed <see cref="QueryResult"/>
-    /// (IsSuccess=false + ErrorMessage) instead of throwing — so callers can
+    /// (IsSuccess=false + ErrorMessage) instead of throwing - so callers can
     /// distinguish "no rows" from "rejected / timed out" and feed the error
     /// back to an AI to self-correct. Cancellation still propagates.
     /// </summary>

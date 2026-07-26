@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { effectScope, nextTick } from 'vue'
 import { useSidebarState } from '../../src/composables/useSidebarState'
 
 describe('useSidebarState', () => {
@@ -92,5 +92,46 @@ describe('useSidebarState', () => {
     await nextTick()
 
     expect(mode.value).toBe('icon')
+  })
+  // -------------------------------------------------------------------------
+  // Cleanup (regression: the resize listener was attached unconditionally but
+  // only detached inside a component, so every scope-less call leaked one.)
+  // -------------------------------------------------------------------------
+
+  it('detaches the resize listener via dispose()', async () => {
+    const { mode, setMode, dispose } = useSidebarState({
+      mobileBreakpoint: 768,
+      storageKey: null,
+    })
+    setMode('icon')
+
+    dispose()
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+
+    // Still 'icon': the disposed instance no longer reacts to resizes.
+    expect(mode.value).toBe('icon')
+  })
+
+  it('is idempotent when dispose() is called twice', () => {
+    const { dispose } = useSidebarState({ storageKey: null })
+    dispose()
+    expect(() => dispose()).not.toThrow()
+  })
+
+  it('cleans up automatically when the owning effect scope stops', async () => {
+    const scope = effectScope()
+    const state = scope.run(() => useSidebarState({ mobileBreakpoint: 768, storageKey: null }))!
+    state.setMode('icon')
+
+    scope.stop()
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+
+    expect(state.mode.value).toBe('icon')
   })
 })

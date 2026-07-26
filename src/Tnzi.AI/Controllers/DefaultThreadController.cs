@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers;
 
 /// <summary>
-/// 用户端线程控制器 — 已认证用户管理自己的对话线程。
+/// 用户端线程控制器 - 已认证用户管理自己的对话线程。
 /// 所有操作自动限定为当前用户（CreatorId 过滤）。
 /// </summary>
 [DefaultController]
@@ -101,7 +101,7 @@ public class DefaultThreadController : ApiControllerBase
     /// 生成对话的后续建议问题
     /// </summary>
     [HttpPost("{threadId:guid}/suggestions")]
-    public virtual async Task<ApiResult<List<string>>> GetSuggestions(Guid threadId, [FromQuery] int count = 3, CancellationToken ct = default)
+    public virtual async Task<ApiResult<List<string>>> GetSuggestions(Guid threadId, [FromQuery][Range(1, 10)] int count = 3, CancellationToken ct = default)
     {
         await EnsureOwnershipAsync(threadId);
 

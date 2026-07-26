@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// 技能模板引擎实现 — 解析 {{param}} 占位符、验证参数值、渲染最终提示词
+/// 技能模板引擎实现 - 解析 {{param}} 占位符、验证参数值、渲染最终提示词
 /// </summary>
 public partial class SkillTemplateEngine : ISkillTemplateEngine
 {

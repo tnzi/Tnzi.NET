@@ -11,10 +11,14 @@ export default defineConfig({
       { find: 'virtual:uno.css', replacement: resolve(__dirname, '__tests__/stubs/empty.css') },
       { find: '@tnzi/ui', replacement: resolve(__dirname, '../ui/src') },
       { find: '@tnzi/core', replacement: resolve(__dirname, '../core/src') },
-      // @tnzi/ui-ai is not built in test envs (heavy tailwind/vue-flow deps).
-      // Tests vi.mock('@tnzi/ui-ai') for bespoke stubs; the alias here just
-      // satisfies vite's resolver so dynamic import() in lazy-load shells
-      // (Task 5.5 WorkflowEditor) doesn't fail at transform time.
+      // @tnzi/ui-ai is not built in test envs (heavy vue-flow deps).
+      // Tests vi.mock(...) for bespoke stubs; the aliases here just satisfy
+      // vite's resolver so dynamic import() in lazy-load shells doesn't fail at
+      // transform time.
+      // The `/workflow` subpath must come FIRST: vite string aliases match by
+      // prefix, so the bare entry would otherwise rewrite it to
+      // `<stub>/workflow` and fail to resolve.
+      { find: '@tnzi/ui-ai/workflow', replacement: resolve(__dirname, '__tests__/stubs/ui-ai.ts') },
       { find: '@tnzi/ui-ai', replacement: resolve(__dirname, '__tests__/stubs/ui-ai.ts') },
       // Enable runtime template compilation so stub components using
       // `template: '...'` strings render correctly under vue-test-utils.
@@ -28,7 +32,7 @@ export default defineConfig({
     // SFC transform + TCrudPage + bridge init can exceed vitest's 5s default
     // on the first test in a file. We previously ran at 15s but Phase G
     // started seeing 1-4 flaky timeouts per run on Windows SSDs (the page
-    // shifted between runs — i.e. environmental, not regression). Bumped
+    // shifted between runs - i.e. environmental, not regression). Bumped
     // to 30s to give all integration mounts headroom; genuine hangs still
     // surface within a reasonable wall-clock for CI.
     testTimeout: 30000,
@@ -54,7 +58,7 @@ export default defineConfig({
         // user-flow simulation (form validation, modal lifecycle, row action
         // clicks that only execute arrow handlers declared inside <script
         // setup>). Real user flows are covered by Playwright E2E specs in
-        // Tasks 6.3–6.6. Lines/statements/branches meet the 80/70 targets.
+        // Tasks 6.3-6.6. Lines/statements/branches meet the 80/70 targets.
         functions: 60,
         branches: 70,
       },

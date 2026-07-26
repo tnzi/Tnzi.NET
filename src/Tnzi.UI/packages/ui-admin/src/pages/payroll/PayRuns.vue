@@ -11,6 +11,7 @@
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="payRunFormSchema"
+        :sections="payRunFormSections"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
         :field-renderers="fieldRenderers"
@@ -124,6 +125,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref } from 'vue'
 import { NButton, NDatePicker, NDescriptions, NDescriptionsItem, NInput, NInputNumber, NSelect, type DataTableColumns } from 'naive-ui'
 import { formatDateOnly } from '@tnzi/core'
@@ -149,7 +151,13 @@ import { useSafeMessage } from '../_shared/safeMessage'
 import { createPayrollOptionSources } from './options'
 import { enumKey } from './setup-config'
 import { amountCell, fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../finance/money'
-import { buildPayRunColumns, payRunFormSchema, toPayRunPayload, type PayRunRow } from './pay-run-config'
+import {
+  buildPayRunColumns,
+  payRunFormSchema,
+  payRunFormSections,
+  toPayRunPayload,
+  type PayRunRow,
+} from './pay-run-config'
 
 const bridge = createPayrollBridge({ client: useAdminClient() })
 const t = makePageTranslator('payroll.payRuns')
@@ -214,7 +222,7 @@ const payslipColumns: DataTableColumns<PayslipListDto> = [
   { key: 'grossPay', title: t('payslip.grossPay'), width: 110, render: (r) => amountCell(fmtAmount(r.grossPay)) },
   { key: 'netPay', title: t('payslip.netPay'), width: 110, render: (r) => amountCell(fmtAmount(r.netPay), true) },
   { key: 'paymentStatus', title: t('payslip.paymentStatus'), width: 100, render: (r) => t(`payslip.status.${enumKey(r.paymentStatus)}`) },
-  { key: 'calculationError', title: t('payslip.error'), minWidth: 120, render: (r) => r.calculationError ?? '—' },
+  { key: 'calculationError', title: t('payslip.error'), minWidth: 120, render: (r) => r.calculationError ?? EMPTY_DASH },
 ]
 
 const payslipRowActions: RowAction<PayslipListDto>[] = [

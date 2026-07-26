@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// Agent 任务实体 — 持久化 AI Agent 的任务追踪（Todo 项）
+/// Agent 任务实体 - 持久化 AI Agent 的任务追踪（Todo 项）
 /// </summary>
 public class AgentTask : CreationAuditedEntity<Guid>, IMultiTenant
 {

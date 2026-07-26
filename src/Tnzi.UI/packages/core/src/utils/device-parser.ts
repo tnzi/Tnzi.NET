@@ -1,15 +1,15 @@
 /**
- * Device-info parsing — turns a raw `deviceInfo` / `userAgent` string
+ * Device-info parsing - turns a raw `deviceInfo` / `userAgent` string
  * (whatever the backend captured at login time) into a friendly icon +
  * short label pair for table rendering.
  *
- * Heuristics, NOT exhaustive UA parsing — we deliberately avoid pulling
+ * Heuristics, NOT exhaustive UA parsing - we deliberately avoid pulling
  * `ua-parser-js` (~50 KB gzip) because:
  *   1. We only need OS-family + browser-family granularity, not exact
  *      version numbers.
  *   2. Almost every login event recorded by Tnzi.Identity carries a
  *      pre-formatted `deviceInfo` ("Windows 10 / Chrome 120") rather
- *      than the raw UA — the simple regex catches those just fine.
+ *      than the raw UA - the simple regex catches those just fine.
  *
  * If a future requirement needs detailed UA fields (e.g. exact engine
  * versions) we can swap the body for ua-parser-js without touching the
@@ -33,7 +33,7 @@ export interface DeviceProfile {
 
 const UNKNOWN: DeviceProfile = {
   icon: 'mdi:devices',
-  label: '—',
+  label: '-',
   osFamily: 'unknown',
 }
 
@@ -46,7 +46,7 @@ const OS_PATTERNS: Array<{ test: RegExp; icon: string; family: DeviceOsFamily; l
 ]
 
 const BROWSER_PATTERNS: Array<{ test: RegExp; label: string }> = [
-  // Order matters — Edge/Chromium/Brave all carry "Chrome" in their UA;
+  // Order matters - Edge/Chromium/Brave all carry "Chrome" in their UA;
   // check more specific brands first so we report "Edge" instead of
   // "Chrome" for users running Edge.
   { test: /\bEdg(e|A|iOS)?\/[\d.]+/i, label: 'Edge' },

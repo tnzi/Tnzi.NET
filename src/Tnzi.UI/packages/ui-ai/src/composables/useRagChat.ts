@@ -1,8 +1,8 @@
 /**
- * useRagChat — RAG mode chat with knowledge base selection and citations
+ * useRagChat - RAG mode chat with knowledge base selection and citations
  */
 
-import { ref, computed, readonly, type Ref, type DeepReadonly } from 'vue';
+import { ref, computed, readonly, type Ref, type ComputedRef, type DeepReadonly } from 'vue';
 
 export interface RagCitation {
   title: string;
@@ -14,7 +14,7 @@ export interface RagCitation {
 export interface UseRagChatReturn {
   selectedBaseIds: DeepReadonly<Ref<readonly string[]>>;
   citations: DeepReadonly<Ref<readonly RagCitation[]>>;
-  isRagEnabled: DeepReadonly<Ref<boolean>>;
+  isRagEnabled: ComputedRef<boolean>;
   toggleBase: (baseId: string) => void;
   clearBases: () => void;
   setCitations: (citations: RagCitation[]) => void;
@@ -53,7 +53,7 @@ export function useRagChat(): UseRagChatReturn {
   return {
     selectedBaseIds: readonly(selectedBaseIds) as DeepReadonly<Ref<readonly string[]>>,
     citations: readonly(citations) as DeepReadonly<Ref<readonly RagCitation[]>>,
-    isRagEnabled: isRagEnabled as unknown as DeepReadonly<Ref<boolean>>,
+    isRagEnabled,
     toggleBase,
     clearBases,
     setCitations,

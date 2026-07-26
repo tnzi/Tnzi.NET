@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TLayoutModeCard` — soybean-parity preview card for one of the four
+ * `TLayoutModeCard` - soybean-parity preview card for one of the four
  * admin layout modes. Renders a 96x64 canvas with primary-tinted boxes
  * arranged to mimic each mode's chrome (sider/header/main combinations).
  *
@@ -73,7 +73,7 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
       </span>
 
       <!-- top-hybrid-header-first: primary header + (default-tinted sider + main).
-           The sider is plain (not primary-tinted) — it hosts the active
+           The sider is plain (not primary-tinted) - it hosts the active
            first-level's children. -->
       <span v-else-if="mode === 'top-hybrid-header-first'" class="t-layout-card__col">
         <span class="t-layout-card__header t-layout-card__header--primary" />
@@ -88,7 +88,7 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
 </template>
 
 <style scoped>
-/* Card outer button — flex column for canvas + label, no border on the
+/* Card outer button - flex column for canvas + label, no border on the
    button itself (soybean uses a transparent ring + box-shadow on the
    inner canvas instead). Width is pinned to the canvas width so that
    even if the parent grid uses an auto-sizing column, the button itself
@@ -108,9 +108,9 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
   cursor: pointer;
 }
 
-/* Canvas is the chrome preview — keeps the 96x64 (3:2) proportions but
+/* Canvas is the chrome preview - keeps the 96x64 (3:2) proportions but
    scales down to fit narrower cells (4-in-a-row). Soybean uses a ring
-   (box-shadow) for active/hover state — avoids reflow on selection. */
+   (box-shadow) for active/hover state - avoids reflow on selection. */
 .t-layout-card__canvas {
   display: flex;
   width: 100%;
@@ -136,7 +136,7 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
     0 0 0 2px var(--tnzi-primary, #646cff);
 }
 
-/* Layout primitives — match soybean's atomic UnoCSS classes:
+/* Layout primitives - match soybean's atomic UnoCSS classes:
    `.layout-header { h-16px rd-4px }`, `.layout-sider { bg-primary-300 rd-4px }`,
    `.layout-main { flex-1 bg-primary-200 rd-4px }`. */
 .t-layout-card__col {

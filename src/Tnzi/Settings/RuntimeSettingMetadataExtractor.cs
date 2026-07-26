@@ -58,11 +58,23 @@ public static class RuntimeSettingMetadataExtractor
             I18nKey = groupAttr?.I18nKey,
             Icon = groupAttr?.Icon,
             Order = groupAttr?.Order ?? 0,
+            IsBuiltIn = IsFrameworkAssembly(optionsType.Assembly),
             PermissionGroup = groupAttr?.PermissionGroup,
             PermissionSlug = groupAttr?.PermissionSlug,
             OptionsTypes = [optionsType],
             Fields = fields,
         };
+    }
+
+    /// <summary>
+    /// 框架内置配置组来自 <c>Tnzi</c> / <c>Tnzi.*</c> 程序集；消费应用自有 <c>[RuntimeSetting]</c>
+    /// 组（如 <c>Acme.Blog</c>）不是内置，必须不受 admin「内置菜单」开关影响。判据沿用框架
+    /// 铁律「框架程序集名称以 Tnzi 开头」。
+    /// </summary>
+    private static bool IsFrameworkAssembly(Assembly assembly)
+    {
+        var name = assembly.GetName().Name;
+        return name is not null && (name == "Tnzi" || name.StartsWith("Tnzi.", StringComparison.Ordinal));
     }
 
     /// <summary>无效正则属于定义错误，启动期 fail-fast（与非标量属性同一护栏纪律）。</summary>

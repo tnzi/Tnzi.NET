@@ -1,6 +1,6 @@
 /**
  * @experimental
- * useCodeHighlight — Reactive Shiki syntax highlighter.
+ * useCodeHighlight - Reactive Shiki syntax highlighter.
  *
  * Wraps Shiki's `codeToHtml` in a Vue-friendly interface: pass reactive
  * refs for code/lang/theme and get back a `shallowRef<string>` holding
@@ -14,7 +14,7 @@
  *
  * TArtifactPanel was the first consumer, but any component that wants to
  * render a code block with github-light / github-dark theming can reuse
- * this — e.g. ChatMessage's inline code blocks, RAG citation snippets,
+ * this - e.g. ChatMessage's inline code blocks, RAG citation snippets,
  * skill parameter samples. Centralizing the Shiki pipeline here also
  * means a single place to swap themes, add language detection heuristics,
  * or upgrade to Shiki's async `createHighlighter` API later.
@@ -37,7 +37,15 @@
  * <div v-else v-html="html" />
  * ```
  */
-import { ref, shallowRef, watch, type Ref, type MaybeRefOrGetter, toValue } from 'vue'
+import {
+  ref,
+  shallowRef,
+  watch,
+  onWatcherCleanup,
+  type Ref,
+  type MaybeRefOrGetter,
+  toValue,
+} from 'vue'
 
 /** Shiki grammar ids covered by the built-in detector. */
 export type CodeLang =
@@ -50,7 +58,7 @@ export type CodeTheme = string
 
 /**
  * Derive a Shiki language id from a filename. Falls back to `'text'` for
- * unknown extensions — `'text'` is a valid Shiki lang that just renders
+ * unknown extensions - `'text'` is a valid Shiki lang that just renders
  * plain monospace output.
  */
 export function detectLangFromFilename(filename: string | null | undefined): CodeLang {
@@ -107,7 +115,7 @@ export function useCodeHighlight(
   const error = ref<Error | null>(null)
 
   /* Watch source returns a tuple instead of a fresh object so Vue's
-     shallow comparison can detect "no change" — an object literal
+     shallow comparison can detect "no change": an object literal
      would create a new reference every reactive tick and re-trigger
      the highlight pass even when none of the inputs changed. */
   watch(
@@ -117,6 +125,16 @@ export function useCodeHighlight(
       toValue(options.theme ?? 'github-light'),
     ] as const,
     async ([c, l, t]) => {
+      /* Two awaits follow, so a rapid input change (switching files in the
+         artifact panel) can leave an older pass still in flight. Registering
+         the cleanup synchronously - before the first await - lets a superseded
+         pass detect that it lost the race and drop its result instead of
+         overwriting the newer one. */
+      let superseded = false
+      onWatcherCleanup(() => {
+        superseded = true
+      })
+
       if (!c) {
         html.value = ''
         error.value = null
@@ -126,8 +144,12 @@ export function useCodeHighlight(
       error.value = null
       try {
         const shiki = await import('shiki')
-        html.value = await shiki.codeToHtml(c, { lang: l || 'text', theme: t })
+        if (superseded) return
+        const rendered = await shiki.codeToHtml(c, { lang: l || 'text', theme: t })
+        if (superseded) return
+        html.value = rendered
       } catch (err) {
+        if (superseded) return
         error.value = err instanceof Error ? err : new Error(String(err))
         // Fallback: escape and wrap in <pre><code> so the view still
         // renders something reasonable when Shiki fails to load the
@@ -137,7 +159,7 @@ export function useCodeHighlight(
         )
         html.value = `<pre><code>${esc}</code></pre>`
       } finally {
-        isLoading.value = false
+        if (!superseded) isLoading.value = false
       }
     },
     { immediate: options.immediate ?? true },

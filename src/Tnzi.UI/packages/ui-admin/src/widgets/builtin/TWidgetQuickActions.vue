@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetQuickActions` — grid of action tiles with icon + label.
+ * `TWidgetQuickActions` - grid of action tiles with icon + label.
  *
  * Each action can either navigate (`to`) or fire an arbitrary callback
  * (`onClick`). Use this to surface 4-8 frequent admin actions ("Add
@@ -18,7 +18,7 @@ export interface QuickAction {
   key: string
   /** Iconify name (e.g. `mdi:account-plus`). */
   icon: string
-  /** Display label — i18n key or raw text. */
+  /** Display label - i18n key or raw text. */
   label: string
   /** Vue-router target. Mutually exclusive with `onClick`. */
   to?: RouteLocationRaw
@@ -40,7 +40,7 @@ export interface QuickAction {
   /**
    * Backend module the action's destination belongs to (e.g. `'ai'`,
    * `'audit'`). When set, the tile is hidden when the backend host didn't
-   * load that module (no super-user bypass — the destination route is gated
+   * load that module (no super-user bypass - the destination route is gated
    * to /403 for everyone). Fail-open while the availability signal is
    * unknown. Omit for module-agnostic actions.
    */
@@ -65,9 +65,9 @@ const authStore = useAdminAuthStore()
 const moduleAvailability = useModuleAvailability()
 
 // Hide actions whose destination the user can't reach, on two orthogonal
-// dimensions: module availability (`module` — no super-user bypass; an
+// dimensions: module availability (`module` - no super-user bypass; an
 // unloaded module's route bounces to /403 for everyone) and permissions
-// (`permission` — super-user bypass + fail-open before permissions load).
+// (`permission` - super-user bypass + fail-open before permissions load).
 const visibleActions = computed<QuickAction[]>(() => {
   const moduleVisible = props.actions.filter(
     (a) => !a.module || moduleAvailability.has(a.module),
@@ -135,7 +135,7 @@ async function handleClick(action: QuickAction): Promise<void> {
   justify-content: center;
   gap: 6px;
   padding: 14px 10px;
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   cursor: pointer;

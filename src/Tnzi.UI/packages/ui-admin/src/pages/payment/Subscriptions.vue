@@ -1,6 +1,6 @@
 <template>
   <!--
-    Subscriptions — admin view of payment subscriptions. Read-only: there is NO
+    Subscriptions - admin view of payment subscriptions. Read-only: there is NO
     admin subscription update endpoint (subscriptions are initiated by users), so
     the page offers a read-only View plus a single lifecycle action,
     "Cancel at period end" (POST /admin/subscriptions/{id}/cancel, immediate=false),
@@ -14,7 +14,7 @@
     :translate="t"
     :row-actions="rowActions"
   >
-    <!-- Read-only quick preview (right drawer) — reached via the row View
+    <!-- Read-only quick preview (right drawer) - reached via the row View
          action. A #detail slot (not #form) is required so the view surface
          mounts on this create/update-free page. -->
     <template #detail="{ data }">

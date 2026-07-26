@@ -1,59 +1,67 @@
 import { h, type VNode } from 'vue'
+import {
+  formatAccountingDate,
+  formatAmount,
+  formatMoney,
+  isoDateToLocalTs,
+  srMoney,
+  tsToIsoDate,
+} from '../../utils/finance-format'
 
 /**
- * Shared money formatting for the finance pages.
+ * Finance-page shims over the shared accounting formatters.
  *
- * With a currency code, renders a localized currency string. Without one,
- * degrades to a plain 2-decimal number rather than assuming a `$` default —
- * a fixed `USD` fallback mislabels every non-USD document as dollars.
+ * The real implementations live in `utils/finance-format.ts` (public on the
+ * package root) so consumer apps get the same conventions. These wrappers keep
+ * the call shape the 24 built-in finance pages already use.
+ */
+
+/**
+ * Money with a currency symbol when the document carries a currency code, and
+ * a bare number when it does not - a fixed `USD` fallback would mislabel every
+ * non-USD document as dollars.
+ *
+ * Negatives render as `(1,234.56)` per the accounting convention.
  */
 export function fmtMoney(amount?: number | null, currency?: string | null): string {
-  if (amount === null || amount === undefined) return '—'
-  if (!currency) return fmtAmount(amount)
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
+  return formatMoney(amount, { currency })
 }
 
 /** Plain 2-decimal amount without a currency symbol (report tables). */
 export function fmtAmount(amount?: number | null): string {
-  if (amount === null || amount === undefined) return '—'
-  return new Intl.NumberFormat(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
+  return formatAmount(amount)
 }
 
-/** Tabular-nums cell for amount columns. */
-export function amountCell(text: string, emphasis = false): VNode {
+/**
+ * Tabular-nums cell for amount columns.
+ *
+ * `srText` carries the screen-reader form (explicit `-`, not parentheses);
+ * pass it whenever the cell can hold a negative, so the accessible name is not
+ * the purely visual accounting glyph. AODA / WCAG 2.0 AA.
+ */
+export function amountCell(text: string, emphasis = false, srText?: string): VNode {
   return h(
     'span',
-    { style: `font-variant-numeric: tabular-nums;${emphasis ? ' font-weight: 600;' : ''}` },
+    {
+      style: `font-variant-numeric: tabular-nums;${emphasis ? ' font-weight: 600;' : ''}`,
+      ...(srText ? { 'aria-label': srText } : {}),
+    },
     text,
   )
 }
 
-/** Local date (00:00) → ISO string the backend DateTime binder accepts. */
-export function tsToIsoDate(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+/** `amountCell` for a raw number - formats and labels it in one step. */
+export function moneyCell(amount?: number | null, currency?: string | null, emphasis = false): VNode {
+  return amountCell(fmtMoney(amount, currency), emphasis, srMoney(amount, { currency }))
 }
 
 /**
- * Backend date-only value (UTC midnight ISO) → local-midnight timestamp for
- * date pickers. Going through `new Date(iso).getTime()` instead would shift
- * the calendar day for viewers west of UTC (and round-trip a day earlier
- * through tsToIsoDate on save).
+ * The canonical finance date: `Jan 15, 2026`.
+ *
+ * Deliberately not `toLocaleDateString` - US `MM/DD/YYYY` and Canadian
+ * `YYYY-MM-DD` are both common, and letting the browser choose means two
+ * colleagues read the same ledger differently.
  */
-export function isoDateToLocalTs(iso: string): number {
-  const y = Number(iso.slice(0, 4))
-  const m = Number(iso.slice(5, 7))
-  const d = Number(iso.slice(8, 10))
-  return new Date(y, m - 1, d).getTime()
-}
+export const fmtDate = formatAccountingDate
+
+export { tsToIsoDate, isoDateToLocalTs }

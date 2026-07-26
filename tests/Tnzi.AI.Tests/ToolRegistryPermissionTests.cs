@@ -130,7 +130,7 @@ public class ToolRegistryPermissionTests
     [Fact]
     public void GetToolsByNames_RespectsPermissions()
     {
-        // A per-tool grant must still respect userPermissions — the grant is an allow-LIST
+        // A per-tool grant must still respect userPermissions - the grant is an allow-LIST
         // of WHICH tools, but permissions gate access. A tool the user lacks permission for
         // must NOT be returned even when explicitly named.
         var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());

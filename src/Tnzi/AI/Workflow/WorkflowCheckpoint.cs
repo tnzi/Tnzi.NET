@@ -28,7 +28,7 @@ public enum WorkflowExecutionStatus
 }
 
 /// <summary>
-/// 工作流检查点模型 — 保存工作流执行的中间状态，支持断点续执行
+/// 工作流检查点模型 - 保存工作流执行的中间状态，支持断点续执行
 /// </summary>
 public class WorkflowCheckpoint
 {

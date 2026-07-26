@@ -7,7 +7,6 @@ import Dictionaries from '../../../src/pages/system/Dictionaries.vue'
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
-    menus: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), reorder: vi.fn() },
     settings: {
       fetch: vi.fn(async () => ({
         items: [
@@ -47,19 +46,24 @@ const stubs = {
 describe('Dictionaries page (Phase 3.13)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
-  it('mounts and fetches settings on load', async () => {
+  // Key/value pairs render as document rows: the key leads and the value gets
+  // the right-hand slot, instead of a middle table column that truncated first.
+  it('mounts and renders one row per entry, key and value both visible', async () => {
     const wrapper = mount(Dictionaries, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
-    expect(wrapper.find('.dt').attributes('data-rows')).toBe('2')
+    expect(wrapper.findAll('.t-item-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('site.name')
+    expect(wrapper.text()).toContain('My App')
   })
 
   it('opens form modal when Create button is clicked', async () => {
     const wrapper = mount(Dictionaries, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    await wrapper.find('.t-crud-page__create').trigger('click')
+    // Card/row pages use the shell's own create button; only TCrudPage adds
+    // the legacy `t-crud-page__create` alias on top of it.
+    await wrapper.find('.t-list-shell__create').trigger('click')
     expect(wrapper.find('form').exists()).toBe(true)
   })
 })

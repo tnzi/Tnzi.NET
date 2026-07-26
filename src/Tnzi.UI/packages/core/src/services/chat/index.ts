@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/services/chat
  *
- * Chat Service — system-level instant messaging (IM): conversations, messages,
+ * Chat Service - system-level instant messaging (IM): conversations, messages,
  * presence, broadcast, and admin maintenance.
  */
 

@@ -15,6 +15,14 @@ public class DefaultExceptionHandler : ExceptionHandlerBase
     {
     }
 
+    /// <summary>
+    /// 最低优先级：本处理器 <see cref="CanHandle"/> 恒为 true，必须排在链尾。
+    /// 若与其它处理器同为默认的 0，链的相对次序就取决于 List.Sort 的稳定性
+    /// （文档明确不保证），一旦本处理器被排到业务处理器之前，404/403 等
+    /// 业务状态码会被统统压成 500。
+    /// </summary>
+    public override int Priority => int.MinValue;
+
     public override bool CanHandle(Exception exception)
     {
         // 默认处理器可以处理所有异常（作为最后的备选）

@@ -36,7 +36,7 @@ import TWidgetOpsSnapshot from './builtin/TWidgetOpsSnapshot.vue'
 
 /**
  * The canned 4-tile KPI strip the Workbench shipped with before the
- * widget refactor. **Mock placeholder data** — exposed only for consumers
+ * widget refactor. **Mock placeholder data** - exposed only for consumers
  * who want to render a static demo / marketing screenshot without hitting
  * the admin API. The bundled Workbench deck no longer wires these in;
  * `TWidgetKpiStrip` auto-fetches real admin metrics (users, access logs,
@@ -112,7 +112,7 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.settings',
       to: '/admin/settings',
       tone: 'warning',
-      // Settings Center is gated by system.parameter.view (Technical) — hidden
+      // Settings Center is gated by system.parameter.view (Technical) - hidden
       // from business admins so the tile doesn't just bounce to /403.
       permission: 'system.parameter.view',
       module: 'system',
@@ -120,7 +120,7 @@ export function defaultQuickActions(): QuickAction[] {
   ]
 }
 
-/** Default what's-new style timeline. Plain English — apps usually override. */
+/** Default what's-new style timeline. Plain English - apps usually override. */
 export function defaultTimelineItems(): TimelineItem[] {
   return [
     {
@@ -167,7 +167,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       component: TWidgetKpiStrip,
       span: 24,
       bare: true,
-      // KPI strip now auto-fetches 4 real admin metrics — no props needed.
+      // KPI strip now auto-fetches 4 real admin metrics - no props needed.
       // Consumers wanting custom KPIs can override this widget entry with
       // `{ ...kpiWidget, props: { kpis: myCustomCards } }`.
       props: {},
@@ -186,8 +186,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
     // fetches, no dead cards on a zero-permission "empty shell" dashboard).
     // Dashboard.vue fails open for super admins / the pre-permission window.
     // They ALSO carry the backend module their data lives in (`module`), so a
-    // host that never loaded that module drops the widget for everyone —
-    // including super admins — instead of firing fetches that can only fail.
+    // host that never loaded that module drops the widget for everyone -
+    // including super admins - instead of firing fetches that can only fail.
     {
       id: 'identity-stats',
       component: TWidgetIdentityStats,
@@ -230,7 +230,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.systemHealth.title',
       icon: 'mdi:heart-pulse',
       span: { xs: 24, sm: 24, md: 24, lg: 8 },
-      // Technical/ops surface — hidden from business admins (they lack
+      // Technical/ops surface - hidden from business admins (they lack
       // system.health.view). Super admins and the pre-permission window still
       // see it (Dashboard.vue fail-open).
       permission: 'system.health.view',
@@ -241,7 +241,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.modules.dashboard.activity.title',
       icon: 'mdi:timeline-text-outline',
       span: { xs: 24, sm: 24, md: 24, lg: 16 },
-      // Auto-fetches recent audit log entries — `refreshable: true` so
+      // Auto-fetches recent audit log entries - `refreshable: true` so
       // the timeline can be re-polled from the widget toolbar (the
       // hardcoded i18n placeholder list never benefited from refresh).
       props: { limit: 6 },
@@ -263,8 +263,8 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.opsHealth.title',
       icon: 'mdi:heart-pulse',
       span: { xs: 24, sm: 24, md: 12, lg: 12 },
-      // Technical/ops rollup (exceptions / P95 / SignalR / channels) — its
-      // probes are all Technical-gated, so it renders all-"—" for a business
+      // Technical/ops rollup (exceptions / P95 / SignalR / channels) - its
+      // probes are all Technical-gated, so it renders all-"-" for a business
       // admin. Gate it away entirely instead (they lack system.performance.view).
       permission: 'system.performance.view',
     },

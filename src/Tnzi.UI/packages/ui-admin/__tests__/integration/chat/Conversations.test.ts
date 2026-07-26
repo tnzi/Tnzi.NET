@@ -54,7 +54,7 @@ vi.mock('../../../src/services/bridges/chat-bridge', () => ({
     broadcasts,
   }),
 }))
-// BroadcastDialog (role/user pickers) builds an identity bridge — mock it so the
+// BroadcastDialog (role/user pickers) builds an identity bridge - mock it so the
 // embedded dialog mounts cleanly.
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({

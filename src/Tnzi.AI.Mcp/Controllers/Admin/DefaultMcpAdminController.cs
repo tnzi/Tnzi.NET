@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Mcp.Controllers.Admin;
 
 /// <summary>
-/// MCP Server 管理控制器 — 查看服务器状态、工具列表、动态管理暴露的 Agent
+/// MCP Server 管理控制器 - 查看服务器状态、工具列表、动态管理暴露的 Agent
 /// </summary>
 /// <remarks>
 /// 仅管理 Tnzi 自身作为 MCP Server 的配置（status/tools/agents）。
@@ -10,7 +10,7 @@ namespace Tnzi.AI.Mcp.Controllers.Admin;
 [DefaultController]
 [Route("admin/mcp")]
 [ApiExplorerSettings(GroupName = "admin")]
-[ApiAuthorize(PermissionName = "ai.mcp.view")]
+[ApiAuthorize(PermissionName = "ai.mcpServer.view")]
 public class DefaultMcpAdminController : ApiAdminControllerBase
 {
     private readonly IMcpServerHost _mcpServerHost;
@@ -76,7 +76,7 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     /// 动态暴露 Agent 为 MCP 工具
     /// </summary>
     [HttpPost("agents/{agentId:guid}/expose")]
-    [ApiAuthorize(PermissionName = "ai.mcp.update")]
+    [ApiAuthorize(PermissionName = "ai.mcpServer.update")]
     public virtual ApiResult ExposeAgent(Guid agentId, [FromBody] McpToolExposureOptions? options = null)
     {
         _mcpServerHost.ExposeAgent(agentId, options);
@@ -87,7 +87,7 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     /// 移除已暴露的 Agent
     /// </summary>
     [HttpDelete("agents/{agentId:guid}")]
-    [ApiAuthorize(PermissionName = "ai.mcp.update")]
+    [ApiAuthorize(PermissionName = "ai.mcpServer.update")]
     public virtual ApiResult RemoveAgent(Guid agentId)
     {
         var removed = _mcpServerHost.RemoveAgent(agentId);

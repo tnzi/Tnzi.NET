@@ -1,6 +1,6 @@
 <template>
   <!--
-    LoginSecurity — surfaces /admin/login-security/{overview,frequent-failures}
+    LoginSecurity - surfaces /admin/login-security/{overview,frequent-failures}
     for the Tnzi.Identity module. Read-only dashboard: KPI strip + failure-rate
     bar + a table of users hitting the failure threshold. Built on TContentPage
     (white page-header + small toolbar in #actions); the failures table fills
@@ -38,16 +38,16 @@
 
     <div class="t-sec-page">
       <TKpiRow class="t-sec-page__kpis" cols="1 s:2 m:4 l:7">
-        <TKpiCard :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? 0" />
+        <TKpiCard :label="t('kpi.attempts')" :value="overview?.totalLoginAttempts ?? null" />
         <TKpiCard
           :label="t('kpi.success')"
-          :value="overview?.successfulLogins ?? 0"
+          :value="overview?.successfulLogins ?? null"
           icon="mdi:check-circle-outline"
           tone="success"
         />
         <TKpiCard
           :label="t('kpi.failures')"
-          :value="overview?.failedLogins ?? 0"
+          :value="overview?.failedLogins ?? null"
           icon="mdi:alert-circle-outline"
           tone="error"
         />
@@ -56,11 +56,11 @@
           :value="formatPercent(overview?.failureRate)"
           :tone="failureTone"
         />
-        <TKpiCard :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? 0" />
-        <TKpiCard :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? 0" />
+        <TKpiCard :label="t('kpi.uniqueUsers')" :value="overview?.distinctUsers ?? null" />
+        <TKpiCard :label="t('kpi.uniqueIps')" :value="overview?.distinctIpAddresses ?? null" />
         <TKpiCard
           :label="t('kpi.lockedOut')"
-          :value="overview?.lockedOutUsers ?? 0"
+          :value="overview?.lockedOutUsers ?? null"
           :tone="(overview?.lockedOutUsers ?? 0) > 0 ? 'warning' : 'default'"
         >
           <template #extra>
@@ -115,6 +115,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -146,7 +147,7 @@ import { makePageTranslator } from '../_shared/translate'
 
 const client = useAdminClient()
 const bridge = createLoginSecurityBridge({ client })
-// Identity bridge is the source of truth for user lock/unlock — the
+// Identity bridge is the source of truth for user lock/unlock - the
 // LoginSecurity backend doesn't expose enforcement endpoints (it's a
 // read-only diagnostic surface), but identity's user admin does, and
 // the user IDs in the failed-login summary line up directly.
@@ -190,7 +191,7 @@ const failureProgressStatus = computed<'success' | 'warning' | 'error'>(() => {
 })
 
 function formatPercent(n: number | undefined | null): string {
-  if (n == null) return '—'
+  if (n == null) return EMPTY_DASH
   return `${n.toFixed(2)}%`
 }
 
@@ -236,13 +237,13 @@ const failuresColumns = computed<DataTableColumns<UserFailedLoginSummaryDto>>(()
     title: () => t('cols.userName'),
     key: 'userName',
     minWidth: 130,
-    render: (row) => row.userName ?? '—',
+    render: (row) => row.userName ?? EMPTY_DASH,
   },
   {
     title: () => t('cols.email'),
     key: 'email',
     minWidth: 180,
-    render: (row) => row.email ?? '—',
+    render: (row) => row.email ?? EMPTY_DASH,
   },
   {
     title: () => t('cols.lastFailure'),
@@ -297,7 +298,7 @@ async function refresh(): Promise<void> {
     failures.value = fl
   } catch (e) {
     // Surface the error so "no data" (genuinely empty) is distinguishable
-    // from a failing endpoint — previously this was swallowed silently.
+    // from a failing endpoint - previously this was swallowed silently.
     overview.value = null
     failures.value = []
     message.error(e instanceof Error ? e.message : String(e))

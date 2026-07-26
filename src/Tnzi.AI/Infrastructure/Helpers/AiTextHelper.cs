@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Helpers;
 
 /// <summary>
-/// AI 文本工具 — 中文检测、代码围栏解析等
+/// AI 文本工具 - 中文检测、代码围栏解析等
 /// </summary>
 public static partial class AiTextHelper
 {

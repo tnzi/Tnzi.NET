@@ -33,7 +33,7 @@ public class EvaluationRunDto
 }
 
 /// <summary>
-/// 评估运行详情 DTO — 包含结果 JSON
+/// 评估运行详情 DTO - 包含结果 JSON
 /// </summary>
 public class EvaluationRunDetailDto : EvaluationRunDto
 {
@@ -84,7 +84,7 @@ public class EvaluationCaseDto
 }
 
 /// <summary>
-/// 批量评估 DTO — 对多个 Agent/版本并行评估
+/// 批量评估 DTO - 对多个 Agent/版本并行评估
 /// </summary>
 public class BatchEvaluationDto
 {
@@ -141,7 +141,7 @@ public class EvaluationTrendPointDto
 }
 
 /// <summary>
-/// 评估趋势 DTO — 展示最近 N 次运行的评分变化
+/// 评估趋势 DTO - 展示最近 N 次运行的评分变化
 /// </summary>
 public class EvaluationTrendDto
 {
@@ -177,7 +177,7 @@ public class VersionStatsDto
 }
 
 /// <summary>
-/// 版本比较 DTO — A/B 版本评估比较
+/// 版本比较 DTO - A/B 版本评估比较
 /// </summary>
 public class VersionComparisonDto
 {

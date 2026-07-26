@@ -37,6 +37,19 @@ public static class IdentityConstants
     }
 
     /// <summary>
+    /// JWT claim 类型常量（框架自管，非标准映射名，读写两端一致）
+    /// </summary>
+    public static class ClaimTypeNames
+    {
+        /// <summary>
+        /// 登录会话ID claim。写端由 <c>JwtTokenService</c> 写入，读端由 JWT Bearer 的
+        /// <c>OnTokenValidated</c> 钩子据此校验会话有效性。刻意用不参与 inbound 映射的
+        /// 自定义名（同 <c>tenant_id</c>），读写两端按同名取用，避免被 <c>MapInboundClaims</c> 改写。
+        /// </summary>
+        public const string SessionId = "session_id";
+    }
+
+    /// <summary>
     /// 2FA类型名称常量
     /// </summary>
     public static class TwoFactorTypeName

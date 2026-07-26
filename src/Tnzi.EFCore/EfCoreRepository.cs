@@ -414,6 +414,15 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         {
             source = source.Where(predicate);
         }
+
+        // Auto-apply dynamic filter from PagedQuery.Filter（与另外两个分页重载保持一致，
+        // 此前投影重载静默忽略 query.Filter）
+        if (query.Filter is { HasFilters: true })
+        {
+            var filterExpression = FilterExpressionBuilder.Build<TEntity>(query.Filter);
+            source = source.Where(filterExpression);
+        }
+
         source = ApplyOrderBy(source, query.OrderBy);
         return await source.Select(selector).CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
     }
@@ -536,7 +545,7 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     }
 
     /// <summary>
-    /// Explicit flush — forces pending changes through SaveChangesAsync regardless of
+    /// Explicit flush: forces pending changes through SaveChangesAsync regardless of
     /// the transaction-deferred policy. Use sparingly when subsequent operations within
     /// the same UnitOfWork need to observe writes (e.g. sequence-number computation).
     /// </summary>

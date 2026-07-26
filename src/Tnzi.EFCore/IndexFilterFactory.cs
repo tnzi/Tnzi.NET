@@ -34,7 +34,7 @@ namespace Tnzi.EFCore;
 /// </code>
 /// </para>
 /// <para>
-/// 重要：请勿在实体配置中硬编码 HasFilter 的 SQL（如 \"IsDeleted\" = false），
+/// 重要：请勿在实体配置中硬编码 HasFilter 的 SQL（如 &quot;IsDeleted&quot; = false），
 /// 应始终使用此工厂来确保跨数据库兼容性。
 /// </para>
 /// </remarks>
@@ -353,6 +353,36 @@ public static class IndexFilterFactory
     {
         var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
         return GetColumnEqualsAndIsDeletedFalse(columnName, value, provider);
+    }
+
+    /// <summary>
+    /// 获取 "columnName &lt;&gt; value" 的过滤 SQL，
+    /// 用于**排除某一状态**的部分唯一索引（如"同一期次至多成功一次，但失败可以重试"）
+    /// </summary>
+    /// <remarks>
+    /// 不带 IsDeleted 条件：无软删除的记录表（<c>CreationAuditedEntity</c> 之类）用它。
+    /// 需要同时排除软删除行时另用 <see cref="GetColumnEqualsAndIsDeletedFalse(string, int)"/> 一族。
+    /// </remarks>
+    /// <param name="columnName">列名</param>
+    /// <param name="value">整数常量值（枚举底层值）</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotEquals(string columnName, int value, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(columnName);
+        return $"{QuoteIdentifier(columnName, provider)} <> {value}";
+    }
+
+    /// <summary>
+    /// 获取 "columnName &lt;&gt; value" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <param name="value">整数常量值（枚举底层值）</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNotEquals(string columnName, int value)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnNotEquals(columnName, value, provider);
     }
 
     /// <summary>

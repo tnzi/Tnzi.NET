@@ -21,7 +21,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_DenyRule_ReturnsAndOverridesAllow()
     {
-        // Arrange — both deny and allow exist for the same tool, deny wins
+        // Arrange - both deny and allow exist for the same tool, deny wins
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "dangerous_tool", Behavior = PermissionBehavior.Allow },
@@ -56,7 +56,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_DestructiveTool_WithoutExplicitAllow_Denied()
     {
-        // Arrange — no rules at all, destructive tool should be denied
+        // Arrange - no rules at all, destructive tool should be denied
         var evaluator = new ToolPermissionEvaluator([]);
 
         // Act
@@ -70,7 +70,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_DestructiveTool_WithExplicitAllow_Allowed()
     {
-        // Arrange — explicit allow rule for the destructive tool
+        // Arrange - explicit allow rule for the destructive tool
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "delete_everything", Behavior = PermissionBehavior.Allow }
@@ -106,7 +106,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_WildcardPattern_MatchesAll()
     {
-        // Arrange — wildcard deny blocks everything
+        // Arrange - wildcard deny blocks everything
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "*", Behavior = PermissionBehavior.Deny, Reason = "All tools blocked" }
@@ -124,7 +124,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_PrefixWildcard_MatchesPrefix()
     {
-        // Arrange — "mcp_*" matches "mcp_server_tool"
+        // Arrange - "mcp_*" matches "mcp_server_tool"
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "mcp_*", Behavior = PermissionBehavior.Deny, Reason = "MCP tools blocked" }
@@ -144,7 +144,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_CaseInsensitive()
     {
-        // Arrange — rule with lowercase pattern, tool with mixed case
+        // Arrange - rule with lowercase pattern, tool with mixed case
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "my_tool", Behavior = PermissionBehavior.Deny, Reason = "Blocked" }
@@ -162,7 +162,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_DenyRuleWithDefaultReason_UsesFallback()
     {
-        // Arrange — deny rule without explicit reason
+        // Arrange - deny rule without explicit reason
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "blocked_tool", Behavior = PermissionBehavior.Deny }
@@ -180,7 +180,7 @@ public class ToolPermissionTests
     [Fact]
     public void Evaluate_PrefixWildcard_CaseInsensitive()
     {
-        // Arrange — prefix wildcard with different casing
+        // Arrange - prefix wildcard with different casing
         var rules = new List<ToolPermissionRule>
         {
             new() { ToolPattern = "MCP_*", Behavior = PermissionBehavior.Deny }

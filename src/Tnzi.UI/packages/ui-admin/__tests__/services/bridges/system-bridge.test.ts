@@ -1,23 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createSystemBridge } from '../../../src/services/bridges/system-bridge'
 
-function mockMenuApi() {
-  return {
-    getList: vi.fn(async () => [
-      { id: 'm1', name: 'Dashboard', path: '/dashboard', sortOrder: 1, isHidden: false, children: [] },
-      { id: 'm2', name: 'Users', path: '/users', sortOrder: 2, isHidden: false, children: [] },
-    ]),
-    getById: vi.fn(async () => null),
-    getUserTree: vi.fn(async () => []),
-    create: vi.fn(async (d: unknown) => ({ ...(d as object), id: 'new-menu' })),
-    update: vi.fn(async (id: string, d: unknown) => ({ id, ...(d as object) })),
-    delete: vi.fn(async () => undefined),
-    batchDelete: vi.fn(async () => undefined),
-    batchUpdateOrders: vi.fn(async () => undefined),
-    move: vi.fn(async () => undefined),
-  }
-}
-
 function mockSettingApi() {
   return {
     getList: vi.fn(async () => [
@@ -66,15 +49,12 @@ function mockSettingsCenterApi() {
 }
 
 describe('system-bridge', () => {
-  it('exposes menus / settings / accessLogs / scheduledJobs / settingsCenter sub-contracts', () => {
+  it('exposes settings / accessLogs / scheduledJobs / settingsCenter sub-contracts', () => {
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
     })
-    expect(typeof bridge.menus.fetch).toBe('function')
-    expect(typeof bridge.menus.reorder).toBe('function')
     expect(typeof bridge.settings.fetch).toBe('function')
     expect(typeof bridge.accessLogs.fetch).toBe('function')
     expect(typeof bridge.scheduledJobs.fetch).toBe('function')
@@ -84,24 +64,9 @@ describe('system-bridge', () => {
     expect(typeof bridge.settingsCenter.resetGroup).toBe('function')
   })
 
-  it('menus.fetch calls menuApi.getList and returns paged items', async () => {
-    const menuApi = mockMenuApi()
-    const bridge = createSystemBridge({
-      menuApi: menuApi as never,
-      settingApi: mockSettingApi() as never,
-      accessLogApi: mockAccessLogApi() as never,
-      settingsCenterApi: mockSettingsCenterApi() as never,
-    })
-    const result = await bridge.menus.fetch({ pageIndex: 1, pageSize: 10, searchText: '', filters: {} })
-    expect(menuApi.getList).toHaveBeenCalled()
-    expect(result.items).toHaveLength(2)
-    expect(result.totalCount).toBe(2)
-  })
-
   it('settings.fetch honors query.filters.groupPrefix (in-memory filter)', async () => {
     const settingApi = mockSettingApi()
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: settingApi as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -120,7 +85,6 @@ describe('system-bridge', () => {
 
   it('settings.fetch returns all rows when groupPrefix is empty string', async () => {
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -137,7 +101,6 @@ describe('system-bridge', () => {
   it('settings.delete calls settingApi.batchDelete with all ids', async () => {
     const settingApi = mockSettingApi()
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: settingApi as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -149,7 +112,6 @@ describe('system-bridge', () => {
   it('accessLogs.fetch delegates to accessLogApi.getList', async () => {
     const accessLogApi = mockAccessLogApi()
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: accessLogApi as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -163,9 +125,8 @@ describe('system-bridge', () => {
     // Plan E wired scheduledJobs to real /admin/scheduled-jobs via direct
     // HttpClient calls. When deps.client is missing, the bridge surfaces a
     // clear 'HttpClient required' error instead of silently returning an
-    // empty list — fails fast at call time rather than hiding the gap.
+    // empty list - fails fast at call time rather than hiding the gap.
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -182,7 +143,6 @@ describe('system-bridge', () => {
     }
     const bridge = createSystemBridge({
       client: mockClient as never,
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: mockSettingsCenterApi() as never,
@@ -203,7 +163,6 @@ describe('system-bridge settingsCenter', () => {
       resetGroup: vi.fn().mockResolvedValue({ success: true, data: group }),
     }
     const bridge = createSystemBridge({
-      menuApi: mockMenuApi() as never,
       settingApi: mockSettingApi() as never,
       accessLogApi: mockAccessLogApi() as never,
       settingsCenterApi: settingsCenterApi as never,

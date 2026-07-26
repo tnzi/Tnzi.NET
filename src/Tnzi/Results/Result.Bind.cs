@@ -1,7 +1,7 @@
 namespace Tnzi.Results;
 
 /// <summary>
-/// Result 链式操作扩展 — Bind (可能失败的链式转换)
+/// Result 链式操作扩展 - Bind (可能失败的链式转换)
 /// </summary>
 /// <remarks>
 /// <para>

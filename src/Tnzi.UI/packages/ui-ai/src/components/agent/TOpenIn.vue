@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TOpenIn — Open in external platform dropdown
+ * TOpenIn - Open in external platform dropdown
  */
 
 import { NDropdown, NButton } from 'naive-ui';

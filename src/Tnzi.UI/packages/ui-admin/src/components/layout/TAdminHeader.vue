@@ -1,5 +1,12 @@
 <template>
-  <header class="t-admin-header" :class="{ 't-admin-header--fixed': fixed }">
+  <header
+    class="t-admin-header"
+    :class="{
+      't-admin-header--fixed': fixed,
+      't-admin-header--inverted': surface === 'dark',
+      't-admin-header--surface-light': surface === 'light',
+    }"
+  >
     <!-- Left region: toggler + breadcrumb -->
     <div class="t-admin-header__left">
       <div v-if="$slots.logo" class="t-admin-header__logo">
@@ -50,74 +57,10 @@
          focus trap, and user/notification are the highest-frequency
          affordances. -->
     <div class="t-admin-header__right">
-      <template v-if="!shouldUseOverflow">
-        <NTooltip v-if="showSearch" placement="bottom" trigger="hover">
-          <template #trigger>
-            <button
-              class="t-admin-header__icon-btn t-admin-header__search"
-              aria-label="Search"
-              @click="emit('openSearch')"
-            >
-              <Icon icon="mdi:magnify" width="20" height="20" />
-            </button>
-          </template>
-          Search (Ctrl+K)
-        </NTooltip>
-        <NTooltip v-if="showReload" placement="bottom" trigger="hover">
-          <template #trigger>
-            <button
-              class="t-admin-header__icon-btn t-admin-header__reload"
-              aria-label="Reload"
-              @click="appStore.reloadPage()"
-            >
-              <Icon icon="mdi:refresh" width="20" height="20" />
-            </button>
-          </template>
-          Reload
-        </NTooltip>
-        <NTooltip v-if="fullscreenButtonVisible" placement="bottom" trigger="hover">
-          <template #trigger>
-            <button
-              class="t-admin-header__icon-btn t-admin-header__fullscreen"
-              :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
-              @click="toggleFullscreen()"
-            >
-              <Icon
-                :icon="isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'"
-                width="20"
-                height="20"
-              />
-            </button>
-          </template>
-          {{ isFullscreen ? 'Exit fullscreen' : 'Fullscreen' }}
-        </NTooltip>
-        <NTooltip v-if="showThemeSchemaBtn" placement="bottom" trigger="hover">
-          <template #trigger>
-            <button
-              class="t-admin-header__icon-btn t-admin-header__theme-schema"
-              :aria-label="`Theme: ${themeSchemaTooltip}`"
-              @click="cycleThemeSchema"
-            >
-              <Icon :icon="themeSchemaIcon" width="20" height="20" />
-            </button>
-          </template>
-          Theme: {{ themeSchemaTooltip }}
-        </NTooltip>
-        <NTooltip v-if="showThemeBtn" placement="bottom" trigger="hover">
-          <template #trigger>
-            <button
-              class="t-admin-header__icon-btn t-admin-header__theme"
-              aria-label="Theme settings"
-              @click="emit('openThemeDrawer')"
-            >
-              <Icon icon="mdi:palette-outline" width="20" height="20" />
-            </button>
-          </template>
-          Theme settings
-        </NTooltip>
-      </template>
+      <!-- Overflow trigger sits LEFT of the inline survivors - it holds the
+           actions folded away from the left side of the row. -->
       <NDropdown
-        v-else
+        v-if="overflowDropdownOptions.length > 0"
         :options="overflowDropdownOptions"
         trigger="click"
         @select="onOverflowSelect"
@@ -129,6 +72,70 @@
           <Icon icon="mdi:dots-vertical" width="20" height="20" />
         </button>
       </NDropdown>
+      <NTooltip v-if="showSearch && inlineActionKeys.has('search')" placement="bottom" trigger="hover">
+        <template #trigger>
+          <button
+            class="t-admin-header__icon-btn t-admin-header__search"
+            aria-label="Search"
+            @click="emit('openSearch')"
+          >
+            <Icon icon="mdi:magnify" width="20" height="20" />
+          </button>
+        </template>
+        Search (Ctrl+K)
+      </NTooltip>
+      <NTooltip v-if="showReload && inlineActionKeys.has('reload')" placement="bottom" trigger="hover">
+        <template #trigger>
+          <button
+            class="t-admin-header__icon-btn t-admin-header__reload"
+            aria-label="Reload"
+            @click="appStore.reloadPage()"
+          >
+            <Icon icon="mdi:refresh" width="20" height="20" />
+          </button>
+        </template>
+        Reload
+      </NTooltip>
+      <NTooltip v-if="fullscreenButtonVisible && inlineActionKeys.has('fullscreen')" placement="bottom" trigger="hover">
+        <template #trigger>
+          <button
+            class="t-admin-header__icon-btn t-admin-header__fullscreen"
+            :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
+            @click="toggleFullscreen()"
+          >
+            <Icon
+              :icon="isFullscreen ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'"
+              width="20"
+              height="20"
+            />
+          </button>
+        </template>
+        {{ isFullscreen ? 'Exit fullscreen' : 'Fullscreen' }}
+      </NTooltip>
+      <NTooltip v-if="showThemeSchemaBtn && inlineActionKeys.has('theme-schema')" placement="bottom" trigger="hover">
+        <template #trigger>
+          <button
+            class="t-admin-header__icon-btn t-admin-header__theme-schema"
+            :aria-label="`Theme: ${themeSchemaTooltip}`"
+            @click="cycleThemeSchema"
+          >
+            <Icon :icon="themeSchemaIcon" width="20" height="20" />
+          </button>
+        </template>
+        Theme: {{ themeSchemaTooltip }}
+      </NTooltip>
+      <NTooltip v-if="showThemeBtn && inlineActionKeys.has('theme')" placement="bottom" trigger="hover">
+        <template #trigger>
+          <button
+            class="t-admin-header__icon-btn t-admin-header__theme"
+            aria-label="Theme settings"
+            @click="emit('openThemeDrawer')"
+          >
+            <Icon icon="mdi:palette-outline" width="20" height="20" />
+          </button>
+        </template>
+        Theme settings
+      </NTooltip>
       <NDropdown
         v-if="showLangSwitch"
         :options="langOptions"
@@ -179,10 +186,31 @@ interface Props {
    * Below this breakpoint the right-side action buttons fold into a
    * single "···" overflow dropdown so the header doesn't clip on phones.
    *   'xs'    → fold below 640px (default; tablets keep the inline row)
-   *   'sm'    → fold below 768px (more aggressive — phablets fold too)
+   *   'sm'    → fold below 768px (more aggressive - phablets fold too)
    *   'never' → always inline (legacy behaviour, may overflow on phones)
    */
   overflowMenuBreakpoint?: 'xs' | 'sm' | 'never'
+  /**
+   * Cap on how many action buttons (everything except the user /
+   * notification / chat slots) render on DESKTOP - the "···" overflow
+   * trigger COUNTS toward the cap, so when folding is needed the row shows
+   * `max - 1` real buttons plus the "···" holding the surplus (same dropdown
+   * the mobile breakpoint uses). Survivors are picked right-to-left (the
+   * ones closest to the user info win). The language switch hosts its own
+   * dropdown and cannot nest inside the overflow (naive focus trap), so it
+   * always renders inline - but it still occupies a slot so the cap holds.
+   * `undefined` = no cap (classic behaviour). The shell passes `2` for the
+   * horizontal / hybrid layouts where the top menu needs the header width.
+   */
+  maxInlineActions?: number
+  /**
+   * Surface tone when the header carries a custom background color.
+   *   - `'dark'`  → dark surface + light foreground (inverted)
+   *   - `'light'` → light surface + dark foreground (only needed under the
+   *                 global dark mode, so a light header stays readable)
+   *   - undefined → follow the global light/dark mode (no override)
+   */
+  surface?: 'dark' | 'light'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -196,6 +224,8 @@ const props = withDefaults(defineProps<Props>(), {
   showLangSwitch: true,
   showReload: true,
   overflowMenuBreakpoint: 'xs',
+  maxInlineActions: undefined,
+  surface: undefined,
 })
 
 const emit = defineEmits<{
@@ -214,7 +244,7 @@ const bp = useBreakpoint()
 // Hide the button when the API isn't supported OR the device is a
 // touchscreen so users don't tap a dead control.
 // `isSupported` may be undefined under happy-dom (the test environment
-// lacks Fullscreen API entirely) — fall back to `true` so desktop test
+// lacks Fullscreen API entirely) - fall back to `true` so desktop test
 // mounts still see the inline button, and trust the touch probe to hide
 // it where it actually matters.
 const fullscreenButtonVisible = computed<boolean>(() => {
@@ -230,9 +260,9 @@ function setLocale(locale: 'en' | 'zh-cn') {
   emit('localeChange', locale)
 }
 
-/** Language options for the NDropdown — mirrors soybean's lang-switch.vue
+/** Language options for the NDropdown - mirrors soybean's lang-switch.vue
  *  pattern (NDropdown :options + trigger=hover + @select). When a new
- *  locale is added, extend this list — TAdminHeader picks it up without
+ *  locale is added, extend this list - TAdminHeader picks it up without
  *  template changes. Active option gets a checkmark icon via the `icon`
  *  render function (NDropdown calls it lazily per render). */
 const langOptions = computed<DropdownOption[]>(() => [
@@ -352,9 +382,25 @@ const overflowActions = computed<OverflowAction[]>(() => [
   },
 ])
 
+/** Which action keys render inline. Mobile fold (shouldUseOverflow) keeps
+ *  only the language switch inline (existing behaviour); a desktop
+ *  `maxInlineActions` cap keeps the RIGHTMOST survivors (language included
+ *  in the count - it always sits at the tail). When everything fits within
+ *  the cap there is no "···" trigger and all render inline; once folding is
+ *  needed the trigger itself occupies one slot, so `max - 1` buttons stay. */
+const inlineActionKeys = computed<Set<string>>(() => {
+  if (shouldUseOverflow.value) return new Set<string>()
+  const enabled = overflowActions.value.filter((a) => a.show).map((a) => a.key)
+  if (props.showLangSwitch) enabled.push('lang')
+  const max = props.maxInlineActions
+  if (max == null || enabled.length <= max) return new Set(enabled)
+  const keep = Math.max(0, max - 1)
+  return new Set(keep === 0 ? [] : enabled.slice(-keep))
+})
+
 const overflowDropdownOptions = computed<DropdownOption[]>(() =>
   overflowActions.value
-    .filter((a) => a.show)
+    .filter((a) => a.show && !inlineActionKeys.value.has(a.key))
     .map((a) => ({
       key: a.key,
       label: a.label,
@@ -384,7 +430,7 @@ defineExpose({ setLocale })
   border-bottom: 1px solid var(--tnzi-border);
   /* Phase H1 B2: soybean header has a subtle shadow that lifts it
      above the content. Earlier annotation claimed "no box-shadow"
-     was the parity — that was wrong. soybean uses `shadow-header`
+     was the parity - that was wrong. soybean uses `shadow-header`
      ≈ `0 1px 2px 0 rgb(0 21 41 / 8%)`. */
   box-shadow: 0 1px 2px 0 rgb(0 21 41 / 0.05);
   z-index: var(--tnzi-admin-z-header, 80);
@@ -396,6 +442,45 @@ defineExpose({ setLocale })
 .t-admin-header--fixed {
   position: sticky;
   top: 0;
+}
+/* Adaptive surface - a custom header background flips the header's foreground
+   token set so its chrome (breadcrumb, action icons, user name) stays legible.
+   Mirrors the sider's inverted/surface-light treatment. */
+.t-admin-header--inverted {
+  --tnzi-base-text: var(--tnzi-admin-header-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  --tnzi-border: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  color: var(--tnzi-base-text);
+  border-bottom-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+}
+.t-admin-header--surface-light {
+  --tnzi-base-text: var(--tnzi-admin-header-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  --tnzi-border: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+  color: var(--tnzi-base-text);
+  border-bottom-color: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+}
+/* The breadcrumb is a naive NBreadcrumb, which reads its own theme tokens
+   (near-black in light mode) instead of --tnzi-base-text - on a dark custom
+   header its labels would melt into the chrome (espresso/aubergine unified
+   looks). Remap the breadcrumb tokens alongside the surface variant. */
+.t-admin-header--inverted :deep(.n-breadcrumb) {
+  --n-item-text-color: var(--tnzi-admin-header-fg, var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.65)));
+  --n-item-text-color-hover: #ffffff;
+  --n-item-text-color-pressed: #ffffff;
+  --n-item-text-color-active: var(--tnzi-admin-header-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --n-separator-color: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.45));
+  --n-item-color-hover: rgba(255, 255, 255, 0.08);
+  --n-item-color-pressed: rgba(255, 255, 255, 0.12);
+}
+.t-admin-header--surface-light :deep(.n-breadcrumb) {
+  --n-item-text-color: var(--tnzi-admin-header-fg, var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5)));
+  --n-item-text-color-hover: rgba(0, 0, 0, 0.8);
+  --n-item-text-color-pressed: rgba(0, 0, 0, 0.8);
+  --n-item-text-color-active: var(--tnzi-admin-header-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --n-separator-color: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.35));
+  --n-item-color-hover: rgba(0, 0, 0, 0.06);
+  --n-item-color-pressed: rgba(0, 0, 0, 0.09);
 }
 .t-admin-header__left {
   display: flex;
@@ -432,6 +517,15 @@ defineExpose({ setLocale })
   padding: 0 10px;
   font-size: 13px;
   font-weight: 500;
+}
+/* Leading toggler: an icon button centers its 20px glyph in a 36px box, so on
+   top of the header's 16px padding the glyph reads ~8px further in than the
+   content below it. Pull the button back by that centering inset so its glyph
+   lines up with the content's left edge. Scoped to `:first-child` so it only
+   applies when the toggler leads the row (vertical / vertical-mix); in hybrid
+   the brand logo precedes it and the spacing stays intact. */
+.t-admin-header__left > .t-admin-header__toggler:first-child {
+  margin-left: -8px;
 }
 .t-admin-header__icon-btn:hover {
   background-color: var(--tnzi-admin-menu-item-hover-bg, rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.08));

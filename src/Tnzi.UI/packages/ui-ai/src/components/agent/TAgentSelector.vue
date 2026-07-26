@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TAgentSelector — Agent card gallery with search
+ * TAgentSelector - Agent card gallery with search
  */
 
 import { NInput, NCard, NBadge, NScrollbar } from 'naive-ui';

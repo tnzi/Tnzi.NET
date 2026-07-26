@@ -44,6 +44,7 @@ public static class ResultExtensions
     /// </remarks>
     public static ApiResult ToApiResult(this Result result)
     {
+        Check.NotNull(result);
         if (result.Succeeded)
         {
             return ApiResult.Ok(result.Message ?? "Success");

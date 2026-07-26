@@ -9,7 +9,7 @@
  * The editor also persists canvas positions on the same `configuration` bag
  * under `__x` / `__y` so the layout survives save/load. Both are stripped on
  * the wire by the backend graph builder (`CloneStep` removes `__originalIndex`
- * — we reuse that pattern for `__x` / `__y` / `__nodeType` so they remain
+ * - we reuse that pattern for `__x` / `__y` / `__nodeType` so they remain
  * UI-only hints that don't leak into the runtime).
  */
 export type WorkflowNodeKind =
@@ -26,7 +26,7 @@ export type WorkflowNodeKind =
 /**
  * Which property fields make sense for a given node kind. The editor renders
  * a property form that hides irrelevant fields rather than showing every
- * possible field for every node — the resulting form matches how the backend
+ * possible field for every node - the resulting form matches how the backend
  * executors actually consume the step.
  */
 export interface WorkflowNodeFieldFlags {
@@ -192,8 +192,8 @@ export function getNodeTypeMeta(kind: string | undefined | null): WorkflowNodeTy
   return byKind.get(key) ?? byKind.get('agent')!
 }
 
-/** Stored under WorkflowStepDto.configuration. UI-only — stripped on save? No
- * — backend tolerates extra keys (CloneStep just removes `__originalIndex`).
+/** Stored under WorkflowStepDto.configuration. UI-only - stripped on save? No
+ * - backend tolerates extra keys (CloneStep just removes `__originalIndex`).
  * We keep these prefixed with `__` so they're visually distinct from
  * user-defined config keys. */
 export const NODE_TYPE_KEY = '__nodeType'

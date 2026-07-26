@@ -1,5 +1,5 @@
 /**
- * Admin manifest service — fetches the backend-driven module manifest from
+ * Admin manifest service - fetches the backend-driven module manifest from
  * <c>GET admin/diagnostics/admin-manifest</c>. Shipped in `@tnzi/ui-admin` 0.2.4
  * and consumed by `useAdminModuleManifest()` to auto-build the admin menu.
  *

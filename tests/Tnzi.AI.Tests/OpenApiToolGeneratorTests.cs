@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Tools;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// OpenApiToolGenerator 单元测试 — 验证从 OpenAPI 3.x 规范自动生成 AITool
+/// OpenApiToolGenerator 单元测试 - 验证从 OpenAPI 3.x 规范自动生成 AITool
 /// </summary>
 public class OpenApiToolGeneratorTests
 {

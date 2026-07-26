@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWorkbenchLayout` — declarative grid renderer for the Workbench
+ * `TWorkbenchLayout` - declarative grid renderer for the Workbench
  * widget system.
  *
  * Walks an array of `WidgetDef`s, renders each one inside a
@@ -18,17 +18,17 @@
  * widgets the user can't see never even mount.
  *
  * Sunk from `@tnzi/ui-admin/components/pages/TWorkbenchLayout.vue` in
- * 0.2.x. `vue-draggable-plus` is an optional peer dependency — when the
+ * 0.2.x. `vue-draggable-plus` is an optional peer dependency - when the
  * consumer never uses `layout: 'draggable'` the bundler tree-shakes the
  * draggable branch out.
  */
 import {
   computed,
   defineAsyncComponent,
+  markRaw,
   onBeforeUnmount,
   onMounted,
   ref,
-  ref as vueRef,
   toRef,
   watch,
   type Component,
@@ -41,14 +41,14 @@ import type { SpanValue, WidgetDef, WorkbenchConfig } from './widget-types'
 // `vue-draggable-plus` is an optional peer dependency. Lazy-load it via
 // defineAsyncComponent so fixed-mode consumers (who never set
 // `layout: 'draggable'`, and may not have it installed) never resolve the
-// module. The `<VueDraggable v-if="draggable">` branch only mounts — and
-// thus only triggers this dynamic import — in draggable mode.
+// module. The `<VueDraggable v-if="draggable">` branch only mounts - and
+// thus only triggers this dynamic import - in draggable mode.
 const VueDraggable = defineAsyncComponent(
   () => import('vue-draggable-plus').then((m) => m.VueDraggable as unknown as Component),
 )
 
 interface Props {
-  /** Widget array — the source of truth. */
+  /** Widget array - the source of truth. */
   widgets: WidgetDef[]
   /** Layout mode. Default `'fixed'`. */
   layout?: WorkbenchConfig['layout']
@@ -94,10 +94,16 @@ const props = withDefaults(defineProps<Props>(), {
 // a widget the user can't render (the id would be dropped silently
 // anyway, but filtering up-front keeps storage clean).
 const visibleWidgets = computed<WidgetDef[]>(() => {
-  if (!props.hasPermission) return props.widgets
-  return props.widgets.filter(
-    (w) => !w.permission || props.hasPermission!(w.permission),
-  )
+  const allowed = props.hasPermission
+    ? props.widgets.filter((w) => !w.permission || props.hasPermission!(w.permission))
+    : props.widgets
+  // `draggableList` below is a deep `ref`, so anything reachable from a widget
+  // gets wrapped in a reactive Proxy - including `component`, which Vue then
+  // warns about ("received a Component that was made a reactive object") once
+  // per widget. Reactivity is wanted for the ARRAY (VueDraggable reorders it in
+  // place); a component definition is inert, so opt it out here, at the single
+  // point every render path reads from.
+  return allowed.map((w) => (w.component ? { ...w, component: markRaw(w.component) } : w))
 })
 
 const draggable = computed(() => props.layout === 'draggable')
@@ -112,14 +118,14 @@ const { orderedWidgets, setOrder } = useWorkbenchLayout({
 })
 
 // VueDraggable expects a reactive list. Plain `ref` (not `shallowRef`) is
-// used so in-place array mutations from VueDraggable trigger reactivity —
+// used so in-place array mutations from VueDraggable trigger reactivity -
 // the previous `shallowRef` only kept the UI in sync because the upstream
 // `update:modelValue` happened to reassign the value; a future
 // vue-draggable-plus that drops the v-model emit would silently desync
 // the rendered order and the persisted order.
 const draggableList = ref<WidgetDef[]>([...orderedWidgets.value])
 
-// `dragging` flag — set on @start / cleared on @end. The watch below
+// `dragging` flag - set on @start / cleared on @end. The watch below
 // pauses while a drag gesture is in flight so an unrelated reactive
 // change (e.g. permission refresh causing `visibleWidgets` to re-emit)
 // doesn't reassign `draggableList.value` mid-gesture and sever
@@ -127,7 +133,7 @@ const draggableList = ref<WidgetDef[]>([...orderedWidgets.value])
 const dragging = ref(false)
 
 // Keep the local draggable copy in sync with the computed source when
-// the upstream widget array (or persisted order) changes — but only when
+// the upstream widget array (or persisted order) changes - but only when
 // no drag is in flight, otherwise we'd abort the user's gesture.
 watch(
   orderedWidgets,
@@ -153,7 +159,7 @@ function spanString(value: SpanValue | undefined): string {
   if (value === undefined) return '24'
   if (typeof value === 'number') return String(value)
   const parts: string[] = []
-  // xs is the implicit base — emit it first without a prefix so the
+  // xs is the implicit base - emit it first without a prefix so the
   // breakpoint lookup falls back to it on every smaller width.
   if (value.xs !== undefined) parts.push(String(value.xs))
   else parts.push('24')
@@ -165,7 +171,7 @@ function spanString(value: SpanValue | undefined): string {
 }
 
 /**
- * Pick the most-applicable span for the active viewport width —
+ * Pick the most-applicable span for the active viewport width -
  * VueDraggable needs a single grid-column span value (not a NGrid-style
  * breakpoint string), so we resolve the span object client-side using
  * the same Tailwind breakpoints naive-ui's `responsive="screen"` uses.
@@ -174,7 +180,7 @@ function spanString(value: SpanValue | undefined): string {
  * changes. Defaults to 24 (full row) on SSR or when the breakpoint key
  * is missing.
  */
-const viewportWidth = vueRef(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
 function onResize(): void {
   if (typeof window !== 'undefined') viewportWidth.value = window.innerWidth
 }
@@ -230,7 +236,7 @@ function itemStyle(def: WidgetDef): Record<string, string> {
  *
  * Discrimination: an async factory takes zero args (`() => Promise<...>`)
  * while a Vue functional component takes at least one (`(props) => VNode`).
- * Using `.length === 0` to distinguish — both are typeof 'function', so the
+ * Using `.length === 0` to distinguish - both are typeof 'function', so the
  * previous typeof-only check incorrectly wrapped functional components
  * in `defineAsyncComponent`, which then tried to `.then()` a VNode and
  * crashed at render.
@@ -244,7 +250,7 @@ function resolveComponent(def: WidgetDef): Component {
 }
 
 function onWidgetRefresh(def: WidgetDef): void {
-  // The card already provides WidgetContext.refresh to descendants —
+  // The card already provides WidgetContext.refresh to descendants -
   // this top-level handler exists so external observers (e.g.
   // analytics) could hook in later without touching every widget.
   // Right now it's a no-op pass-through.
@@ -341,7 +347,7 @@ function onWidgetRefresh(def: WidgetDef): void {
 .t-workbench-layout__grid--draggable {
   /* Use CSS Grid with a 24-col track so draggable cards honour the same
      SpanValue contract as the fixed-mode NGrid renderer. VueDraggable
-     mutates direct children which works fine with grid items — the
+     mutates direct children which works fine with grid items - the
      reordering animation operates on flow position regardless. */
   display: grid;
   grid-template-columns: repeat(24, minmax(0, 1fr));

@@ -76,7 +76,7 @@ public class FileLengthConventionTests
             }
             if (File.ReadLines(full).Count() <= MaxLines)
             {
-                stale.Add($"{rel} (now <= {MaxLines} lines — remove from allowlist)");
+                stale.Add($"{rel} (now <= {MaxLines} lines - remove from allowlist)");
             }
         }
 

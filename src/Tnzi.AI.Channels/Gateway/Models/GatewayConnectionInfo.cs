@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// Gateway 连接信息 — 描述一个 WebSocket 连接
+/// Gateway 连接信息 - 描述一个 WebSocket 连接
 /// </summary>
 public class GatewayConnectionInfo
 {

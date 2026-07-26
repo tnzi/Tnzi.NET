@@ -7,6 +7,16 @@ namespace Tnzi.Finance.Tests.Integration;
 /// </summary>
 public class EftBatchTests : FinanceIntegrationTestBase
 {
+    /// <summary>
+    /// 一个稳定落在未来的生效日。
+    /// </summary>
+    /// <remarks>
+    /// EFT 批次拒绝过去的生效日（见 <c>CreateBatch_PastEffectiveDate_Rejects400</c>），
+    /// 所以「正常路径」的测试必须**算**出一个未来日期，而不是写死一个。写死的日期
+    /// 是一颗定时炸弹：到期那天四个测试同时变红，且失败信息与被测行为毫无关系。
+    /// </remarks>
+    private static DateTime FutureDate(int offsetDays = 0) => DateTime.UtcNow.Date.AddDays(7 + offsetDays);
+
     private Task<Guid> BankLedgerIdAsync() => AccountIdByCodeAsync("1120");
 
     private async Task<Guid> CreateBankAccountAsync()
@@ -77,7 +87,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
 
         var batch = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 20),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
             PaymentEntryIds = new List<Guid> { p }
         });
         batch.Succeeded.ShouldBeTrue(batch.Message);
@@ -116,7 +126,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
         // Cpa005 需要 CaEft 出款行 → scheme 不匹配
         var batch = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Cpa005, EffectiveDate = new DateTime(2026, 7, 20),
+            BankAccountId = bank, Format = EftFileFormat.Cpa005, EffectiveDate = FutureDate(),
             PaymentEntryIds = new List<Guid> { p }
         });
         batch.Succeeded.ShouldBeFalse();
@@ -153,14 +163,14 @@ public class EftBatchTests : FinanceIntegrationTestBase
 
         var first = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 20),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
             PaymentEntryIds = new List<Guid> { p }
         });
         first.Succeeded.ShouldBeTrue(first.Message);
 
         var second = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 21),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(1),
             PaymentEntryIds = new List<Guid> { p }
         });
         second.Succeeded.ShouldBeFalse();
@@ -178,7 +188,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
 
         var batch = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 20),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
             PaymentEntryIds = new List<Guid> { p }
         });
         var first = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
@@ -200,7 +210,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
 
         var batch1 = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 20),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
             PaymentEntryIds = new List<Guid> { p }
         });
         var gen1 = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch1.Data!.Id));
@@ -214,7 +224,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
         // 重入批 + 生成 → FileCreationNumber 递增
         var batch2 = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = new DateTime(2026, 7, 22),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(2),
             PaymentEntryIds = new List<Guid> { p }
         });
         batch2.Succeeded.ShouldBeTrue(batch2.Message);

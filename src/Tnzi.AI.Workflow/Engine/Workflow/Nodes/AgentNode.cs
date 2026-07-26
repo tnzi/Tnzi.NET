@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// Agent 节点 — 通过 IAgentFactory 创建 AgentExecutor 执行 LLM 调用
+/// Agent 节点 - 通过 IAgentFactory 创建 AgentExecutor 执行 LLM 调用
 /// </summary>
 /// <remarks>
 /// 配置项：

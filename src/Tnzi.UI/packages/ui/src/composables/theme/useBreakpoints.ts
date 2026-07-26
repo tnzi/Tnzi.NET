@@ -16,7 +16,7 @@ import { useBreakpoints as vueuseBreakpoints, useWindowSize, breakpointsTailwind
  * full-screen modal, single-vs-multi-column grids, etc.
  */
 /**
- * The narrowed shape of `vueuseBreakpoints(breakpointsTailwind)` — vueuse
+ * The narrowed shape of `vueuseBreakpoints(breakpointsTailwind)` - vueuse
  * infers the key union (`'sm' | 'md' | ...`) from the input record, and we
  * surface that specific shape rather than the wider `Record<string, ...>`
  * default. Without this narrowing, `ReturnType<typeof vueuseBreakpoints>`
@@ -32,14 +32,14 @@ export interface UseBreakpointsReturn {
   width: ComputedRef<number>
   /** Viewport height in px (reactive). 0 in non-browser envs. */
   height: ComputedRef<number>
-  // Coarse triad — backward compatible with original `useBreakpoints()`.
+  // Coarse triad - backward compatible with original `useBreakpoints()`.
   /** `true` when viewport < 768px (Tailwind md-down). */
   isMobile: ComputedRef<boolean>
   /** `true` when viewport is between 768px and 1024px. */
   isTablet: ComputedRef<boolean>
   /** `true` when viewport ≥ 1024px (Tailwind lg+). */
   isDesktop: ComputedRef<boolean>
-  // Fine-grained ranges — moved here from `@tnzi/ui-admin` in 0.2.71+.
+  // Fine-grained ranges - moved here from `@tnzi/ui-admin` in 0.2.71+.
   /** `true` when viewport < 640px. */
   isXs: Readonly<Ref<boolean>>
   /** `true` when viewport < 768px. */
@@ -48,7 +48,7 @@ export interface UseBreakpointsReturn {
   isMd: Readonly<Ref<boolean>>
   /** `true` when viewport < 1280px. */
   isLg: Readonly<Ref<boolean>>
-  // …AndUp helpers — backward compatible.
+  // …AndUp helpers - backward compatible.
   /** `true` when viewport ≥ 640px. */
   smAndUp: Readonly<Ref<boolean>>
   /** `true` when viewport ≥ 768px. */
@@ -82,7 +82,7 @@ function probeTouch(): boolean {
       }
     }
   } catch {
-    // ignore — fall through to ontouchstart probe
+    // ignore - fall through to ontouchstart probe
   }
   cachedTouch = 'ontouchstart' in window
   return cachedTouch
@@ -136,7 +136,7 @@ export function useBreakpoints(): UseBreakpointsReturn {
  * `useBreakpoint()` (singular) shape. Provided for backward compatibility
  * after the helper was sunk from ui-admin into @tnzi/ui in 0.2.71+.
  *
- * Prefer `useBreakpoints()` in new code — it offers the same fields plus
+ * Prefer `useBreakpoints()` in new code - it offers the same fields plus
  * the original triad and `…AndUp` helpers.
  */
 export interface UseBreakpointReturn {

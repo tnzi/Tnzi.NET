@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TWorkflowNode — Card-based graph node with handles
+ * TWorkflowNode - Card-based graph node with handles
  */
 
 import { NCard } from 'naive-ui';

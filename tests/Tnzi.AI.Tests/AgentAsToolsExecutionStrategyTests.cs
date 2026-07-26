@@ -170,7 +170,7 @@ public class AgentAsToolsExecutionStrategyTests
     [Fact]
     public async Task ExecuteAsync_WithoutForwarder_UsesNonStreamingPath()
     {
-        // Arrange — ServiceProvider 不注册 IAgentStreamForwarder（返回 null）
+        // Arrange - ServiceProvider 不注册 IAgentStreamForwarder（返回 null）
         var config = new AgentAsToolsConfiguration();
         var strategy = new AgentAsToolsExecutionStrategy(config);
         var agent = CreateAgent("Parent", "non-streaming result");
@@ -180,14 +180,14 @@ public class AgentAsToolsExecutionStrategyTests
         // Act
         var result = await strategy.ExecuteAsync(agent, messages, context, CancellationToken.None);
 
-        // Assert — 正常走非流式路径返回结果
+        // Assert - 正常走非流式路径返回结果
         result.Response.Text.ShouldBe("non-streaming result");
     }
 
     [Fact]
     public async Task ExecuteAsync_EnableChildStreamingFalse_DoesNotResolveForwarder()
     {
-        // Arrange — EnableChildStreaming = false（默认），即使 DI 注册了 forwarder 也不解析
+        // Arrange - EnableChildStreaming = false（默认），即使 DI 注册了 forwarder 也不解析
         var config = new AgentAsToolsConfiguration { EnableChildStreaming = false };
         var strategy = new AgentAsToolsExecutionStrategy(config);
 
@@ -208,14 +208,14 @@ public class AgentAsToolsExecutionStrategyTests
         // Act
         await strategy.ExecuteAsync(agent, messages, context, CancellationToken.None);
 
-        // Assert — forwarder 从未被解析
+        // Assert - forwarder 从未被解析
         sp.Verify(s => s.GetService(typeof(IAgentStreamForwarder)), Times.Never);
     }
 
     [Fact]
     public async Task ExecuteAsync_WithForwarder_ResolvesForwarderOnceFromServiceProvider()
     {
-        // Arrange — 验证 forwarder 从 ServiceProvider 只解析一次（在 CreateChildAgentTools 中）
+        // Arrange - 验证 forwarder 从 ServiceProvider 只解析一次（在 CreateChildAgentTools 中）
         var config = new AgentAsToolsConfiguration
         {
             EnableChildStreaming = true,
@@ -239,12 +239,12 @@ public class AgentAsToolsExecutionStrategyTests
             Logger = Mock.Of<ILogger>()
         };
 
-        // Act — 父 Agent 不调用工具，直接返回
+        // Act - 父 Agent 不调用工具，直接返回
         var parentAgent = CreateAgent("Parent", "done");
         var messages = new List<ChatMessage> { new(ChatRole.User, "Hi") };
         var result = await strategy.ExecuteAsync(parentAgent, messages, context, CancellationToken.None);
 
-        // Assert — GetService<IAgentStreamForwarder> 只调用了一次（不是每个工具调用一次）
+        // Assert - GetService<IAgentStreamForwarder> 只调用了一次（不是每个工具调用一次）
         sp.Verify(s => s.GetService(typeof(IAgentStreamForwarder)), Times.Once);
         result.Response.ShouldNotBeNull();
     }
@@ -252,7 +252,7 @@ public class AgentAsToolsExecutionStrategyTests
     [Fact]
     public async Task ExecuteChildStreamingAsync_ForwardsAllChunksAndReturnsFullText()
     {
-        // Arrange — 直接测试 ExecuteChildStreamingAsync 的逻辑
+        // Arrange - 直接测试 ExecuteChildStreamingAsync 的逻辑
         // 模拟子 Agent 流式返回 3 个 chunk
         var childAgent = CreateAgentForStreaming("child", "abc", ["a", "b", "c"]);
         var invocations = new ConcurrentQueue<(string, int, int)>();
@@ -275,7 +275,7 @@ public class AgentAsToolsExecutionStrategyTests
         var resultTask = (Task<string>)method.Invoke(null, [childAgent, "child", childMessages, forwarderMock.Object, invocations, CancellationToken.None])!;
         var result = await resultTask;
 
-        // Assert — 所有 chunk 被转发
+        // Assert - 所有 chunk 被转发
         forwardedDeltas.ShouldBe(["a", "b", "c"]);
         // 返回完整文本
         result.ShouldBe("abc");

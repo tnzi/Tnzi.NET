@@ -9,7 +9,6 @@ import type { PagedList } from '../../types/pagination';
 import type {
   FileRecordDto,
   FileQueryDto,
-  FileUploadResultDto,
   FileStorageStatisticsDto,
   FileUploadSessionDto,
   FileChunkDto,
@@ -60,9 +59,9 @@ export function useStorageApi(client: HttpClient) {
     delete: (id: string) =>
       client.delete<void>(`${BASE}/${id}`),
 
-    /** Upload file */
+    /** Upload file. Backend `DefaultStorageController.Upload` returns the full file record. */
     upload: (file: File, onProgress?: (progress: number) => void) =>
-      client.upload<FileUploadResultDto>(`${BASE}/upload`, file, { onProgress }),
+      client.upload<FileRecordDto>(`${BASE}/upload`, file, { onProgress }),
 
     /** Batch upload files */
     uploadMany: (files: File[], onProgress?: (progress: number) => void) => {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.FileExtractors;
 
 /// <summary>
-/// 表格内容提取器 — 将 CSV/TSV 文件转换为结构化可检索文本。
+/// 表格内容提取器 - 将 CSV/TSV 文件转换为结构化可检索文本。
 /// 输出格式: "Table: {filename}\nHeaders: col1, col2\nRow 1: val1, val2\n..."
 /// </summary>
 public class TableContentExtractor : IFileExtractorService
@@ -65,7 +65,8 @@ public class TableContentExtractor : IFileExtractorService
     }
 
     /// <summary>
-    /// 解析单行字段，支持带引号的字段（处理字段内含分隔符和换行的情况）
+    /// 解析单行字段，支持带引号的字段（含字段内的分隔符与双引号转义）。
+    /// 注意：调用方已先按行拆分，因此引号内跨行的字段不受支持。
     /// </summary>
     private static string[] ParseFields(string line, char delimiter)
     {

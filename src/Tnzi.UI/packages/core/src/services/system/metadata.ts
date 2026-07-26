@@ -3,12 +3,14 @@
  */
 
 /**
- * Health status
+ * Health status. String enum (member name = value): `Tnzi.HealthChecks`
+ * writes `report.Status.ToString()` into the health payload, so the wire value
+ * is always the PascalCase name.
  */
 export enum HealthStatus {
-  Unhealthy = 0,
-  Degraded = 1,
-  Healthy = 2,
+  Unhealthy = 'Unhealthy',
+  Degraded = 'Degraded',
+  Healthy = 'Healthy',
 }
 
 /**

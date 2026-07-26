@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// 工具执行上下文 — 提供工具运行时对 Scoped 服务的访问
+/// 工具执行上下文 - 提供工具运行时对 Scoped 服务的访问
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,7 +48,7 @@ public interface IToolContext
 }
 
 /// <summary>
-/// 工具上下文访问器 — 基于 AsyncLocal 的静态访问入口
+/// 工具上下文访问器 - 基于 AsyncLocal 的静态访问入口
 /// </summary>
 /// <remarks>
 /// AgentRuntime 在执行 Agent 前设置 Current，执行完成后清除。

@@ -6,9 +6,9 @@ namespace Tnzi.Security.Authorization;
 /// it does NOT drive any implicit grant. Every non-super-admin user resolves
 /// through explicit grants only (deny-by-default).
 /// <list type="bullet">
-///   <item><see cref="Business"/> — business-facing administration (users,
+///   <item><see cref="Business"/> - business-facing administration (users,
 ///     finance, payment, content, AI agents/skills, …).</item>
-///   <item><see cref="Technical"/> — system/operations administration
+///   <item><see cref="Technical"/> - system/operations administration
 ///     (diagnostics, performance, logs, MCP servers, sandbox, quotas,
 ///     system parameters, …). Assignment UIs render a warning badge on
 ///     these so operators granting roles can spot dangerous surfaces.</item>

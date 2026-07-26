@@ -4,7 +4,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests.Mcp;
 
 /// <summary>
-/// McpServerRegistryService 单元测试 — 覆盖 CRUD、加密、HasAuthToken 暴露语义、
+/// McpServerRegistryService 单元测试 - 覆盖 CRUD、加密、HasAuthToken 暴露语义、
 /// transport/URL 校验（stdio 拒绝）、真实 TestConnection 探针与运行时缓存失效联动
 /// </summary>
 public class McpServerRegistryServiceTests
@@ -41,7 +41,7 @@ public class McpServerRegistryServiceTests
         _aiOptions,
         _serviceProvider);
 
-    // Service with egress enforcement ON (AllowPrivateEndpoints=false) — used to assert
+    // Service with egress enforcement ON (AllowPrivateEndpoints=false) - used to assert
     // the SSRF guard rejects private/internal ServerUrls before any DB write.
     private McpServerRegistryService CreateServiceWithEgressEnforced() => new(
         _repository.Object,
@@ -208,7 +208,7 @@ public class McpServerRegistryServiceTests
     public async Task CreateAsync_PrivateUrl_WithEgressEnforced_IsRejected()
     {
         // SSRF regression: with AllowPrivateEndpoints=false, a private/internal ServerUrl
-        // (literal RFC1918 IP — no DNS needed) must be rejected before any DB write.
+        // (literal RFC1918 IP - no DNS needed) must be rejected before any DB write.
         SetupQueryable(new List<McpServerRegistration>());
         var svc = CreateServiceWithEgressEnforced();
 
@@ -419,7 +419,7 @@ public class McpServerRegistryServiceTests
     }
 
     // =====================================================================
-    // TestConnection — 真实探针（经 IMcpClientFactory）
+    // TestConnection - 真实探针（经 IMcpClientFactory）
     // =====================================================================
 
     [Fact]
@@ -503,7 +503,7 @@ public class McpServerRegistryServiceTests
     [Fact]
     public async Task TestConnectionAsync_LegacyStdioRow_ReportsFailure_WithoutConnecting()
     {
-        // schema 收紧前可能遗留 stdio 行 — 探针应直接报告不支持，而非尝试连接
+        // schema 收紧前可能遗留 stdio 行 - 探针应直接报告不支持，而非尝试连接
         var existing = MakeRegistration(transport: "stdio", url: "https://placeholder.example.com", authType: "none");
         SetupQueryable(new List<McpServerRegistration> { existing });
         var svc = CreateService();
@@ -545,7 +545,7 @@ public class McpServerRegistryServiceTests
     }
 
     /// <summary>
-    /// Stub IDataProtectionProvider — wraps plaintext with a marker prefix so tests can
+    /// Stub IDataProtectionProvider - wraps plaintext with a marker prefix so tests can
     /// assert ciphertext shape without depending on real DataProtection key infrastructure.
     /// </summary>
     private sealed class StubDataProtectionProvider : IDataProtectionProvider

@@ -115,7 +115,7 @@ public class TnziApplication : ITnziApplication
         }
 
         // 第三阶段：PostConfigureServices（所有模块）
-        // 用于覆盖或补充其他模块的配置（注册增量同样计入模块服务映射 — Manifest/依赖审计不留盲区）
+        // 用于覆盖或补充其他模块的配置（注册增量同样计入模块服务映射 - Manifest/依赖审计不留盲区）
         foreach (var module in Modules)
         {
             try
@@ -309,7 +309,6 @@ public class TnziApplication : ITnziApplication
         }
     }
 
-    /// <inheritdoc />
     private bool _isShutdown = false;
     private readonly SemaphoreSlim _shutdownLock = new(1, 1);
 
@@ -430,13 +429,8 @@ public class TnziApplication : ITnziApplication
         // 异步释放
         await ShutdownAsync().ConfigureAwait(false);
 
-        // 这里的 Dispose(false) 会由公开的 DisposeAsync 方法调用，因此这里不需要处理 _shutdownLock
-        // 但为了完整性，如果 DisposeAsyncCore 被重写并未调用 ShutdownAsync，需要注意
+        // DisposeAsync 随后调用的是 Dispose(false)，不会走 disposing 分支，
+        // 因此 _shutdownLock 必须在这里释放，否则异步释放路径永远不会释放它
+        _shutdownLock.Dispose();
     }
-
-    /// <summary>
-    /// 统一注册所有业务模块的控制器程序集
-    /// 在所有模块的 ConfigureServices 执行完成后调用，确保 IMvcBuilder 已注册
-    /// </summary>
-
 }

@@ -126,8 +126,8 @@ public class ExceptionStatistics : IExceptionStatistics
     {
         return exception switch
         {
-            Tnzi.Exceptions.BusinessException bEx => bEx.HttpStatusCode,
-            Tnzi.Exceptions.InfrastructureException => 503,
+            BusinessException bEx => bEx.HttpStatusCode,
+            InfrastructureException => 503,
             _ => null
         };
     }
@@ -136,7 +136,7 @@ public class ExceptionStatistics : IExceptionStatistics
     {
         return exception switch
         {
-            Tnzi.Exceptions.TnziException tzEx => tzEx.Code,
+            TnziException tzEx => tzEx.Code,
             _ => null
         };
     }

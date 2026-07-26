@@ -115,7 +115,7 @@ describe('storage-bridge', () => {
     expect(storageApi.getDownloadUrl).toHaveBeenCalledWith('abc')
     expect(typeof url).toBe('string')
     expect(url.length).toBeGreaterThan(0)
-    // No hardcoded /api prefix — the URL is resolved by the HttpClient.
+    // No hardcoded /api prefix - the URL is resolved by the HttpClient.
     expect(url).not.toContain('/api/files')
   })
 

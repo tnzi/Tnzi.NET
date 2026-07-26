@@ -74,14 +74,22 @@ public class ResultMappingExtensionsTests
         Assert.Equal(31, mapped.Data?.Age);
     }
 
+    /// <summary>
+    /// 映射异常一律降级为失败结果，Debug 与 Release 行为相同。
+    /// 曾经 Debug 下 rethrow、Release 下返回失败结果，开发期因此永远观察不到生产行为。
+    /// </summary>
     [Fact]
-    public async Task MapAsync_WithMapperException_ThrowsInDebug()
+    public async Task MapAsync_WithMapperException_ReturnsFailureInAllConfigurations()
     {
         using var _ = MapperExtensions.PushMapper(_mapper, _config);
         var result = Result<SourceModel>.Success(new SourceModel { Name = "Error", Age = 1 });
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            result.MapAsync(_ => Task.FromException<TargetModel>(new InvalidOperationException("boom"))));
+        var mapped = await result.MapAsync(_ => Task.FromException<TargetModel>(new InvalidOperationException("boom")));
+
+        Assert.False(mapped.Succeeded);
+        Assert.Equal(500, mapped.Code);
+        Assert.Equal("MAPPING_ERROR", mapped.ErrorCode);
+        Assert.Contains("boom", mapped.Message);
     }
 
     private sealed class SourceModel

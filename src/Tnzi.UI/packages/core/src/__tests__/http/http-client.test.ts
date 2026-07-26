@@ -336,6 +336,39 @@ describe('HttpClient', () => {
       await c.get('/c');
       expect(listener).toHaveBeenCalledTimes(1);
     });
+
+    it('should keep the once-per-cycle guard when the handler clears the token', async () => {
+      // createTnziClient wires onUnauthorized -> auth.clearAuth() -> setAccessToken(null).
+      // Re-arming the guard there reopened it mid-notification, so every queued
+      // 401 fired the listeners again.
+      const listener = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        onUnauthorized: () => c.setAccessToken(null),
+      });
+      c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      await Promise.all([c.get('/a'), c.get('/b'), c.get('/c')]);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it('should re-arm the guard once a new token is installed', async () => {
+      const listener = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api' });
+      c.addUnauthorizedListener(listener);
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 401 }, 401));
+
+      await c.get('/a');
+      c.setAccessToken(null);
+      await c.get('/b');
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      c.setAccessToken('new-session');
+      await c.get('/c');
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
   });
 
   // ------------------------------------------
@@ -662,7 +695,7 @@ describe('HttpClient', () => {
     it('should call onUnauthorized when refresh succeeds but retry still 401s', async () => {
       // Scenario: backend gave us a "new" token (or the same one) via
       // refreshTokenFn but it's still rejected by the protected endpoint
-      // — e.g. session was server-side revoked, stale token returned, or
+      // - e.g. session was server-side revoked, stale token returned, or
       // clock skew. Before the fix, the inner executeWithRetry returned
       // the 401 result and the outer caller never invoked onUnauthorized,
       // so the consumer's session-expired handler (router push to /login,
@@ -745,6 +778,59 @@ describe('HttpClient', () => {
 
       await Promise.all([c.get('/users'), c.get('/users')]);
 
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should NOT deduplicate GETs that carry an abort signal', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+      const a = new AbortController();
+      const b = new AbortController();
+
+      await Promise.all([
+        client.get('/users', { signal: a.signal }),
+        client.get('/users', { signal: b.signal }),
+      ]);
+
+      // Sharing one fetch across two independent controllers means either
+      // caller's abort cancels the other's request.
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not let an aborted GET poison the next one (cancel-then-refetch)', async () => {
+      // Reproduces the DataQueryController shape: abort the in-flight request,
+      // then synchronously issue a fresh one for the same URL.
+      const first = new AbortController();
+      mockFetch.mockImplementationOnce((_url: string, opts: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          opts.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        }),
+      );
+      const pending = client.get('/users', { signal: first.signal });
+
+      first.abort();
+      mockFetch.mockResolvedValue(apiSuccessResponse({ items: ['fresh'] }));
+      const second = new AbortController();
+      const result = await client.get('/users', { signal: second.signal });
+
+      await pending; // the aborted one resolves as a failed result, as designed
+      expect(result.succeeded).toBe(true);
+      expect(result.data).toEqual({ items: ['fresh'] });
+      expect(second.signal.aborted).toBe(false);
+    });
+
+    it('should still deduplicate signal-free GETs alongside signal-bearing ones', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+      const controller = new AbortController();
+
+      await Promise.all([
+        client.get('/users'),
+        client.get('/users'),
+        client.get('/users', { signal: controller.signal }),
+      ]);
+
+      // Two signal-free callers share one fetch; the signal-bearing one is its own.
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
@@ -1025,6 +1111,91 @@ describe('HttpClient', () => {
 
       expect(result.succeeded).toBe(true);
       expect(c.getAccessToken()).toBe('fresh-token');
+    });
+  });
+
+  // ------------------------------------------
+  // Upload 401 handling
+  // ------------------------------------------
+
+  describe('uploadFormData 401 handling', () => {
+    /**
+     * Minimal XHR stand-in. `queue` supplies one `{status, body}` per send, so a
+     * test can script "401 then 200" across the refresh-retry.
+     */
+    function stubXhr(queue: Array<{ status: number; body: unknown }>): { sends: number } {
+      const state = { sends: 0 };
+      class FakeXhr {
+        status = 0;
+        responseText = '';
+        timeout = 0;
+        withCredentials = false;
+        upload = { onprogress: null as unknown };
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        ontimeout: (() => void) | null = null;
+        open() {}
+        setRequestHeader() {}
+        send() {
+          const next = queue[state.sends] ?? queue[queue.length - 1];
+          state.sends += 1;
+          this.status = next.status;
+          this.responseText = JSON.stringify(next.body);
+          queueMicrotask(() => this.onload?.());
+        }
+      }
+      vi.stubGlobal('XMLHttpRequest', FakeXhr);
+      return state;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.stubGlobal('fetch', mockFetch);
+    });
+
+    it('refreshes and retries the upload once on 401', async () => {
+      const sends = stubXhr([
+        { status: 401, body: { succeeded: false, code: 401, message: 'expired' } },
+        { status: 200, body: { succeeded: true, code: 200, data: { id: 'f1' } } },
+      ]);
+      const refreshFn = vi.fn().mockResolvedValue('fresh-token');
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn });
+
+      const result = await c.uploadFormData<{ id: string }>('/files/upload', new FormData());
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(sends.sends).toBe(2);
+      expect(result.succeeded).toBe(true);
+      expect(result.data).toEqual({ id: 'f1' });
+    });
+
+    it('notifies onUnauthorized when the upload refresh fails', async () => {
+      stubXhr([{ status: 401, body: { succeeded: false, code: 401 } }]);
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: vi.fn().mockRejectedValue(new Error('no refresh token')),
+        onUnauthorized,
+      });
+
+      const result = await c.uploadFormData('/files/upload', new FormData());
+
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(result.code).toBe(401);
+    });
+
+    it('returns a 401 as-is for auth-flow uploads (skipAuthRefresh)', async () => {
+      const sends = stubXhr([{ status: 401, body: { succeeded: false, code: 401 } }]);
+      const refreshFn = vi.fn().mockResolvedValue('fresh-token');
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn });
+
+      const result = await c.uploadFormData('/files/upload', new FormData(), {
+        skipAuthRefresh: true,
+      });
+
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(sends.sends).toBe(1);
+      expect(result.code).toBe(401);
     });
   });
 });

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Network;
 
 /// <summary>
-/// 端口分配器接口 — 线程安全的端口分配与管理
+/// 端口分配器接口 - 线程安全的端口分配与管理
 /// </summary>
 public interface IPortAllocator : IDisposable
 {
@@ -14,7 +14,7 @@ public interface IPortAllocator : IDisposable
 }
 
 /// <summary>
-/// 端口预留 — Dispose 时自动释放端口回分配池
+/// 端口预留 - Dispose 时自动释放端口回分配池
 /// </summary>
 public sealed class PortReservation : IDisposable
 {

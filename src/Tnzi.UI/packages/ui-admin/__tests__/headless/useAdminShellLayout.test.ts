@@ -124,6 +124,54 @@ describe('useAdminShellLayout', () => {
     expect(layout.siderInverted.value).toBe(false)
   })
 
+  it('a dark custom siderBg inverts the sider even with invertSider off', () => {
+    const layout = setupShell({ mode: 'vertical' })
+    const theme = useAdminThemeStore()
+    theme.invertSider = false
+    theme.setSiderBg('#0F172A')
+    expect(layout.siderInverted.value).toBe(true)
+  })
+
+  it('a light custom siderBg wins over invertSider (not inverted)', () => {
+    const layout = setupShell({ mode: 'vertical' })
+    const theme = useAdminThemeStore()
+    theme.invertSider = true
+    theme.setSiderBg('#FFFFFF')
+    expect(layout.siderInverted.value).toBe(false)
+    expect(layout.siderLightSurface.value).toBe(false) // light mode needs no forced-light
+  })
+
+  it('a light custom siderBg under dark mode forces the light-surface treatment', () => {
+    const layout = setupShell({ mode: 'vertical', isDark: true })
+    const theme = useAdminThemeStore()
+    theme.setSiderBg('#FFFFFF')
+    expect(layout.siderInverted.value).toBe(false)
+    expect(layout.siderLightSurface.value).toBe(true)
+  })
+
+  it('header/tab/footer/content surface = dark for a dark bg', () => {
+    const layout = setupShell({ mode: 'vertical' })
+    const theme = useAdminThemeStore()
+    theme.setHeaderBg('#0F172A')
+    theme.setTabBg('#1E293B')
+    theme.setFooterBg('#111111')
+    theme.setContentBg('#222222')
+    expect(layout.headerSurface.value).toBe('dark')
+    expect(layout.tabSurface.value).toBe('dark')
+    expect(layout.footerSurface.value).toBe('dark')
+    expect(layout.contentSurface.value).toBe('dark')
+  })
+
+  it('a light surface bg emits no variant in light mode, "light" in dark mode', () => {
+    const light = setupShell({ mode: 'vertical', isDark: false })
+    useAdminThemeStore().setHeaderBg('#FFFFFF')
+    expect(light.headerSurface.value).toBeUndefined()
+
+    const dark = setupShell({ mode: 'vertical', isDark: true })
+    useAdminThemeStore().setHeaderBg('#FFFFFF')
+    expect(dark.headerSurface.value).toBe('light')
+  })
+
   it('topMenuVariant: null in vertical, full in horizontal, first-level in hybrid', () => {
     expect(setupShell({ mode: 'vertical' }).topMenuVariant.value).toBe(null)
     expect(setupShell({ mode: 'horizontal' }).topMenuVariant.value).toBe('full')

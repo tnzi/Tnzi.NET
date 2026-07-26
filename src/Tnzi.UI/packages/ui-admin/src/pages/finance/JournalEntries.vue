@@ -26,7 +26,7 @@
       <template v-if="viewed">
         <NDescriptions :column="2" size="small" bordered class="je-detail__meta">
           <NDescriptionsItem :label="t('columns.status')">{{ statusLabel(viewed.status) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="t('columns.postingDate')">{{ formatDateOnly(viewed.postingDate, { utc: true }) }}</NDescriptionsItem>
+          <NDescriptionsItem :label="t('columns.postingDate')">{{ fmtDate(viewed.postingDate) }}</NDescriptionsItem>
           <NDescriptionsItem :label="t('columns.currency')">
             {{ viewed.currency }} <template v-if="viewed.exchangeRate !== 1"> @ {{ viewed.exchangeRate }}</template>
           </NDescriptionsItem>
@@ -35,7 +35,7 @@
           </NDescriptionsItem>
           <NDescriptionsItem :label="`${t('columns.totalDebit')} ${t('baseCurrency')}`">{{ fmtAmount(viewed.totalDebit) }}</NDescriptionsItem>
           <NDescriptionsItem :label="`${t('columns.totalCredit')} ${t('baseCurrency')}`">{{ fmtAmount(viewed.totalCredit) }}</NDescriptionsItem>
-          <NDescriptionsItem :label="t('columns.memo')" :span="2">{{ viewed.memo ?? '—' }}</NDescriptionsItem>
+          <NDescriptionsItem :label="t('columns.memo')" :span="2">{{ viewed.memo ?? EMPTY_DASH }}</NDescriptionsItem>
         </NDescriptions>
         <TResponsiveTable
           class="je-detail__lines"
@@ -67,10 +67,11 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, ref, watch } from 'vue'
 import { NButton, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
+
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -84,7 +85,7 @@ import { makePageTranslator } from '../_shared/translate'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { buildJournalEntryColumns, ENTRY_STATUS_META, type JournalRow } from './journal-entry-config'
-import { amountCell, fmtAmount } from './money'
+import { amountCell, fmtAmount, fmtDate } from './money'
 import { financeSourceTypeLabel } from './source-type'
 import JournalEntryEditor from './components/JournalEntryEditor.vue'
 
@@ -149,18 +150,18 @@ const lineColumns: DataTableColumns<JournalLineDto> = [
     minWidth: 200,
     render: (row) => `${row.accountCode ?? ''} ${row.accountName ?? row.accountId}`.trim(),
   },
-  { key: 'memo', title: t('form.lineMemo'), minWidth: 140, render: (row) => row.memo ?? '—' },
+  { key: 'memo', title: t('form.lineMemo'), minWidth: 140, render: (row) => row.memo ?? EMPTY_DASH },
   {
     key: 'debit',
     title: `${t('form.debit')} ${t('baseCurrency')}`,
     width: 140,
-    render: (row) => amountCell(row.debit > 0 ? fmtAmount(row.debit) : '—'),
+    render: (row) => amountCell(row.debit > 0 ? fmtAmount(row.debit) : EMPTY_DASH),
   },
   {
     key: 'credit',
     title: `${t('form.credit')} ${t('baseCurrency')}`,
     width: 140,
-    render: (row) => amountCell(row.credit > 0 ? fmtAmount(row.credit) : '—'),
+    render: (row) => amountCell(row.credit > 0 ? fmtAmount(row.credit) : EMPTY_DASH),
   },
 ]
 

@@ -1,12 +1,12 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// 工具白名单/黑名单 Guardrail Provider — 基于配置允许或拒绝特定工具调用
+/// 工具白名单/黑名单 Guardrail Provider - 基于配置允许或拒绝特定工具调用
 /// </summary>
 /// <remarks>
 /// 评估逻辑优先级：
-/// 1. 黑名单检查（DeniedTools）— 命中即拒绝
-/// 2. 白名单检查（AllowedTools）— 非空时，未命中即拒绝
+/// 1. 黑名单检查（DeniedTools）- 命中即拒绝
+/// 2. 白名单检查（AllowedTools）- 非空时，未命中即拒绝
 /// 3. 无工具名称的请求直接放行
 /// </remarks>
 public class AllowlistGuardrailProvider : IGuardrailProvider

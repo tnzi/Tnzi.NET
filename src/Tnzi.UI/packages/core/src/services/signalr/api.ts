@@ -1,7 +1,7 @@
 /**
- * SignalR Module API — admin access to live connection/presence state.
+ * SignalR Module API - admin access to live connection/presence state.
  *
- * Mirrors `Tnzi.SignalR/Controllers/DefaultSignalRAdminController` — read
+ * Mirrors `Tnzi.SignalR/Controllers/DefaultSignalRAdminController` - read
  * endpoints (stats, online users, per-user connections, group lookups, online
  * check) plus one destructive endpoint (force-disconnect a user) under
  * `/admin/signalr/*`. `Tnzi.SignalR` is optional, so every endpoint returns 404
@@ -18,7 +18,7 @@ import type {
 const ADMIN_SIGNALR_BASE = '/admin/signalr';
 
 /**
- * Admin SignalR API — live presence + connection introspection.
+ * Admin SignalR API - live presence + connection introspection.
  *
  * Example:
  * ```ts

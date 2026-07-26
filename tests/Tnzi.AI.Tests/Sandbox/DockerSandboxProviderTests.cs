@@ -153,7 +153,7 @@ public class DockerSandboxProviderTests
         var provider = CreateProvider(handler);
         var sandbox = await provider.CreateAsync(CreateSandboxOptions());
 
-        // Act — should not throw even though stop failed
+        // Act - should not throw even though stop failed
         await provider.DisposeAsync(sandbox);
 
         // Assert: remove was still called despite stop failure

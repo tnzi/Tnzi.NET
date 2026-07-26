@@ -4,7 +4,7 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
-/// DatabaseMemoryStore 单元测试 — MemoryScope 隔离 + 修剪 + 过期 + 搜索优化
+/// DatabaseMemoryStore 单元测试 - MemoryScope 隔离 + 修剪 + 过期 + 搜索优化
 /// </summary>
 public class DatabaseMemoryStoreTests
 {
@@ -167,7 +167,7 @@ public class DatabaseMemoryStoreTests
 
     #endregion
 
-    #region SearchAsync — keyword pre-filtering
+    #region SearchAsync - keyword pre-filtering
 
     [Fact]
     public async Task SearchAsync_MatchingKeyword_ReturnsResults()
@@ -312,7 +312,7 @@ public class DatabaseMemoryStoreTests
 
     #endregion
 
-    #region SearchAsync — importance scoring + Id/Category population
+    #region SearchAsync - importance scoring + Id/Category population
 
     [Fact]
     public async Task SearchAsync_AppliesImportanceBoost()

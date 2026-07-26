@@ -32,3 +32,8 @@ export type { DetailMode, DetailAction, DetailLayout, DetailSection, UseDetailOp
 export { useGlobalTheme } from './useGlobalTheme'
 export type { GlobalThemeController, UseGlobalThemeOptions } from './useGlobalTheme'
 export { waitForClientToken } from './waitForClientToken'
+// Finance headless layer: shared reporting period, owner/accountant view
+// mode, and general-ledger drill-down.
+export * from './useFinancePeriod'
+export * from './useFinanceViewMode'
+export * from './useGlDrilldown'

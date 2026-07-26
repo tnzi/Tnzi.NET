@@ -1,7 +1,7 @@
 namespace Tnzi.AI.WebSearch;
 
 /// <summary>
-/// Web 搜索提供者抽象 — 可插拔的联网搜索能力
+/// Web 搜索提供者抽象 - 可插拔的联网搜索能力
 /// </summary>
 /// <remarks>
 /// <para>默认实现由 Tnzi.AI 模块提供（DuckDuckGo HTML 抓取）。</para>

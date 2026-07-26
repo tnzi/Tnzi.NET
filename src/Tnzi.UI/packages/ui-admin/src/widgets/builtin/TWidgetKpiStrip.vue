@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * `TWidgetKpiStrip` — KPI hero row widget.
+ * `TWidgetKpiStrip` - KPI hero row widget.
  *
  * Renders a responsive grid of gradient KPI cards (mirrors the cards used
  * in TDashboardPage). Hybrid data model:
- *   - **Props mode** — consumer passes `kpis: KpiCard[]` and the widget
+ *   - **Props mode** - consumer passes `kpis: KpiCard[]` and the widget
  *     renders that array as-is (the original behaviour).
- *   - **Auto-fetch mode** — consumer omits `kpis` (or passes empty array)
+ *   - **Auto-fetch mode** - consumer omits `kpis` (or passes empty array)
  *     and the widget pulls 4 admin-meaningful metrics in parallel via the
  *     bridge layer: total users, total access logs, AI request count, and
  *     payment order count. Bridges that fail (module not loaded, no
@@ -68,7 +68,7 @@ function canSee(permission: string): boolean {
   return authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission(permission)
 }
 
-// Per-KPI module gate — each tile fetches from a DIFFERENT optional backend
+// Per-KPI module gate - each tile fetches from a DIFFERENT optional backend
 // module, so the widget-level `WidgetDef.module` tag can't cover it. Uses
 // `canActivate` (no super-user bypass, defers while the availability probe is
 // in flight) so no tile ever fires a fetch at a module the host didn't load.
@@ -76,9 +76,9 @@ const moduleAvailability = useModuleAvailability()
 
 interface KpiSpec {
   key: string
-  /** Permission gating this KPI's endpoint — dropped when the user lacks it. */
+  /** Permission gating this KPI's endpoint - dropped when the user lacks it. */
   permission: string
-  /** Backend module this KPI's endpoint lives in — dropped when not loaded. */
+  /** Backend module this KPI's endpoint lives in - dropped when not loaded. */
   module: string
   title: string
   icon: string
@@ -87,7 +87,7 @@ interface KpiSpec {
 }
 
 const { reload } = useWidgetData(async () => {
-  if (!isAuto.value) return // consumer-supplied kpis — skip
+  if (!isAuto.value) return // consumer-supplied kpis - skip
   const emptyQuery = { pageIndex: 1, pageSize: 1, searchText: '', filters: {} }
   // AI usage summary backend (`UsageAnalyticsService.GetSummaryAsync`)
   // validates startTime <= endTime up-front and 400s on empty/zero

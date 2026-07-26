@@ -11,7 +11,7 @@ namespace Tnzi.System.Controllers.Admin;
 // module code fits. Authorization is enforced PER-GROUP in SettingsCenterService
 // (each group has its own {group}.settings.{slug}.view/update code, super-admin
 // bypasses). The controller is a bare authentication boundary - same self-service
-// exemption pattern as Menu user-tree / FunctionAuthorization access-profile.
+// exemption pattern as FunctionAuthorization access-profile.
 // GET returns only the caller's viewable groups; writes 403 per-group in service.
 [ApiAuthorize]
 public class DefaultSettingsCenterAdminController : ApiAdminControllerBase

@@ -53,9 +53,6 @@ public class SystemModule : TnziApplicationModule
 
         var services = context.Services;
 
-        // 注册菜单服务
-        services.AddScoped<IMenuService, MenuService>();
-
         // 注册配置服务
         services.AddScoped<ISettingService, SettingService>();
         services.AddScoped<ISettingsCenterService, SettingsCenterService>();
@@ -136,7 +133,7 @@ public class SystemModule : TnziApplicationModule
         else
         {
             // 沉默失败护栏：存在热设置定义却没有 source 时，配置中心 UI 照常可编辑、
-            // 保存也"成功"，但值永远流不进 IOptionsMonitor — 必须在启动期把话说明白。
+            // 保存也"成功"，但值永远流不进 IOptionsMonitor - 必须在启动期把话说明白。
             // 自动接线覆盖 TnziApp 流程 (ConfigurationManager); 走到这里意味着宿主传入了
             // 非 builder 型 IConfiguration 且未手调, 或显式关闭了自动接线。
             var hasRuntimeSettings = context.ServiceProvider

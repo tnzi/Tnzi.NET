@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TMessageActions — Action button row shown below an assistant message.
+ * TMessageActions - Action button row shown below an assistant message.
  *
  * Renders a horizontal row of pill-shaped buttons matching Manus's
  * post-message action cluster (copy / Start agent / Create dropdown).
@@ -10,15 +10,15 @@
  *
  * Three slots so consumers can wire any combination of buttons:
  *
- *   - `#default` — the entire button row (overrides the built-in
+ *   - `#default` - the entire button row (overrides the built-in
  *     copy + actions list)
- *   - `#actions` — additional buttons after copy and before any custom
+ *   - `#actions` - additional buttons after copy and before any custom
  *     content; receives `(copy)` slot prop
  *
  * For the simple case use the `actions` prop with `[{ icon, label }]`
  * tuples; the component renders them automatically.
  */
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { Icon } from '@iconify/vue'
 
 export interface MessageAction {
@@ -54,13 +54,24 @@ const emit = defineEmits<{
 
 const copied = ref(false)
 
+/* Cleared on unmount so the reset callback cannot fire against a torn-down
+   component. */
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null
+onBeforeUnmount(() => {
+  if (copyResetTimer != null) clearTimeout(copyResetTimer)
+})
+
 async function handleCopy(): Promise<void> {
   try {
     await navigator.clipboard.writeText(props.content)
     copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
+    if (copyResetTimer != null) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      copyResetTimer = null
+      copied.value = false
+    }, 1500)
   } catch {
-    /* clipboard permission denied — silent */
+    /* clipboard permission denied - silent */
   }
   emit('copy', props.content)
 }

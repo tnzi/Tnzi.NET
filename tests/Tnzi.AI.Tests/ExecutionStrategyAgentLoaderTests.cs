@@ -3,8 +3,8 @@ using Microsoft.Data.Sqlite;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// Verifies that <see cref="ExecutionStrategyAgentLoader.ResolveAgentAsync"/> — the CHILD/target-agent loader
-/// used by Handoff / Router / AgentAsTools strategies — projects per-tool grants (GrantType=Tool) and passes
+/// Verifies that <see cref="ExecutionStrategyAgentLoader.ResolveAgentAsync"/> - the CHILD/target-agent loader
+/// used by Handoff / Router / AgentAsTools strategies - projects per-tool grants (GrantType=Tool) and passes
 /// them to the factory as <c>toolNames</c>. Without this a child agent in a multi-agent flow silently loses
 /// its individually granted tools (only tool groups would survive).
 ///
@@ -143,7 +143,7 @@ public class ExecutionStrategyAgentLoaderTests : IDisposable
         executor.ShouldNotBeNull();
         // Group grants still flow as toolGroups (regression guard).
         _capturedToolGroups.ShouldBe(new[] { "fs" });
-        // Per-tool grant flows as toolNames — the gap this fix closes.
+        // Per-tool grant flows as toolNames - the gap this fix closes.
         _capturedToolNames.ShouldBe(new[] { "read_file" });
     }
 
@@ -222,7 +222,7 @@ public class ExecutionStrategyAgentLoaderTests : IDisposable
 }
 
 /// <summary>
-/// Test-only DbContext — Agent + Provider + Persona + the three grant entities.
+/// Test-only DbContext - Agent + Provider + the three grant entities.
 /// Mirrors AgentGrantWiringDbContext (no AgentVersion needed: the loader never writes versions).
 /// </summary>
 internal sealed class LoaderGrantDbContext : TnziDbContext<LoaderGrantDbContext>
@@ -238,7 +238,6 @@ internal sealed class LoaderGrantDbContext : TnziDbContext<LoaderGrantDbContext>
     {
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new AgentToolGrantConfiguration());
         modelBuilder.ApplyConfiguration(new AgentSkillGrantConfiguration());
         modelBuilder.ApplyConfiguration(new AgentKnowledgeGrantConfiguration());

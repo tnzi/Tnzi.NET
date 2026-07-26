@@ -27,7 +27,6 @@ public class AIPermissions : IPermissionDefinitionProvider
         // send-input control signals - an ops surface, not a business one.
         context.AddPermission("ai.agentRun.view", "View Agent Runs", parentName: "ai", category: PermissionCategory.Technical);
         context.AddPermission("ai.agentRun.execute", "Control Agent Runs", parentName: "ai", category: PermissionCategory.Technical);
-        context.AddCrudPermissions("ai.persona", "Personas", parentName: "ai");
         context.AddCrudPermissions("ai.provider", "Providers", parentName: "ai", category: PermissionCategory.Technical);
         context.AddPermission("ai.provider.execute", "Test Providers", parentName: "ai", category: PermissionCategory.Technical);
         context.AddCrudPermissions("ai.mcp", "MCP Servers", parentName: "ai", category: PermissionCategory.Technical);

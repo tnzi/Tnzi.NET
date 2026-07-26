@@ -45,7 +45,7 @@ public class AgentExecutorOptions
     public int ToolTimeoutSeconds { get; set; } = 120;
 
     /// <summary>
-    /// 历史消息压缩器（可选）— invoked by AgentExecutor before the tool-calling loop.
+    /// 历史消息压缩器（可选）- invoked by AgentExecutor before the tool-calling loop.
     /// </summary>
     public IHistoryReducer? HistoryReducer { get; set; }
 
@@ -74,7 +74,7 @@ public class AgentExecutorOptions
     public bool StripTextFromToolCallMessages { get; set; }
 
     /// <summary>
-    /// 浅拷贝克隆 — 基于 <see cref="object.MemberwiseClone"/>，自动复制全部成员；
+    /// 浅拷贝克隆 - 基于 <see cref="object.MemberwiseClone"/>，自动复制全部成员；
     /// 新增选项属性无需手动同步到克隆逻辑（曾因手抄字段清单漏掉
     /// <see cref="Logger"/> 与 <see cref="StripTextFromToolCallMessages"/>）。
     /// <para>

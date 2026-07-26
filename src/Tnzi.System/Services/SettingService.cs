@@ -232,7 +232,7 @@ public class SettingService : ApplicationService, ISettingService
         Check.NotNull(input);
 
         // 后门收口：命中配置中心（RuntimeSetting）管理的 Global 键必须走 settings-center
-        // 端点 — 原始 CRUD 无 schema 校验，Global 行会经 SettingConfigurationProvider 流入
+        // 端点 - 原始 CRUD 无 schema 校验，Global 行会经 SettingConfigurationProvider 流入
         // IConfiguration，非法值将在下次重绑定强类型 Options 时抛异常。
         if (IsManagedBySettingsCenter(input.Key, input.Scope))
             return Fail<SettingDto>($"Setting key '{input.Key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
@@ -249,6 +249,13 @@ public class SettingService : ApplicationService, ISettingService
         setting.IsSystem = false;
 
         await _settingRepository.InsertAsync(setting);
+        // 环境事务下仓储会推迟 SaveChanges，此时实体 Id 仍是默认值（框架在 SaveChanges
+        // 里生成），返回的 DTO 会带 Guid.Empty，调用方无法据此再编辑/删除该行。
+        await _settingRepository.SaveChangesAsync();
+
+        // 读路径会缓存"键不存在"的结果（1 小时），新建后必须清掉该键的缓存，
+        // 否则新值在缓存过期前一直读不到（其余写路径均已清理）。
+        await _cache.RemoveAsync($"Setting:{setting.Key}");
 
         await PublishSettingChangedAsync(setting.Key, setting.Scope, setting.ScopeId, setting.Value, isRemoval: false);
 
@@ -268,7 +275,13 @@ public class SettingService : ApplicationService, ISettingService
         if (setting.IsSystem)
             return Fail<SettingDto>("Cannot update system setting", 403, ErrorCodes.SYSTEM_ERROR);
 
-        // 后门收口：与 CreateSettingAsync 相同 — 受管键的值必须经配置中心的 schema 校验写入
+        // 加密行必须经 SetEncryptedAsync 更新：这里写入的是明文，而 IsEncrypted 仍为 true，
+        // 之后每次读取都会拿明文去解密（GetSettingAsync 静默回退默认值、GetDecryptedAsync 400）。
+        // 与 SetSettingAsync 的同名防护对齐。
+        if (setting.IsEncrypted)
+            return Fail<SettingDto>("Cannot update an encrypted setting here; use the encrypted setting endpoint instead", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // 后门收口：与 CreateSettingAsync 相同 - 受管键的值必须经配置中心的 schema 校验写入
         if (IsManagedBySettingsCenter(setting.Key, setting.Scope))
             return Fail<SettingDto>($"Setting key '{setting.Key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
 
@@ -328,7 +341,7 @@ public class SettingService : ApplicationService, ISettingService
 
         await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
-            await _settingRepository.DeleteManyAsync(settings);
+            await _settingRepository.DeleteManyAsync(settings, cancellationToken);
         });
 
         // 缓存清理在事务提交后执行，避免事务回滚时缓存已被清理
@@ -576,7 +589,7 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <summary>
-    /// 判断键是否由配置中心（[RuntimeSetting] schema）管理。仅 Global 作用域受管 —
+    /// 判断键是否由配置中心（[RuntimeSetting] schema）管理。仅 Global 作用域受管 -
     /// 配置中心只写 Global，Tenant/User 行不进 IConfiguration，无污染风险。
     /// </summary>
     private bool IsManagedBySettingsCenter(string key, SettingScope scope)
@@ -615,7 +628,7 @@ public class SettingService : ApplicationService, ISettingService
             }
         }
 
-        // 多实例一致性：分布式总线可用时把 Global 变更广播给其他实例（仅 key，不带值 —
+        // 多实例一致性：分布式总线可用时把 Global 变更广播给其他实例（仅 key，不带值 -
         // 收端直查数据库 reload，broker 上不落配置值/机密）。本地链已处理本实例，
         // 收端用 OriginInstanceId 跳过回环投递。
         if (_distributedEventBus != null && scope == SettingScope.Global)

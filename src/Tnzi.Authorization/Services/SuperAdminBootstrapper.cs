@@ -6,7 +6,7 @@ namespace Tnzi.Authorization.Services;
 /// super-admin role, but ONLY while every configured super-admin role has zero
 /// members. A zero-member super-admin role means the system has no recovery
 /// account at all (fresh install or accidental lockout), so re-applying on
-/// restart is deliberate recovery behaviour — once any member exists the
+/// restart is deliberate recovery behaviour - once any member exists the
 /// bootstrap is a no-op. Never creates users, never touches passwords.
 /// </summary>
 /// <remarks>
@@ -44,7 +44,7 @@ public class SuperAdminBootstrapper
 
     /// <summary>
     /// Runs the bootstrap. Returns the number of users actually assigned
-    /// (0 when skipped for any reason — missing wiring, existing members,
+    /// (0 when skipped for any reason - missing wiring, existing members,
     /// unknown user names).
     /// </summary>
     public async Task<int> BootstrapAsync(IReadOnlyList<string> superAdminRoleNames, IReadOnlyList<string> userNames)

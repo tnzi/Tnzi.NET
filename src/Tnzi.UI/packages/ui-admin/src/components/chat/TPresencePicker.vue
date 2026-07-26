@@ -47,7 +47,7 @@ const props = withDefaults(
     status: UserPresenceStatus
     name?: string
     avatarFileId?: string
-    /** Deployment toggle — false drops "Invisible" from the status menu. */
+    /** Deployment toggle - false drops "Invisible" from the status menu. */
     allowInvisible?: boolean
   }>(),
   { allowInvisible: true },
@@ -95,7 +95,7 @@ function select(key: UserPresenceStatus) {
 </style>
 
 <style>
-/* Unscoped — the menu renders inside the teleported popover (`raw`). */
+/* Unscoped - the menu renders inside the teleported popover (`raw`). */
 .t-presence-menu {
   background: var(--chat-surface, #fff);
   border: 1px solid var(--chat-border, #e6e6e6);

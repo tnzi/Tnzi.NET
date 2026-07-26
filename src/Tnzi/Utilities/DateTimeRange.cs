@@ -106,8 +106,9 @@ public class DateTimeRange
         get
         {
             DateTime now = DateTime.Now;
-            int daysUntilMonday = ((int)DayOfWeek.Monday - (int)now.DayOfWeek + 7) % 7;
-            DateTime startOfWeek = now.Date.AddDays(-daysUntilMonday);
+            // 距本周一已过的天数（方向必须是 当前星期 - 周一；写反会把周中的日期算到上一周的后半段）
+            int daysSinceMonday = ((int)now.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+            DateTime startOfWeek = now.Date.AddDays(-daysSinceMonday);
             return new DateTimeRange(startOfWeek, startOfWeek.AddDays(7).AddMilliseconds(-1));
         }
     }

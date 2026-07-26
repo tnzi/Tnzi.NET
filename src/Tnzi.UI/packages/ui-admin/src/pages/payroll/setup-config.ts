@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -105,7 +106,7 @@ export function buildStructureColumns(t: (key: string) => string): ColumnDef<Str
   return [
     { key: 'name', title: 'columns.name', minWidth: 160, primary: true },
     { key: 'frequency', title: 'columns.frequency', width: 130, render: (r) => t(`frequency.${enumKey(r.frequency)}`) },
-    { key: 'description', title: 'columns.description', minWidth: 200, mobileHidden: true, render: (r) => r.description ?? '—' },
+    { key: 'description', title: 'columns.description', minWidth: 200, mobileHidden: true, render: (r) => r.description ?? EMPTY_DASH },
     {
       key: 'isActive',
       title: 'columns.status',

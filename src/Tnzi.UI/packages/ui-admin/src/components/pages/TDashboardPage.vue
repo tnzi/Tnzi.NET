@@ -9,7 +9,7 @@ import { translatePageKey } from '../../pages/_shared/translate'
 import type { EChartsOption } from 'echarts'
 
 /**
- * `TDashboardPage` — opinionated dashboard scaffold: KPI hero row +
+ * `TDashboardPage` - opinionated dashboard scaffold: KPI hero row +
  * line chart + pie chart + activity slot. Drop into a route to get an
  * immediately-presentable admin home. All data is consumer-supplied;
  * the component owns layout, animation, and theme reactivity only.
@@ -36,13 +36,13 @@ export interface KpiCard {
   tone?: 'primary' | 'info' | 'success' | 'warning' | 'error'
   /**
    * Gradient palette (soybean-style). When supplied the whole card renders
-   * as a coloured tile (white text, no icon chip) — mutually exclusive with
+   * as a coloured tile (white text, no icon chip) - mutually exclusive with
    * `tone`, and `delta` colors are remapped to translucent white.
    */
   gradient?: KpiCardGradient
   /** Optional unit prefix shown before the value (e.g. `'$'`). */
   unit?: string
-  /** Optional comparison delta — e.g. "+12.4%". */
+  /** Optional comparison delta - e.g. "+12.4%". */
   delta?: string
   /** Whether the delta is up (positive) or down (negative). */
   deltaTrend?: 'up' | 'down' | 'flat'
@@ -56,7 +56,7 @@ export interface ChartSeriesPoint {
 interface Props {
   /** KPI hero cards. */
   kpis?: KpiCard[]
-  /** Line chart series — pass two series for over-time comparison. */
+  /** Line chart series - pass two series for over-time comparison. */
   lineSeries?: Array<{ name: string; data: number[] }>
   /** Line chart x-axis categories. */
   lineCategories?: string[]
@@ -97,7 +97,7 @@ const pieHasData = computed(() => props.pieData.length > 0)
  *  - 3 KPIs → 1/3 across xs / md+    (24 / 8)
  *  - 2 KPIs → 1/2 across xs / md+    (24 / 12)
  *  - 1 or 5+ → 1 col on xs, even split on md+ (24 / 24/count rounded down)
- * Dashboards with 6+ KPIs are uncommon — for those we fall back to 6 per
+ * Dashboards with 6+ KPIs are uncommon - for those we fall back to 6 per
  * row so the cards never become microscopic. */
 const kpiSpan = computed<string>(() => {
   const count = props.kpis.length
@@ -184,12 +184,12 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 
 <template>
   <div class="t-dashboard-page">
-    <!-- Header banner slot — typically a THeaderBanner with greeting + time -->
+    <!-- Header banner slot - typically a THeaderBanner with greeting + time -->
     <div v-if="$slots.header" class="t-dashboard-page__header">
       <slot name="header" />
     </div>
 
-    <!-- KPI hero row — responsive breakpoints (NGrid `responsive="screen"`
+    <!-- KPI hero row - responsive breakpoints (NGrid `responsive="screen"`
          with per-NGi `span` string overrides the parent `:cols`). At xs/sm
          each card claims the full row (24); at md two per row (12); at lg+
          four per row (6). This replaces the previous `:cols="kpis.length"`
@@ -241,7 +241,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
       </NGi>
     </NGrid>
 
-    <!-- Chart row — span="24 m:24 l:16" for the line chart and
+    <!-- Chart row - span="24 m:24 l:16" for the line chart and
          "24 m:24 l:8" for the pie. Below `lg` the two charts stack so
          each gets the full content width; at `lg+` they sit side-by-side
          in the historical 2:1 split. Previously `:cols="3"` with hard
@@ -274,7 +274,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* No padding — the host page (Workbench / UsageDashboard) sits inside
+  /* No padding - the host page (Workbench / UsageDashboard) sits inside
      TAdminContent which already supplies the 12px page-edge gutter. An
      extra padding here was creating a transparent "凹陷" frame around
      the KPI + chart cards because this wrapper has no background of
@@ -318,7 +318,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
   margin-right: 2px;
 }
 .t-dashboard-page__header {
-  /* Reset — let the consumer banner style itself end-to-end. */
+  /* Reset - let the consumer banner style itself end-to-end. */
 }
 
 .t-dashboard-page__kpi-row {
@@ -387,7 +387,7 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 
 .t-dashboard-page__chart-card {
   height: 360px;
-  /* soybean parity — drop shadow + 8px radius matching the KPI cards. */
+  /* soybean parity - drop shadow + 8px radius matching the KPI cards. */
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
 }

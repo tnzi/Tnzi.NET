@@ -50,10 +50,15 @@ public class ToolRegistry : IToolRegistry
     /// </summary>
     public IReadOnlyList<ToolDefinition> GetToolsByGroup(string groupName)
     {
-        if (_toolsByGroup.TryGetValue(groupName, out var tools))
+        // 必须在 _lock 内复制：组内的 List 由 Register/Unregister* 在锁内就地增删，
+        // 无锁 ToList() 与并发 Add/Remove 竞争会抛 InvalidOperationException 或复制出撕裂的快照
+        lock (_lock)
         {
-            // 返回副本，防止调用方遍历时被并发修改
-            return tools.ToList();
+            if (_toolsByGroup.TryGetValue(groupName, out var tools))
+            {
+                // 返回副本，防止调用方遍历时被并发修改
+                return tools.ToList();
+            }
         }
 
         return Array.Empty<ToolDefinition>();

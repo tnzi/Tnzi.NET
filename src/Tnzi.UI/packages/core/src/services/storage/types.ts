@@ -11,7 +11,12 @@ import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination'
 // ============================================
 
 /**
- * File record DTO
+ * File record DTO - the single response shape every file endpoint returns
+ * (upload included). Mirrors `Tnzi.Storage/Dtos/FileRecordDto.cs`, which is a
+ * deliberately narrow safe subset: it carries NO url / thumbnailUrl. Build
+ * content URLs from the id via `useStorageApi().getPreviewUrl(id)` /
+ * `getDownloadUrl(id)` / `getThumbnailUrl(id)`, which resolve through the
+ * client baseUrl and stay deployment-prefix aware.
  */
 export interface FileRecordDto extends CreationAuditedEntity<string> {
   fileName: string;
@@ -32,7 +37,7 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   provider: string;
   referenceCount: number;
   /**
-   * @deprecated 后端 DefaultStorageController 已把对外契约收窄为安全 DTO,不再返回该内部缩略图路径字段(改用 thumbnailUrl)。
+   * @deprecated 后端 DefaultStorageController 已把对外契约收窄为安全 DTO,不再返回该内部缩略图路径字段。
    * 保留为可选仅为向后兼容;勿在新代码中依赖。
    */
   thumbnailPath?: string | null;
@@ -40,15 +45,15 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   creatorName?: string | null;
   /** Owning folder id; null = root / unfiled. */
   folderId?: string | null;
+  /** True while the file is an unreferenced upload awaiting cleanup. */
+  isTemporary: boolean;
   /**
    * Custom tags. The backend stores + serializes these as a single
-   * comma-separated string (e.g. `"invoice,2026,paid"`), not an array — split
+   * comma-separated string (e.g. `"invoice,2026,paid"`), not an array - split
    * on `,` (trimming + dropping blanks) to read individual tags. Null / empty
    * when the file has no tags.
    */
   tags?: string | null;
-  url: string;
-  thumbnailUrl?: string | null;
 }
 
 /**
@@ -78,7 +83,7 @@ export interface FileQueryDto extends SortedPagedQueryDto {
 }
 
 /**
- * Folder DTO — output of /admin/storage/folders/tree.
+ * Folder DTO - output of /admin/storage/folders/tree.
  * `children` is populated by the tree endpoint; flat lookup endpoints leave it undefined.
  */
 export interface FileFolderDto {
@@ -112,18 +117,6 @@ export interface MoveFilesToFolderRequest {
   fileIds: string[];
   /** Target folder id; null moves files to the root (unfiled). */
   folderId?: string | null;
-}
-
-/**
- * File upload result
- */
-export interface FileUploadResultDto {
-  id: string;
-  fileName: string;
-  originalName: string;
-  url: string;
-  size: number;
-  contentType: string;
 }
 
 /**
@@ -168,7 +161,7 @@ export interface ChunkUploadResultDto {
   uploadedChunks: number;
   totalChunks: number;
   isComplete: boolean;
-  file?: FileUploadResultDto;
+  file?: FileRecordDto;
 }
 
 /**

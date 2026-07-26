@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// ScoreNormalizationPostProcessor 不可变性测试 — 归一化必须返回新实例，
+/// ScoreNormalizationPostProcessor 不可变性测试 - 归一化必须返回新实例，
 /// 不得原地修改入参对象（与 WeightedDiminishingReranker 的 immutable pattern 一致）。
 /// </summary>
 public class ScoreNormalizationImmutabilityTests

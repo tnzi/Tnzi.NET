@@ -100,7 +100,7 @@ defineSlots<{
 }>()
 
 // useRoute/useRouter return undefined when no router is installed (e.g. unit
-// tests that don't mount a router) — guard every access.
+// tests that don't mount a router) - guard every access.
 const route = useRoute() as RouteLocationNormalizedLoaded | undefined
 const router = useRouter() as Router | undefined
 
@@ -137,7 +137,12 @@ function onBack(): void {
 .t-page-header { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
 .t-page-header--bordered { border-bottom: 1px solid var(--tnzi-border); padding-bottom: 12px; }
 .t-page-header--surface {
-  background: var(--tnzi-container-bg, #fff);
+  /* Own the page-header container surface: the theme drawer's "Page header"
+     background writes `--tnzi-admin-page-header-bg`; falls back to the base
+     container color so nothing shifts until a color is picked. The adaptive
+     foreground (dark bar → light title) is driven by the root tone attribute
+     in polish.css (`[data-tnzi-ph-tone]`). */
+  background: var(--tnzi-admin-page-header-bg, var(--tnzi-container-bg, #fff));
   border-radius: var(--tnzi-admin-radius-md, 8px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   padding: 12px 16px;
@@ -174,7 +179,7 @@ function onBack(): void {
 @media (max-width: 767px) {
   .t-page-header__title { font-size: 16px; }
 }
-/* Phone: stack wide action groups below the title — UNLESS the consumer
+/* Phone: stack wide action groups below the title - UNLESS the consumer
    opted into inline actions (compact icon cluster fits beside the title). */
 @media (max-width: 640px) {
   .t-page-header:not(.t-page-header--inline-actions) .t-page-header__left { flex-basis: 100%; }

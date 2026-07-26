@@ -1,18 +1,18 @@
 <script setup lang="ts">
 /**
- * `TAvatar` — flexible identity avatar primitive.
+ * `TAvatar` - flexible identity avatar primitive.
  *
  * Renders, in priority order:
  *   1. the `src` image (cover-cropped), degrading on a load error to
  *   2. the `name` initial(s) on a deterministic colour, or
  *   3. a fallback `icon` (when `prefer-icon` is set, or there is no name).
  *
- * One component for every avatar scenario in the ecosystem — chat bubbles, the
- * admin header, user cards, AI persona / role glyphs — driven entirely by props
+ * One component for every avatar scenario in the ecosystem - chat bubbles, the
+ * admin header, user cards, AI persona / role glyphs - driven entirely by props
  * plus two slots:
- *   - `#badge`    — an overlay anchored to the bottom-right corner (presence
+ *   - `#badge` - an overlay anchored to the bottom-right corner (presence
  *                   dots, unread counters, edit pencils, …).
- *   - `#fallback` — fully custom non-image content (replaces the initial/icon).
+ *   - `#fallback` - fully custom non-image content (replaces the initial/icon).
  *
  * The component is stateless about *where* the image URL comes from: callers
  * resolve the URL (storage preview, external link, …) and pass `src`. It owns
@@ -29,7 +29,7 @@ const props = withDefaults(
   defineProps<{
     /** Resolved image URL. When present (and it loads) the picture is shown. */
     src?: string | null
-    /** Display name — drives the initial fallback, the default colour seed and `alt`. */
+    /** Display name - drives the initial fallback, the default colour seed and `alt`. */
     name?: string | null
     /** Explicit colour seed (e.g. a stable user id). Defaults to `name`. */
     seed?: string | null
@@ -43,7 +43,7 @@ const props = withDefaults(
     icon?: string
     /** Number of initial characters (1 or 2). Default 1. */
     maxInitials?: 1 | 2
-    /** Background colour override — skips the deterministic palette. Any CSS colour / `var()`. */
+    /** Background colour override - skips the deterministic palette. Any CSS colour / `var()`. */
     color?: string
     /** Foreground (text / icon) colour override. Default white. */
     textColor?: string
@@ -55,6 +55,17 @@ const props = withDefaults(
     alt?: string
     /** Draw a subtle 1px ring (useful for white-on-white surfaces). */
     bordered?: boolean
+    /**
+     * Presence status - renders a colored dot in the bottom-right corner when `showStatus`
+     * is set (and no `#badge` slot is provided). Accepts the `UserPresenceStatus` member
+     * names (`'Online' | 'Away' | 'Busy' | 'Invisible' | 'Offline'`) or their lowercase form.
+     * Lets any avatar (chat, header, user cards, member grids) show online status directly.
+     */
+    status?: string | null
+    /** Show the presence dot for `status`. Default false. */
+    showStatus?: boolean
+    /** Presence dot diameter in px. Defaults to ~28% of `size` (min 8). */
+    statusSize?: number
   }>(),
   {
     src: null,
@@ -71,8 +82,30 @@ const props = withDefaults(
     objectFit: 'cover',
     alt: undefined,
     bordered: false,
+    status: null,
+    showStatus: false,
+    statusSize: undefined,
   },
 )
+
+const slots = defineSlots<{
+  badge?: () => unknown
+  fallback?: () => unknown
+}>()
+
+// Presence dot: online/away/busy resolve to a colour; invisible = hollow ring;
+// anything else (including offline / unknown) = grey. Explicit #badge always wins.
+const statusKind = computed(() => {
+  switch ((props.status ?? '').toLowerCase()) {
+    case 'online': return 'online'
+    case 'away': return 'away'
+    case 'busy': return 'busy'
+    case 'invisible': return 'invisible'
+    default: return 'offline'
+  }
+})
+const showStatusDot = computed(() => props.showStatus && props.status != null && !slots.badge)
+const statusDotSize = computed(() => `${props.statusSize ?? Math.max(8, Math.round(props.size * 0.28))}px`)
 
 // Track image load failures so a broken/expired URL degrades to the initial /
 // icon instead of a broken-image glyph. Reset whenever the source changes
@@ -147,6 +180,12 @@ const altText = computed(() => props.alt ?? props.name ?? '')
       </slot>
     </span>
     <span v-if="$slots.badge" class="t-avatar__badge"><slot name="badge" /></span>
+    <span
+      v-else-if="showStatusDot"
+      class="t-avatar__status"
+      :class="`t-avatar__status--${statusKind}`"
+      :style="{ width: statusDotSize, height: statusDotSize }"
+    />
   </span>
 </template>
 
@@ -186,4 +225,19 @@ const altText = computed(() => props.alt ?? props.name ?? '')
   bottom: 0;
   line-height: 0;
 }
+/* Built-in presence dot (bottom-right); an explicit #badge slot overrides it. The ring
+   uses the container background so the dot reads on any surface. */
+.t-avatar__status {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--tnzi-container-bg, #fff);
+}
+.t-avatar__status--online { background: #1aad19; }
+.t-avatar__status--away { background: #f5a623; }
+.t-avatar__status--busy { background: #e64340; }
+.t-avatar__status--offline { background: #bcbcbc; }
+.t-avatar__status--invisible { background: transparent; border-color: #bcbcbc; }
 </style>

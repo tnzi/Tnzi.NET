@@ -1,7 +1,7 @@
 /**
- * Diagnostics Module API — admin read access to runtime diagnostics.
+ * Diagnostics Module API - admin read access to runtime diagnostics.
  *
- * Mirrors `Tnzi.AspNetCore/Controllers/DefaultDiagnosticsAdminController` —
+ * Mirrors `Tnzi.AspNetCore/Controllers/DefaultDiagnosticsAdminController` -
  * exception ring-buffer summary/recent (+ one DELETE to clear it), the
  * controller map, and the loaded module manifest list under
  * `/admin/diagnostics/*`.
@@ -18,7 +18,7 @@ import type {
 const ADMIN_DIAGNOSTICS_BASE = '/admin/diagnostics';
 
 /**
- * Admin Diagnostics API — runtime exception/controller/module introspection.
+ * Admin Diagnostics API - runtime exception/controller/module introspection.
  *
  * Example:
  * ```ts

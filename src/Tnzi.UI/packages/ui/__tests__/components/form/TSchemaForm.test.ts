@@ -3,7 +3,7 @@ import { h } from 'vue'
 import { mount } from '@vue/test-utils'
 import TSchemaForm, { type FieldRenderer } from '../../../src/components/form/TSchemaForm'
 
-describe('TSchemaForm — custom field renderers (F3)', () => {
+describe('TSchemaForm - custom field renderers (F3)', () => {
   it('uses a custom field renderer for a non-builtin field type', () => {
     const markdown: FieldRenderer = (ctx) => h('div', { class: 'custom-md' }, String(ctx.value))
     const wrapper = mount(TSchemaForm, {

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// 默认 Gateway 实现 — 路由请求到 Agent，追踪活跃会话
+/// 默认 Gateway 实现 - 路由请求到 Agent，追踪活跃会话
 /// </summary>
 public class DefaultGateway : IGateway
 {
@@ -67,7 +67,7 @@ public class DefaultGateway : IGateway
         }
         catch (Exception ex)
         {
-            // Do not echo internal exception details to the caller — log them server-side,
+            // Do not echo internal exception details to the caller - log them server-side,
             // return a generic error (parity with ProcessStreamingAsync).
             _logger.LogError(ex, "Gateway ProcessAsync failed for channel={Channel} chatId={ChatId}",
                 request.Channel, request.ChatId);
@@ -213,7 +213,7 @@ public class DefaultGateway : IGateway
             UserId = request.UserId,
             PeerKind = request.PeerKind,
             ExplicitAgentId = request.AgentId?.ToString(),
-            // 透传渠道归属租户 — 带 TenantId 的绑定规则按租户分区命中（null = 部署级全局）
+            // 透传渠道归属租户 - 带 TenantId 的绑定规则按租户分区命中（null = 部署级全局）
             TenantId = request.TenantId
         };
 
@@ -243,7 +243,7 @@ public class DefaultGateway : IGateway
     }
 
     /// <summary>
-    /// 懒驱逐 — 清理超过 SessionEvictionHours 未活跃的会话
+    /// 懒驱逐 - 清理超过 SessionEvictionHours 未活跃的会话
     /// </summary>
     private void EvictStaleSessions()
     {

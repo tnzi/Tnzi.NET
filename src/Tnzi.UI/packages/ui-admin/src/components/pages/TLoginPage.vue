@@ -1,22 +1,22 @@
 <script setup lang="ts">
 /**
- * `TLoginPage` — login page shell (2026-06-11 redesign).
+ * `TLoginPage` - login page shell (2026-06-11 redesign).
  *
  * Two layouts, selected via the `layout` prop (consumers set it through
  * `defineAdminApp({ login: { layout } })`):
  *
- *   - `'wave'` (default, 方案 A) — the direct evolution of the legacy
+ *   - `'wave'` (default, 方案 A) - the direct evolution of the legacy
  *     soybean-style page: brand-tinted background + drifting aurora blobs +
  *     dual-layer animated waves, centered card with staggered entrance.
- *   - `'split'` (方案 B) — brand narrative panel on the left (flowing aurora,
+ *   - `'split'` (方案 B) - brand narrative panel on the left (flowing aurora,
  *     tagline, admin-shell miniature) + white form pane on the right with a
  *     "Welcome back" heading and stacked field labels. Below 768px the panel
  *     collapses to a top brand strip.
  *
  * Optional interactions (both layouts, hidden unless configured):
- *   - `qrComponent` — corner-fold toggle (top-right) that swaps the form for
+ *   - `qrComponent` - corner-fold toggle (top-right) that swaps the form for
  *     a consumer-rendered QR sign-in panel.
- *   - `thirdParty` — providers forwarded to `PwdLogin` via the context,
+ *   - `thirdParty` - providers forwarded to `PwdLogin` via the context,
  *     rendered as round icon buttons under an "Or continue with" divider.
  *
  * The shell exposes a {@link LoginContext} via `provide()` so each module can
@@ -44,6 +44,7 @@ import {
   type LoginThirdPartyProvider,
   type LoginUiStyle,
   type TwoFactorChallenge,
+  type LoginCaptchaData,
 } from '../../pages/login/useLoginContext'
 
 interface Props {
@@ -51,7 +52,7 @@ interface Props {
   module?: LoginModule
   /** Module components map (6 entries: pwd-login / code-login / register / reset-pwd / bind-wechat / two-factor). */
   moduleComponents: Record<LoginModule, Component>
-  /** Page layout — `'wave'` (centered card, 方案 A) or `'split'` (brand panel + form, 方案 B). */
+  /** Page layout - `'wave'` (centered card, 方案 A) or `'split'` (brand panel + form, 方案 B). */
   layout?: 'wave' | 'split'
   /** Brand title shown next to the logo. */
   brand?: string
@@ -65,7 +66,7 @@ interface Props {
   taglineSub?: string
   /** Copyright line. Defaults to `© {year} {brand}`. */
   copyright?: string
-  /** Translation function — fallback returns `fallback ?? key`. */
+  /** Translation function - fallback returns `fallback ?? key`. */
   translate?: (key: string, fallback?: string) => string
   /** Auth callbacks passed down to modules via `useLoginContext()`. */
   callbacks?: LoginCallbacks
@@ -95,7 +96,7 @@ interface Props {
   transitionName?: string
   /**
    * Show the language switcher (`TLangSwitch`) in the toolbar.
-   * Defaults to **false** — many deployments are single-locale.
+   * Defaults to **false** - many deployments are single-locale.
    */
   showLangSwitch?: boolean
   /**
@@ -227,11 +228,15 @@ const waveHeading = computed(() =>
   qrMode.value ? t('admin.login.qr.title', 'QR Code Login') : activeLabel.value,
 )
 
-// Phase I.7.5 — outstanding 2FA challenge state. PwdLogin / CodeLogin
+// Phase I.7.5 - outstanding 2FA challenge state. PwdLogin / CodeLogin
 // callbacks push into this via `helpers.setTwoFactorRequired(...)`, and
 // the watcher below auto-toggles the shell to the `two-factor` module
 // so the consumer's callback doesn't have to know about route names.
 const pendingTwoFactor = ref<TwoFactorChallenge | null>(null)
+// Adaptive login captcha - the `pwdLogin` callback pushes into this via
+// `helpers.setCaptchaRequired(...)` when the backend replies
+// `IDENTITY_CAPTCHA_REQUIRED`; PwdLogin reveals + seeds its captcha field.
+const pendingCaptcha = ref<LoginCaptchaData | null>(null)
 const helpers = {
   setTwoFactorRequired: (c: TwoFactorChallenge) => {
     pendingTwoFactor.value = c
@@ -239,19 +244,25 @@ const helpers = {
   clearTwoFactor: () => {
     pendingTwoFactor.value = null
   },
+  setCaptchaRequired: (c: LoginCaptchaData) => {
+    pendingCaptcha.value = c
+  },
+  clearCaptcha: () => {
+    pendingCaptcha.value = null
+  },
 }
 watch(pendingTwoFactor, (challenge) => {
   if (challenge) props.onToggleModule?.('two-factor')
 })
 
-// Layout-derived form chrome hints — `reactive` unwraps the computeds so
+// Layout-derived form chrome hints - `reactive` unwraps the computeds so
 // modules can read `ui.labeled` / `ui.pill` as plain reactive booleans.
 const ui = reactive({
   labeled: computed(() => props.layout === 'split'),
   pill: computed(() => props.layout !== 'split'),
 }) as LoginUiStyle
 
-// Live form-interaction signals — PwdLogin writes, the split layout's
+// Live form-interaction signals - PwdLogin writes, the split layout's
 // animated characters react (lean in while typing, look away from a
 // visible password, sneak the occasional peek).
 const scene: LoginSceneState = reactive({
@@ -279,6 +290,9 @@ const loginContext: LoginContext = {
     // Clearing the 2FA flag when the user navigates away from the
     // two-factor module mid-flow keeps the next attempt clean.
     if (name !== 'two-factor') pendingTwoFactor.value = null
+    // The adaptive login captcha only lives on pwd-login; a module switch
+    // starts fresh (a stale captchaId would be rejected on return anyway).
+    pendingCaptcha.value = null
     props.onToggleModule?.(name)
   },
   callbacks: props.callbacks,
@@ -288,6 +302,7 @@ const loginContext: LoginContext = {
   features: props.features,
   scene,
   pendingTwoFactor,
+  pendingCaptcha,
   helpers,
 }
 provideLoginContext(loginContext)
@@ -481,7 +496,7 @@ provideLoginContext(loginContext)
   background: var(--tnzi-container-bg, #fff);
 }
 .t-login__panel {
-  /* Equal split — the brand panel and the form pane each take half. */
+  /* Equal split - the brand panel and the form pane each take half. */
   width: 50%;
   min-width: 360px;
   flex: none;
@@ -548,7 +563,7 @@ provideLoginContext(loginContext)
     align-items: flex-start;
     padding: 28px 20px 24px;
   }
-  /* The toolbar sits on the brand strip's gradient — flip icons to white. */
+  /* The toolbar sits on the brand strip's gradient - flip icons to white. */
   .t-login__pane-toolbar {
     top: 14px;
     right: 14px;
@@ -637,7 +652,7 @@ provideLoginContext(loginContext)
 }
 </style>
 
-<!-- Shared entrance stagger — unscoped so LoginBrandPanel can reuse it. -->
+<!-- Shared entrance stagger - unscoped so LoginBrandPanel can reuse it. -->
 <style>
 .t-login-stagger > * {
   animation: t-login-enter 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;

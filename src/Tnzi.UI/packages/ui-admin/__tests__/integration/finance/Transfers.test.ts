@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Transfers page — TCrudPage over the funds-transfer document workflow
+ * Transfers page - TCrudPage over the funds-transfer document workflow
  * (draft create/edit + conditional post/void/delete row actions).
  */
 vi.mock('../../../src/plugin/client', () => ({

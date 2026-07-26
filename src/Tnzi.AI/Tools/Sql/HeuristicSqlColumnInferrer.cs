@@ -36,7 +36,7 @@ public sealed partial class HeuristicSqlColumnInferrer : ISqlColumnInferrer
 
     private string InferType(string columnName)
     {
-        // Application-supplied rules win — they encode domain knowledge the framework cannot.
+        // Application-supplied rules win - they encode domain knowledge the framework cannot.
         foreach (var rule in _customRules)
         {
             var custom = rule.TryInferType(columnName);
@@ -74,7 +74,7 @@ public sealed partial class HeuristicSqlColumnInferrer : ISqlColumnInferrer
     private static partial Regex BooleanPattern();
 
     /// <summary>
-    /// Currency/financial columns by suffix. Generic English terms only — domain abbreviations
+    /// Currency/financial columns by suffix. Generic English terms only - domain abbreviations
     /// (CPP/EI/WSIB/HST/GST etc.) belong in an application-supplied <see cref="ISqlColumnInferenceRule"/>.
     /// </summary>
     [GeneratedRegex(

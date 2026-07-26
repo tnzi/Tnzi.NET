@@ -132,7 +132,7 @@ public class WorkflowDelegatorTests
         }
     }
 
-    // ============== ResumeWorkflowRunAsync — reject path ==============
+    // ============== ResumeWorkflowRunAsync - reject path ==============
 
     [Fact]
     public async Task ResumeWorkflowRunAsync_Reject_MarksAwaitingNodesAndRunFailed()
@@ -171,7 +171,7 @@ public class WorkflowDelegatorTests
         updated.Last().Status.ShouldBe(AgentRunStatus.Failed);
     }
 
-    // ============== ResumeWorkflowRunAsync — approve path ==============
+    // ============== ResumeWorkflowRunAsync - approve path ==============
 
     [Fact]
     public async Task ResumeWorkflowRunAsync_Approve_ApprovesNodesAndResumesWorkflow()
@@ -215,7 +215,7 @@ public class WorkflowDelegatorTests
         workflowService.Verify(x => x.ResumeAsync("exec-2", It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // ============== ResumeWorkflowRunAsync — RequiresClarification path ==============
+    // ============== ResumeWorkflowRunAsync - RequiresClarification path ==============
 
     [Fact]
     public async Task ResumeWorkflowRunAsync_RequiresClarification_WithoutInput_ThrowsBusinessException()

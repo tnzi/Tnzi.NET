@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流图 — 纯数据结构，表示节点和边的有向图（含条件边和循环支持）
+/// 工作流图 - 纯数据结构，表示节点和边的有向图（含条件边和循环支持）
 /// </summary>
 public class WorkflowGraph
 {
@@ -142,7 +142,9 @@ public class WorkflowGraph
     {
         foreach (var (loopId, loopDef) in Loops)
         {
-            if (loopDef.NodeIds.Contains(nodeId))
+            // 节点 ID 在图内一律大小写不敏感（_nodeMap / CollectActiveLoopNodeIds / HandleLoop 同此），
+            // 这里若用默认的序数比较，循环定义与步骤 ID 大小写不一致时循环会被当成不存在。
+            if (loopDef.NodeIds.Contains(nodeId, StringComparer.OrdinalIgnoreCase))
             {
                 return (true, loopId);
             }
@@ -200,7 +202,7 @@ public class WorkflowGraph
 }
 
 /// <summary>
-/// 循环定义 — 工作流中的循环结构
+/// 循环定义 - 工作流中的循环结构
 /// </summary>
 public class LoopDefinition
 {

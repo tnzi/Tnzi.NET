@@ -123,7 +123,7 @@ public class NotificationDeepIterationTests
         // Act
         var result = await _notificationService.BatchCancelAsync(ids);
 
-        // Assert — 只有 Pending 和 Scheduled 应该被取消
+        // Assert - 只有 Pending 和 Scheduled 应该被取消
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe(2);
         _repositoryMock.Verify(r => r.UpdateManyAsync(
@@ -136,7 +136,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task BatchCancelAsync_Should_Return_Zero_When_No_Cancellable_Found()
     {
-        // Arrange — 全部是已发送/已失败状态
+        // Arrange - 全部是已发送/已失败状态
         var sentMsg = CreateMessage(NotificationStatus.Sent);
         var failedMsg = CreateMessage(NotificationStatus.Failed);
         var allMessages = new List<Message> { sentMsg, failedMsg };
@@ -158,7 +158,7 @@ public class NotificationDeepIterationTests
         // Arrange
         var emptyIds = new List<Guid>();
 
-        // Act & Assert — Check.NotNullOrEmpty 抛 ArgumentException
+        // Act & Assert - Check.NotNullOrEmpty 抛 ArgumentException
         await Should.ThrowAsync<ArgumentException>(async () =>
             await _notificationService.BatchCancelAsync(emptyIds));
     }
@@ -166,7 +166,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task BatchCancelAsync_Should_Throw_When_Ids_Null()
     {
-        // Act & Assert — Check.NotNullOrEmpty 抛 ArgumentNullException
+        // Act & Assert - Check.NotNullOrEmpty 抛 ArgumentNullException
         await Should.ThrowAsync<ArgumentNullException>(async () =>
             await _notificationService.BatchCancelAsync(null!));
     }
@@ -188,7 +188,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task BatchCancelAsync_Should_Only_Cancel_Matching_Ids()
     {
-        // Arrange — 只请求部分 ID
+        // Arrange - 只请求部分 ID
         var pending1 = CreateMessage(NotificationStatus.Pending);
         var pending2 = CreateMessage(NotificationStatus.Pending);
         var pending3 = CreateMessage(NotificationStatus.Pending);
@@ -200,7 +200,7 @@ public class NotificationDeepIterationTests
         // Act
         var result = await _notificationService.BatchCancelAsync(ids);
 
-        // Assert — 只取消请求的 2 个
+        // Assert - 只取消请求的 2 个
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe(2);
     }
@@ -233,7 +233,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task BatchDeleteAsync_Should_Return_Zero_When_No_Notifications_Found()
     {
-        // Arrange — 没有匹配的 ID
+        // Arrange - 没有匹配的 ID
         SetupQueryable(new List<Message>());
         var ids = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() };
 
@@ -265,7 +265,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task BatchDeleteAsync_Should_Only_Delete_Matching_Ids()
     {
-        // Arrange — msg3 的 ID 不在请求中
+        // Arrange - msg3 的 ID 不在请求中
         var msg1 = CreateMessage(NotificationStatus.Sent);
         var msg2 = CreateMessage(NotificationStatus.Pending);
         var msg3 = CreateMessage(NotificationStatus.Failed);
@@ -438,7 +438,7 @@ public class NotificationDeepIterationTests
         // Act
         var result = await _queryService.GetScheduledAsync(request);
 
-        // Assert — 检查按 ScheduledTime 升序
+        // Assert - 检查按 ScheduledTime 升序
         result.Succeeded.ShouldBeTrue();
         var items = result.Data!.Items.ToList();
         items.Count.ShouldBe(3);
@@ -509,7 +509,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetScheduledAsync_Should_Filter_By_ScheduledTime_Range()
     {
-        // Arrange — StartTime/EndTime 过滤 ScheduledTime 而不是 CreationTime
+        // Arrange - StartTime/EndTime 过滤 ScheduledTime 而不是 CreationTime
         var baseTime = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
         var inRange = CreateMessage(NotificationStatus.Scheduled,
             scheduledTime: baseTime.AddHours(12),
@@ -533,7 +533,7 @@ public class NotificationDeepIterationTests
         // Act
         var result = await _queryService.GetScheduledAsync(request);
 
-        // Assert — 只返回 scheduledTime 在范围内的
+        // Assert - 只返回 scheduledTime 在范围内的
         result.Succeeded.ShouldBeTrue();
         result.Data!.TotalCount.ShouldBe(1);
     }
@@ -588,7 +588,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetStatisticsTrendAsync_Weekly_Should_Generate_Correct_Labels()
     {
-        // Arrange — 跨 2 周
+        // Arrange - 跨 2 周
         var startDate = new DateTime(2026, 2, 16, 0, 0, 0, DateTimeKind.Utc); // 周一
         var endDate = new DateTime(2026, 3, 2, 0, 0, 0, DateTimeKind.Utc);    // 2周后
 
@@ -610,7 +610,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetStatisticsTrendAsync_Monthly_Should_Generate_Correct_Labels()
     {
-        // Arrange — 跨 3 个月
+        // Arrange - 跨 3 个月
         var startDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var endDate = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
 
@@ -707,7 +707,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetStatisticsTrendAsync_Empty_Periods_Should_Have_Zero_Counts()
     {
-        // Arrange — 数据只在第 2 天，第 1 天和第 3 天为空
+        // Arrange - 数据只在第 2 天，第 1 天和第 3 天为空
         var startDate = new DateTime(2026, 2, 25, 0, 0, 0, DateTimeKind.Utc);
         var endDate = new DateTime(2026, 2, 28, 0, 0, 0, DateTimeKind.Utc);
 
@@ -760,7 +760,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetStatisticsTrendAsync_Should_Only_Include_Notifications_In_Date_Range()
     {
-        // Arrange — 有数据在范围外
+        // Arrange - 有数据在范围外
         var startDate = new DateTime(2026, 2, 25, 0, 0, 0, DateTimeKind.Utc);
         var endDate = new DateTime(2026, 2, 26, 0, 0, 0, DateTimeKind.Utc);
 
@@ -782,7 +782,7 @@ public class NotificationDeepIterationTests
     [Fact]
     public async Task GetStatisticsTrendAsync_PartiallySent_Should_Count_As_Sent()
     {
-        // Arrange — PartiallySent 应计入 SentCount
+        // Arrange - PartiallySent 应计入 SentCount
         var startDate = new DateTime(2026, 2, 25, 0, 0, 0, DateTimeKind.Utc);
         var endDate = new DateTime(2026, 2, 26, 0, 0, 0, DateTimeKind.Utc);
 

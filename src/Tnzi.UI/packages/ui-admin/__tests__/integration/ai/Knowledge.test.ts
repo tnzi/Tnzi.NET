@@ -3,12 +3,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Knowledge integration test — production-grade card grid (TCardPage) with a
+ * Knowledge integration test - production-grade card grid (TCardPage) with a
  * create/edit modal, a per-card Reindex action, and a document-management
  * drawer (Documents + Search test tabs).
  *
  * The drawer's "open manage" flow calls bridge.knowledge.getDocuments, and the
- * card Reindex action calls bridge.knowledge.reindex — both sub-contracts are
+ * card Reindex action calls bridge.knowledge.reindex - both sub-contracts are
  * mocked. KB rows mirror @tnzi/core KnowledgeBaseDto.
  */
 vi.mock('../../../src/plugin/client', () => ({

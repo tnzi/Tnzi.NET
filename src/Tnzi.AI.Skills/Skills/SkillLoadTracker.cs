@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills;
 
 /// <summary>
-/// Scoped implementation — one instance per HTTP request, persists across tool calls.
+/// Scoped implementation - one instance per HTTP request, persists across tool calls.
 /// Uses ConcurrentDictionary for thread safety during parallel tool execution.
 /// </summary>
 public class SkillLoadTracker : ISkillLoadTracker

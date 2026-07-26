@@ -14,7 +14,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Channels;
 
 /// <summary>
-/// D2 — signature-gated webhook inbound. Per platform: valid signature accepted + dispatched,
+/// D2 - signature-gated webhook inbound. Per platform: valid signature accepted + dispatched,
 /// invalid/missing signature rejected (NOT dispatched), challenge/handshake handled.
 /// </summary>
 public class WebhookSignatureTests

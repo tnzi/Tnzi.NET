@@ -86,7 +86,7 @@ public class GuardrailsOptions
     public int StreamingOverlapSize { get; set; } = 50;
 
     /// <summary>
-    /// Fail-closed 模式 — 当 IGuardrailProvider 抛出异常时视为拒绝（默认 true）。
+    /// Fail-closed 模式 - 当 IGuardrailProvider 抛出异常时视为拒绝（默认 true）。
     /// 设为 false 时异常将被忽略（fail-open）。
     /// </summary>
     [RuntimeSetting(Label = "Fail Closed", I18n = "admin.modules.system.settings.fields.guardrailsFailClosed",

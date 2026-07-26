@@ -1,5 +1,5 @@
 /**
- * Chat sound library — WebAudio-synthesised message tones.
+ * Chat sound library - WebAudio-synthesised message tones.
  *
  * All effects are generated at runtime from oscillators, so there are NO binary
  * assets to bundle, NO network requests (CSP-safe), and every deployment gets
@@ -49,7 +49,7 @@ function tone(ctx: AudioContext, now: number, s: ToneSpec): void {
   } else {
     osc.frequency.setValueAtTime(s.freq, t0)
   }
-  // Exponential envelope (can't ramp to exactly 0 — use a tiny floor).
+  // Exponential envelope (can't ramp to exactly 0 - use a tiny floor).
   g.gain.setValueAtTime(0.0001, t0)
   g.gain.exponentialRampToValueAtTime(peak, t0 + attack)
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + s.dur)
@@ -106,7 +106,7 @@ const RECIPES: Partial<Record<ChatSoundEffect, SoundRecipe>> = {
   },
 }
 
-/** Ordered presets for the notification (attention) category — for UI/docs. */
+/** Ordered presets for the notification (attention) category - for UI/docs. */
 export const NOTIFICATION_SOUND_EFFECTS: ChatSoundEffect[] = [
   ChatSoundEffect.None,
   ChatSoundEffect.Chime,
@@ -117,7 +117,7 @@ export const NOTIFICATION_SOUND_EFFECTS: ChatSoundEffect[] = [
   ChatSoundEffect.Bell,
 ]
 
-/** Ordered presets for the in-conversation (subtle) category — for UI/docs. */
+/** Ordered presets for the in-conversation (subtle) category - for UI/docs. */
 export const MESSAGE_SOUND_EFFECTS: ChatSoundEffect[] = [
   ChatSoundEffect.None,
   ChatSoundEffect.Pop,
@@ -170,7 +170,7 @@ export function playSoundEffect(effect: ChatSoundEffect | string | null | undefi
     if (!c) return
     recipe(c, c.currentTime)
   } catch {
-    /* autoplay blocked / no audio device — silent */
+    /* autoplay blocked / no audio device - silent */
   }
 }
 

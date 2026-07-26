@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Adapters;
 
 /// <summary>
-/// Channel adapter 共享发送逻辑 — 分块 + 指数退避重试。
+/// Channel adapter 共享发送逻辑 - 分块 + 指数退避重试。
 /// 避免各 adapter 重复实现相同的 chunking + retry 模式。
 /// </summary>
 internal static class ChannelSendHelper

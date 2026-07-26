@@ -5,7 +5,7 @@ using Tnzi.AspNetCore.Mvc;
 namespace Tnzi.AI.Channels.Controllers.Admin;
 
 /// <summary>
-/// Channel 适配器管理控制器 — 查询适配器状态和频道配置
+/// Channel 适配器管理控制器 - 查询适配器状态和频道配置
 /// </summary>
 [DefaultController]
 [Route("admin/channels")]

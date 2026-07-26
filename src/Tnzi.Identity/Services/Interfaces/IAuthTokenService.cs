@@ -8,15 +8,16 @@ namespace Tnzi.Identity.Services;
 public interface IAuthTokenService
 {
     /// <summary>
-    /// 保存令牌
+    /// 保存令牌（按 用户+Provider+Name+会话 upsert）
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="loginProvider">登录提供者</param>
     /// <param name="name">令牌名称</param>
     /// <param name="value">令牌值</param>
     /// <param name="expiresAt">过期时间</param>
+    /// <param name="sessionId">所属登录会话ID；<see cref="Guid.Empty"/>（默认）表示不绑定会话（每用户一行，如 2FA 临时令牌）。传入具体会话ID时按会话各存一条（多设备各自独立刷新令牌）</param>
     /// <returns>令牌ID</returns>
-    Task<Guid> SaveTokenAsync(Guid userId, string loginProvider, string name, string value, DateTime? expiresAt = null);
+    Task<Guid> SaveTokenAsync(Guid userId, string loginProvider, string name, string value, DateTime? expiresAt = null, Guid sessionId = default);
 
     /// <summary>
     /// 获取令牌

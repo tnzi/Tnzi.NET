@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 成本计算服务实现 — 基于配置的模型成本率计算 Token 使用的美元成本
+/// 成本计算服务实现 - 基于配置的模型成本率计算 Token 使用的美元成本
 /// </summary>
 public class CostCalculator : ICostCalculator
 {

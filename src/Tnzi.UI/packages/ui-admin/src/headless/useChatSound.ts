@@ -9,9 +9,9 @@ import { playSoundEffect, unlockChatAudio } from './chatSounds'
  * configures it once from the deployment config, and any component (e.g. the
  * composer in `TChatWindow`) can play the same tones.
  *
- *  - `playNotification()` — attention tone for a message while the window is
+ *  - `playNotification()` - attention tone for a message while the window is
  *    closed or in a non-active conversation.
- *  - `playMessage()` — subtle tone for send/receive within the active thread.
+ *  - `playMessage()` - subtle tone for send/receive within the active thread.
  *
  * Both respect the master `enabled` flag and the per-category effect (`None` =
  * silent). `preview()` always plays (an explicit user action, e.g. in Settings).
@@ -37,7 +37,7 @@ export function useChatSound() {
     if (enabled.value) playSoundEffect(messageEffect.value)
   }
 
-  /** Play a specific effect regardless of `enabled` — for previews. */
+  /** Play a specific effect regardless of `enabled` - for previews. */
   function preview(effect: ChatSoundEffect): void {
     playSoundEffect(effect)
   }

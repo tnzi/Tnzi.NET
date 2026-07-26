@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// 基于向量的文本搜索服务 — 替换 NoOpTextSearchService，
+/// 基于向量的文本搜索服务 - 替换 NoOpTextSearchService，
 /// 为 Agent 的 TextSearchProvider 提供 RAG 检索能力
 /// </summary>
 /// <remarks>
@@ -88,7 +88,7 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
                 }
             }
 
-            // 2+3. 生成查询向量并执行向量搜索 — 有知识库范围时按 per-KB 嵌入配置分组逐库检索后合并；
+            // 2+3. 生成查询向量并执行向量搜索 - 有知识库范围时按 per-KB 嵌入配置分组逐库检索后合并；
             // 否则使用全局默认嵌入配置跨所有启用知识库（query 向量须与摄取 provider/model 对齐，
             // 与 KnowledgeBaseService.SearchAsync 同范式）。
             List<VectorSearchResult> rawResults;
@@ -175,7 +175,7 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
                 }
             }).ToList();
 
-            // 6. 相关性评分（可选）— 过滤不相关的结果
+            // 6. 相关性评分（可选）- 过滤不相关的结果
             if (_relevanceGrader != null)
             {
                 var graded = await _relevanceGrader.GradeAsync(query, searchResults, ct);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetStorageUsage` — total file count + aggregate size.
+ * `TWidgetStorageUsage` - total file count + aggregate size.
  *
  * Wired to `storage-bridge.statistics.get()` (GET /admin/files/statistics →
  * FileStorageStatistics) which returns the exact `totalFiles` / `totalSize`
@@ -8,6 +8,7 @@
  * (`files.fetch({ pageSize: 50 })` → average × count), so the size is no
  * longer approximate and the "≈" hint is gone.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
@@ -52,7 +53,7 @@ function fmtBytes(bytes: number): string {
       <div class="t-widget-storage__text">
         <span class="t-widget-storage__label">{{ t('admin.widgets.storage.totalFiles', 'Total files') }}</span>
         <span class="t-widget-storage__value">
-          {{ loaded ? totalFiles.toLocaleString() : '—' }}
+          {{ loaded ? totalFiles.toLocaleString() : EMPTY_DASH }}
         </span>
       </div>
     </div>
@@ -65,7 +66,7 @@ function fmtBytes(bytes: number): string {
           {{ t('admin.widgets.storage.totalSize', 'Total size') }}
         </span>
         <span class="t-widget-storage__value">
-          {{ loaded ? fmtBytes(totalSizeBytes) : '—' }}
+          {{ loaded ? fmtBytes(totalSizeBytes) : EMPTY_DASH }}
         </span>
       </div>
     </div>

@@ -1,6 +1,6 @@
 <template>
   <!--
-    Quotas — budget cost dashboard + per-user AI token quota CRUD.
+    Quotas - budget cost dashboard + per-user AI token quota CRUD.
 
     Top:  a budget dashboard strip fed by `quota.getBudgetSummary()`
           (GET /admin/quotas/budget/summary - defaults to the current month
@@ -167,6 +167,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import { NButton, NCard, NInput, NProgress, NTag, type DataTableColumns } from 'naive-ui'
 import { formatDateTime } from '@tnzi/core'
@@ -238,7 +239,7 @@ function openEditIfAllowed(item: UserQuotaDto): void {
 /** GUID truncated to its first 8 chars for the card header (full in `title`). */
 function shortId(value: string | null | undefined): string {
   const full = value ?? ''
-  if (!full) return '—'
+  if (!full) return EMPTY_DASH
   return full.length > 8 ? `${full.slice(0, 8)}…` : full
 }
 
@@ -254,7 +255,7 @@ function usageStatus(ratio: number | null | undefined): 'default' | 'warning' | 
 function formatModified(row: UserQuotaDto): string {
   return formatDateTime(
     (row as { lastModificationTime?: string | null }).lastModificationTime,
-    { fallback: '—' },
+    { fallback: EMPTY_DASH },
   )
 }
 
@@ -315,7 +316,7 @@ function formatUsd(value: number | null | undefined): string {
 
 function formatPercent(ratio: number | null | undefined): string {
   const n = typeof ratio === 'number' ? ratio : Number(ratio)
-  if (!Number.isFinite(n)) return '—'
+  if (!Number.isFinite(n)) return EMPTY_DASH
   return `${Math.round(n * 1000) / 10}%`
 }
 
@@ -326,7 +327,7 @@ const agentSpendColumns = computed<DataTableColumns<AgentSpendDto>>(() => {
     {
       key: 'agentName',
       title: t('budget.agentName'),
-      render: (row) => row.agentName || row.agentId || '—',
+      render: (row) => row.agentName || row.agentId || EMPTY_DASH,
     },
     {
       key: 'spendUsd',
@@ -351,7 +352,7 @@ const agentSpendColumns = computed<DataTableColumns<AgentSpendDto>>(() => {
               { size: 'small', bordered: false },
               { default: () => `${Math.round(((row.spendUsd ?? 0) / total) * 1000) / 10}%` },
             )
-          : '—',
+          : EMPTY_DASH,
     },
   ]
 })

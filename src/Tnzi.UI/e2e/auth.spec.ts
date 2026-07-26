@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 /**
- * Phase 6.3 — Auth E2E
+ * Phase 6.3 - Auth E2E
  *
  * Exercises the @tnzi/ui TLoginForm / TRegisterForm / TPasswordReset
  * components rendered in the playground's AuthSection. Confirms:
@@ -16,7 +16,7 @@ test.describe('Auth forms (playground)', () => {
     await page.goto('/')
     // Playground boots into the Theme section. Menu entry label is "Auth"
     // (demo-menu.ts) but the section heading is "Authentication".
-    // Click via naive-ui menu item text — role is tree/menuitem depending on
+    // Click via naive-ui menu item text - role is tree/menuitem depending on
     // NMenu rendering, so fall back to text locator within the sidebar.
     await page.locator('.n-menu-item-content').filter({ hasText: /^Auth$/ }).first().click()
     await expect(page.getByRole('heading', { name: 'Authentication', level: 1 })).toBeVisible()
@@ -40,7 +40,7 @@ test.describe('Auth forms (playground)', () => {
     // TLoginForm's submit button is a naive-ui primary button inside the card
     const primaryButtons = loginFormCard.locator('button.n-button--primary-type')
     await expect(primaryButtons.first()).toBeVisible()
-    // Click the primary button — the exact downstream effect depends on form
+    // Click the primary button - the exact downstream effect depends on form
     // internals (form emits 'submit', AuthSection shows a message). We don't
     // assert the toast since TLoginForm's form-name/emit coupling varies by
     // locale and component version. Instead we verify the button is clickable

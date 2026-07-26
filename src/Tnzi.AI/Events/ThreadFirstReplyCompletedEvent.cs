@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Events;
 
 /// <summary>
-/// 线程首轮对话完成事件 — 用于触发标题生成等后续操作
+/// 线程首轮对话完成事件 - 用于触发标题生成等后续操作
 /// </summary>
 public class ThreadFirstReplyCompletedEvent : EventBase
 {

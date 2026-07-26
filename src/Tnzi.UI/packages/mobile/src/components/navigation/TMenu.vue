@@ -8,8 +8,6 @@ interface IMenuProps {
   openedKeys?: string[];
   horizontal?: boolean;
   mode?: 'light' | 'dark';
-  class?: string | string[];
-  style?: string | Record<string, string | number>;
 }
 
 interface IMenuEmits {
@@ -62,7 +60,7 @@ const onSelectChild = (item: IMenuItem) => {
 </script>
 
 <template>
-  <section class="t-menu" :class="props.class" :style="props.style">
+  <section class="t-menu">
     <van-cell-group inset>
       <template v-for="item in visibleItems" :key="item.key">
         <van-cell

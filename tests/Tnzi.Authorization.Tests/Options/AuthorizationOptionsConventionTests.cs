@@ -53,7 +53,7 @@ public class AuthorizationOptionsConventionTests
     /// <summary>
     /// Regression lock for the binder append trap: the configuration binder
     /// ADDS items to a pre-populated List instead of replacing it. The
-    /// convention default therefore must NOT be a property initializer —
+    /// convention default therefore must NOT be a property initializer -
     /// a deployment configuring ["SuperAdmin"] must end up with exactly one
     /// entry through the module's real registration path (Bind +
     /// PostConfigure), or the validator's duplicate check kills startup.

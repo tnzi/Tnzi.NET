@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// HistoryMiddleware 单元测试 — 验证 limit 参数正确传递
+/// HistoryMiddleware 单元测试 - 验证 limit 参数正确传递
 /// </summary>
 public class HistoryMiddlewareTests
 {
@@ -59,7 +59,7 @@ public class HistoryMiddlewareTests
         // Act
         await middleware.InvokeAsync(context, next);
 
-        // Assert — 默认值应为 100
+        // Assert - 默认值应为 100
         capturedLimit.ShouldBe(100);
     }
 

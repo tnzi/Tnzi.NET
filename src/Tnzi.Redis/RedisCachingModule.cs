@@ -19,7 +19,7 @@ public class RedisCachingModule : TnziInfrastructureModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册 Redis 配置选项并启用启动时验证
-        context.Services.AddTnziOptions<Options.RedisOptions, Options.RedisOptionsValidator>(context.Configuration);
+        context.Services.AddTnziOptions<RedisOptions, RedisOptionsValidator>(context.Configuration);
 
         return Task.CompletedTask;
     }

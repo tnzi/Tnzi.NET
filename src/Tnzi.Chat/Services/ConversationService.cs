@@ -124,12 +124,12 @@ public class ConversationService : ApplicationService, IConversationService
             .ToListAsync();
         var otherIds = others.Select(o => o.UserId).ToList();
 
-        // Recipients who currently can't use chat (no chat.use) — isolated from this message.
+        // Recipients who currently can't use chat (no chat.use) - isolated from this message.
         var disabled = await _access.FilterDisabledAsync(otherIds);
 
         // Direct chat whose sole recipient is disabled: intercept. Persist nothing and
         // surface a message so the sender's UI can explain the delivery failure. Because
-        // the message never lands, the recipient can never see it — even after re-enable.
+        // the message never lands, the recipient can never see it - even after re-enable.
         if (conv.Type == ConversationType.Direct && otherIds.Count > 0 && otherIds.All(disabled.Contains))
             return Fail<ChatMessageDto>("This user is currently unavailable and can't receive messages.", 403);
 
@@ -231,7 +231,7 @@ public class ConversationService : ApplicationService, IConversationService
         var limit = query.Limit <= 0 || query.Limit > 100 ? 30 : query.Limit;
 
         // NOTE: cursor filters strictly on SentAt. Messages sharing the EXACT same SentAt millisecond
-        // as the cursor may be skipped across a page boundary — rare at human message rates.
+        // as the cursor may be skipped across a page boundary - rare at human message rates.
         // A monotonic sequence column would fix this fully; deferred to a later iteration.
         DateTime? beforeAt = null;
         if (query.Before.HasValue)
@@ -342,7 +342,7 @@ public class ConversationService : ApplicationService, IConversationService
 
         // Batch-load every active member of these conversations once, then resolve the
         // Direct other-party in memory. This avoids N+1 member queries on the conversation
-        // list — a hot path called whenever a user opens the chat window.
+        // list - a hot path called whenever a user opens the chat window.
         var allMembers = await _memberRepository.ToListAsync(m => convIds.Contains(m.ConversationId) && m.RemovedAt == null);
         var otherIdsByConv = allMembers
             .Where(m => m.UserId != me)
@@ -357,7 +357,7 @@ public class ConversationService : ApplicationService, IConversationService
         }
 
         // Group composite avatars: owner always first, then the earliest joined members
-        // (join order). Computed from the already-loaded member batch — no extra query.
+        // (join order). Computed from the already-loaded member batch - no extra query.
         var avatarTake = Math.Clamp(_options.Value.GroupAvatarMemberCount, 1, 9);
         var ownerByConv = conversations
             .Where(c => c.Type == ConversationType.Group)

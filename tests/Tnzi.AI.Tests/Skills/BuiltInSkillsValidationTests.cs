@@ -38,7 +38,7 @@ public class BuiltInSkillsValidationTests
     [Fact]
     public void AllBuiltInSkills_LoadAtLeastOne()
     {
-        AllSkills.Value.ShouldNotBeEmpty("No built-in skills loaded — check BuiltIn directory path");
+        AllSkills.Value.ShouldNotBeEmpty("No built-in skills loaded - check BuiltIn directory path");
     }
 
     [Theory]

@@ -1,5 +1,5 @@
 /**
- * `useWidgetData()` — one-liner data hook for business widgets.
+ * `useWidgetData()` - one-liner data hook for business widgets.
  *
  * Wraps the boilerplate every Workbench widget needs:
  *   - Fire `loader()` on mount.

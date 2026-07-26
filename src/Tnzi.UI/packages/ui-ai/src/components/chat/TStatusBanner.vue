@@ -1,18 +1,18 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TStatusBanner — Inline status pill for conversation-level events.
+ * TStatusBanner - Inline status pill for conversation-level events.
  *
- * Use to surface transient or terminal conversation state — the agent
+ * Use to surface transient or terminal conversation state - the agent
  * has stopped, the session is rate-limited, a task hit a tool-call budget,
  * etc. Purely visual; consumers wire in the actual state via props.
  *
  * Variants:
- *   - `stopped`  — amber (Manus "agent has stopped")
- *   - `warning`  — amber (generic)
- *   - `info`     — blue
- *   - `success`  — green
- *   - `error`    — red
+ *   - `stopped` - amber (Manus "agent has stopped")
+ *   - `warning` - amber (generic)
+ *   - `info` - blue
+ *   - `success` - green
+ *   - `error` - red
  */
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
@@ -82,25 +82,28 @@ const resolvedIcon = computed((): string => {
   font-size: 15px;
   flex-shrink: 0;
 }
+/* Each variant is derived from one status token, so the banner follows the
+   palette into dark mode instead of staying a glaring pale block on a dark
+   canvas (the previous hardcoded pastels had no .dark counterpart at all). */
 .t-status-banner--stopped,
 .t-status-banner--warning {
-  background: #fff3e0;
-  border-color: #f8d9a6;
-  color: #8a5a1a;
+  background: color-mix(in srgb, var(--tnzi-ai-warning) 12%, var(--tnzi-ai-surface));
+  border-color: color-mix(in srgb, var(--tnzi-ai-warning) 34%, transparent);
+  color: color-mix(in srgb, var(--tnzi-ai-warning) 78%, var(--tnzi-ai-text));
 }
 .t-status-banner--info {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: color-mix(in srgb, var(--tnzi-ai-info) 12%, var(--tnzi-ai-surface));
+  border-color: color-mix(in srgb, var(--tnzi-ai-info) 34%, transparent);
+  color: color-mix(in srgb, var(--tnzi-ai-info) 78%, var(--tnzi-ai-text));
 }
 .t-status-banner--success {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-  color: #047857;
+  background: color-mix(in srgb, var(--tnzi-ai-success) 12%, var(--tnzi-ai-surface));
+  border-color: color-mix(in srgb, var(--tnzi-ai-success) 34%, transparent);
+  color: color-mix(in srgb, var(--tnzi-ai-success) 78%, var(--tnzi-ai-text));
 }
 .t-status-banner--error {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  background: color-mix(in srgb, var(--tnzi-ai-danger) 12%, var(--tnzi-ai-surface));
+  border-color: color-mix(in srgb, var(--tnzi-ai-danger) 34%, transparent);
+  color: color-mix(in srgb, var(--tnzi-ai-danger) 78%, var(--tnzi-ai-text));
 }
 </style>

@@ -1,19 +1,19 @@
 <template>
   <!--
-    TTabsPage — the batteries-included container for a tabbed content page.
+    TTabsPage - the batteries-included container for a tabbed content page.
 
     A page with primary tabs (each tab = a table list, a card grid, a status
     board, a report…) declares its tabs once via `:sections` and drops each
     tab's content into a same-named slot. Everything that used to be hand-written
     boilerplate is owned here:
-      • the white page-header chrome (title / icon / help / #actions) — via TContentPage
+      • the white page-header chrome (title / icon / help / #actions) - via TContentPage
       • the standard NTabs (line, medium, animated) + the `t-table-tabs` surface
         (white fill, border, radius, residual-height fill, pinned nav)
       • the required per-pane `t-table-tabs__pane` wrapper (flex-column fill)
       • `?section=` deep-linking + Back/Forward + the app-level kill switch
-        (via useSectionRoute — the consumer does not wire this)
+        (via useSectionRoute - the consumer does not wire this)
       • card-in-a-card flattening when a tab embeds a TCrudPage / TCardPage
-        (the list-card's doubled surface/inset is dropped — see polish.css)
+        (the list-card's doubled surface/inset is dropped - see polish.css)
 
     Consumer shape:
       <TTabsPage :title icon :help :translate :sections="[
@@ -44,7 +44,7 @@
     <template v-if="$slots.extra" #extra><slot name="extra" /></template>
 
     <!-- Cross-tab band ABOVE the tab surface (e.g. a KPI strip that spans every
-         tab). Sits between the page header and the tabs, flush on the canvas —
+         tab). Sits between the page header and the tabs, flush on the canvas -
          mirrors TListShell's `#kpis`. Use this (not `#extra`) for content that
          belongs above the tabs rather than inside the header card. -->
     <div v-if="$slots.kpis" class="t-tabs-page__kpis"><slot name="kpis" /></div>
@@ -71,7 +71,7 @@
     </NTabs>
 
     <!-- Tab-independent overlays (drawers / dialogs). They teleport to <body>,
-         so their position in the tree is irrelevant — this slot just gives the
+         so their position in the tree is irrelevant - this slot just gives the
          page one tidy place to declare them. -->
     <slot name="overlays" />
   </TContentPage>
@@ -81,11 +81,12 @@
 import { watch } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import TContentPage from './TContentPage.vue'
+import type { BackTarget } from './backTarget'
 import { useSectionRoute } from '../../headless/useSectionRoute'
 
 /** One primary tab. `label` is the (already-translated) tab title; `scroll`
  *  makes the pane own its vertical scroll (mixed variable-height content like
- *  reports/status boards) — leave it off for a single flex-height table/cards. */
+ *  reports/status boards) - leave it off for a single flex-height table/cards. */
 export interface TabSection {
   name: string
   label?: string
@@ -101,7 +102,7 @@ const props = withDefaults(
     sections: TabSection[]
     /** Section to land on when the URL carries none. Defaults to the first. */
     defaultSection?: string
-    /** Optional `v-model:section` — lets the page read/programmatically drive
+    /** Optional `v-model:section` - lets the page read/programmatically drive
      *  the active tab. Deep-linking is owned internally regardless. */
     section?: string
     /** Enable `?section=` deep-linking. Default true. */
@@ -110,7 +111,8 @@ const props = withDefaults(
     icon?: string
     help?: string
     helpTitle?: string
-    back?: boolean | string
+    /** Back affordance; `{ fallback }` = smart back (preferred for a drilled-into page). */
+  back?: BackTarget
     translate?: (key: string) => string
   }>(),
   {
@@ -137,7 +139,12 @@ const active = useSectionRoute({
 })
 
 // Two-way `v-model:section`: mirror internal → out, and adopt external writes.
-watch(active, (v) => emit('update:section', v))
+// `immediate` matters: the initial value is resolved from `?section=` (or
+// `defaultSection`), and without emitting it the binding stays at whatever the
+// page initialised its own ref to. A page deep-linked straight into a non-first
+// tab would then render its cross-tab controls for the WRONG tab until the user
+// happened to click one.
+watch(active, (v) => emit('update:section', v), { immediate: true })
 watch(
   () => props.section,
   (v) => {

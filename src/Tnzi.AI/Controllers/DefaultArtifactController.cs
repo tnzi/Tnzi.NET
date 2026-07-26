@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers;
 
 /// <summary>
-/// Agent 产出物控制器 — 列表与查询（仅限当前用户自有产出物）
+/// Agent 产出物控制器 - 列表与查询（仅限当前用户自有产出物）
 /// </summary>
 [DefaultController]
 [ApiAuthorize]

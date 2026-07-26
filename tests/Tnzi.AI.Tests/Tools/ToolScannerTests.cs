@@ -5,7 +5,7 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Tools;
 
 /// <summary>
-/// ToolScanner 工具扫描测试 — 验证安全元数据提取
+/// ToolScanner 工具扫描测试 - 验证安全元数据提取
 /// </summary>
 public class ToolScannerTests
 {

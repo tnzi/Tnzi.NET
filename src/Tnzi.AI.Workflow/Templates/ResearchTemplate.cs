@@ -20,7 +20,7 @@ public static class ResearchTemplate
 
         var builder = WorkflowBuilder.Create();
 
-        // 1. Search 阶段 — 单个或多个 Search Agent 并行
+        // 1. Search 阶段 - 单个或多个 Search Agent 并行
         if (options.SearchAgentIds is { Count: > 1 })
         {
             // 多 Search Agent 并行
@@ -43,19 +43,19 @@ public static class ResearchTemplate
                 .WithInstructions(options.SearchInstructions ?? "Search and gather relevant information for: {{input}}");
         }
 
-        // 2. Analysis 节点 — 分析搜索结果
+        // 2. Analysis 节点 - 分析搜索结果
         builder.AddStep("analysis", agentId: options.AnalysisAgentId)
             .DependsOn("search")
             .WithInstructions(options.AnalysisInstructions
                 ?? "Analyze the following search results and extract key insights:\n\n{{search}}");
 
-        // 3. Review 节点（可选）— 审查分析质量
+        // 3. Review 节点（可选）- 审查分析质量
         if (options.ReviewerAgentId.HasValue)
         {
             builder.AddReviewStep("review", agentId: options.ReviewerAgentId.Value)
                 .DependsOn("analysis");
 
-            // 4. Synthesize 节点 — 汇总最终报告
+            // 4. Synthesize 节点 - 汇总最终报告
             builder.AddSynthesizeStep("synthesize", agentId: options.SynthesizerAgentId)
                 .DependsOn("review")
                 .WithInstructions(options.SynthesizeInstructions

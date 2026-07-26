@@ -5,7 +5,7 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *
  * Backed by entity-driven CRUD on the AI_Provider table. Types come from
  * @tnzi/core/services/ai (ProviderDto / CreateProviderDto / UpdateProviderDto /
- * ProviderTestResultDto). Providers render as a TCardPage grid — the card +
+ * ProviderTestResultDto). Providers render as a TCardPage grid - the card +
  * create/edit modal own presentation, so there are no table columns, only the
  * create/edit form schema + the keyword search field.
  *

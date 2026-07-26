@@ -1,5 +1,5 @@
 /**
- * Storage bridge — full implementation (Phase 3 Task 3.17).
+ * Storage bridge - full implementation (Phase 3 Task 3.17).
  *
  * Adapts the storage backend APIs to BridgeCrudContract + ChunkUploader shapes
  * used by TCrudPage-based storage management pages.
@@ -25,7 +25,6 @@ import {
   useStorageApi,
   useStoragePreviewApi,
   type FileRecordDto,
-  type FileUploadResultDto,
   type FileQueryDto,
   type FileFolderDto,
   type CreateFileFolderDto,
@@ -47,7 +46,16 @@ type HttpClient = Parameters<typeof useAdminFileApi>[0]
 export interface ChunkUploader {
   initUpload(fileMeta: { name: string; size: number; chunkCount: number }): Promise<{ uploadId: string }>
   uploadChunk(uploadId: string, chunkIndex: number, chunk: Blob): Promise<void>
-  completeUpload(uploadId: string): Promise<{ url: string }>
+  /**
+   * Finish a chunked upload and return the stored record.
+   *
+   * Returns the record rather than a `{ url }`: the backend's `FileRecordDto`
+   * has never carried a `url`, so the old shape resolved to `{ url: undefined }`
+   * on every successful upload. Callers build the URL they need from `id`
+   * (download / preview / presigned), which is also what every other file
+   * surface in the admin does.
+   */
+  completeUpload(uploadId: string): Promise<FileRecordDto>
 }
 
 export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> {
@@ -56,7 +64,7 @@ export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> 
   /** Synchronously build the inline (anonymous) preview URL for a stored file id. */
   previewUrl(id: string): string
   /** Single-shot upload for small files (e.g. avatars); pre-unwraps the envelope. */
-  upload(file: File): Promise<FileUploadResultDto>
+  upload(file: File): Promise<FileRecordDto>
   /** Move a batch of files to a target folder (null = root / unfiled). */
   moveTo(fileIds: string[], folderId: string | null): Promise<void>
   /** ChunkUploader methods for TChunkFileUpload */
@@ -66,7 +74,7 @@ export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> 
 }
 
 /**
- * Folder management surface — drives the StorageFile browser's left tree
+ * Folder management surface - drives the StorageFile browser's left tree
  * and the create/move-folder dialogs.
  */
 export interface StorageFoldersContract {
@@ -82,10 +90,10 @@ export interface StorageFoldersContract {
 
 export interface StorageBridge {
   files: StorageFilesContract
-  /** Hierarchical folder management — see {@link StorageFoldersContract}. */
+  /** Hierarchical folder management - see {@link StorageFoldersContract}. */
   folders: StorageFoldersContract
   /**
-   * Chunks — paged audit list wired to
+   * Chunks - paged audit list wired to
    * DefaultStorageAuditAdminController (Plan E, 2026-04-14).
    * Supports optional filter by uploadSessionId passed through query.filters.
    */
@@ -94,7 +102,7 @@ export interface StorageBridge {
     delete(ids: string[]): Promise<void>
   }
   /**
-   * Versions — paged audit list wired to
+   * Versions - paged audit list wired to
    * DefaultStorageAuditAdminController (Plan E, 2026-04-14).
    * Supports optional filter by fileId and currentOnly via query.filters.
    */
@@ -107,21 +115,21 @@ export interface StorageBridge {
      */
     restore(fileId: string, version: number): Promise<void>
   }
-  /** Aggregate storage statistics — GET /admin/files/statistics. */
+  /** Aggregate storage statistics - GET /admin/files/statistics. */
   statistics: {
     get(): Promise<FileStorageStatisticsDto>
   }
   /**
-   * Share-link management — paged active-share listing + revocation.
+   * Share-link management - paged active-share listing + revocation.
    * Wired to /admin/files/shares/* and /admin/files/{id}/shares.
    */
   shares: StorageSharesContract
-  /** File-integrity verification — single + batch. */
+  /** File-integrity verification - single + batch. */
   integrity: {
     verifyOne(fileId: string): Promise<FileIntegrityResultDto>
     batchVerify(maxFiles?: number): Promise<BatchIntegrityResultDto>
   }
-  /** File tags — set per file + query files by a single tag. */
+  /** File tags - set per file + query files by a single tag. */
   tags: {
     set(fileId: string, tags: string[]): Promise<FileRecordDto>
     byTag(tag: string, query: CrudPageQuery): Promise<CrudPageResult<FileRecordDto>>
@@ -131,22 +139,22 @@ export interface StorageBridge {
     get(fileId: string): Promise<Record<string, string>>
     set(fileId: string, metadata: Record<string, string>): Promise<FileRecordDto>
   }
-  /** File-reference queries — by file or by owning entity. */
+  /** File-reference queries - by file or by owning entity. */
   references: {
     byFile(fileId: string): Promise<FileReferenceDto[]>
     byEntity(entityType: string, entityId: string): Promise<FileReferenceDto[]>
   }
-  /** Per-user storage usage — single user + top-N leaderboard. */
+  /** Per-user storage usage - single user + top-N leaderboard. */
   userUsage: {
     forUser(userId: string): Promise<UserStorageUsageDto>
     topUsers(topN?: number): Promise<UserStorageUsageDto[]>
   }
-  /** Temporary-file maintenance — list + cleanup trigger. */
+  /** Temporary-file maintenance - list + cleanup trigger. */
   cleanup: {
     temporaryFiles(olderThanHours?: number): Promise<FileRecordDto[]>
     trigger(olderThanHours?: number): Promise<number>
   }
-  /** File preview — capability check + URL resolution (user-facing controller). */
+  /** File preview - capability check + URL resolution (user-facing controller). */
   preview: {
     canPreview(fileId: string): Promise<boolean>
     url(fileId: string): Promise<string>
@@ -154,7 +162,7 @@ export interface StorageBridge {
 }
 
 /**
- * Active-share listing + revocation surface. Read + revoke only — shares are
+ * Active-share listing + revocation surface. Read + revoke only - shares are
  * created from the file detail / user-facing API, never via this admin list.
  */
 export interface StorageSharesContract {
@@ -206,7 +214,7 @@ export interface StorageBridgeDeps {
 export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge {
   const fileApi = deps.fileApi ?? (deps.client ? useAdminFileApi(deps.client) : null)
   const storageApi = deps.storageApi ?? (deps.client ? useStorageApi(deps.client) : null)
-  // folderApi is optional — when neither a client nor an explicit api was
+  // folderApi is optional - when neither a client nor an explicit api was
   // supplied the folders sub-contract degrades to lazy-rejecting stubs (same
   // pattern as identity-bridge). This keeps the existing 2-api test fixtures
   // green while still providing real implementations in production.
@@ -275,12 +283,12 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       })
     },
 
-    // Files are not created via a form — creation happens through chunked upload.
+    // Files are not created via a form - creation happens through chunked upload.
     create: async (_data): Promise<FileRecordDto> => {
       throw new Error('files.create: use chunked upload (initUpload/uploadChunk/completeUpload) instead of create')
     },
 
-    // Files cannot be updated via the admin API — metadata changes go through specific endpoints.
+    // Files cannot be updated via the admin API - metadata changes go through specific endpoints.
     update: async (_id, _data): Promise<FileRecordDto> => {
       throw new Error('files.update: no generic update endpoint in backend; use rename/tags endpoints directly')
     },
@@ -290,16 +298,17 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
 
     // Deployment-prefix-aware download URL (resolveUrl), symmetric with
-    // previewUrl — no hardcoded `/api` that breaks under a sub-app mount.
+    // previewUrl - no hardcoded `/api` that breaks under a sub-app mount.
     downloadUrl: (id: string): string => storageApi.getDownloadUrl(id),
 
-    // Synchronous anonymous preview URL (no request) — used for avatar rendering.
+    // Synchronous anonymous preview URL (no request) - used for avatar rendering.
     previewUrl: (id: string): string => storageApi.getPreviewUrl(id),
 
     // Single-shot upload (avatars etc.); pre-unwraps the ApiResult envelope so
-    // callers get the FileUploadResultDto directly (consistent with bridge style).
-    upload: async (file: File): Promise<FileUploadResultDto> =>
-      unwrap<FileUploadResultDto>(await storageApi.upload(file)),
+    // callers get the stored FileRecordDto directly (the endpoint returns the record;
+    // there was never a separate upload-result DTO on the backend).
+    upload: async (file: File): Promise<FileRecordDto> =>
+      unwrap<FileRecordDto>(await storageApi.upload(file)),
 
     moveTo: async (fileIds: string[], folderId: string | null): Promise<void> => {
       if (!folderApi) {
@@ -324,9 +333,8 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       ensureOk(await storageApi.uploadChunk(uploadId, chunkIndex, chunk as File))
     },
 
-    completeUpload: async (uploadId: string): Promise<{ url: string }> => {
-      const record = unwrap(await storageApi.completeChunkedUpload(uploadId, { isTemporary: false }))
-      return { url: (record as FileRecordDto).url }
+    completeUpload: async (uploadId: string): Promise<FileRecordDto> => {
+      return unwrap(await storageApi.completeChunkedUpload(uploadId, { isTemporary: false }))
     },
   }
 
@@ -361,11 +369,11 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
     delete: async (_ids: string[]): Promise<void> => {
       // Chunks are managed by the upload lifecycle (initiate/upload/complete/abort)
-      // — there's no direct admin "delete a single chunk row" endpoint. The previous
+      // - there's no direct admin "delete a single chunk row" endpoint. The previous
       // implementation forwarded to `fileApi.batchDelete`, which targets FileRecord
       // (the wrong table), so chunk delete was a silent no-op against the wrong rows.
       throw new Error(
-        'chunks.delete: not supported by the admin audit endpoint — abort the parent upload session via the user-facing /storage API to clean up chunks',
+        'chunks.delete: not supported by the admin audit endpoint - abort the parent upload session via the user-facing /storage API to clean up chunks',
       )
     },
   }
@@ -406,7 +414,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       if (!deps.client) {
         throw new Error('versions.restore: HttpClient (deps.client) is required')
       }
-      // Admin audit endpoint is read-only — reuse the user-facing restore endpoint
+      // Admin audit endpoint is read-only - reuse the user-facing restore endpoint
       // (DefaultStorageController.RestoreVersion). The audit controller could
       // proxy it, but keeping a single source of truth for restore semantics
       // matters more than ducking through `/admin`.

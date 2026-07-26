@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TStatToCards` — declarative statistics-card grid for admin dashboards.
+ * `TStatToCards` - declarative statistics-card grid for admin dashboards.
  *
  * Replaces the hand-rolled `<Grid><Card><Statistic /></Card>...</Grid>`
  * boilerplate that PaymentOrder and AgentDetail repeat. Auto-formats
@@ -56,7 +56,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ refresh: [] }>()
 
 function formatValue(card: StatCard): string {
-  if (card.value === null || card.value === undefined || card.value === '') return '—'
+  if (card.value === null || card.value === undefined || card.value === '') return '-'
   if (typeof card.value === 'string') return card.value
   if (Number.isFinite(card.value)) {
     const num = card.value as number

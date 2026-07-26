@@ -34,7 +34,7 @@ function makeMenus(): AdminMenuItem[] {
       key: 'system',
       label: 'System',
       path: '/admin/system',
-      children: [{ key: 'menus', label: 'Menus', path: '/admin/system/menus' }],
+      children: [{ key: 'dictionaries', label: 'Dictionaries', path: '/admin/system/dictionaries' }],
     },
   ]
 }
@@ -75,7 +75,7 @@ describe('useAdminMenuContext', () => {
   })
 
   it('keeps a 1st level leaf as active when the route matches it directly', () => {
-    // dashboard is a 1st level item with no children — UI components decide
+    // dashboard is a 1st level item with no children - UI components decide
     // (via isActiveFirstLevelMenuHasChildren) whether to show a sub-rail.
     const { ctx } = makeContext('dashboard')
     expect(ctx.activeFirstLevelMenuKey.value).toBe('dashboard')
@@ -83,7 +83,7 @@ describe('useAdminMenuContext', () => {
   })
 
   it('falls back to first item with children when the route matches nothing', () => {
-    // 'phantom-route' is not in any menu key — fall back to first
+    // 'phantom-route' is not in any menu key - fall back to first
     // 1st level item with children = 'identity'.
     const { ctx } = makeContext('phantom-route')
     expect(ctx.activeFirstLevelMenuKey.value).toBe('identity')
@@ -109,7 +109,7 @@ describe('useAdminMenuContext', () => {
     const { ctx } = makeContext('users')
     expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(true)
     ctx.handleSelectFirstLevelMenu('dashboard')
-    // Dashboard has no children — but the watcher would have refilled it...
+    // Dashboard has no children - but the watcher would have refilled it...
     // routeName is still 'users' so activeFirstLevel would re-sync. Force
     // a route change too.
     expect(ctx.activeFirstLevelMenuKey.value).toBe('dashboard')
@@ -120,14 +120,14 @@ describe('useAdminMenuContext', () => {
     const { ctx } = makeContext('users')
     ctx.handleSelectFirstLevelMenu('system')
     expect(ctx.activeFirstLevelMenuKey.value).toBe('system')
-    expect(ctx.secondLevelMenus.value.map((m) => m.key)).toEqual(['menus'])
+    expect(ctx.secondLevelMenus.value.map((m) => m.key)).toEqual(['dictionaries'])
   })
 
   it('route change re-syncs activeFirstLevelMenuKey', async () => {
     const { ctx, routeName } = makeContext('users')
     expect(ctx.activeFirstLevelMenuKey.value).toBe('identity')
-    routeName.value = 'menus'
-    // Vue watchers are async — let microtasks drain.
+    routeName.value = 'dictionaries'
+    // Vue watchers are async - let microtasks drain.
     await Promise.resolve()
     expect(ctx.activeFirstLevelMenuKey.value).toBe('system')
   })

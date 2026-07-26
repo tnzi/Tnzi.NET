@@ -9,7 +9,7 @@ import type { Ref } from 'vue';
 import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
 
 /**
- * Minimal vue-router Router shape — avoids hard dependency on vue-router package.
+ * Minimal vue-router Router shape - avoids hard dependency on vue-router package.
  */
 export interface VueRouterLike {
   push(to: string | Record<string, unknown>): unknown;

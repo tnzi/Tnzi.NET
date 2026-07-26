@@ -1,7 +1,7 @@
 /**
- * Performance Module API — admin read access to runtime request timings.
+ * Performance Module API - admin read access to runtime request timings.
  *
- * Mirrors `Tnzi.Performance/Controllers/DefaultPerformanceAdminController` —
+ * Mirrors `Tnzi.Performance/Controllers/DefaultPerformanceAdminController` -
  * percentile summary, per-endpoint stats, slow-request log (+ one DELETE to
  * reset the collectors) under `/admin/performance/*`. `Tnzi.Performance` is an
  * optional infrastructure module, so every endpoint returns 404 when it is not
@@ -18,7 +18,7 @@ import type {
 const ADMIN_PERFORMANCE_BASE = '/admin/performance';
 
 /**
- * Admin Performance API — request-timing percentiles, per-endpoint stats and
+ * Admin Performance API - request-timing percentiles, per-endpoint stats and
  * the slow-request log.
  *
  * Example:

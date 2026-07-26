@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// PostgreSQL 全文搜索提供者 — 基于 tsvector/tsquery 进行关键词搜索
+/// PostgreSQL 全文搜索提供者 - 基于 tsvector/tsquery 进行关键词搜索
 /// </summary>
 /// <remarks>
 /// <para>

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// Agent 版本路由器实现 — 支持 A/B 测试流量分配
+/// Agent 版本路由器实现 - 支持 A/B 测试流量分配
 /// </summary>
 public class AgentVersionRouter : IAgentVersionRouter
 {
@@ -85,7 +85,7 @@ public class AgentVersionRouter : IAgentVersionRouter
             IsAbTestRouted = true,
             SelectedVersion = selectedVersion,
             SelectedVariant = selectedVariant,
-            // The variant's resources must come from the SNAPSHOT, not the live junction — the
+            // The variant's resources must come from the SNAPSHOT, not the live junction - the
             // resolver consumes this projection directly (resource columns were dropped from Agent,
             // so they can't ride on routedAgent). Null snapshot lists map to empty to honor the
             // projection's non-null contract (legacy/pre-grant snapshots → no resources, correct).
@@ -207,9 +207,9 @@ public class AgentVersionRouter : IAgentVersionRouter
             Source = original.Source,
             DefinitionHash = original.DefinitionHash,
             // Snapshot wins so A/B-routed variants can diverge persona.
-            // Falls back to original.PersonaId for snapshots taken before the
-            // PersonaId field existed (legacy AgentConfigSnapshot rows).
-            PersonaId = snapshot.PersonaId ?? original.PersonaId
+            // Falls back to original.Persona for snapshots taken before the
+            // inline Persona field existed (legacy AgentConfigSnapshot rows).
+            Persona = snapshot.Persona ?? original.Persona
         };
     }
 

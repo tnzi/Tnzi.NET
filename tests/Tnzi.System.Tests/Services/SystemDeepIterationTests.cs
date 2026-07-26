@@ -1,7 +1,7 @@
 namespace Tnzi.System.Tests.Services;
 
 /// <summary>
-/// AccessLogService E1 增强测试 — GetAccessLogTrendAsync + GetTopEndpointsAsync
+/// AccessLogService E1 增强测试 - GetAccessLogTrendAsync + GetTopEndpointsAsync
 /// </summary>
 public class AccessLogTrendTests
 {
@@ -261,7 +261,7 @@ public class AccessLogTrendTests
 
     #endregion
 
-    #region GetTopEndpointsAsync — DTO 与枚举契约测试
+    #region GetTopEndpointsAsync - DTO 与枚举契约测试
 
     [Fact]
     public void TopEndpointDto_Should_Have_All_Required_Properties()
@@ -391,7 +391,7 @@ public class AccessLogTrendTests
 }
 
 /// <summary>
-/// SettingService E1 增强测试 — GetSettingGroupsAsync
+/// SettingService E1 增强测试 - GetSettingGroupsAsync
 /// </summary>
 public class SettingGroupTests
 {
@@ -430,7 +430,7 @@ public class SettingGroupTests
             Enumerable.Empty<ISettingDefinitionProvider>());
     }
 
-    #region GetSettingGroupsAsync — DTO 契约测试
+    #region GetSettingGroupsAsync - DTO 契约测试
 
     [Fact]
     public void SettingGroupDto_Should_Have_All_Required_Properties()
@@ -479,7 +479,7 @@ public class SettingGroupTests
 
     #endregion
 
-    #region GetSettingGroupsAsync — 接口默认实现测试
+    #region GetSettingGroupsAsync - 接口默认实现测试
 
     [Fact]
     public async Task ISettingService_GetSettingGroupsAsync_Default_Should_Return_501()

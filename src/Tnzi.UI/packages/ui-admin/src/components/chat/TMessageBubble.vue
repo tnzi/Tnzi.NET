@@ -1,6 +1,6 @@
 <template>
   <!-- System-conversation notification: a left-aligned card. Distinct from the
-       centered grey pill below — in a System feed every item is a notice, so
+       centered grey pill below - in a System feed every item is a notice, so
        centered pills would blend with the timestamp separators and read as
        trivial. A card makes each broadcast read as an actual notification. -->
   <div v-if="message.contentType === MessageContentType.System && isSystem" class="t-bubble-notice">
@@ -104,14 +104,14 @@ const props = defineProps<{
   message: ChatMessageView
   mine: boolean
   showSender: boolean
-  /** True when rendered inside a System (notifications) conversation — system
+  /** True when rendered inside a System (notifications) conversation - system
    *  messages then render as left-aligned notification cards instead of the
    *  inline centered pill used for group notices. */
   isSystem?: boolean
-  /** Current user's display name — used for the avatar initial on own messages
+  /** Current user's display name - used for the avatar initial on own messages
    *  (locally-appended messages have no senderName until the server round-trips). */
   myName?: string
-  /** Current user's avatar file id — used for the picture on own messages
+  /** Current user's avatar file id - used for the picture on own messages
    *  (own optimistic messages carry no senderAvatarFileId until round-trip). */
   myAvatarFileId?: string | null
 }>()
@@ -130,7 +130,7 @@ const linkLabel = computed(() => translatePageKey('chat', 'window.viewDetails'))
 // Tooltip fallback on the retry marker when the backend gave no reason.
 const retryLabel = computed(() => translatePageKey('chat', 'window.resend'))
 
-// File/image URL — reuse the file preview helper (/api/files/{id}/preview).
+// File/image URL - reuse the file preview helper (/api/files/{id}/preview).
 const fileUrl = computed(() => resolveChatAvatarUrl(props.message.fileId))
 
 // File-type icon: map the extension to a recognisable coloured icon so a PDF /
@@ -345,7 +345,7 @@ const fileSizeLabel = computed(() => {
 
 /* Touch: the 18px retry glyph is too small to tap reliably, so give it a ≥40px
    hit area (the icon stays centered and its size unchanged). Coarse-pointer
-   only — desktop keeps the tight inline marker. */
+   only - desktop keeps the tight inline marker. */
 @media (pointer: coarse) {
   .t-bubble-retry {
     min-width: 40px;
@@ -409,7 +409,7 @@ const fileSizeLabel = computed(() => {
   box-shadow: -1px 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-/* ── Image (NImage — click to open the zoom/prev-next lightbox) ─────────── */
+/* ── Image (NImage - click to open the zoom/prev-next lightbox) ─────────── */
 .t-bubble-image {
   display: inline-block;
   line-height: 0;

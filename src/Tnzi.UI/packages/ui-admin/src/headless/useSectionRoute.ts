@@ -8,7 +8,7 @@ import { tryInjectDeepLinkConfig } from '../plugin/deepLinkConfig'
  */
 export interface UseSectionRouteOptions {
   /**
-   * Valid section keys — used to reject a stale / hand-typed `?section=garbage`
+   * Valid section keys - used to reject a stale / hand-typed `?section=garbage`
    * so it falls back to the default instead of rendering a blank panel. Accepts
    * the `DetailSection[]` shape (`{ key }`) or plain strings. An empty/omitted
    * list disables validation (any non-empty value is accepted).
@@ -21,7 +21,7 @@ export interface UseSectionRouteOptions {
    * in ONE URL without clobbering each other: a page detail's side menu uses
    * `'section'` (the default), and a modal/drawer detail opened ON TOP of it
    * uses its own key (e.g. `'edit'`) so the URL becomes
-   * `?section=tools&edit=perms` — each instance reads/writes only its own key
+   * `?section=tools&edit=perms` - each instance reads/writes only its own key
    * and leaves the others (and any business query params) intact.
    */
   key?: MaybeRefOrGetter<string>
@@ -35,7 +35,7 @@ export interface UseSectionRouteOptions {
   history?: MaybeRefOrGetter<'push' | 'replace'>
   /**
    * Master switch. Default `true`. When `false` the returned ref behaves like a
-   * plain `ref` (no router reads or writes) — lets a component pass a reactive
+   * plain `ref` (no router reads or writes) - lets a component pass a reactive
    * flag to keep its controlled-mode behaviour untouched (e.g. a transient
    * drawer that should not deep-link).
    */
@@ -52,7 +52,7 @@ function keySet(list: ReadonlyArray<{ key: string } | string> | undefined): Set<
  * Two-way bind an "active section" string to a **URL query key** so detail
  * sections (a `TDetailLayout` `tabs` / `side` nav, a settings page, a
  * modal/drawer detail) become **deep-linkable** AND the browser
- * **Back / Forward** buttons step through them — uniformly across page, modal
+ * **Back / Forward** buttons step through them - uniformly across page, modal
  * and drawer presentation.
  *
  * Returns a writable `ref`:
@@ -80,8 +80,8 @@ export function useSectionRoute(options: UseSectionRouteOptions & { defaultSecti
 export function useSectionRoute(options?: UseSectionRouteOptions): Ref<string | null>
 export function useSectionRoute(options: UseSectionRouteOptions = {}): Ref<string | null> {
   // App-wide section-channel kill switch (`defineAdminApp({ deepLink })`) is
-  // enforced HERE so every consumer — useDetail's section nav AND pages that
-  // bind an NTabs directly — honours it without per-page wiring. Global
+  // enforced HERE so every consumer - useDetail's section nav AND pages that
+  // bind an NTabs directly - honours it without per-page wiring. Global
   // disable > per-call `enabled` > default on.
   const deepLink = tryInjectDeepLinkConfig()
   const isOn = (): boolean => deepLink.section && (toValue(options.enabled) ?? true)
@@ -90,7 +90,7 @@ export function useSectionRoute(options: UseSectionRouteOptions = {}): Ref<strin
   // The underlying scope stays permanently active (router permitting): THIS
   // composable gates every read/write on `isOn()` itself, because deactivation
   // needs one LAST write (dropping the key from the URL) after `enabled` has
-  // already flipped false — an enabled-gated scope would swallow it.
+  // already flipped false - an enabled-gated scope would swallow it.
   const scope = useQueryScope(() => toValue(options.key) ?? 'section')
 
   function fallback(): string | null {
@@ -156,8 +156,8 @@ export function useSectionRoute(options: UseSectionRouteOptions = {}): Ref<strin
 
   /**
    * Activate this nav: adopt an existing (valid) deep-linked value if the URL
-   * already carries one — e.g. a shared `?section=tools&edit=perms` link
-   * reopened — otherwise make the URL self-describing by writing the resolved
+   * already carries one - e.g. a shared `?section=tools&edit=perms` link
+   * reopened - otherwise make the URL self-describing by writing the resolved
    * section in (via replace, no history entry).
    */
   function activate(): void {
@@ -184,7 +184,7 @@ export function useSectionRoute(options: UseSectionRouteOptions = {}): Ref<strin
     if (next !== current.value) current.value = next
   })
 
-  // Enable/disable lifecycle — chiefly an overlay (modal/drawer) opening and
+  // Enable/disable lifecycle - chiefly an overlay (modal/drawer) opening and
   // closing. Activating writes/adopts the key; deactivating DROPS this nav's
   // key from the URL (via replace, no history entry) so a closed overlay never
   // leaves a stale `&edit=perms` deep-link behind.

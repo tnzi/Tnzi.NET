@@ -53,6 +53,28 @@
             @update:model-value="(u: string) => (squareUrl = u)"
             @error="(m: string) => message.error(m)"
           />
+          <!-- Generic (non-avatar) usage: a fixed-size rectangular dropzone with a
+               custom slot placeholder, crop disabled, contain-fit, removable. -->
+          <TImageUpload
+            :model-value="bannerUrl"
+            shape="rounded"
+            :width="240"
+            :height="120"
+            :cropper="false"
+            object-fit="contain"
+            removable
+            :upload="mockUpload"
+            @update:model-value="(u: string) => (bannerUrl = u)"
+            @remove="() => (bannerUrl = '')"
+            @error="(m: string) => message.error(m)"
+          >
+            <template #placeholder>
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                <span style="font-size: 22px; line-height: 1;">🖼️</span>
+                <span style="font-size: 12px;">Upload banner (240×120)</span>
+              </div>
+            </template>
+          </TImageUpload>
           <span style="color: var(--tnzi-base-text-muted);">Click a box, pick an image, crop, then Confirm.</span>
         </div>
       </PreviewBox>
@@ -103,9 +125,10 @@ import PreviewBox from '../components/PreviewBox.vue';
 const message = useMessage();
 const msgAdapter = createMessageAdapter(message);
 
-// Image upload demo (cropperjs v2) — no backend; the cropped blob becomes an object URL.
+// Image upload demo (cropperjs v2) - no backend; the cropped blob becomes an object URL.
 const avatarUrl = ref('');
 const squareUrl = ref('');
+const bannerUrl = ref('');
 async function mockUpload(file: File | Blob): Promise<{ id?: string; url: string }> {
   return { id: 'demo', url: URL.createObjectURL(file) };
 }

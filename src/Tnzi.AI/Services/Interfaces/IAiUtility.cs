@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 轻量级系统级 AI 调用工具 — 不加载 tools/skills/middleware，
+/// 轻量级系统级 AI 调用工具 - 不加载 tools/skills/middleware，
 /// 用于框架内部任务（标题生成、摘要、分类等）。
 /// </summary>
 public interface IAiUtility

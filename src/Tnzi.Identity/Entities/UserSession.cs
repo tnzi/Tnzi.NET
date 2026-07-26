@@ -41,6 +41,13 @@ public class UserSession : EntityBase<Guid>, IHasCreationTime
     public DateTime LastActivityTime { get; set; }
 
     /// <summary>
+    /// 获取或设置 会话硬过期时间（绑定到刷新令牌生命周期）。
+    /// 到期后会话被判定为失效：不再计入并发数、令牌校验/刷新一律拒绝。
+    /// null 表示不过期（历史遗留会话，向后兼容）。
+    /// </summary>
+    public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>
     /// 获取或设置 是否已撤销
     /// </summary>
     public bool IsRevoked { get; set; }

@@ -1,7 +1,7 @@
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 
 /**
- * Permission guard composable — thin wrapper over `useAdminAuthStore`'s
+ * Permission guard composable - thin wrapper over `useAdminAuthStore`'s
  * permission helpers that adds the super-user bypass and the framework-wide
  * FAIL-OPEN rule while the user isn't loaded yet (`userInfo === null`):
  * mirrors the sidebar filter / `useCrudPage` action gating / widget filter,

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// WorkflowEngine 条件边 × 循环回边交互测试 — 验证条件边的「跳过非目标分支」逻辑
+/// WorkflowEngine 条件边 × 循环回边交互测试 - 验证条件边的「跳过非目标分支」逻辑
 /// 显式排除「当前激活循环内的节点」，避免误把循环体节点标记为完成而破坏循环迭代。
 ///
 /// 场景：循环成员节点 <c>check</c> 持有条件边，一支路由出循环（<c>finish</c>，循环外），

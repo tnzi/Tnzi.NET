@@ -1,18 +1,18 @@
 <template>
   <!--
-    McpServers — production-grade three-tab MCP control surface.
+    McpServers - production-grade three-tab MCP control surface.
 
-      Tab 1 «External Servers» — entity-driven CRUD over AI_McpServerRegistration:
+      Tab 1 «External Servers» - entity-driven CRUD over AI_McpServerRegistration:
         the external MCP servers Tnzi connects to as a CLIENT. A responsive card
         grid (TCardPage) with per-card Test Connection, full create/edit modal
         (authToken tri-state) + delete confirm.
 
-      Tab 2 «This Server» — read-only status of Tnzi's OWN self-hosted MCP server
+      Tab 2 «This Server» - read-only status of Tnzi's OWN self-hosted MCP server
         (Tnzi as the server, exposing its tools to external MCP clients). KPI strip
         + descriptions, "Exposed Agents" management (expose/remove), and the
         registered-tools list.
 
-      Tab 3 «Tool Analytics» — MCP tool-call telemetry: most-used ranking table;
+      Tab 3 «Tool Analytics» - MCP tool-call telemetry: most-used ranking table;
         clicking a row opens a drawer with per-tool stats (p95, error rate, unique
         callers, first/last used) + recent error breakdown. A Cleanup popconfirm
         prunes old usage records.
@@ -163,15 +163,15 @@
 
               <TKpiRow cols="1 s:2 m:4">
                 <TKpiCard :label="t('status.state')" :value="status?.enabled ? t('status.enabled') : t('status.disabled')" :tone="status?.enabled ? 'success' : 'default'" />
-                <TKpiCard :label="t('status.totalTools')" :value="status?.totalToolCount ?? 0" />
-                <TKpiCard :label="t('status.customTools')" :value="status?.customToolCount ?? 0" />
-                <TKpiCard :label="t('status.exposedAgents')" :value="status?.exposedAgentCount ?? 0" />
+                <TKpiCard :label="t('status.totalTools')" :value="status?.totalToolCount ?? null" />
+                <TKpiCard :label="t('status.customTools')" :value="status?.customToolCount ?? null" />
+                <TKpiCard :label="t('status.exposedAgents')" :value="status?.exposedAgentCount ?? null" />
               </TKpiRow>
 
               <NCard size="small" :title="t('status.detailsTitle')" :bordered="false" class="mt-12px t-tab-card">
                 <NDescriptions :column="2" label-placement="left" size="small">
                   <NDescriptionsItem :label="t('status.endpoint')">
-                    <code class="font-mono">{{ status?.endpoint || '—' }}</code>
+                    <code class="font-mono">{{ status?.endpoint || EMPTY_DASH }}</code>
                   </NDescriptionsItem>
                   <NDescriptionsItem :label="t('status.requireAuth')">
                     <NTag size="tiny" :bordered="false" :type="status?.requireAuthentication ? 'success' : 'default'">
@@ -192,7 +192,7 @@
               <!-- Exposed Agents management -->
               <NCard size="small" :title="t('expose.title')" :bordered="false" class="mt-12px t-tab-card">
                 <template #header-extra>
-                  <div v-if="can('ai.mcp.update')" class="flex items-center gap-6px">
+                  <div v-if="can('ai.mcpServer.update')" class="flex items-center gap-6px">
                     <NSelect
                       v-model:value="agentToExpose"
                       size="small"
@@ -226,7 +226,7 @@
                       <span class="t-mcp__exposed-name">{{ row.name }}</span>
                       <code class="font-mono t-mcp__exposed-id">{{ row.agentId }}</code>
                     </span>
-                    <NPopconfirm v-if="can('ai.mcp.update')" @positive-click="onRemoveAgent(row.agentId)">
+                    <NPopconfirm v-if="can('ai.mcpServer.update')" @positive-click="onRemoveAgent(row.agentId)">
                       <template #trigger>
                         <NButton size="small" type="error" tertiary>
                           <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
@@ -269,7 +269,7 @@
             <template v-else>
             <div class="t-mcp__analytics-bar">
               <span class="t-mcp__analytics-hint">{{ t('analytics.hint') }}</span>
-              <NPopconfirm v-if="can('ai.mcp.delete')" @positive-click="onCleanup">
+              <NPopconfirm v-if="can('ai.mcpServer.delete')" @positive-click="onCleanup">
                 <template #trigger>
                   <NButton size="small" :loading="cleanupBusy">
                     <template #icon><TSvgIcon icon="mdi:broom" :size="14" /></template>
@@ -318,10 +318,10 @@
                   </NTag>
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="t('analytics.firstUsed')">
-                  {{ toolStats.firstUsed ? formatDateTime(toolStats.firstUsed) : '—' }}
+                  {{ toolStats.firstUsed ? formatDateTime(toolStats.firstUsed) : EMPTY_DASH }}
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="t('analytics.lastUsed')">
-                  {{ toolStats.lastUsed ? formatDateTime(toolStats.lastUsed) : '—' }}
+                  {{ toolStats.lastUsed ? formatDateTime(toolStats.lastUsed) : EMPTY_DASH }}
                 </NDescriptionsItem>
               </NDescriptions>
             </div>
@@ -347,6 +347,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import {
   NAlert,
@@ -618,11 +619,11 @@ async function onCleanup(): Promise<void> {
   }
 }
 
-// Per-tool analytics drawer — a record detail (the tool) driven by the single
+// Per-tool analytics drawer - a record detail (the tool) driven by the single
 // detail engine so it is deep-linkable (`?tool=view:<toolName>`),
 // refresh-survivable and Back-closeable. `source` hydrates a cold-load deep
 // link from the loaded popularity ranking; `getId` keys on the tool name.
-// `:footer="false"` — a read-only panel; the X closes it.
+// `:footer="false"` - a read-only panel; the X closes it.
 const toolDetail = useDetail<McpToolPopularityDto>({
   mode: 'drawer',
   url: 'tool',
@@ -638,7 +639,7 @@ async function openToolDetail(toolName: string): Promise<void> {
   await toolDetail.open('view', toolName)
 }
 
-// Load per-tool stats + errors whenever the drawer (re)binds to a tool — covers
+// Load per-tool stats + errors whenever the drawer (re)binds to a tool - covers
 // an in-session open AND a `?tool=view:<name>` cold-load deep link / refresh.
 watch(() => toolDetail.data.value, async (row) => {
   if (!row) return

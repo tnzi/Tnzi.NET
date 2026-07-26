@@ -68,7 +68,7 @@ function mockLoginLogApi() {
   } as any
 }
 
-// organizationApi + sessionApi are optional — the bridge degrades the
+// organizationApi + sessionApi are optional - the bridge degrades the
 // organizations / sessions sub-contracts to lazy-rejecting stubs when they're
 // absent, so existing 4-api tests don't need to mock them. (See
 // identity-bridge.ts createIdentityBridge for the guard.)
@@ -105,7 +105,10 @@ describe('identity-bridge', () => {
         pageSize: 10,
         keyword: 'alice',
         sortBy: 'name',
-        sortOrder: 'asc',
+        // The wire name is `sortDescending`, not `sortOrder`: no backend query
+        // DTO declares a direction string, so the old key was dropped on
+        // arrival and server-side sorting silently never happened.
+        sortDescending: false,
         active: true,
       }),
     )
@@ -294,5 +297,29 @@ describe('identity-bridge', () => {
   it('sessions.list rejects with a clear error when no sessionApi is wired', async () => {
     const bridge = makeBridge()
     await expect(bridge.sessions.list()).rejects.toThrow(/sessions\.list/)
+  })
+
+  it('getAuthConfig returns null when no authApi is wired (fail-open)', async () => {
+    const bridge = makeBridge()
+    await expect(bridge.getAuthConfig()).resolves.toBeNull()
+  })
+
+  it('getAuthConfig unwraps the auth config from authApi', async () => {
+    const authApi = { getConfig: vi.fn(async () => ({ allowEmailLogin: true, oAuthProviders: [] })) } as any
+    const bridge = makeBridge({ authApi })
+    const config = await bridge.getAuthConfig()
+    expect(authApi.getConfig).toHaveBeenCalled()
+    expect(config?.allowEmailLogin).toBe(true)
+  })
+
+  it('getAuthConfig swallows probe errors and returns null (fail-open)', async () => {
+    const authApi = { getConfig: vi.fn(async () => { throw new Error('boom') }) } as any
+    const bridge = makeBridge({ authApi })
+    await expect(bridge.getAuthConfig()).resolves.toBeNull()
+  })
+
+  it('oauthLoginUrl returns empty string when no client is wired', () => {
+    const bridge = makeBridge()
+    expect(bridge.oauthLoginUrl('github')).toBe('')
   })
 })

@@ -40,11 +40,21 @@ public static class ObjectExtensions
     /// <summary>
     /// 转换为指定类型，失败时返回默认值
     /// </summary>
+    /// <remarks>
+    /// 不能委托给单参数的 CastTo 重载：该重载自己吞掉异常并返回 default(T)，
+    /// 外层 catch 永不触发，defaultValue 会被完全忽略。这里必须自行判定转换失败。
+    /// </remarks>
     public static T CastTo<T>(this object? obj, T defaultValue)
     {
+        if (obj == null)
+            return defaultValue;
+
+        if (obj is T result)
+            return result;
+
         try
         {
-            return CastTo<T>(obj);
+            return (T)Convert.ChangeType(obj, typeof(T));
         }
         catch
         {
@@ -139,8 +149,8 @@ public static class ObjectExtensions
     /// <param name="value">动态类型对象</param>
     /// <param name="start">范围起点</param>
     /// <param name="end">范围终点</param>
-    /// <param name="leftEqual">是否可等于上限（默认等于）</param>
-    /// <param name="rightEqual">是否可等于下限（默认等于）</param>
+    /// <param name="leftEqual">是否可等于下限 <paramref name="start"/>（默认等于）</param>
+    /// <param name="rightEqual">是否可等于上限 <paramref name="end"/>（默认等于）</param>
     /// <returns>是否在范围内</returns>
     public static bool IsBetween<T>(this T value, T start, T end, bool leftEqual = true, bool rightEqual = true)
         where T : IComparable<T>

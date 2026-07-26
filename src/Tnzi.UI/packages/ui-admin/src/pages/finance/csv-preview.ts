@@ -3,7 +3,7 @@
  * names instead of asking someone to count commas.
  *
  * The server does the authoritative parse (`CsvStatementParser`); this only has
- * to be right enough to label a dropdown — and honest about quoting, since a
+ * to be right enough to label a dropdown - and honest about quoting, since a
  * preview that split `"Smith, John"` into two columns would send the user to map
  * the wrong index.
  */
@@ -53,7 +53,7 @@ export interface CsvPeek {
 /**
  * Parse the head of a CSV file.
  *
- * Rows are split on newlines, which is wrong for a quoted field containing one —
+ * Rows are split on newlines, which is wrong for a quoted field containing one -
  * rare in bank exports, and it only ever costs a cosmetically odd preview row
  * (the server's parser is the one that has to get it right).
  */
@@ -97,12 +97,12 @@ export interface GuessedColumns {
 /**
  * Best-effort first guess at which column is which, by header name.
  *
- * Wrong guesses are free — the preview shows them and the user corrects them
+ * Wrong guesses are free - the preview shows them and the user corrects them
  * from the dropdown; the point is that the common exports need no edits.
  *
  * Two shapes exist in the wild and they are mutually exclusive: one signed
  * `Amount` column, or a `Withdrawal`/`Deposit` pair. The pair is resolved first
- * and its columns are excluded from the `Amount` search on purpose — exports
+ * and its columns are excluded from the `Amount` search on purpose - exports
  * label the pair `Withdrawal Amount` / `Deposit Amount` often enough that a bare
  * `includes('amount')` would otherwise map the withdrawal column as the signed
  * amount and import every deposit as a withdrawal.

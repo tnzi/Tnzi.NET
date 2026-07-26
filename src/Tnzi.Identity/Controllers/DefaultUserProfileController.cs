@@ -119,7 +119,7 @@ public class DefaultUserProfileController : ApiControllerBase
     }
 
     /// <summary>
-    /// 撤销指定会话
+    /// 撤销指定会话（仅限当前用户自己的会话）
     /// </summary>
     [HttpDelete("sessions/{sessionId}")]
     public virtual async Task<ApiResult> RevokeMySession(Guid sessionId)
@@ -132,6 +132,17 @@ public class DefaultUserProfileController : ApiControllerBase
         if (SessionService == null)
         {
             return Error("Session service is not available", 503);
+        }
+
+        // 归属校验：会话ID是顺序 GUID（可部分预测），若不校验归属，任何已认证用户
+        // 都能凭会话ID强制下线他人。不属于当前用户时按"未找到"返回，不泄露会话是否存在。
+        var mySessions = await SessionService.GetUserSessionsAsync(CurrentUser.Id.Value, includeRevoked: true);
+        var owned = mySessions.Succeeded
+            && mySessions.Data != null
+            && mySessions.Data.Any(s => s.Id == sessionId);
+        if (!owned)
+        {
+            return NotFound("Session not found");
         }
 
         var result = await SessionService.RevokeSessionAsync(sessionId);
@@ -267,6 +278,46 @@ public class DefaultUserProfileController : ApiControllerBase
     }
 
     /// <summary>
+    /// 暂停双因素认证（总开关关闭，保留已配置的方式 / TOTP key / 首选，可随时恢复）
+    /// </summary>
+    [HttpPost("two-factor/suspend")]
+    public virtual async Task<ApiResult> SuspendTwoFactor()
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        if (TwoFactorService == null)
+        {
+            return Error("Two-factor service is not available", 503);
+        }
+
+        var result = await TwoFactorService.SuspendTwoFactorAsync(CurrentUser.Id.Value);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 恢复被暂停的双因素认证（总开关重新开启，原有配置立即生效）
+    /// </summary>
+    [HttpPost("two-factor/resume")]
+    public virtual async Task<ApiResult> ResumeTwoFactor()
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        if (TwoFactorService == null)
+        {
+            return Error("Two-factor service is not available", 503);
+        }
+
+        var result = await TwoFactorService.ResumeTwoFactorAsync(CurrentUser.Id.Value);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取 TOTP 设置信息（生成密钥和二维码 URI）
     /// </summary>
     [HttpPost("two-factor/totp/setup")]
@@ -323,6 +374,46 @@ public class DefaultUserProfileController : ApiControllerBase
         }
 
         var result = await TwoFactorService.DisableTotpAsync(CurrentUser.Id.Value);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 禁用某一种 2FA 方式（其它方式保持不变）
+    /// </summary>
+    [HttpPost("two-factor/method/disable")]
+    public virtual async Task<ApiResult> DisableTwoFactorMethod([FromBody] TwoFactorMethodRequestDto input)
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        if (TwoFactorService == null)
+        {
+            return Error("Two-factor service is not available", 503);
+        }
+
+        var result = await TwoFactorService.DisableTwoFactorMethodAsync(CurrentUser.Id.Value, input.Type);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 设置首选 2FA 方式（必须是已启用的方式；登录时优先展示）
+    /// </summary>
+    [HttpPost("two-factor/preferred")]
+    public virtual async Task<ApiResult> SetPreferredTwoFactor([FromBody] TwoFactorMethodRequestDto input)
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        if (TwoFactorService == null)
+        {
+            return Error("Two-factor service is not available", 503);
+        }
+
+        var result = await TwoFactorService.SetPreferredTwoFactorAsync(CurrentUser.Id.Value, input.Type);
         return result.ToApiResult();
     }
 

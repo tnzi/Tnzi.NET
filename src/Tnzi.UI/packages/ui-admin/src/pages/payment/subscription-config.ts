@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { formatCurrency, formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
@@ -6,7 +7,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { StatusType } from '@tnzi/ui'
 
 /**
- * Subscriptions page config — aligned with `SubscriptionDto`
+ * Subscriptions page config - aligned with `SubscriptionDto`
  * (Tnzi.Payment.Dtos.SubscriptionDto).
  *
  * `status` / `cycleType` serialise as member-name strings (global
@@ -65,7 +66,7 @@ export function buildSubscriptionColumns(t: (key: string) => string): ColumnDef[
         return h(TStatusBadge, {
           value: v,
           type: STATUS_TONE[v] ?? 'default',
-          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || '—',
+          label: STATUS_KEY[v] ? t(`status.${STATUS_KEY[v]}`) : v || EMPTY_DASH,
         })
       },
     },
@@ -75,7 +76,7 @@ export function buildSubscriptionColumns(t: (key: string) => string): ColumnDef[
       width: 110,
       render: (row) => {
         const v = String(row.cycleType ?? '')
-        return CYCLE_KEY[v] ? t(`cycleType.${CYCLE_KEY[v]}`) : v || '—'
+        return CYCLE_KEY[v] ? t(`cycleType.${CYCLE_KEY[v]}`) : v || EMPTY_DASH
       },
     },
     {

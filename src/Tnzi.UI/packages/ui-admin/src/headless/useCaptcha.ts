@@ -1,12 +1,12 @@
 /**
- * `useCaptcha` — countdown + loading state for verification-code buttons.
+ * `useCaptcha` - countdown + loading state for verification-code buttons.
  *
  * Mirrors `soybean-admin-example/src/hooks/business/captcha.ts`. Owns the
  * 60-second cooldown timer and the in-flight "sending" flag so the consumer
  * can bind the result straight to an `NButton :disabled :loading`.
  *
  * The actual "send code" call is supplied by the consumer (via a callback
- * passed to `getCaptcha`) — `useCaptcha` stays HTTP-agnostic.
+ * passed to `getCaptcha`) - `useCaptcha` stays HTTP-agnostic.
  *
  * @example
  * ```ts

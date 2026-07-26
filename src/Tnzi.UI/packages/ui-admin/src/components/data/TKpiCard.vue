@@ -1,6 +1,6 @@
 <template>
   <!--
-    TKpiCard — unified KPI statistic card (white NCard, small, borderless).
+    TKpiCard - unified KPI statistic card (white NCard, small, borderless).
     Renamed from TStatCard in the 2026-06 component audit to avoid a name
     collision with @tnzi/ui's globally-registered <TStatCard> (a different
     NStatistic-based component). Pairs with TKpiRow for the responsive grid.
@@ -29,7 +29,7 @@
         <div class="t-stat-card__label">{{ label }}</div>
         <div class="t-stat-card__value" :class="`t-stat-card__value--${tone}`">
           <span class="t-stat-card__number">
-            <template v-if="value == null">—</template>
+            <template v-if="value == null">{{ EMPTY_DASH }}</template>
             <NNumberAnimation
               v-else-if="typeof value === 'number' && animated"
               :from="0"
@@ -43,7 +43,7 @@
         </div>
       </div>
     </div>
-    <!-- Full-width band below the value row — for a progress bar, a status
+    <!-- Full-width band below the value row - for a progress bar, a status
          line or a mini-chart that a same-baseline `#extra` can't host. Keeps
          "KPI + progress/trend" cards unified instead of hand-rolling NCard. -->
     <div v-if="$slots.footer" class="t-stat-card__footer"><slot name="footer" /></div>
@@ -51,6 +51,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed } from 'vue'
 import { NCard, NNumberAnimation } from 'naive-ui'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
@@ -73,14 +74,14 @@ export interface TKpiCardProps {
   animated?: boolean
   /**
    * Vue-router target. When set the whole card becomes a click target (cursor +
-   * hover lift + `role="button"`) and navigates on click — so a KPI can act as a
+   * hover lift + `role="button"`) and navigates on click - so a KPI can act as a
    * drill-in link ("Active files → /admin/matters") without hand-rolling a
    * clickable card. Also emits `click` for router-less handling.
    */
   to?: RouteLocationRaw
   /**
    * Force the interactive affordance (cursor + hover lift + `click` emit) without
-   * a router target — for consumers wiring their own `@click`. Ignored when `to`
+   * a router target - for consumers wiring their own `@click`. Ignored when `to`
    * is set (that already implies interactive).
    */
   interactive?: boolean
@@ -107,7 +108,7 @@ defineSlots<{
   footer?: () => unknown
 }>()
 
-// `useRouter()` is a plain inject — safe even without a router installed
+// `useRouter()` is a plain inject - safe even without a router installed
 // (returns undefined); navigation is guarded so router-less mounts (e.g. unit
 // tests, non-interactive KPIs) never throw.
 const router = useRouter()
@@ -119,7 +120,7 @@ function handleClick(): void {
 }
 
 /**
- * Preserve the value's decimal places through NNumberAnimation — its default
+ * Preserve the value's decimal places through NNumberAnimation - its default
  * `precision: 0` would round e.g. `99.95` → `100`. Capped at 4 to avoid
  * float-noise tails ever widening a KPI card.
  */

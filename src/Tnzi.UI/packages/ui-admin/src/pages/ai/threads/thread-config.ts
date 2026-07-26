@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
@@ -10,7 +11,7 @@ type DateLike = string | null | undefined
  * so the page renders a table (not cards). The Agent column prefers the
  * resolved `agentName` (added to the list DTO server-side) and falls back to
  * a truncated `agentId` for rows the backend hasn't enriched. Timestamps go
- * through `formatDateTime` (locale-aware, null-safe `—` fallback).
+ * through `formatDateTime` (locale-aware, null-safe `-` fallback).
  */
 export const threadColumns: ColumnDef[] = [
   { key: 'title', title: 'columns.title', width: 220, primary: true, ellipsis: { tooltip: true } },
@@ -23,7 +24,7 @@ export const threadColumns: ColumnDef[] = [
       const name = (row as { agentName?: string | null }).agentName
       if (name) return name
       const id = (row as { agentId?: string | null }).agentId
-      if (!id) return '—'
+      if (!id) return EMPTY_DASH
       const full = String(id)
       const short = full.length > 8 ? `${full.slice(0, 8)}…` : full
       return h('span', { title: full, class: 'font-mono' }, short)
@@ -34,13 +35,13 @@ export const threadColumns: ColumnDef[] = [
     key: 'lastActivityTime',
     title: 'columns.lastActivityTime',
     width: 170,
-    render: (row) => formatDateTime(row.lastActivityTime as DateLike, { fallback: '—' }),
+    render: (row) => formatDateTime(row.lastActivityTime as DateLike, { fallback: EMPTY_DASH }),
   },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
     width: 170,
-    render: (row) => formatDateTime(row.creationTime as DateLike, { fallback: '—' }),
+    render: (row) => formatDateTime(row.creationTime as DateLike, { fallback: EMPTY_DASH }),
   },
 ]
 

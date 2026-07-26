@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Entities;
 
 /// <summary>
-/// 知识图谱边 — 表示两个实体之间的关系
+/// 知识图谱边 - 表示两个实体之间的关系
 /// </summary>
 public class KnowledgeGraphEdge : CreationAuditedEntity<Guid>, IMultiTenant
 {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 资源发现与读取 — 从已配置的 MCP 服务器获取上下文资源。
+/// MCP 资源发现与读取 - 从已配置的 MCP 服务器获取上下文资源。
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 public interface IMcpResourceProvider

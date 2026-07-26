@@ -1,5 +1,5 @@
 /**
- * RAG API wrappers — Knowledge base queries, chat, and admin management
+ * RAG API wrappers - Knowledge base queries, chat, and admin management
  *
  * User-facing: useRagApi (query + chat + stream)
  * Admin: useAdminKnowledgeBaseApi (CRUD + doc upload + search test)
@@ -27,7 +27,7 @@ export interface RagChatParams {
 }
 
 /**
- * Document ingestion status — mirrors the backend `DocumentStatus` enum. The
+ * Document ingestion status - mirrors the backend `DocumentStatus` enum. The
  * backend registers `JsonStringEnumConverter`, so responses carry the PascalCase
  * member NAME string. The numeric ordinals (0=Processing / 1=Completed /
  * 2=Failed) are kept in the union for backward compatibility with older payloads.
@@ -136,11 +136,11 @@ export function useRagApi(client: HttpClient) {
   const base = '/rag';
 
   return {
-    /** Query knowledge base(s) — returns relevant chunks with scores */
+    /** Query knowledge base(s) - returns relevant chunks with scores */
     query: (data: RagQueryParams) =>
       client.post(`${base}/query`, data),
 
-    /** Chat with RAG context — returns answer with citations */
+    /** Chat with RAG context - returns answer with citations */
     chat: (data: RagChatParams) =>
       client.post(`${base}/chat`, data),
 
@@ -190,7 +190,7 @@ export function useAdminKnowledgeBaseApi(client: HttpClient) {
     /** Upload a document to a knowledge base */
     uploadDocument: (kbId: string, file: File) =>
       // Backend route is POST {id}/upload (multipart, IFormFile). Use
-      // client.upload (multipart/form-data via XHR) — NOT client.post, which
+      // client.upload (multipart/form-data via XHR) - NOT client.post, which
       // would JSON.stringify the FormData into "{}" and drop the file.
       client.upload<DocumentUploadResultDto>(`${base}/${kbId}/upload`, file),
 

@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T = unknown">
 /**
- * `TWidgetList` — paginated dashboard list card.
+ * `TWidgetList` - paginated dashboard list card.
  *
  * The "list" primitive of the Workbench widget family. Renders a bounded,
  * page-level-paginated list of arbitrary rows so a list panel occupies a
@@ -10,7 +10,7 @@
  * pager) is uniform.
  *
  * Two shapes:
- *   - **Standalone card** (default) — renders its own NCard + header
+ *   - **Standalone card** (default) - renders its own NCard + header
  *     (title + optional link). Drop it straight into a custom dashboard:
  *     ```vue
  *     <TWidgetList
@@ -20,7 +20,7 @@
  *       <template #row="{ item }">…</template>
  *     </TWidgetList>
  *     ```
- *   - **Bare** (`bare`) — strips the NCard/header so it nests inside a
+ *   - **Bare** (`bare`) - strips the NCard/header so it nests inside a
  *     `TWidgetCard` (WidgetDef grid), which then owns the title + refresh.
  *
  * Generalised from the "recent files / my deadlines / review queue" list
@@ -41,15 +41,15 @@ const props = withDefaults(
     items: T[]
     /** Rows per page. The card height is bounded to this many rows. Default 5. */
     pageSize?: number
-    /** Header title — i18n key (resolved against the bundled locale) or raw text. */
+    /** Header title - i18n key (resolved against the bundled locale) or raw text. */
     title?: string
     /** Iconify icon shown before the title. */
     icon?: string
     /** Title colour. `primary` tints it with the brand colour. Default `default`. */
     tone?: WidgetListTone
-    /** Right-aligned header link text — i18n key or raw. Emits `link` on click. */
+    /** Right-aligned header link text - i18n key or raw. Emits `link` on click. */
     linkText?: string
-    /** Empty-state copy — i18n key or raw. */
+    /** Empty-state copy - i18n key or raw. */
     emptyText?: string
     /** Empty-state icon. Default `mdi:inbox-outline`. */
     emptyIcon?: string
@@ -226,7 +226,7 @@ watch(pageCount, (n) => {
 .t-widget-list {
   border-radius: var(--tnzi-admin-radius-md, 8px);
 }
-/* Standalone card only — the NCard carries the soft dashboard shadow. */
+/* Standalone card only - the NCard carries the soft dashboard shadow. */
 .t-widget-list:not(.t-widget-list--bare) {
   box-shadow: var(--tnzi-shadow-card, 0 1px 2px rgb(0 0 0 / 0.05));
 }

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway;
 
 /// <summary>
-/// Gateway 统一控制面 — 处理入站请求、路由到 Agent、管理活跃会话
+/// Gateway 统一控制面 - 处理入站请求、路由到 Agent、管理活跃会话
 /// </summary>
 [ExperimentalApi(Reason = "Gateway API under active development")]
 public interface IGateway

@@ -52,7 +52,7 @@ interface Props {
    */
   fullscreen?: boolean
   /**
-   * Suppress this modal for the `view` action — the host renders the read-only
+   * Suppress this modal for the `view` action - the host renders the read-only
    * detail in a drawer (its `#detail` slot) instead. Create/edit still open the
    * modal. Off by default, so a page with no `#detail` slot keeps view-in-modal.
    */

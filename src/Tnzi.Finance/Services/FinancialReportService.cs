@@ -19,6 +19,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     private readonly IReadOnlyRepository<PaymentEntry, Guid> _paymentRepository;
     private readonly IReadOnlyRepository<PaymentApplication, Guid> _applicationRepository;
     private readonly BalanceSummaryReader _reader;
+    private readonly GeneralLedgerReader _ledgerReader;
     private readonly FinanceOptions _options;
 
     public FinancialReportService(
@@ -34,6 +35,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         IReadOnlyRepository<PaymentEntry, Guid> paymentRepository,
         IReadOnlyRepository<PaymentApplication, Guid> applicationRepository,
         BalanceSummaryReader reader,
+        GeneralLedgerReader ledgerReader,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
@@ -48,6 +50,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         _paymentRepository = Check.NotNull(paymentRepository);
         _applicationRepository = Check.NotNull(applicationRepository);
         _reader = Check.NotNull(reader);
+        _ledgerReader = Check.NotNull(ledgerReader);
         _options = Check.NotNull(options).Value;
     }
 
@@ -196,92 +199,14 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         return Ok(report);
     }
 
-    public async Task<Result<GeneralLedgerReportDto>> GetGeneralLedgerAsync(Guid accountId, DateTime from, DateTime to, PagedQueryDto paging, CancellationToken cancellationToken = default)
-    {
-        Check.NotNull(paging);
+    public Task<Result<GeneralLedgerReportDto>> GetGeneralLedgerAsync(Guid accountId, DateTime from, DateTime to, PagedQueryDto paging, CancellationToken cancellationToken = default)
+        => GetGeneralLedgerAsync(accountId, from, to, paging, null, cancellationToken);
 
-        if (to.Date < from.Date)
-            return Fail<GeneralLedgerReportDto>("The 'to' date must not be earlier than the 'from' date.");
-
-        var account = await _accountRepository.GetAsync(accountId, cancellationToken);
-        if (account == null)
-            return Fail<GeneralLedgerReportDto>("Account not found.", 404);
-
-        var fromDate = from.ToUtcDate();
-        var toExclusive = to.ToUtcDate().AddDays(1);
-
-        // 期初/期间借贷四项聚合（读路径按开关走汇总桶或明细条件求和）；行明细始终走明细（行序依赖）
-        var sums = await _reader.SumOpeningAndPeriodForAccountAsync(accountId, fromDate, toExclusive, cancellationToken);
-
-        var openingDebit = sums.OpeningDebit;
-        var openingCredit = sums.OpeningCredit;
-        var periodDebit = sums.PeriodDebit;
-        var periodCredit = sums.PeriodCredit;
-
-        var lines = await ProjectLedgerLines(OrderedPeriodLines(accountId, fromDate, toExclusive))
-            .CreateAsync(paging.PageIndex, paging.PageSize, cancellationToken);
-
-        var openingBalance = openingDebit - openingCredit;
-
-        // 第 N 页起点余额 = 期初余额 + 页首之前行的净额（单次聚合，首页零额外查询）。
-        // 页行与前缀和是两次独立查询：并发过账落在两查询之间时本页余额可能整体偏移
-        // （报表为近似快照，非可串行化读；刷新即自愈）
-        var running = openingBalance;
-        if (paging.Skip > 0)
-        {
-            running += await OrderedPeriodLines(accountId, fromDate, toExclusive)
-                .Take(paging.Skip)
-                .SumAsync(l => l.Debit - l.Credit, cancellationToken);
-        }
-
-        foreach (var line in lines.Items)
-        {
-            running += line.Debit - line.Credit;
-            line.RunningBalance = running;
-        }
-
-        var report = new GeneralLedgerReportDto
-        {
-            AccountId = account.Id,
-            Code = account.Code,
-            Name = account.Name,
-            From = fromDate,
-            To = to.Date,
-            BaseCurrency = _options.BaseCurrency,
-            OpeningBalance = openingBalance,
-            ClosingBalance = openingBalance + periodDebit - periodCredit,
-            Lines = lines
-        };
-
-        return Ok(report);
-    }
-
-    /// <summary>
-    /// 期间内已过账行的稳定全序：同日跨凭证按凭证号（过账时顺序分配、补零后字符串可排序，
-    /// 凭证号唯一故构成全序；顺序 GUID 的字符串序不保证时序）、凭证内按行号。
-    /// 运行余额与分页导出都依赖此确定性顺序
-    /// </summary>
-    private IQueryable<JournalLine> OrderedPeriodLines(Guid accountId, DateTime fromDate, DateTime toExclusive)
-        => PostedLines
-            .Where(l => l.AccountId == accountId && l.PostingDate >= fromDate && l.PostingDate < toExclusive)
-            .OrderBy(l => l.PostingDate)
-            .ThenBy(l => l.JournalEntry!.Number)
-            .ThenBy(l => l.LineNumber);
-
-    private static IQueryable<GeneralLedgerLineDto> ProjectLedgerLines(IQueryable<JournalLine> query)
-        => query.Select(l => new GeneralLedgerLineDto
-        {
-            JournalEntryId = l.JournalEntryId,
-            EntryNumber = l.JournalEntry!.Number,
-            PostingDate = l.PostingDate,
-            Memo = l.Memo ?? l.JournalEntry.Memo,
-            Debit = l.Debit,
-            Credit = l.Credit,
-            PartyType = l.PartyType,
-            PartyId = l.PartyId,
-            SourceType = l.JournalEntry.SourceType,
-            SourceId = l.JournalEntry.SourceId
-        });
+    /// <summary>总账明细：委托 <see cref="GeneralLedgerReader"/>（行序/分页/筛选自成一套机制）。</summary>
+    public Task<Result<GeneralLedgerReportDto>> GetGeneralLedgerAsync(
+        Guid accountId, DateTime from, DateTime to, PagedQueryDto paging, GeneralLedgerFilterDto? filter,
+        CancellationToken cancellationToken = default)
+        => _ledgerReader.GetGeneralLedgerAsync(accountId, from, to, paging, filter, cancellationToken);
 
     private Task<List<Account>> GetPostableAccountsAsync(CancellationToken cancellationToken)
         => _accountRepository.AsNoTracking()
@@ -443,12 +368,19 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     {
         var report = new AgingReportDto { AsOf = asOf, BaseCurrency = _options.BaseCurrency };
 
-        static void AddToBucket(AgingBucketsDto buckets, int overdueDays, decimal amount)
+        // 切分点来自配置（未配则 30/60/90）：北美惯例不是法律，按周结算的行业
+        // 常用 7/14/21。桶数固定五档，只有切分点可配——桶数可变等于 DTO 形状可变。
+        var cuts = _options.ResolveAgingBucketDays();
+        var first = cuts[0];
+        var second = cuts[1];
+        var third = cuts[2];
+
+        void AddToBucket(AgingBucketsDto buckets, int overdueDays, decimal amount)
         {
             if (overdueDays <= 0) buckets.Current += amount;
-            else if (overdueDays <= 30) buckets.Days1To30 += amount;
-            else if (overdueDays <= 60) buckets.Days31To60 += amount;
-            else if (overdueDays <= 90) buckets.Days61To90 += amount;
+            else if (overdueDays <= first) buckets.Days1To30 += amount;
+            else if (overdueDays <= second) buckets.Days31To60 += amount;
+            else if (overdueDays <= third) buckets.Days61To90 += amount;
             else buckets.Over90 += amount;
             buckets.Total += amount;
         }
@@ -633,62 +565,14 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     public Task<Result<string>> ExportProfitAndLossCsvAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
         => ToCsvAsync(GetProfitAndLossAsync(from, to, cancellationToken), ReportCsvWriter.ProfitAndLoss);
 
-    public async Task<Result<string>> ExportGeneralLedgerCsvAsync(Guid accountId, DateTime from, DateTime to, CancellationToken cancellationToken = default)
-    {
-        if (to.Date < from.Date)
-            return Fail<string>("The 'to' date must not be earlier than the 'from' date.");
-
-        var account = await _accountRepository.GetAsync(accountId, cancellationToken);
-        if (account == null)
-            return Fail<string>("Account not found.", 404);
-
-        var fromDate = from.ToUtcDate();
-        var toExclusive = to.ToUtcDate().AddDays(1);
-
-        // 期初余额走读路径（汇总桶或明细）；行明细全量始终读明细（运行余额行序依赖）
-        var openingSums = await _reader.SumOpeningAndPeriodForAccountAsync(accountId, fromDate, toExclusive, cancellationToken);
-
-        var openingBalance = openingSums.OpeningDebit - openingSums.OpeningCredit;
-
-        // 成功路径单次扫描（多取一行探测超限）；拒绝超限而非静默截断：
-        // 截断的运行余额会误导对账。精确行数仅在拒绝路径补一次未排序计数
-        var lines = await ProjectLedgerLines(OrderedPeriodLines(accountId, fromDate, toExclusive))
-            .Take(_options.ReportExportMaxRows + 1)
-            .ToListAsync(cancellationToken);
-        if (lines.Count > _options.ReportExportMaxRows)
-        {
-            var count = await PostedLines
-                .CountAsync(l => l.AccountId == accountId && l.PostingDate >= fromDate && l.PostingDate < toExclusive, cancellationToken);
-            return Fail<string>($"The export would contain {count} rows, exceeding the limit of {_options.ReportExportMaxRows}. Narrow the date range.", 400);
-        }
-
-        var running = openingBalance;
-        foreach (var line in lines)
-        {
-            running += line.Debit - line.Credit;
-            line.RunningBalance = running;
-        }
-
-        var header = new GeneralLedgerReportDto
-        {
-            AccountId = account.Id,
-            Code = account.Code,
-            Name = account.Name,
-            From = fromDate,
-            To = to.Date,
-            BaseCurrency = _options.BaseCurrency,
-            OpeningBalance = openingBalance,
-            ClosingBalance = running
-        };
-
-        return Ok<string>(ReportCsvWriter.GeneralLedger(header, lines));
-    }
+    public Task<Result<string>> ExportGeneralLedgerCsvAsync(Guid accountId, DateTime from, DateTime to, CancellationToken cancellationToken = default)
+        => _ledgerReader.ExportGeneralLedgerCsvAsync(accountId, from, to, cancellationToken);
 
     public Task<Result<string>> ExportArAgingCsvAsync(DateTime asOf, CancellationToken cancellationToken = default)
-        => ToCsvAsync(GetArAgingAsync(asOf, cancellationToken), ReportCsvWriter.Aging);
+        => ToCsvAsync(GetArAgingAsync(asOf, cancellationToken), r => ReportCsvWriter.Aging(r, _options.ResolveAgingBucketDays()));
 
     public Task<Result<string>> ExportApAgingCsvAsync(DateTime asOf, CancellationToken cancellationToken = default)
-        => ToCsvAsync(GetApAgingAsync(asOf, cancellationToken), ReportCsvWriter.Aging);
+        => ToCsvAsync(GetApAgingAsync(asOf, cancellationToken), r => ReportCsvWriter.Aging(r, _options.ResolveAgingBucketDays()));
 
     public Task<Result<string>> ExportTaxSummaryCsvAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
         => ToCsvAsync(GetTaxSummaryAsync(from, to, cancellationToken), ReportCsvWriter.TaxSummary);

@@ -138,7 +138,7 @@ public class HangfireModule : TnziInfrastructureModule
         // Hangfire's static facade (BackgroundJob.*, RecurringJob.*, JobStorage.Current) reads the
         // global JobStorage.Current, which AddHangfire only assigns the first time the JobStorage
         // service is resolved. With AddHangfireServer (hosted-service model) that first resolution
-        // happens when the server's IHostedService starts — AFTER app.Run(), i.e. AFTER every
+        // happens when the server's IHostedService starts: AFTER app.Run(), i.e. AFTER every
         // module's OnApplicationInitializationAsync has already run. The Dashboard middleware below
         // would also trigger it, but only when the Dashboard is enabled. As a result, any module that
         // registers a recurring job at init time via IBackgroundJobManager.CreateRecurring (which

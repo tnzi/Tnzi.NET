@@ -1,5 +1,5 @@
 /**
- * `useWidget()` — read the surrounding `TWidgetCard`'s context from
+ * `useWidget()` - read the surrounding `TWidgetCard`'s context from
  * inside a widget component. Returns a fallback no-op context when
  * called outside a card (e.g. unit-test mounting a widget standalone)
  * so widgets don't crash without a host.

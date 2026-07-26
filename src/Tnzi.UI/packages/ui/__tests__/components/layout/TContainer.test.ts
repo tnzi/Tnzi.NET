@@ -45,7 +45,7 @@ describe('TContainer', () => {
 
   it('default padding has zero vertical component', () => {
     const wrapper = mount(TContainer)
-    // Default is '0 clamp(16px, 4vw, 32px)' — vertical 0, horizontal responsive.
+    // Default is '0 clamp(16px, 4vw, 32px)' - vertical 0, horizontal responsive.
     // jsdom may drop the shorthand containing clamp() from the serialized style
     // attribute, so assert on the resolved prop value instead.
     expect(wrapper.props('padding')).toMatch(/^0\s/)

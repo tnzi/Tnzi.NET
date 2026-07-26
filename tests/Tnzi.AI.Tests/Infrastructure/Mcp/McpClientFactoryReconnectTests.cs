@@ -47,7 +47,7 @@ public class McpClientFactoryReconnectTests
     {
         var factory = new McpClientFactory(_loggerFactory.Object, _logger.Object);
 
-        // Act & Assert — 不应抛异常
+        // Act & Assert - 不应抛异常
         await factory.InvalidateClientAsync("non-existent");
     }
 
@@ -70,13 +70,13 @@ public class McpClientFactoryReconnectTests
 
         InjectCachedClient(factory, "failing-server", mockAdapter.Object);
 
-        // Act — should not throw even though Dispose fails
+        // Act - should not throw even though Dispose fails
         await factory.InvalidateClientAsync("failing-server");
     }
 
     #endregion
 
-    #region Health Check — GetOrCreateClientAsync returns new client when cached is disconnected
+    #region Health Check - GetOrCreateClientAsync returns new client when cached is disconnected
 
     [Fact]
     public async Task GetOrCreateClientAsync_ReturnsCachedClient_WhenHealthy()
@@ -93,7 +93,7 @@ public class McpClientFactoryReconnectTests
         // Act
         var result = await factory.GetOrCreateClientAsync(config);
 
-        // Assert — 返回缓存中的同一个实例
+        // Assert - 返回缓存中的同一个实例
         result.ShouldBeSameAs(healthyAdapter.Object);
     }
 
@@ -126,7 +126,7 @@ public class McpClientFactoryReconnectTests
     [Fact]
     public async Task GetOrCreateClientAsync_HealthCheckException_TreatedAsDisconnected()
     {
-        // Arrange — 健康检查抛异常应视为断开连接
+        // Arrange - 健康检查抛异常应视为断开连接
         var factory = new TestableReconnectMcpClientFactory(_loggerFactory.Object, _logger.Object);
         var faultyAdapter = new Mock<IMcpClientAdapter>();
         faultyAdapter.Setup(x => x.IsConnectedAsync(It.IsAny<CancellationToken>()))
@@ -204,7 +204,7 @@ public class McpClientFactoryReconnectTests
 
         var config = CreateConfig("broken-server");
 
-        // Act & Assert — 3 次重试后抛异常
+        // Act & Assert - 3 次重试后抛异常
         var ex = await Should.ThrowAsync<InvalidOperationException>(
             () => factory.GetOrCreateClientAsync(config));
         ex.Message.ShouldContain("broken-server");

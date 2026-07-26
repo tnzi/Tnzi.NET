@@ -24,6 +24,7 @@ import { isValidSnapshot, type AdminThemeSnapshot } from '../theme/admin-config'
 import { applyThemeSnapshot, buildThemeSnapshot, overlayUserPreset } from '../theme/snapshot'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { createSystemBridge, type SystemBridge } from '../services/bridges/system-bridge'
+import type { AdminThemePreset } from '../theme/appearancePresets'
 
 type HttpClientLike = NonNullable<Parameters<typeof createSystemBridge>[0]>['client']
 
@@ -42,6 +43,10 @@ export interface UseGlobalThemeOptions {
    * non-privileged / standalone behavior).
    */
   shouldOverlayUserPreset?: () => boolean
+  /** The resolved appearance-look list - lets the personal-look overlay
+   *  (`userPresetLook`) re-apply the user's whole chosen preset after the
+   *  global snapshot lands. Omitted → only the legacy color overlay works. */
+  appearancePresets?: AdminThemePreset[]
   /** Test seam. */
   bridge?: Pick<SystemBridge, 'appearance'>
 }
@@ -101,11 +106,17 @@ export function useGlobalTheme(options: UseGlobalThemeOptions = {}): GlobalTheme
     if (!ctx || !remote.value) return
     // Idempotence guard - the common reload case re-fetches a snapshot
     // identical to the locally cached one; skip the ~50 store setters (and
-    // their CSS-var / DOM-filter watchers) when nothing would change.
-    if (deepEqual(comparable(buildThemeSnapshot(themeStore, ctx)), comparable(remote.value))) return
-    applyThemeSnapshot(remote.value, themeStore, ctx, { modeAsDefault: true })
+    // their CSS-var / DOM-filter watchers) when nothing would change. The
+    // guard covers ONLY the snapshot apply: the user-preset overlay below must
+    // still run, because "local == remote" can mean another useGlobalTheme
+    // instance already applied the snapshot WITHOUT the overlay (or the user's
+    // look was never re-applied this session) - skipping it there would lose
+    // the personal look on reload. The overlay itself is idempotent.
+    if (!deepEqual(comparable(buildThemeSnapshot(themeStore, ctx)), comparable(remote.value))) {
+      applyThemeSnapshot(remote.value, themeStore, ctx, { modeAsDefault: true })
+    }
     if (options.shouldOverlayUserPreset?.() !== false) {
-      overlayUserPreset(themeStore, ctx)
+      overlayUserPreset(themeStore, ctx, options.appearancePresets)
     }
   }
 
@@ -116,7 +127,7 @@ export function useGlobalTheme(options: UseGlobalThemeOptions = {}): GlobalTheme
     }
     try {
       // `GET /appearance/admin-theme` is ANONYMOUS (deployment-level public
-      // appearance), so there is no token to wait for — firing immediately lets
+      // appearance), so there is no token to wait for - firing immediately lets
       // the login page and the top-level exception pages (403/404/500, rendered
       // pre-auth outside the shell) pick up the global theme too, instead of
       // snapping back to the built-in palette on refresh.

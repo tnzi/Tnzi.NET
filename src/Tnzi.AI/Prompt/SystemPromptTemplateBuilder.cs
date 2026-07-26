@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Prompt;
 
 /// <summary>
-/// 系统提示词模板工具 — 将 Agent 静态 Instructions 包裹为 &lt;instructions&gt; XML 段落。
+/// 系统提示词模板工具 - 将 Agent 静态 Instructions 包裹为 &lt;instructions&gt; XML 段落。
 /// </summary>
 /// <remarks>
 /// 历史上此类支持 13 个 XML tag 段落与 ISystemPromptSectionProvider 动态装配管线，

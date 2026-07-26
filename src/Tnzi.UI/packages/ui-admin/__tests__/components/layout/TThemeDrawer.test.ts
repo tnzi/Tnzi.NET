@@ -6,7 +6,7 @@ import { createThemeContext, mergeThemeSettings, type ThemeContext } from '@tnzi
 import TThemeDrawer from '../../../src/components/layout/TThemeDrawer.vue'
 import { useAdminThemeStore } from '../../../src/stores/useAdminThemeStore'
 
-// vi.mock factory is hoisted before module init — keep stubs inline.
+// vi.mock factory is hoisted before module init - keep stubs inline.
 vi.mock('naive-ui', () => ({
   NDrawer: {
     name: 'NDrawer',
@@ -104,6 +104,11 @@ vi.mock('naive-ui', () => ({
   NWatermark: { name: 'NWatermark', template: '<div class="watermark-stub" />' },
   NMenu: { name: 'NMenu', template: '<div class="menu-stub" />' },
   NDivider: { name: 'NDivider', template: '<div class="divider-stub"><slot /></div>' },
+  NPopover: {
+    name: 'NPopover',
+    props: ['trigger', 'placement', 'showArrow'],
+    template: '<div class="popover-stub"><slot name="trigger" /><slot /></div>',
+  },
   NTooltip: {
     name: 'NTooltip',
     props: ['placement', 'trigger'],
@@ -117,7 +122,7 @@ vi.mock('naive-ui', () => ({
   }),
 }))
 
-// Stub @iconify/vue Icon — the drawer renders icons for color-mode tabs
+// Stub @iconify/vue Icon - the drawer renders icons for color-mode tabs
 // and the Preset palette active state, but tests don't care about visuals.
 vi.mock('@iconify/vue', () => ({
   Icon: { name: 'Icon', props: ['icon'], template: '<i class="iconify-stub" :data-icon="icon" />' },
@@ -175,18 +180,28 @@ describe('TThemeDrawer', () => {
     expect(names).toEqual(['appearance', 'layout', 'general', 'preset'])
   })
 
-  it('updates theme context primary color when palette card clicked', async () => {
-    // Standalone swatches were folded into NColorPicker `:swatches` (soybean
-    // parity) and the palette cards moved to the Preset tab as full-size
-    // cards. We click an inner card directly via its class.
+  it('applies a full appearance look when a Preset-tab look card is clicked', async () => {
+    // The Preset tab offers full appearance presets (a complete look, not just
+    // a primary swatch). Clicking the "aubergine" look applies its accent + the
+    // unified aubergine chrome (sider + header).
     const ctx = createCtx()
+    const store = useAdminThemeStore()
+    store.setCardBg('#eeeeee') // a stale override the look must clear (aubergine sets no cardBg)
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: ctx },
     })
-    const cards = wrapper.findAll('.t-theme-drawer__preset-card')
-    expect(cards.length).toBe(12)
-    await cards[2].trigger('click') // index 2 = '#7C3AED'
-    expect(ctx.settings.value.colors.primary).toBe('#7C3AED')
+    const cards = wrapper.findAll('.t-theme-drawer__look-card')
+    expect(cards.length).toBe(18) // built-in curated looks
+    // Locate by aria-label so the test survives roster reordering.
+    const aubergine = wrapper.find('[aria-label="admin.theme.preset.looks.aubergine"]')
+    expect(aubergine.exists()).toBe(true)
+    await aubergine.trigger('click')
+    expect(ctx.settings.value.colors.primary).toBe('#611F69')
+    expect(store.invertSider).toBe(true)
+    expect(store.siderBg).toBe('#3F0E40') // Slack's aubergine sider
+    expect(store.headerBg).toBe('#3F0E40') // unified chrome: header joins the sider
+    // The look defines the whole surface set, so it clears the stale card override.
+    expect(store.cardBg).toBeNull()
   })
 
   it('updates themeStore.layoutMode when a layout card clicked', async () => {
@@ -291,38 +306,42 @@ describe('TThemeDrawer - presets mode', () => {
     setActivePinia(createPinia())
   })
 
-  it('renders only the preset grid (no tabs) with the user-preset title', () => {
+  it('renders the whole-look grid (no tabs) with the appearance title', () => {
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: createCtx(), mode: 'presets' },
     })
     expect(wrapper.findAll('.tab-pane-stub').length).toBe(0)
-    // Default card + 12 built-in palettes.
-    expect(wrapper.findAll('.t-theme-drawer__preset-card').length).toBe(13)
+    // Non-privileged users now pick a WHOLE look (same 18 built-in looks the
+    // admin sees), not just a color swatch.
+    expect(wrapper.findAll('.t-theme-drawer__look-card').length).toBe(18)
     expect(wrapper.find('.n-drawer-content-stub').attributes('data-title')).toBe(
       'admin.theme.userPreset.title',
     )
   })
 
-  it('picking a preset records userPresetColor and applies the primary color', async () => {
+  it('picking a look records userPresetLook and applies the whole preset', async () => {
     const ctx = createCtx()
     const store = useAdminThemeStore()
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: ctx, mode: 'presets' },
     })
-    const cards = wrapper.findAll('.t-theme-drawer__preset-card')
-    await cards[3].trigger('click') // [0] = default card, [3] = '#7C3AED'
-    expect(store.userPresetColor).toBe('#7C3AED')
+    const aubergine = wrapper.find('[aria-label="admin.theme.preset.looks.aubergine"]')
+    await aubergine.trigger('click')
+    expect(store.userPresetLook).toBe('aubergine')
+    expect(store.siderBg).toBe('#3F0E40') // the look's surface applied, not just a color
+    expect(ctx.settings.value.colors.primary).toBe('#611F69')
   })
 
-  it('the default card clears the choice and re-applies the global snapshot', async () => {
+  it('the default look clears the personal choice and re-applies the global snapshot', async () => {
     const store = useAdminThemeStore()
-    store.setUserPresetColor('#7C3AED')
+    store.setUserPresetLook('nord')
     const controller = fakeController()
+    controller.remote.value = { version: 1 } as never // a global snapshot exists
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: createCtx(), mode: 'presets', globalTheme: controller },
     })
-    await wrapper.findAll('.t-theme-drawer__preset-card')[0].trigger('click')
-    expect(store.userPresetColor).toBeNull()
+    await wrapper.findAll('.t-theme-drawer__look-card')[0].trigger('click') // [0] = 'default'
+    expect(store.userPresetLook).toBeNull()
     expect(controller.applyRemote).toHaveBeenCalled()
   })
 

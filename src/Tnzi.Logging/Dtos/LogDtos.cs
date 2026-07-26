@@ -1,7 +1,7 @@
 namespace Tnzi.Logging.Dtos;
 
 /// <summary>
-/// Single log level entry — the per-level directory that LoggingModule
+/// Single log level entry: the per-level directory that LoggingModule
 /// creates (Information / Warning / Error / Fatal / Debug). Used by the
 /// admin log viewer to populate the left-side level navigator.
 /// </summary>
@@ -45,7 +45,7 @@ public class LogFileInfoDto
 }
 
 /// <summary>
-/// Tail-read result — last N lines of a single log file.
+/// Tail-read result: last N lines of a single log file.
 /// </summary>
 public class LogTailResultDto
 {

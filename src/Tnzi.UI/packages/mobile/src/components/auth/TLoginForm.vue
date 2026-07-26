@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { OAuthSocialProvider } from '@tnzi/core/types/shared-ui';
+import { useLoginForm } from '../../headless/useLoginForm';
 
 interface ILoginFormProps {
   showRememberMe?: boolean;
@@ -59,23 +60,41 @@ const props = withDefaults(defineProps<ILoginFormProps>(), {
 
 const emit = defineEmits<ILoginFormEmits>();
 
-const userName = ref('');
-const password = ref('');
-const rememberMe = ref(false);
-const captchaCode = ref('');
+// State and validation live in the headless composable so the logic stays
+// testable and shared with consumers that draw their own UI. The options are
+// declared as getters because the composable reads them lazily (inside computed
+// / validate), which is what keeps them tracking the live props.
+const form = useLoginForm({
+  get showCaptcha() {
+    return props.showCaptcha;
+  },
+  get captchaId() {
+    return props.captchaId;
+  },
+  onSubmit: async (credentials) => {
+    emit('submit', {
+      userName: credentials.userName,
+      password: credentials.password,
+      rememberMe: props.showRememberMe ? credentials.rememberMe : undefined,
+      captchaId: props.showCaptcha ? props.captchaId : undefined,
+      captchaCode: props.showCaptcha ? credentials.captchaCode : undefined,
+    });
+  },
+  onForgotPassword: () => emit('forgotPassword'),
+  onRefreshCaptcha: () => props.onRefreshCaptcha?.(),
+});
 
-const isLoading = computed(() => props.loading);
+const { username, password, rememberMe, captchaCode } = form.fields;
+
+const isLoading = computed(() => props.loading || form.isSubmitting.value);
 const isDisabled = computed(() => props.disabled);
 
-const handleSubmit = () => {
-  emit('submit', {
-    userName: userName.value,
-    password: password.value,
-    rememberMe: props.showRememberMe ? rememberMe.value : undefined,
-    captchaId: props.showCaptcha ? props.captchaId : undefined,
-    captchaCode: props.showCaptcha ? captchaCode.value : undefined,
-  });
-};
+const usernameRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: props.usernameLabel || t('auth.username') }) },
+]);
+const passwordRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: props.passwordLabel || t('auth.password') }) },
+]);
 
 const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProviders']>[number]) => {
   emit('socialLogin', provider);
@@ -83,15 +102,15 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
 </script>
 
 <template>
-  <div class="tz-vant-card">
-    <van-form @submit="handleSubmit">
+  <div class="overflow-hidden rounded-xl bg-van-surface">
+    <van-form @submit="form.submit">
       <van-field
-        v-model="userName"
+        v-model="username"
         name="username"
         :label="props.usernameLabel || t('auth.username')"
         :placeholder="props.usernamePlaceholder || t('auth.username')"
         :disabled="isDisabled"
-        :rules="[{ required: true, message: 'Username is required' }]"
+        :rules="usernameRules"
       />
       <van-field
         v-model="password"
@@ -100,7 +119,7 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
         :label="props.passwordLabel || t('auth.password')"
         :placeholder="props.passwordPlaceholder || t('auth.password')"
         :disabled="isDisabled"
-        :rules="[{ required: true, message: 'Password is required' }]"
+        :rules="passwordRules"
       />
 
       <van-field
@@ -116,7 +135,7 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
             :src="props.captchaUrl"
             alt="captcha"
             class="h-8 w-20 rounded"
-            @click="props.onRefreshCaptcha?.()"
+            @click="form.refreshCaptcha"
           />
         </template>
       </van-field>
@@ -128,9 +147,9 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
         <button
           v-if="props.showForgotPassword"
           type="button"
-          class="border-0 bg-transparent text-[#1989fa]"
+          class="border-0 bg-transparent text-van-primary"
           :disabled="isDisabled"
-          @click="emit('forgotPassword')"
+          @click="form.forgotPassword"
         >
           {{ t('auth.forgotPassword') }}
         </button>
@@ -160,11 +179,3 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
     </van-form>
   </div>
 </template>
-
-<style scoped>
-.tz-vant-card {
-  border-radius: 12px;
-  background: #fff;
-  overflow: hidden;
-}
-</style>

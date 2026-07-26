@@ -22,7 +22,7 @@ public static class SupervisorTemplate
 
         var builder = WorkflowBuilder.Create();
 
-        // 1. Router 节点 — 分类输入
+        // 1. Router 节点 - 分类输入
         var routesJson = JsonSerializer.Serialize(options.Routes, TnziJsonDefaults.Options);
         builder.AddRouterStep("router", agentId: options.RouterAgentId)
             .WithConfiguration("routes", routesJson);
@@ -44,7 +44,7 @@ public static class SupervisorTemplate
                 .WithConfiguration("workers", workersJson);
         }
 
-        // 3. 条件边 — Router 路由到对应 Worker
+        // 3. 条件边 - Router 路由到对应 Worker
         var routeEdges = new Dictionary<string, string>();
         foreach (var category in options.CategoryWorkers.Keys)
         {
@@ -55,14 +55,14 @@ public static class SupervisorTemplate
         // 4. Review-Rework 循环
         builder.AddLoop("review-loop", options.MaxReworkRounds, loopBuilder =>
         {
-            // Review 节点 — 审查 Worker 输出
+            // Review 节点 - 审查 Worker 输出
             var reviewStep = loopBuilder.AddReviewStep("review", agentId: options.ReviewerAgentId);
             foreach (var stepId in workerStepIds)
             {
                 reviewStep.DependsOn(stepId);
             }
 
-            // Rework 节点 — 如果 Review verdict = rework，重新处理
+            // Rework 节点 - 如果 Review verdict = rework，重新处理
             loopBuilder.AddStep("rework", agentId: workerStepIds.Count == 1
                 ? options.CategoryWorkers.Values.First().FirstOrDefault()
                 : null)
@@ -77,7 +77,7 @@ public static class SupervisorTemplate
             }, defaultTarget: "synthesize");
         });
 
-        // 5. Synthesize 节点 — 汇总最终结果
+        // 5. Synthesize 节点 - 汇总最终结果
         var synthStep = builder.AddSynthesizeStep("synthesize", agentId: options.SynthesizerAgentId);
         synthStep.DependsOn("review");
 

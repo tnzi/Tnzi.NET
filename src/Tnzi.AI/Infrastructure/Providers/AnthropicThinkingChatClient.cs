@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Streaming;
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// Anthropic thinking 装饰器 — 在 ChatOptions.AdditionalProperties 中注入 thinking 参数。
+/// Anthropic thinking 装饰器 - 在 ChatOptions.AdditionalProperties 中注入 thinking 参数。
 /// Anthropic SDK 原生返回 TextReasoningContent，无需 ReasoningAwareChatClientDecorator。
 /// </summary>
 public sealed class AnthropicThinkingChatClient : DelegatingChatClient

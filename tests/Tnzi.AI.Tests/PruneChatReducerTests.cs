@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// PruneChatReducer 单元测试 — 验证历史消息裁剪策略
+/// PruneChatReducer 单元测试 - 验证历史消息裁剪策略
 /// </summary>
 public class PruneChatReducerTests
 {

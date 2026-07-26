@@ -369,4 +369,85 @@ public static class FinanceQueryExtensions
 
         return queryable;
     }
+
+    /// <summary>
+    /// 根据 EstimateQueryDto 过滤报价单
+    /// </summary>
+    public static IQueryable<Estimate> Filter(this IQueryable<Estimate> queryable, EstimateQueryDto query)
+    {
+        if (query.Status.HasValue)
+            queryable = queryable.Where(d => d.Status == query.Status.Value);
+
+        // "仍在流转中" = 还可能变成一张发票的那些；已转换/已拒绝/已关闭都出局。
+        if (query.OpenOnly == true)
+            queryable = queryable.Where(d =>
+                d.Status == FinanceOfferStatus.Draft ||
+                d.Status == FinanceOfferStatus.Sent ||
+                d.Status == FinanceOfferStatus.Accepted);
+
+        if (query.CustomerId.HasValue)
+            queryable = queryable.Where(d => d.CustomerId == query.CustomerId.Value);
+
+        if (query.DateFrom.HasValue)
+        {
+            var from = query.DateFrom.Value.ToUtcDate();
+            queryable = queryable.Where(d => d.DocDate >= from);
+        }
+
+        if (query.DateTo.HasValue)
+        {
+            var toExclusive = query.DateTo.Value.ToUtcDate().AddDays(1);
+            queryable = queryable.Where(d => d.DocDate < toExclusive);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var keyword = query.Keyword.ToLower();
+            queryable = queryable.Where(d =>
+                (d.Number != null && d.Number.ToLower().Contains(keyword)) ||
+                (d.Memo != null && d.Memo.ToLower().Contains(keyword)));
+        }
+
+        return queryable;
+    }
+
+    /// <summary>
+    /// 根据 PurchaseOrderQueryDto 过滤采购订单
+    /// </summary>
+    public static IQueryable<PurchaseOrder> Filter(this IQueryable<PurchaseOrder> queryable, PurchaseOrderQueryDto query)
+    {
+        if (query.Status.HasValue)
+            queryable = queryable.Where(d => d.Status == query.Status.Value);
+
+        if (query.OpenOnly == true)
+            queryable = queryable.Where(d =>
+                d.Status == FinanceOfferStatus.Draft ||
+                d.Status == FinanceOfferStatus.Sent ||
+                d.Status == FinanceOfferStatus.Accepted);
+
+        if (query.VendorId.HasValue)
+            queryable = queryable.Where(d => d.VendorId == query.VendorId.Value);
+
+        if (query.DateFrom.HasValue)
+        {
+            var from = query.DateFrom.Value.ToUtcDate();
+            queryable = queryable.Where(d => d.DocDate >= from);
+        }
+
+        if (query.DateTo.HasValue)
+        {
+            var toExclusive = query.DateTo.Value.ToUtcDate().AddDays(1);
+            queryable = queryable.Where(d => d.DocDate < toExclusive);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var keyword = query.Keyword.ToLower();
+            queryable = queryable.Where(d =>
+                (d.Number != null && d.Number.ToLower().Contains(keyword)) ||
+                (d.Memo != null && d.Memo.ToLower().Contains(keyword)));
+        }
+
+        return queryable;
+    }
 }

@@ -78,7 +78,7 @@ public class AgentToolGrantResolutionTests
         agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Agent { Id = agentId, Name = "agent", Provider = "OpenAI", Model = "gpt-4o", IsEnabled = true });
 
-        // The agent has a single per-tool grant ("specific_tool") — no group grants the tool.
+        // The agent has a single per-tool grant ("specific_tool") - no group grants the tool.
         var grantService = new Mock<IAgentGrantService>();
         grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentGrantsProjection { ToolNames = ["specific_tool"] });
@@ -95,7 +95,7 @@ public class AgentToolGrantResolutionTests
     [Fact]
     public async Task ResolveAgentAsync_AdHocRequestToolNames_FlowsToFactory()
     {
-        // No AgentId, no ToolGroups — purely ad-hoc per-tool override via request.ToolNames.
+        // No AgentId, no ToolGroups - purely ad-hoc per-tool override via request.ToolNames.
         var grantService = new Mock<IAgentGrantService>();
         var agentRepository = new Mock<IRepository<Agent, Guid>>();
 

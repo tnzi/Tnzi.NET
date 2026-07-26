@@ -1,5 +1,5 @@
 /**
- * Sub-Agent Type API wrappers — CRUD over persisted custom sub-agent type
+ * Sub-Agent Type API wrappers - CRUD over persisted custom sub-agent type
  * definitions.
  *
  * Mirrors `Tnzi.AI/Controllers/Admin/DefaultSubAgentTypeAdminController` (route

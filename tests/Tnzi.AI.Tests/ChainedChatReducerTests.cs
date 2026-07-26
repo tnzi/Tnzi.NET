@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// ChainedChatReducer 单元测试 — 验证链式历史压缩器行为
+/// ChainedChatReducer 单元测试 - 验证链式历史压缩器行为
 /// </summary>
 public class ChainedChatReducerTests
 {

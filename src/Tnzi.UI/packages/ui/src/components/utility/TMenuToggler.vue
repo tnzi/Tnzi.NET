@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * `TMenuToggler` — sidebar collapse / expand button. Faithful port of
+ * `TMenuToggler` - sidebar collapse / expand button. Faithful port of
  * soybean-admin's `MenuToggler` (src/components/common/menu-toggler.vue):
  * the icon is an animated `line-md` fold glyph whose stroke draws itself on
  * mount, and the button carries `:key="String(collapsed)"` so it remounts on
- * every toggle — replaying that draw-in animation each click. `fold-left`
+ * every toggle - replaying that draw-in animation each click. `fold-left`
  * ("click to collapse") shows when expanded, `fold-right` ("click to expand")
  * when collapsed.
  */

@@ -1,5 +1,5 @@
 /**
- * Authorization bridge — full implementation (Phase 3 Task 3.6 + 3.8).
+ * Authorization bridge - full implementation (Phase 3 Task 3.6 + 3.8).
  *
  * Adapts the authorization backend APIs (tree/list/assign patterns) to the
  * BridgeCrudContract shape used by all TCrudPage-based management pages.
@@ -43,7 +43,7 @@ import { ensureOk, pageArray, pagedResult, unwrapResult as unwrap } from '../_ma
 type HttpClient = Parameters<typeof useAdminFunctionModuleApi>[0]
 
 /**
- * Result of `functionModules.previewCascade(id)` — what flips when an
+ * Result of `functionModules.previewCascade(id)` - what flips when an
  * admin disables a parent module. The UI uses this in the confirm
  * dialog so the user can see "you're about to disable X child modules
  * and Y functions" before clicking through.
@@ -84,7 +84,7 @@ export interface AuthorizationBridge {
     /** Disable a module (cascades to all children + functions). */
     disable(id: string): Promise<void>
     /**
-     * Compute the cascade footprint of disabling a module — count of
+     * Compute the cascade footprint of disabling a module - count of
      * descendant modules + functions that would also flip to disabled.
      * Runs entirely in the bridge (no extra backend call) by walking the
      * cached `getAll()` tree + a single `permissions.getByModule` per
@@ -93,7 +93,7 @@ export interface AuthorizationBridge {
     previewCascade(id: string): Promise<ModuleCascadePreview>
   }
   /**
-   * Permissions (ModuleFunction) — full management via
+   * Permissions (ModuleFunction) - full management via
    * /admin/module-functions (create/update/delete/enable/disable) plus the
    * per-module read used by the Permissions master-detail page. `fetch`
    * requires a `moduleId` filter. System-managed rows (declared by an
@@ -126,7 +126,7 @@ export interface AuthorizationBridge {
     compare(roleAId: string, roleBId: string): Promise<PermissionComparisonDto>
     /**
      * Copy every assignment from `sourceRoleId` into `targetRoleId`. Does
-     * NOT remove existing assignments on the target — pair with
+     * NOT remove existing assignments on the target - pair with
      * `clearForRole(targetRoleId)` for hard reset semantics. Returns the
      * number of new assignments inserted.
      */
@@ -167,7 +167,7 @@ export interface AuthorizationBridge {
     /** Every EntityRole assignment for a given entity type. */
     getByEntityInfo(entityInfoId: string): Promise<EntityRoleDto[]>
     /**
-     * Effective entity-roles for a single user — aggregated across every
+     * Effective entity-roles for a single user - aggregated across every
      * role the user holds. Used by the EntityRole page's "Inspect User"
      * tab to debug "why can/can't user X do operation Y on entity Z?"
      * without the admin having to cross-reference role + role-function
@@ -236,7 +236,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
     previewCascade: async (id: string): Promise<ModuleCascadePreview> => {
       // BFS over the flat module list to gather every descendant of `id`,
-      // then sum the function counts (one `getByModule` per node — cheap
+      // then sum the function counts (one `getByModule` per node - cheap
       // for typical trees of <100 modules, and avoids a dedicated backend
       // endpoint).
       const all = unwrap<FunctionModuleDto[]>(await fmApi.getList())
@@ -279,7 +279,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
   }
 
-  // Permissions (ModuleFunction) — list requires a `moduleId` filter; writes
+  // Permissions (ModuleFunction) - list requires a `moduleId` filter; writes
   // go to the dedicated /admin/module-functions endpoints.
   const permissions: AuthorizationBridge['permissions'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<ModuleFunctionDto>> => {
@@ -307,7 +307,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
   }
 
-  // RoleFunction is a relationship table — no create/update/delete from admin.
+  // RoleFunction is a relationship table - no create/update/delete from admin.
   // Fetch uses the canonical GET /admin/role-functions paged endpoint so the
   // page can browse assignments across ALL roles. Role / function / enabled
   // filters flow through the standard filters bag on CrudPageQuery.
@@ -424,7 +424,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
           ensureOk(await erApi.create({ entityInfoId, roleId, operation, filter }))
         }
       } else if (existing) {
-        // Toggle-off currently deletes the row outright — matches the prior CRUD
+        // Toggle-off currently deletes the row outright - matches the prior CRUD
         // behaviour and keeps the matrix readable (no zombie isEnabled=false
         // rows clogging getByEntityInfo results).
         ensureOk(await erApi.delete(existing.id))

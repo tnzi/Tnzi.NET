@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// Agent 版本快照实体 — 每次 Agent 更新时自动创建的配置快照
+/// Agent 版本快照实体 - 每次 Agent 更新时自动创建的配置快照
 /// </summary>
 public class AgentVersion : CreationAuditedEntity<Guid>, IMultiTenant
 {

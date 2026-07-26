@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Search;
 
 /// <summary>
-/// Deduplication post-processor — removes near-duplicate search results.
+/// Deduplication post-processor - removes near-duplicate search results.
 /// <para>
 /// Uses content similarity (Jaccard similarity on word sets) to detect duplicates.
 /// When two results are similar above the threshold, the one with the lower score is removed.

@@ -162,7 +162,7 @@ public static class TnziApp
             await app.UseTnziAsync();
         }
 
-        // Post-migration startup tasks — run on EVERY boot, AFTER module init +
+        // Post-migration startup tasks - run on EVERY boot, AFTER module init +
         // (optional) migration, regardless of the AutoInitializeDatabase / prod-skip
         // gates. Framework infrastructure that needs the migrated schema (e.g. the
         // permission-catalogue sync) registers an IPostMigrationStartupTask instead of
@@ -252,7 +252,7 @@ public static class TnziApp
     /// </summary>
     private static void WriteStartupError(Exception ex)
     {
-        var sb = new System.Text.StringBuilder();
+        var sb = new StringBuilder();
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
         sb.AppendLine();

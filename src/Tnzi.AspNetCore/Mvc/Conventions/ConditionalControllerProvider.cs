@@ -115,6 +115,15 @@ public class ConditionalControllerProvider : IApplicationModelProvider
                     continue;
                 }
 
+                // ★IEnumerable<T> 恒可解析：MS.DI 对它在零实现时给出空集合，而不是
+                // 解析失败。按"元素类型有没有注册"来判定会把一个完全能跑的 Controller
+                // 静默移除 —— 而"零实现"往往正是它要表达的状态（例如税务申报表：
+                // 一个国家包都没装时也该回 501 引导，不是 404）。
+                if (IsResolvableCollection(parameterType))
+                {
+                    continue;
+                }
+
                 // 检查服务是否已注册
                 if (!IsServiceRegistered(parameterType))
                 {
@@ -134,6 +143,29 @@ public class ConditionalControllerProvider : IApplicationModelProvider
         // 所有构造函数的依赖都不可用
         missingDependency = lastMissing;
         return false;
+    }
+
+    /// <summary>
+    /// 判定参数是否为 MS.DI 恒能解析的集合注入形态。
+    /// </summary>
+    /// <remarks>
+    /// **只有 <c>IEnumerable&lt;T&gt;</c>**：`Microsoft.Extensions.DependencyInjection`
+    /// 的 <c>CallSiteFactory</c> 仅对它做多实现特例（零实现时给出空集合）。
+    /// <c>IReadOnlyCollection&lt;T&gt;</c> / <c>IReadOnlyList&lt;T&gt;</c> / <c>T[]</c>
+    /// **不在特例内**，未注册时激活期会抛 <c>InvalidOperationException</c>。
+    ///
+    /// ★把它们一并放行，等于把"路由不存在（404）"换成"每次调用 500"——后者严格更差：
+    /// 前者是可理解的状态，后者看起来像服务坏了。所以这些形态照常走注册检查，
+    /// 可选的多实现扩展点请一律声明成 <c>IEnumerable&lt;T&gt;</c>。
+    /// </remarks>
+    private static bool IsResolvableCollection(Type parameterType)
+    {
+        if (!parameterType.IsGenericType)
+        {
+            return false;
+        }
+
+        return parameterType.GetGenericTypeDefinition() == typeof(IEnumerable<>);
     }
 
     /// <summary>

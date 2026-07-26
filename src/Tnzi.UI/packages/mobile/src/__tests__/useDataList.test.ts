@@ -33,7 +33,7 @@ describe('useDataList', () => {
     const onLoad = vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }])
     const { hasMore, loadMore } = useDataList({ onLoad, pageSize: 2 })
     await loadMore()
-    // exactly pageSize — hasMore stays true
+    // exactly pageSize - hasMore stays true
     expect(hasMore.value).toBe(true)
   })
 

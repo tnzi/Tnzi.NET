@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TQuotaStatus — Quota remaining indicator with progress bar
+ * TQuotaStatus - Quota remaining indicator with progress bar
  */
 
 import { NProgress, NTooltip } from 'naive-ui';

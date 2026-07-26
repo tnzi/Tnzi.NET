@@ -79,7 +79,7 @@ public class ThreadDataMiddleware : IAiMiddleware
     /// </summary>
     /// <remarks>
     /// Idempotent via the <see cref="SkillsWiredMarker"/> sentinel in the
-    /// parent thread directory — a thread is wired exactly once. The marker
+    /// parent thread directory - a thread is wired exactly once. The marker
     /// is written only on success so a half-completed wiring is retried on
     /// the next request.
     /// </remarks>
@@ -92,7 +92,7 @@ public class ThreadDataMiddleware : IAiMiddleware
 
         // Sentinel lives in the parent thread directory rather than inside
         // skillsPath, because skillsPath may end up as a symlink to the shared
-        // root — writing a file inside the link would pollute the shared dir.
+        // root - writing a file inside the link would pollute the shared dir.
         var marker = Path.Combine(threadDir, SkillsWiredMarker);
         if (File.Exists(marker)) return;
 

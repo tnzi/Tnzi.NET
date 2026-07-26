@@ -323,6 +323,45 @@ describe('FormController', () => {
       await form.submit();
       expect(form.isSubmitting).toBe(false);
     });
+
+    it('should record a thrown string, not swallow it', async () => {
+      // `if (error instanceof Error)` dropped everything else on the floor, so
+      // the form reported failure with an empty error list and nothing to show.
+      const form = new FormController<TestForm>({
+        initialValues: { name: 'Alice', email: 'alice@test.com', age: 25 },
+        schema: testSchema as z.ZodType<TestForm>,
+        onSubmit: async () => {
+          throw 'plain string rejection';
+        },
+      });
+      const result = await form.submit();
+      expect(result).toBe(false);
+      expect(form.errors).toEqual([{ field: '_form', message: 'plain string rejection' }]);
+    });
+
+    it('should record a thrown object with a message property', async () => {
+      const form = new FormController<TestForm>({
+        initialValues: { name: 'Alice', email: 'alice@test.com', age: 25 },
+        schema: testSchema as z.ZodType<TestForm>,
+        onSubmit: async () => {
+          throw { message: 'envelope refused' };
+        },
+      });
+      await form.submit();
+      expect(form.errors).toEqual([{ field: '_form', message: 'envelope refused' }]);
+    });
+
+    it('should fall back to a generic message for an opaque throw', async () => {
+      const form = new FormController<TestForm>({
+        initialValues: { name: 'Alice', email: 'alice@test.com', age: 25 },
+        schema: testSchema as z.ZodType<TestForm>,
+        onSubmit: async () => {
+          throw null;
+        },
+      });
+      await form.submit();
+      expect(form.errors).toEqual([{ field: '_form', message: 'Submit failed' }]);
+    });
   });
 
   // ------------------------------------------

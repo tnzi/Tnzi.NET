@@ -1,17 +1,17 @@
 /**
- * Promotion bridge — thin adapter over `@tnzi/core`'s admin promotion API
+ * Promotion bridge - thin adapter over `@tnzi/core`'s admin promotion API
  * (`useAdminCouponApi`, wrapping `/admin/promotions/*` exposed by
  * `Tnzi.Payment.Controllers.Admin.DefaultPromotionAdminController`).
  *
  * Shaped for the standard `useCrudPage` flow: `create` / `update` accept the
  * page's `Partial<PromotionDto>` form model and project it onto the backend
- * `CreatePromotionDto` / `UpdatePromotionDto` by WHITELIST — so the create path
+ * `CreatePromotionDto` / `UpdatePromotionDto` by WHITELIST - so the create path
  * naturally drops `isActive` (not a create field) and the update path naturally
  * drops `discountType` / `startTime` / `type` / `promotionCode` (immutable
  * after creation, absent from `UpdatePromotionDto`).
  *
  * Backend note: `/admin/promotions` GET filters on
- * promotionCode/type/productType/activeOnly only — no free-text search. The
+ * promotionCode/type/productType/activeOnly only - no free-text search. The
  * page's `isActive` boolean maps to the backend `activeOnly` flag.
  */
 import type { HttpClient } from '@tnzi/core/http'
@@ -30,7 +30,7 @@ export type UpdatePromotionDto = CoreUpdatePromotionDto
 
 // Re-export the enums as VALUES so the page can use them at runtime (form
 // initializers / select options) without importing @tnzi/core/services/*
-// directly — pages route through the bridge per the no-restricted-imports gate.
+// directly - pages route through the bridge per the no-restricted-imports gate.
 export { DiscountType, PromotionType } from '@tnzi/core/services/payment'
 
 /** Page-facing query shape (table page: page + active filter). */
@@ -89,7 +89,7 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
     getById: async (id: string) =>
       unwrap<PromotionDto | null>(await api.getById(id)),
     create: async (data: Partial<PromotionDto>) => {
-      // Whitelist onto CreatePromotionDto — drops isActive / id / usedCount /
+      // Whitelist onto CreatePromotionDto - drops isActive / id / usedCount /
       // isValid that the create endpoint does not accept.
       const body: CoreCreatePromotionDto = {
         promotionCode: String(data.promotionCode ?? ''),
@@ -113,7 +113,7 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
       return (unwrap<PromotionDto | null>(await api.create(body)) ?? ({} as PromotionDto))
     },
     update: async (id: string, data: Partial<PromotionDto>) => {
-      // Whitelist onto UpdatePromotionDto — drops discountType / startTime /
+      // Whitelist onto UpdatePromotionDto - drops discountType / startTime /
       // type / promotionCode (immutable after creation) + read-only fields.
       const body: CoreUpdatePromotionDto = {
         name: data.name ?? undefined,

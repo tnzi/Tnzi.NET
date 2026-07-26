@@ -67,10 +67,9 @@ export const en = {
         successColor: 'Success',
         warningColor: 'Warning',
         errorColor: 'Error',
-        recommendColor: 'Recommended palette',
-        recommendColorOn: 'Auto-derive palette from primary',
         infoFollowPrimary: 'Info color follows primary',
         themeRadius: 'Border radius',
+        accessibility: 'Accessibility',
         grayscale: 'Grayscale mode',
         colourWeakness: 'Colour-weakness mode',
         mode: 'Color mode',
@@ -79,11 +78,18 @@ export const en = {
         modeAuto: 'Auto',
         borderRadius: 'Border radius',
         backgrounds: 'Backgrounds',
-        siderBg: 'Sidebar background',
-        headerBg: 'Header background',
-        contentBg: 'Content background',
-        containerBg: 'Container / card background',
+        backgroundsHint:
+          'Pick any color for each surface; the text automatically switches to light or dark to stay readable.',
+        siderBg: 'Sidebar',
+        headerBg: 'Header',
+        tabBg: 'Tab bar',
+        footerBg: 'Footer',
+        contentBg: 'Content',
+        pageHeaderBg: 'Page header',
+        cardBg: 'Card / List',
         resetBg: 'Reset to default',
+        textColor: 'Text color (auto)',
+        textAuto: 'Reset to auto',
       },
       layout: {
         mode: 'Layout mode',
@@ -92,6 +98,8 @@ export const en = {
         horizontal: 'Horizontal',
         topHybridHeaderFirst: 'Hybrid',
         invertSider: 'Inverted sider',
+        invertSiderHint:
+          'Use the built-in dark sidebar. Applies in light mode with a vertical layout, and only when no custom sidebar background is set.',
         siderWidth: 'Sider width',
         siderCollapsedWidth: 'Sider collapsed width',
         mixSiderWidth: 'Mix rail width',
@@ -158,7 +166,27 @@ export const en = {
         global: 'Global',
       },
       preset: {
-        palette: 'Color palettes',
+        palette: 'Appearance presets',
+        looks: {
+          default: 'Default',
+          cloud: 'Cloud',
+          mint: 'Mint',
+          carbon: 'Carbon',
+          latte: 'Latte',
+          dawn: 'Dawn',
+          paper: 'Paper',
+          solarized: 'Solarized',
+          navy: 'Navy',
+          forest: 'Forest',
+          aubergine: 'Aubergine',
+          wine: 'Wine',
+          espresso: 'Espresso',
+          steel: 'Steel',
+          graphite: 'Graphite',
+          nord: 'Nord',
+          gruvbox: 'Gruvbox',
+          terminal: 'Terminal',
+        },
         export: 'Export config',
         exportDescription: 'Export current theme + layout as JSON',
         copy: 'Copy to clipboard',
@@ -182,8 +210,8 @@ export const en = {
         resetFailed: 'Failed to reset the global theme',
       },
       userPreset: {
-        title: 'Color Scheme',
-        hint: 'Pick a color scheme for your interface. All other appearance settings are managed by your administrator.',
+        title: 'Appearance',
+        hint: 'Pick a look for your interface. "Default" follows the theme set by your administrator.',
         default: 'Default',
       },
     },
@@ -371,25 +399,108 @@ export const en = {
       errorMissingResend: 'Resending the code is not configured for this consumer.',
       errorGeneric: 'Request failed',
       errorPasswordMismatch: 'Passwords do not match',
+      captcha: {
+        label: 'Captcha',
+        placeholder: 'Enter the characters shown',
+        refresh: 'Refresh captcha',
+        required: 'Please enter the captcha.',
+        invalid: 'Incorrect captcha, please try again.',
+        hint: 'For your security, please enter the captcha to continue.',
+        loadFailed: 'Failed to load captcha',
+      },
       twoFactor: {
-        greeting: 'Hi',
-        prompt: 'Enter the code from your',
         verify: 'Verify',
-        resend: 'Resend code',
-        codePlaceholder: 'Enter 6-digit code',
-        methodSms: 'SMS message',
-        methodEmail: 'email',
-        methodTotp: 'authenticator app',
+        resend: 'Resend',
+        noCode: "Didn't get a code?",
+        signingInAs: 'Signing in as',
+        tryAnother: 'Try another way',
+        codeSent: 'A new code has been sent.',
+        promptTotp: 'Enter the 6-digit code from your authenticator app.',
+        promptSms: 'Enter the 6-digit code we texted to your phone.',
+        promptEmail: 'Enter the 6-digit code we sent to your email.',
+        promptSentTo: 'Enter the 6-digit code we sent to {target}.',
+        optSms: 'Text message',
+        optEmail: 'Email',
+        optTotp: 'Authenticator app',
       },
       placeholder: {
-        bindWechat: 'WeChat binding — override this module to integrate',
+        bindWechat: 'WeChat binding - override this module to integrate',
       },
     },
-    // Shared field-name dictionary — translatePageKey falls back here when a
+    // Shared field-name dictionary - translatePageKey falls back here when a
     // page-config uses `columns.foo` / `form.foo` but the page namespace
     // doesn't define a per-key override. Keep entries field-name-agnostic
     // (Status, not "User Status") so the same key reads well on every page.
     shared: {
+      /**
+       * Shared vocabulary for form section headings (`FormSchemaSection.labelKey`).
+       *
+       * Section names repeat across modules: "Basics", "Contact", "Status" mean
+       * the same thing on a user, a customer and a template. Keeping one list
+       * here means a page declares `labelKey: 'admin.shared.formSections.basics'`
+       * and is translated everywhere, instead of every module re-declaring (and
+       * re-translating) the same six words under its own namespace.
+       */
+      formSections: {
+        basics: 'Basics',
+        identity: 'Identity',
+        contact: 'Contact',
+        address: 'Address',
+        value: 'Value',
+        placement: 'Placement',
+        status: 'Status',
+        schedule: 'Schedule',
+        lastRun: 'Last run',
+        security: 'Security',
+        banking: 'Banking',
+        billing: 'Billing',
+        content: 'Content',
+        delivery: 'Delivery',
+        limits: 'Limits',
+        pricing: 'Pricing',
+        tax: 'Tax',
+        notes: 'Notes',
+        options: 'Options',
+        connection: 'Connection',
+        credentials: 'Credentials',
+        behaviour: 'Behaviour',
+        appearance: 'Appearance',
+        permissions: 'Permissions',
+        period: 'Period',
+        classification: 'Classification',
+        amounts: 'Amounts',
+        advanced: 'Advanced',
+      },
+      /**
+       * The two vocabularies for the sides of an amount.
+       *
+       * Which one a screen uses is decided by **what the screen shows**, never
+       * by who is looking at it:
+       *
+       * - one funds account, its own side only → `moneyFlow` (Money in / out)
+       * - a whole double-entry voucher, or several accounts → `ledger`
+       *   (Debit / Credit)
+       * - the columns of an external bank file → the bank's own words
+       *   (Withdrawal / Deposit), which stay with the import screen
+       *
+       * Quick test: is there a second account in this view? Yes → `ledger`.
+       * Only the account you are looking at → `moneyFlow`. Anything with a
+       * debit/credit totals row is a ledger view by definition; relabelling it
+       * would read as "this line is both 1,250 in and 1,250 out".
+       *
+       * Rendered through `moneyPairColumns` (components/finance) so the choice
+       * is declared once per view instead of remembered per column.
+       */
+      moneyFlow: { in: 'Money in', out: 'Money out', any: 'Money in or out' },
+      ledger: { debit: 'Debit', credit: 'Credit' },
+      /** Card-surface phrases reused across list pages. */
+      card: {
+        netDays: 'Net {days}',
+        noTerms: 'No terms',
+        recipients: '{ok} of {total} delivered',
+        partial: '{n} failed',
+        discount: '{amount} discount',
+      },
       source: {
         _label: 'Source',
         database: 'Database',
@@ -463,7 +574,7 @@ export const en = {
         debug: 'Debug',
         autoScroll: 'Auto-scroll',
       },
-      // Mirror of `columns.*` — form-schema fall-back dictionary so a
+      // Mirror of `columns.*` - form-schema fall-back dictionary so a
       // generic `'form.name'` key gets a clean label even without a
       // page-scoped override.
       form: {
@@ -636,7 +747,6 @@ export const en = {
         workflows: 'Workflows',
         workflowRuns: 'Workflow Runs',
         skills: 'Skills',
-        personas: 'Personas',
         knowledge: 'Knowledge Base',
         mcp: 'MCP Servers',
         providers: 'Providers',
@@ -654,7 +764,6 @@ export const en = {
       },
       system: {
         _label: 'System',
-        menus: 'Menus',
         dictionaries: 'Dictionaries',
         scheduledJobs: 'Scheduled Jobs',
         features: 'Features',
@@ -717,7 +826,7 @@ export const en = {
     modules: {
       account: {
         userCenter: {
-          loadTimeout: 'Request timed out — please retry.',
+          loadTimeout: 'Request timed out - please retry.',
           loadFailed: 'Failed to load profile.',
           title: 'User Center',
           refresh: 'Refresh',
@@ -741,6 +850,8 @@ export const en = {
             avatarHint: 'Click to upload a new avatar. JPG/PNG, up to 5 MB.',
             avatarUpdated: 'Avatar updated',
             avatarUploadFailed: 'Avatar upload failed',
+            avatarRemove: 'Remove avatar',
+            avatarRemoved: 'Avatar removed',
             noRoles: 'No roles assigned.',
             userName: 'Username',
             nickname: 'Nickname',
@@ -755,7 +866,7 @@ export const en = {
             phonePlaceholder: '+1 555 0100',
             gender: 'Gender',
             genderPlaceholder: 'Select gender',
-            genderUnknown: 'Prefer not to say',
+            genderUnknown: 'Unspecified',
             genderMale: 'Male',
             genderFemale: 'Female',
             birthday: 'Birthday',
@@ -777,7 +888,7 @@ export const en = {
             newPhonePlaceholder: 'New phone number',
             code: 'Verification code',
             codePlaceholder: 'Enter the 6-digit code',
-            hint: 'A verification code will be sent to the new address — enter it below to confirm the change.',
+            hint: 'We\'ll send a verification code to confirm the change.',
             cancel: 'Cancel',
             sendCode: 'Send code',
             confirm: 'Confirm change',
@@ -802,16 +913,40 @@ export const en = {
             },
             twoFactor: {
               title: 'Two-factor authentication',
-              global: 'Two-factor enabled',
-              globalHint: 'Globally requires a second factor at every login.',
+              masterHint: 'Require a second step when signing in. Turning it off keeps your configured methods so you can turn it back on without setting them up again.',
+              setupPrompt: 'Enable one or more methods below to finish turning on two-factor authentication.',
+              suspendedHint: 'Two-factor is off. Your configured methods are saved and will take effect again when you turn it back on.',
+              suspendSuccess: 'Two-factor turned off (your methods are saved)',
+              resumeSuccess: 'Two-factor turned back on',
               totp: 'Authenticator app (TOTP)',
               totpHint: 'Use Google Authenticator / 1Password / Authy.',
+              smsMethod: 'Text message (SMS)',
+              smsMethodHint: 'A one-time code sent to your verified phone.',
+              smsRequiresAddress: 'Add and verify a phone number in your profile to use SMS codes.',
+              emailMethod: 'Email code',
+              emailMethodHint: 'A one-time code sent to your verified email.',
+              emailRequiresAddress: 'Add and verify an email address in your profile to use email codes.',
               enabled: 'Enabled',
               disabled: 'Disabled',
               disable: 'Disable',
-              confirmDisable: 'Disable this factor?',
+              confirmDisable: 'Remove the authenticator app?',
               disableSuccess: 'Two-factor disabled',
-              totpDisableSuccess: 'TOTP disabled',
+              totpDisableSuccess: 'Authenticator app removed',
+              methodDisabled: 'Method disabled',
+              preferred: 'Preferred method',
+              setPreferred: 'Set as preferred',
+              preferredSet: 'Preferred method updated',
+              setup: 'Set up',
+              setupTitle: 'Set up authenticator app',
+              confirmEnable: 'Enable',
+              scanHint:
+                'Scan this QR code with your authenticator app, then enter the 6-digit code to confirm.',
+              secretLabel: 'Or enter this key manually',
+              verifyCode: 'Verification code',
+              verifyCodePlaceholder: 'Enter the 6-digit code',
+              codeRequired: 'Please enter the verification code',
+              setupSuccess: 'Authenticator app enabled',
+              enableSuccess: 'Method enabled',
             },
           },
           sessions: {
@@ -850,6 +985,8 @@ export const en = {
             confirmUnlink: 'Remove this linked account?',
             unlinked: 'Account unlinked',
             empty: 'No linked accounts.',
+            linkTitle: 'Link a new account',
+            linkHint: 'Connect a third-party account you can then use to sign in.',
           },
           danger: {
             title: 'Danger zone',
@@ -871,7 +1008,7 @@ export const en = {
               title: 'Delete account',
               hint: 'Soft-deletes the account and personal data (GDPR right-to-be-forgotten).',
               button: 'Delete account',
-              confirm: 'This cannot be undone — really delete your account?',
+              confirm: 'This cannot be undone - really delete your account?',
               success: 'Account deletion requested',
             },
           },
@@ -903,7 +1040,11 @@ export const en = {
           other: 'Other',
         },
         activity: {
-          title: 'Recent activity',
+          // Distinct from `admin.widgets.auditRecent.title` ("Recent activity"):
+          // both widgets sit side by side on the dashboard and read the same
+          // audit feed, so identical English labels made them indistinguishable.
+          // Chinese already separated them (近期动态 / 最近活动).
+          title: 'Activity timeline',
           item1Title: 'Production deploy v0.2.30',
           item1Desc: 'Footer copyright + tab bar wiring rolled out to production.',
           item1Time: '2 hours ago',
@@ -931,20 +1072,56 @@ export const en = {
             userName: 'Username', password: 'Password', email: 'Email', phoneNumber: 'Phone',
             nickname: 'Nickname', keyword: 'Keyword', keywordHint: 'Username / email / phone',
             isLockedOut: 'Lock Status', isEmailConfirmed: 'Email Confirmed',
+            firstName: 'First Name', lastName: 'Last Name', gender: 'Gender',
+            genderUnknown: 'Unspecified', genderMale: 'Male', genderFemale: 'Female',
+            birthday: 'Birthday', address: 'Address', website: 'Website', bio: 'Bio',
           },
-          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', more: 'More', resetPassword: 'Reset Password', enable: 'Enable', disable: 'Disable', lock: 'Lock', unlock: 'Unlock', confirmEnable: 'Enable this user?', confirmDisable: 'Disable this user?', confirmLock: 'Lock this user?', confirmUnlock: 'Unlock this user?', enableSuccess: 'User enabled', disableSuccess: 'User disabled', lockSuccess: 'User locked', unlockSuccess: 'User unlocked', resetPasswordSuccess: 'Password reset', newPassword: 'New password', resetPasswordHint: 'Set the new password for this user. They must change it on next login.', disableReason: 'Reason (optional)', lockUntil: 'Lock until (leave empty = permanent)', manageRoles: 'Manage Roles', manageRolesTitle: "Manage {user}'s Roles", manageRolesHint: 'Check the roles to grant. Unchecked roles will be removed when you save.', manageRolesSuccess: 'Roles updated', noRolesAvailable: 'No roles configured in the system yet', managePermissions: 'Direct Permissions' },
+          actions: { create: 'Create', edit: 'Edit', delete: 'Delete', more: 'More', resetPassword: 'Reset Password', enable: 'Enable', disable: 'Disable', lock: 'Lock', unlock: 'Unlock', confirmEnable: 'Enable this user?', confirmDisable: 'Disable this user?', confirmLock: 'Lock this user?', confirmUnlock: 'Unlock this user?', enableSuccess: 'User enabled', disableSuccess: 'User disabled', lockSuccess: 'User locked', unlockSuccess: 'User unlocked', resetPasswordSuccess: 'Password reset', newPassword: 'New password', resetPasswordHint: 'Set the new password for this user. They must change it on next login.', disableReason: 'Reason (optional)', lockUntil: 'Lock until (leave empty = permanent)', manageRoles: 'Manage Roles', manageRolesTitle: "Manage {user}'s Roles", manageRolesHint: 'Check the roles to grant. Unchecked roles will be removed when you save.', manageRolesSuccess: 'Roles updated', noRolesAvailable: 'No roles configured in the system yet', managePermissions: 'Direct Permissions', open: 'Open' },
           grants: {
             title: "{user}'s Direct Permissions",
             tabGranted: 'Granted',
             tabDenied: 'Denied',
-            hint: 'Grant permission codes to this user directly, on top of whatever their roles provide. Effective permissions are (role grants + these direct grants) minus the denied codes — removing a direct grant never removes a role-derived permission.',
-            denyHint: 'Deny permission codes for this user only. A denied code is removed from their effective permissions no matter which role granted it — use it to carve one exception out of a role without touching the role itself.',
+            hint: 'Grant permission codes to this user directly, on top of whatever their roles provide. Effective permissions are (role grants + these direct grants) minus the denied codes - removing a direct grant never removes a role-derived permission.',
+            denyHint: 'Deny permission codes for this user only. A denied code is removed from their effective permissions no matter which role granted it - use it to carve one exception out of a role without touching the role itself.',
             assignedPrefix: 'Directly granted',
             deniedPrefix: 'Denied',
             dirty: '+{added} / -{removed} unsaved',
             searchPlaceholder: 'Filter panels…',
             success: 'Direct permissions updated',
             superTarget: 'This user is a super administrator: they bypass every permission check, so direct grants and denies have no effect on them and only super administrators may manage their rows.',
+            sectionTitle: 'Direct Permissions',
+          },
+          detail: {
+            loading: 'Loading…',
+            saved: 'Saved',
+            groups: { general: 'General', access: 'Access', activity: 'Activity' },
+            sections: {
+              profile: 'Profile',
+              roles: 'Roles',
+              grants: 'Grants',
+              sessions: 'Sessions',
+              loginLogs: 'Login Logs',
+            },
+            roles: { dirty: '+{added} / -{removed} unsaved' },
+            sessions: {
+              hint: 'Devices currently signed in as this user. Revoking a session signs that device out immediately.',
+              empty: 'No sessions recorded for this user',
+              active: 'Active',
+              revoked: 'Revoked',
+              revoke: 'Revoke',
+              revokeAll: 'Revoke All',
+              confirmRevoke: 'Sign this device out?',
+              confirmRevokeAll: 'Sign out every active device for this user?',
+              revokedAll: 'All active sessions revoked',
+              signedIn: 'Signed in',
+              lastActive: 'Last active',
+              unknownDevice: 'Unknown device',
+            },
+            loginLogs: {
+              empty: 'No login attempts recorded for this user',
+              success: 'Success',
+              failure: 'Failure',
+            },
           },
         },
         roles: {
@@ -974,6 +1151,7 @@ export const en = {
           title: 'Tenants',
           columns: { name: 'Name', code: 'Code', isEnabled: 'Enabled', expiredAt: 'Expires At', remark: 'Remark', creationTime: 'Created At' },
           form: { name: 'Name', code: 'Code', isEnabled: 'Enabled', expiredAt: 'Expires At', remark: 'Remark', keyword: 'Keyword' },
+          neverExpires: 'No expiry',
           actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
         },
         loginLogs: {
@@ -1277,7 +1455,7 @@ export const en = {
             sourceRole: 'Source Role',
             pickSource: 'Select the role to copy permissions from',
             noSource: 'No other roles available to copy from.',
-            hint: 'Permissions from the source role are merged into the current role — existing permissions are not removed. Use "Clear all" first if you want a hard reset.',
+            hint: 'Permissions from the source role are merged into the current role - existing permissions are not removed. Use "Clear all" first if you want a hard reset.',
             confirm: 'Copy',
             success: 'Copied {n} permission(s)',
             sameRoleError: 'Source role cannot be the current role',
@@ -1289,14 +1467,14 @@ export const en = {
           selectEntity: 'Entity',
           entityPlaceholder: 'Pick an entity type to manage…',
           selectPrompt: 'Pick an entity type above to view its data-permission matrix.',
-          noRoles: 'No roles to assign — create roles first.',
+          noRoles: 'No roles to assign - create roles first.',
           status: { dataAuthOn: 'Data-auth enabled', dataAuthOff: 'Data-auth disabled' },
           matrix: { roleHeader: 'Role' },
           operations: {
             Query: { label: 'Query', tip: 'Allow reading rows of this entity' },
             Update: { label: 'Update', tip: 'Allow modifying rows of this entity' },
             Delete: { label: 'Delete', tip: 'Allow removing rows of this entity' },
-            All: { label: 'All', tip: 'Catch-all — implies Query + Update + Delete' },
+            All: { label: 'All', tip: 'Catch-all - implies Query + Update + Delete' },
           },
           toggleOnSuccess: 'Permission granted',
           toggleOffSuccess: 'Permission revoked',
@@ -1319,13 +1497,6 @@ export const en = {
       },
       system: {
         label: 'System',
-        menus: {
-          title: 'Menus',
-          columns: { name: 'Name', menuKey: 'Menu Key', icon: 'Icon', parentName: 'Parent', path: 'Path', component: 'Component', permission: 'Permission', type: 'Type', sortOrder: 'Sort', isHidden: 'Hidden' },
-          form: { name: 'Name', type: 'Type', parentId: 'Parent', parentIdPlaceholder: 'Search parent menu… (leave empty for top-level)', menuKey: 'Menu Key (route name)', path: 'Path', component: 'Component', icon: 'Icon (mdi:xxx)', permission: 'Permission Code', permissionPlaceholder: 'Pick from the permission catalogue… (empty = public)', sortOrder: 'Sort', isHidden: 'Hidden' },
-          status: { hidden: 'Hidden', visible: 'Visible' },
-          actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
-        },
         dictionaries: {
           title: 'Dictionaries',
           titleHelp: 'Reusable key/value dictionary entries, scoped to the dedicated Dictionary group so they stay separate from system Parameters.',
@@ -1360,6 +1531,7 @@ export const en = {
             notSet: 'Not set',
             viewOnly: 'View only',
             stale: 'This group was changed in another session.',
+            builtInHidden: 'Built-in settings are hidden. Turn "Built-in menus" back on to show them.',
           },
           feedback: { saved: 'Settings saved', resetDone: 'Defaults restored' },
           validation: {
@@ -1387,6 +1559,7 @@ export const en = {
             storageUpload: 'Upload Limits',
             notificationGeneral: 'General',
             chatGeneral: 'General',
+            presence: 'Presence',
             paymentGeneral: 'General',
             auditRetention: 'Retention',
             webObservability: 'Request Observability',
@@ -1484,8 +1657,10 @@ export const en = {
             chatEnableGroups: 'Enable Groups',
             chatMaxGroupMembers: 'Max Group Members',
             chatGroupAvatarMemberCount: 'Group Avatar Members',
-            chatEnablePresence: 'Enable Presence',
-            chatAllowInvisible: 'Allow Invisible Status',
+            presenceEnabled: 'Enable Presence',
+            presenceAllowInvisible: 'Allow Invisible Status',
+            presenceAutoAwayEnabled: 'Auto Away',
+            presenceAutoAwayMinutes: 'Auto Away Minutes',
             chatEnableMessageSound: 'Message Sound',
             chatNotificationSound: 'Notification Sound',
             chatMessageSound: 'In-Conversation Sound',
@@ -1550,7 +1725,7 @@ export const en = {
             recoveryEnableResetBySms: 'Enable Password Reset By SMS',
             recoveryResetPasswordRoute: 'Reset Password Route',
             recoveryResetTokenExpiration: 'Reset Token Expiration (min)',
-            otpCodeLength: 'Code Length', otpEnableEmail: 'Enable Email Codes', otpEnableSms: 'Enable SMS Codes',
+            otpCodeLength: 'Code Length', otpEnableEmail: 'Enable Email Codes', otpEnableSms: 'Enable SMS Codes', otpEnableTotp: 'Enable Authenticator (TOTP)',
             otpExpirationMinutes: 'Expiration (min)', otpMaxAttempts: 'Max Attempts', otpResendInterval: 'Resend Interval (sec)',
             multiLoginAllow: 'Allow Multi-Login', multiLoginMaxConcurrentSessions: 'Max Concurrent Sessions',
             multiLoginOnConflict: 'On Conflict',
@@ -1787,7 +1962,7 @@ export const en = {
           newFolder: 'New folder',
           renameFolder: 'Rename folder',
           deleteFolder: 'Delete folder',
-          cannotDeleteNonEmpty: 'Folder is not empty — move or delete its files / sub-folders first.',
+          cannotDeleteNonEmpty: 'Folder is not empty - move or delete its files / sub-folders first.',
           confirmDeleteFolder: 'Delete this folder? Folders must be empty before they can be deleted.',
           confirmDeleteFile: 'Delete this file?',
           fileCount: '{n} file(s)',
@@ -1809,7 +1984,7 @@ export const en = {
           upload: 'Upload',
           uploadSuccess: '{n} file(s) uploaded',
           uploadFailed: 'Upload failed',
-          largeUploadedToRoot: 'Large file uploaded to All Files — drag it into a folder to file it.',
+          largeUploadedToRoot: 'Large file uploaded to All Files - drag it into a folder to file it.',
           root: 'All files',
           itemCount: '{n} item(s)',
           emptyDir: 'This folder is empty',
@@ -1871,7 +2046,7 @@ export const en = {
           preview: {
             unsupported: 'This file type does not support preview.',
             title: 'Preview',
-            unsupportedInline: 'Inline preview is not available for this file type — download it to view.',
+            unsupportedInline: 'Inline preview is not available for this file type - download it to view.',
           },
           tags: { title: 'File tags', saveSuccess: 'Tags saved' },
           metadata: {
@@ -1879,7 +2054,7 @@ export const en = {
             key: 'Key',
             value: 'Value',
             add: 'Add field',
-            empty: 'No metadata — add a key/value pair.',
+            empty: 'No metadata - add a key/value pair.',
             saveSuccess: 'Metadata saved',
           },
         },
@@ -1887,7 +2062,7 @@ export const en = {
           title: 'Chunks (diagnostics)',
           banner: {
             title: 'Troubleshooting view',
-            body: 'This page lists low-level upload chunks — useful when an upload fails midway and orphans need cleaning up. End users never need to touch it.',
+            body: 'This page lists low-level upload chunks - useful when an upload fails midway and orphans need cleaning up. End users never need to touch it.',
           },
           columns: { uploadId: 'Upload ID', chunkIndex: 'Index', size: 'Size', status: 'Status', createdAt: 'Created At' },
           form: { uploadId: 'Upload ID', chunkIndex: 'Chunk Index', size: 'Size', status: 'Status' },
@@ -1901,13 +2076,13 @@ export const en = {
           },
           columns: { fileId: 'File ID', version: 'Version', size: 'Size', isCurrent: 'Current', creatorId: 'Creator', creationTime: 'Created', description: 'Description' },
           form: { fileId: 'File ID', version: 'Version', path: 'Path', size: 'Size', md5Hash: 'MD5', description: 'Description' },
-          actions: { restore: 'Restore', restoreSuccess: 'Version restored', restoreInvalid: 'Version data missing — cannot restore', delete: 'Delete', export: 'Export' },
+          actions: { restore: 'Restore', restoreSuccess: 'Version restored', restoreInvalid: 'Version data missing - cannot restore', delete: 'Delete', export: 'Export' },
         },
         shares: {
           title: 'Shares',
           banner: {
             title: 'Active share links',
-            body: 'Lists active file-share links across all users. Revoke individual or selected shares — share links are created from the file detail / user API, not here.',
+            body: 'Lists active file-share links across all users. Revoke individual or selected shares - share links are created from the file detail / user API, not here.',
           },
           columns: {
             originalName: 'File', shareToken: 'Token', accessCount: 'Access',
@@ -1940,7 +2115,7 @@ export const en = {
           },
           problems: {
             title: 'Problem files',
-            none: 'No problems found — all checked files are healthy.',
+            none: 'No problems found - all checked files are healthy.',
             runFirst: 'Run a verification to see results.',
           },
         },
@@ -2049,7 +2224,7 @@ export const en = {
       notification: {
         label: 'Notification',
         templates: {
-          title: 'Templates',
+          title: 'Notification Templates',
           titleHelp: 'Notification message templates for email, SMS, and push channels.',
           previewTitle: 'Template Preview',
           columns: { templateName: 'Template Name', category: 'Category (Channel)', description: 'Description', defaultLayoutName: 'Default Layout', isActive: 'Active', source: 'Source' },
@@ -2085,7 +2260,7 @@ export const en = {
           },
         },
         subscriptions: {
-          title: 'Subscriptions',
+          title: 'Notification Subscriptions',
           columns: { userId: 'User', channel: 'Channel', category: 'Category', isEnabled: 'Enabled', quietHoursStart: 'Quiet Hours Start', quietHoursEnd: 'Quiet Hours End', maxFrequencyPerHour: 'Max/Hour' },
           form: { userId: 'User ID', channel: 'Channel', category: 'Category (optional)', isEnabled: 'Enabled', quietHoursStart: 'Quiet Hours Start (HH:mm:ss UTC)', quietHoursEnd: 'Quiet Hours End (HH:mm:ss UTC)', maxFrequencyPerHour: 'Max Frequency / Hour' },
           actions: { create: 'Create', edit: 'Edit', delete: 'Delete' },
@@ -2333,11 +2508,35 @@ export const en = {
             isActiveSystemRoleHint: 'Postings resolve this account by its system role and require it to be active. Clear the role to deactivate it.',
           },
         },
-        customers: {
-          title: 'Customers',
-          columns: { code: 'Code', name: 'Name', email: 'Email', phone: 'Phone', currency: 'Currency', status: 'Status', creationTime: 'Created' },
-          status: { active: 'Active', inactive: 'Inactive' },
-          form: { name: 'Name', code: 'Code', email: 'Email', phone: 'Phone', currency: 'Currency', paymentTermsDays: 'Payment Terms (days)', billingAddress: 'Billing Address', shippingAddress: 'Shipping Address', notes: 'Notes', isActive: 'Active', defaultTaxCode: 'Default Tax Code', taxCodePlaceholder: 'Select tax code' },
+        // The customer / vendor work surface (pages/finance/components/PartyWorkSurface.vue).
+        // Shared by both because the domain is mirror-imaged, not different.
+        party: {
+          customerTitle: 'Customer', vendorTitle: 'Vendor',
+          loading: 'Loading…', inactive: 'Inactive',
+          tabs: { overview: 'Overview', transactions: 'Transactions', banking: 'Banking' },
+          actions: {
+            newInvoice: 'New Invoice', newBill: 'New Bill',
+            receivePayment: 'Receive Payment', payVendor: 'Pay Vendor', refresh: 'Refresh',
+          },
+          kpi: {
+            owedToYou: 'Owed to you', youOwe: 'You owe', overdue: 'Overdue',
+            openDocuments: 'Open documents', salesThisPeriod: 'Sales this period', spendThisPeriod: 'Spend this period',
+          },
+          aging: {
+            title: 'Aging', empty: 'Nothing outstanding.',
+            current: 'Current', d1to30: '1-30', d31to60: '31-60', d61to90: '61-90', over90: '90+',
+          },
+          recent: { title: 'Recent activity', viewAll: 'View all transactions' },
+          contact: { title: 'Contact' },
+          fields: {
+            email: 'Email', phone: 'Phone', currency: 'Currency', paymentTerms: 'Payment Terms',
+            netDays: 'Net {days}', lastActivity: 'Last activity', address: 'Address',
+          },
+          transactions: {
+            all: 'All', open: 'Open', empty: 'No transactions in this period.',
+            date: 'Date', document: 'Document', due: 'Due', amount: 'Amount',
+            outstanding: 'Outstanding', status: 'Status', overdueSuffix: 'd overdue',
+          },
           remitTo: {
             title: 'Bank Accounts', action: 'Bank Accounts', add: 'Add Account', empty: 'No bank accounts.',
             cancel: 'Cancel', save: 'Save', saved: 'Bank account saved.', deleted: 'Bank account removed.',
@@ -2354,26 +2553,19 @@ export const en = {
             },
           },
         },
+        customers: {
+          title: 'Customers',
+          columns: { code: 'Code', name: 'Name', email: 'Email', phone: 'Phone', currency: 'Currency', status: 'Status', creationTime: 'Created' },
+          status: { active: 'Active', inactive: 'Inactive' },
+          actions: { open: 'Open' },
+          form: { name: 'Name', code: 'Code', email: 'Email', phone: 'Phone', currency: 'Currency', paymentTermsDays: 'Payment Terms (days)', billingAddress: 'Billing Address', shippingAddress: 'Shipping Address', notes: 'Notes', isActive: 'Active', defaultTaxCode: 'Default Tax Code', taxCodePlaceholder: 'Select tax code' },
+        },
         vendors: {
           title: 'Vendors',
           columns: { code: 'Code', name: 'Name', email: 'Email', phone: 'Phone', currency: 'Currency', status: 'Status', creationTime: 'Created' },
           status: { active: 'Active', inactive: 'Inactive' },
+          actions: { open: 'Open' },
           form: { name: 'Name', code: 'Code', email: 'Email', phone: 'Phone', currency: 'Currency', paymentTermsDays: 'Payment Terms (days)', address: 'Address', notes: 'Notes', isActive: 'Active' },
-          remitTo: {
-            title: 'Bank Accounts', action: 'Bank Accounts', add: 'Add Account', empty: 'No bank accounts.',
-            cancel: 'Cancel', save: 'Save', saved: 'Bank account saved.', deleted: 'Bank account removed.',
-            edit: 'Edit Bank Account', setDefault: 'Set Default', editAction: 'Edit', deleteAction: 'Delete', default: 'Default',
-            deleteConfirm: 'Delete this remittance bank account? Payments will no longer route to it.', setDefaultConfirm: 'Make this the default remittance account?',
-            scheme: { usAba: 'US ABA', caEft: 'Canada EFT' },
-            type: { checking: 'Checking', savings: 'Savings' },
-            columns: { label: 'Label', bankName: 'Bank', scheme: 'Scheme', accountNumber: 'Account', type: 'Type', default: 'Default' },
-            form: {
-              label: 'Label', bankName: 'Bank Name', scheme: 'Number Scheme', routingNumber: 'Routing Number',
-              institutionNumber: 'Institution Number', transitNumber: 'Transit Number', accountNumber: 'Account Number',
-              accountNumberPlaceholder: 'Leave blank to keep the current number', accountType: 'Account Type',
-              currency: 'Currency', isDefault: 'Default', isActive: 'Active', notes: 'Notes',
-            },
-          },
         },
         items: {
           title: 'Items',
@@ -2397,6 +2589,33 @@ export const en = {
             addLine: 'Add Line', subTotal: 'Subtotal', cancel: 'Cancel', saveDraft: 'Save Draft', saveAndPost: 'Save & Post',
             partyRequired: 'Select a party first.', paidFromRequired: 'Select the paid-from account.', lineAccountRequired: 'Every line needs an account.', noLines: 'Add at least one line.',
           },
+          batch: {
+            postAction: 'Post {n} of {total}', confirmPost: 'Post {n} draft document(s)?',
+            posted: 'Posted {n}.', noDrafts: 'None of the selected documents is a draft.',
+            partial: 'Posted {ok}, {failed} failed -', andMore: ' (+{n} more)',
+          },
+          kpi: { outstanding: 'Outstanding', overdue: 'Overdue', current: 'Not yet due', parties: 'Parties' },
+          search: { dateFrom: 'From date', dateTo: 'To date' },
+          status: {
+            Draft: 'Draft', Posted: 'Posted', PartiallyPaid: 'Partially Paid', Paid: 'Paid',
+            Voided: 'Voided', Reversed: 'Reversed', Closed: 'Closed',
+          },
+          // Attachments + discussion. Shared by every document detail drawer,
+          // so the wording lives in the shared `docs` namespace.
+          attachments: {
+            title: 'Attachments', add: 'Attach',
+            remove: 'Remove attachment', removeConfirm: 'Remove this attachment?',
+            empty: 'No attachments.',
+            emptyDroppable: 'No attachments yet - drop a file here or use Attach.',
+            uploadFailed: 'Upload failed.',
+          },
+          comments: {
+            title: 'Discussion', empty: 'No comments yet.',
+            placeholder: 'Add an internal note...',
+            post: 'Post', submitHint: 'Ctrl + Enter to post',
+            delete: 'Delete comment', deleteConfirm: 'Delete this comment?',
+            someone: 'Someone',
+          },
           method: { cash: 'Cash', check: 'Check', creditCard: 'Credit Card', debitCard: 'Debit Card', bankTransfer: 'Bank Transfer', wire: 'Wire', other: 'Other' },
           // What a posting was projected from. Shared by the general ledger, the
           // journal list and the journal detail so an origin reads the same everywhere.
@@ -2413,11 +2632,70 @@ export const en = {
             success: 'Applied successfully.', noOpenDocs: 'No open documents for this party.',
           },
         },
+        // Estimates and purchase orders: the same document aimed in opposite
+        // directions. Terms are the North-American ones - "Estimate" (US /
+        // QuickBooks) rather than "Quote", "Vendor" rather than "Supplier".
+        estimates: {
+          title: 'Estimates',
+          columns: {
+            number: 'Number', draftPlaceholder: '(draft)', party: 'Customer', docDate: 'Date',
+            expiryDate: 'Valid Until', expectedDate: 'Expected', currency: 'Currency', total: 'Total', status: 'Status',
+          },
+          status: {
+            draft: 'Draft', sent: 'Sent', accepted: 'Accepted',
+            declined: 'Declined', converted: 'Invoiced', closed: 'Closed',
+          },
+          form: { party: 'Customer', internalNote: 'Internal Note', shipTo: 'Ship To' },
+          detail: { draftTitle: 'Draft Estimate' },
+          editor: { createTitle: 'New Estimate', editTitle: 'Edit Estimate' },
+          actions: {
+            create: 'New Estimate', send: 'Send', accept: 'Accept', decline: 'Decline',
+            declineConfirm: 'Mark this estimate as declined?',
+            close: 'Close', closeConfirm: 'Close this estimate? It will no longer be followed up.',
+            convert: 'Create Invoice', saveAndSend: 'Save & Send',
+          },
+          convert: {
+            title: 'Create Invoice',
+            hint: 'This creates a DRAFT invoice from the estimate. Review it before posting.',
+            confirm: 'Create Draft', success: 'Draft invoice created.',
+          },
+          converted: { banner: 'This estimate has been invoiced.', open: 'Open the invoice' },
+          savedSuccess: 'Estimate saved.', sentSuccess: 'Estimate sent.',
+          acceptedSuccess: 'Estimate accepted.', declinedSuccess: 'Estimate declined.', closedSuccess: 'Estimate closed.',
+        },
+        purchaseOrders: {
+          title: 'Purchase Orders',
+          columns: {
+            number: 'Number', draftPlaceholder: '(draft)', party: 'Vendor', docDate: 'Date',
+            expiryDate: 'Valid Until', expectedDate: 'Expected', currency: 'Currency', total: 'Total', status: 'Status',
+          },
+          status: {
+            draft: 'Draft', sent: 'Sent', accepted: 'Confirmed',
+            declined: 'Declined', converted: 'Billed', closed: 'Closed',
+          },
+          form: { party: 'Vendor', internalNote: 'Internal Note', shipTo: 'Ship To' },
+          detail: { draftTitle: 'Draft Purchase Order' },
+          editor: { createTitle: 'New Purchase Order', editTitle: 'Edit Purchase Order' },
+          actions: {
+            create: 'New Purchase Order', send: 'Send', accept: 'Mark Confirmed', decline: 'Decline',
+            declineConfirm: 'Mark this purchase order as declined?',
+            close: 'Close', closeConfirm: 'Close this purchase order? It will no longer be followed up.',
+            convert: 'Create Bill', saveAndSend: 'Save & Send',
+          },
+          convert: {
+            title: 'Create Bill',
+            hint: 'This creates a DRAFT bill from the purchase order. Review it before posting.',
+            confirm: 'Create Draft', success: 'Draft bill created.',
+          },
+          converted: { banner: 'This purchase order has been billed.', open: 'Open the bill' },
+          savedSuccess: 'Purchase order saved.', sentSuccess: 'Purchase order sent.',
+          acceptedSuccess: 'Purchase order confirmed.', declinedSuccess: 'Purchase order declined.', closedSuccess: 'Purchase order closed.',
+        },
         invoices: {
-          title: 'Invoices',
+          title: 'Sales Invoices',
           columns: { number: 'Number', status: 'Status', docDate: 'Date', party: 'Customer', currency: 'Currency', subTotal: 'Subtotal', taxTotal: 'Tax', total: 'Total', applied: 'Applied', outstanding: 'Outstanding', dueDate: 'Due', creationTime: 'Created' },
           status: { draft: 'Draft', posted: 'Open', partiallyPaid: 'Partially Paid', paid: 'Paid', voided: 'Voided' },
-          actions: { create: 'New Invoice', post: 'Post', void: 'Void', delete: 'Delete' },
+          actions: { receivePayment: 'Receive payment',  create: 'New Invoice', post: 'Post', void: 'Void', delete: 'Delete' },
           detail: { draftTitle: 'Draft Invoice' },
           editor: { party: 'Customer', createTitle: 'New Invoice', editTitle: 'Edit Invoice', description: 'Description', amount: 'Amount' },
           confirmPost: 'Post this invoice? Posted documents are immutable.',
@@ -2429,7 +2707,7 @@ export const en = {
           title: 'Bills',
           columns: { number: 'Number', status: 'Status', docDate: 'Date', party: 'Vendor', currency: 'Currency', total: 'Total', applied: 'Applied', outstanding: 'Outstanding', dueDate: 'Due', creationTime: 'Created' },
           status: { draft: 'Draft', posted: 'Open', partiallyPaid: 'Partially Paid', paid: 'Paid', voided: 'Voided' },
-          actions: { create: 'New Bill', post: 'Post', void: 'Void', delete: 'Delete' },
+          actions: { payBill: 'Pay this bill',  create: 'New Bill', post: 'Post', void: 'Void', delete: 'Delete' },
           detail: { draftTitle: 'Draft Bill' },
           editor: { party: 'Vendor', createTitle: 'New Bill', editTitle: 'Edit Bill', description: 'Description', amount: 'Amount' },
           confirmPost: 'Post this bill? Posted documents are immutable.',
@@ -2487,6 +2765,7 @@ export const en = {
         },
         transfers: {
           title: 'Transfers',
+          search: { dateFrom: 'From date', dateTo: 'To date' },
           columns: { number: 'Number', status: 'Status', date: 'Date', from: 'From', to: 'To', amount: 'Amount', reference: 'Reference' },
           status: { draft: 'Draft', posted: 'Posted', voided: 'Voided' },
           actions: { post: 'Post', void: 'Void', delete: 'Delete' },
@@ -2496,13 +2775,157 @@ export const en = {
           confirmDelete: 'Delete this draft transfer?',
           postSuccess: 'Transfer posted.', voidSuccess: 'Transfer voided.', deleteSuccess: 'Draft deleted.',
         },
+        statements: {
+          title: 'Statements & Collections',
+          tabs: { collections: 'Collections', statement: 'Statement' },
+          party: { customers: 'Customers', vendors: 'Vendors' },
+          style: { openItem: 'Open items', activity: 'Activity' },
+          dunning: {
+            none: 'Current',
+            reminder: 'Reminder',
+            overdue: 'Overdue',
+            finalNotice: 'Final notice',
+          },
+          collections: {
+            count: '{n} to chase',
+            empty: 'Nobody is overdue. Nothing to chase today.',
+            unnamed: '(unnamed)',
+            daysPastDue: '{n} days past due',
+            overdue: 'Overdue',
+            balance: 'Balance',
+          },
+          statement: {
+            pickParty: 'Pick a customer or vendor',
+            pickPartyHint: 'Pick a party to see their statement.',
+            empty: 'Nothing on the statement for this period.',
+            amountDue: 'Amount due',
+            overdue: 'Overdue',
+            level: 'Collection level',
+            renderFailed: 'Could not produce a printable statement.',
+          },
+          columns: {
+            date: 'Date',
+            document: 'Document',
+            due: 'Due',
+            charges: 'Charges',
+            payments: 'Payments',
+            outstanding: 'Outstanding',
+            balance: 'Balance',
+          },
+          actions: { refresh: 'Refresh', viewStatement: 'Statement', print: 'Print' },
+        },
+        recurring: {
+          title: 'Recurring',
+          help: 'Templates that create an invoice, bill or expense on a schedule. They generate drafts by default - posting stays a human decision.',
+          columns: {
+            name: 'Template',
+            kind: 'Generates',
+            party: 'Party',
+            schedule: 'Schedule',
+            nextRun: 'Next run',
+            amount: 'Amount',
+            autoPost: 'Auto-post',
+            status: 'Status',
+            generated: 'Generated',
+          },
+          kind: { invoice: 'Invoice', bill: 'Bill', expense: 'Expense' },
+          frequency: {
+            daily: 'Daily',
+            weekly: 'Weekly',
+            monthly: 'Monthly',
+            quarterly: 'Quarterly',
+            yearly: 'Yearly',
+          },
+          weekday: {
+            1: 'on Monday',
+            2: 'on Tuesday',
+            3: 'on Wednesday',
+            4: 'on Thursday',
+            5: 'on Friday',
+            6: 'on Saturday',
+            7: 'on Sunday',
+          },
+          schedule: { everyN: 'every {n}', onDay: 'on the {n}' },
+          status: { active: 'Active', paused: 'Paused', ended: 'Ended' },
+          autoPost: { on: 'Posts', off: 'Draft', inherit: 'Follow default', yes: 'Post automatically', no: 'Keep as draft' },
+          runStatus: { generated: 'Generated', skipped: 'Skipped', failed: 'Failed' },
+          form: {
+            name: 'Template name',
+            kind: 'Generates',
+            party: 'Party',
+            paidFrom: 'Paid from',
+            currency: 'Currency',
+            frequency: 'Frequency',
+            interval: 'Every',
+            anchorDay: 'On day',
+            startDate: 'Starts',
+            endDate: 'Ends',
+            maxOccurrences: 'Max occurrences',
+            dueDays: 'Due in (days)',
+            autoPost: 'Auto-post',
+            memo: 'Memo',
+            lines: 'Lines',
+          },
+          lines: {
+            description: 'Description',
+            account: 'Account',
+            qty: 'Qty',
+            price: 'Unit price',
+            tax: 'Tax',
+            add: 'Add line',
+            total: 'Total',
+          },
+          preview: {
+            title: 'Next runs',
+            refresh: 'Preview',
+            hint: 'Set a start date and frequency, then preview the dates before saving.',
+          },
+          history: {
+            title: 'Generation history',
+            empty: 'Nothing has been generated yet.',
+            period: 'Period',
+            template: 'Template',
+            status: 'Result',
+            document: 'Document',
+            detail: 'Detail',
+            draft: 'Draft',
+          },
+          actions: {
+            runDue: 'Run due now',
+            history: 'History',
+            runNow: 'Run now',
+            pause: 'Pause',
+            resume: 'Resume',
+            end: 'End',
+            endConfirm: 'End this template? It stops generating; the history is kept.',
+            sweepDone: '{generated} generated, {skipped} skipped, {failed} failed.',
+            sweepFailed: 'The run failed.',
+            ranOne: 'Generated {n}.',
+            nothingDue: 'Nothing was due.',
+            failed: 'That did not work.',
+          },
+        },
+        taxReturns: {
+          title: 'Tax Returns',
+          help: 'Line amounts for a filing form, taken from the ledger. Filing itself happens on the tax authority own portal.',
+          form: { placeholder: 'Filing form' },
+          columns: { line: 'Line', label: 'Description', amount: 'Amount' },
+          netTax: 'Net tax',
+          note: 'Figures come from posted entries in the selected period. Check them against the filing instructions before you file.',
+          noForms: 'No filing form is available. Load a country pack (for example Tnzi.Finance.Tax.Ca for CRA GST34) to produce return figures here.',
+          empty: 'Pick a form and a period, then run it.',
+          failed: 'Could not produce the return.',
+          actions: { run: 'Run', copy: 'Copy lines', copied: 'Lines copied.', copyFailed: 'Could not copy.' },
+        },
         reconciliations: {
           title: 'Bank Reconciliation',
           columns: { account: 'Account', currency: 'Currency', statementDate: 'Statement Date', endingBalance: 'Ending Balance', status: 'Status', lines: 'Lines' },
           status: { draft: 'Draft', completed: 'Completed' },
           actions: { worksheet: 'Worksheet', complete: 'Complete', delete: 'Delete' },
           form: { account: 'Account', accountPlaceholder: 'Select funds account', statementDate: 'Statement Date', endingBalance: 'Statement Ending Balance', note: 'Note' },
-          worksheet: { title: 'Reconciliation Worksheet', statement: 'Statement Balance', cleared: 'Cleared Balance', difference: 'Difference', date: 'Date', entry: 'Entry No', memo: 'Memo', debit: 'Debit', credit: 'Credit', save: 'Save Selection', saved: 'Selection saved.', statementMatched: 'Matched to statement' },
+          // Amount headings come from admin.shared.moneyFlow via moneyPairColumns:
+          // every row here belongs to the one funds account being reconciled.
+          worksheet: { title: 'Reconciliation Worksheet', statement: 'Statement Balance', cleared: 'Cleared Balance', difference: 'Difference', date: 'Date', entry: 'Entry No', memo: 'Memo', save: 'Save Selection', saved: 'Selection saved.', statementMatched: 'Matched to statement' },
           confirmComplete: 'Complete this reconciliation? It will be locked afterwards.',
           confirmDelete: 'Delete this draft reconciliation? Cleared-line selections will be removed.',
           completeSuccess: 'Reconciliation completed.', deleteSuccess: 'Draft deleted.',
@@ -2531,14 +2954,74 @@ export const en = {
             externalAccountId: 'External Account Id', eftOriginatorId: 'EFT Originator Id', eftOriginatorName: 'EFT Originator Name',
           },
         },
+        // Bank rules: "the ledger has no counterpart for this line, but I know
+        // what it is." First match wins, so the order IS the rule.
+        bankRules: {
+          title: 'Bank Rules',
+          orderHint: 'Rules are checked top to bottom and the first match wins. Move a rule up to make it take precedence.',
+          columns: {
+            priority: '#', name: 'Rule', conditions: 'When', account: 'Bank Account',
+            counterAccount: 'Category', autoApply: 'Auto', auto: 'Auto-books', status: 'Status',
+          },
+          status: { enabled: 'Enabled', disabled: 'Disabled' },
+          summary: { noConditions: 'Every line in scope', and: 'and', or: 'or' },
+          docType: { expense: 'Expense', paymentEntry: 'Payment', transfer: 'Transfer' },
+          form: {
+            name: 'Rule name', namePlaceholder: 'e.g. Coffee shops',
+            account: 'Bank account', allAccounts: 'All accounts',
+            direction: 'Applies to', then: 'Then',
+            docType: 'Create', counterAccount: 'Category', counterAccountPlaceholder: 'Account to post to',
+            paymentMethod: 'Payment method',
+            autoApply: 'Book it without asking',
+            autoApplyHint: 'Creates, posts and reconciles the document automatically. Use it for lines you already trust, such as a fixed monthly rent.',
+            isEnabled: 'Enabled',
+          },
+          // TRuleBuilder strings.
+          rules: {
+            when: 'When', all: 'all', any: 'any',
+            allSuffix: 'of these are true', anySuffix: 'of these is true',
+            addCondition: 'Add condition', remove: 'Remove condition',
+            textPlaceholder: 'Text to look for', amountPlaceholder: 'Amount, e.g. 50',
+            noConditions: 'This rule has no conditions - it will claim every line that matches its account and direction.',
+            field: { Description: 'Description', Payee: 'Payee', Reference: 'Reference', Amount: 'Amount' },
+            op: {
+              Contains: 'contains', NotContains: 'does not contain', Equals: 'is',
+              StartsWith: 'starts with', EndsWith: 'ends with',
+              GreaterThan: 'is greater than', LessThan: 'is less than',
+            },
+          },
+          actions: { test: 'Test', moveUp: 'Move up', moveDown: 'Move down' },
+          test: {
+            title: 'Rule dry run',
+            summary: 'Matched {matched} of {evaluated} unreconciled lines.',
+            stolen: '{count} of these are taken by a higher-priority rule. Move this rule up if it should win them.',
+            empty: 'No unreconciled lines match this rule.',
+            date: 'Date', description: 'Description', amount: 'Amount', winner: 'Taken by', close: 'Close',
+          },
+        },
         bankFeed: {
           title: 'Bank Feed',
-          columns: { date: 'Date', description: 'Description', reference: 'Reference', amount: 'Amount', status: 'Status', suggestion: 'Suggestion' },
           status: { pending: 'Pending', matched: 'Matched', excluded: 'Excluded' },
           workspace: {
             selectAccount: 'Select bank account', import: 'Import', pull: 'Pull', suggest: 'Suggest', batches: 'Batches',
             suggestResult: 'Suggested {suggested}, auto-confirmed {auto}.',
+            leftToReconcile: 'left to reconcile',
+            forReview: 'For review', categorized: 'Categorized', excluded: 'Excluded',
+            allDone: 'Nothing left to review on this account.',
+            needsDraft: 'Confirming a match files it against an open reconciliation. This account has none yet.',
+            createDraft: 'Start reconciliation',
           },
+          row: {
+            ok: 'OK', exclude: 'Exclude', tabMatch: 'Match', tabCreate: 'Create',
+            bankAmount: 'Bank amount', noDescription: 'No description', unnumbered: 'Unnumbered',
+            byRule: 'Suggested by rule: {rule}',
+            noSuggestion: 'No suggested match yet. Run Suggest, or create a document.',
+            findMatch: 'Find & match', manual: 'Manual', exact: 'Exact', likely: 'Likely',
+            docType: 'Document type', docExpense: 'Expense', docPayment: 'Payment', docTransfer: 'Transfer',
+            customer: 'Customer', vendor: 'Vendor', otherAccount: 'Other account', category: 'Category',
+            unmatch: 'Unmatch', restore: 'Restore',
+          },
+          columns: { date: 'Date', payee: 'Payee', amount: 'Amount' },
           import: {
             title: 'Import Statement', hasHeader: 'Has Header Row', delimiter: 'Delimiter', delimiterPlaceholder: ',',
             dateColumn: 'Date Column', dateFormat: 'Date Format', dateFormatPlaceholder: 'e.g. yyyy-MM-dd (blank = auto)',
@@ -2572,6 +3055,7 @@ export const en = {
             title: 'No Draft Reconciliation',
             content: 'This account has no draft reconciliation to hold the cleared line. Create one now and confirm the match?',
             create: 'Create & Confirm', cancel: 'Cancel',
+            created: 'Reconciliation started.',
           },
         },
         checks: {
@@ -2583,7 +3067,7 @@ export const en = {
           columns: { number: 'Check #', account: 'Account', payee: 'Payee', amount: 'Amount', issueDate: 'Issue Date', status: 'Status', source: 'Source' },
           status: { issued: 'Issued', void: 'Void', spoiled: 'Spoiled' },
           source: { manual: 'Manual', printed: 'Printed' },
-          queue: {
+          queue: { kpiCount: 'Waiting', kpiTotal: 'Amount waiting', 
             selectAccount: 'Select bank account', print: 'Print Selected', calibration: 'Calibration Page', empty: 'No checks to print for this account.',
             columns: { payment: 'Payment', payee: 'Payee', account: 'Account', date: 'Date', amount: 'Amount' },
           },
@@ -2618,7 +3102,7 @@ export const en = {
           format: { nacha: 'NACHA', cpa005: 'CPA-005' },
           status: { draft: 'Draft', generated: 'Generated', voided: 'Voided' },
           columns: { number: 'Number', account: 'Account', format: 'Format', currency: 'Currency', effectiveDate: 'Effective', count: 'Count', amount: 'Amount', status: 'Status' },
-          queue: {
+          queue: { kpiCount: 'Waiting', kpiTotal: 'Amount waiting', 
             hint: 'Select the bank-transfer payments to include in a batch.', create: 'Create Batch ({count})', empty: 'No payable transfers to batch.',
             columns: { payment: 'Payment', payee: 'Payee', bankAccount: 'Bank Account', date: 'Date', currency: 'Currency', amount: 'Amount' },
           },
@@ -2717,6 +3201,22 @@ export const en = {
           form: { fromCurrency: 'From Currency', toCurrency: 'To Currency', rate: 'Rate', rateDate: 'Rate Date', source: 'Source' },
         },
         fiscalYears: {
+          closingDate: {
+            closedThrough: 'Books closed through', notClosed: 'Books are open',
+            lockedHint: 'Posting and reversal on or before this date are rejected.',
+            openHint: 'No closing date set. Any date can still be posted to.',
+            passwordSet: 'Password protected',
+            set: 'Set closing date', change: 'Change', editTitle: 'Closing date',
+            field: 'Closed through (inclusive)',
+            explain: 'Leave empty to remove the lock. Everything on or before this date becomes read-only; to correct a closed period, move the date back, post the correction, then move it forward again.',
+            currentPassword: 'Current password', currentPasswordHint: 'Required to change the closing date',
+            newPassword: 'New password',
+            newPasswordSet: 'Optional: require a password to change this',
+            newPasswordChange: 'Leave blank to keep the current password',
+            passwordExplain: 'The password makes crossing the closing line a deliberate, attributable act. It is not a substitute for the finance.ledgerLock.update permission.',
+            note: 'Note', notePlaceholder: 'e.g. Filed Q2 GST/HST',
+            cancel: 'Cancel', save: 'Save',
+          },
           title: 'Fiscal Years',
           closeSuccess: 'Fiscal year closed.',
           reopenSuccess: 'Fiscal year reopened.',
@@ -2728,16 +3228,36 @@ export const en = {
           form: { name: 'Name', startDate: 'Start Date', endDate: 'End Date' },
         },
         reports: {
+          period: {
+            presetLabel: 'Period', comparisonLabel: 'Compare',
+            preset: {
+              'this-month': 'This month', 'last-month': 'Last month',
+              'this-quarter': 'This quarter', 'last-quarter': 'Last quarter',
+              'year-to-date': 'Year to date', 'last-year': 'Last year', custom: 'Custom',
+            },
+            comparison: {
+              none: 'No comparison', 'previous-period': 'vs previous period', 'previous-year': 'vs previous year',
+            },
+          },
+          viewMode: { owner: 'Business', accountant: 'Accounting' },
+          drilldown: {
+            title: 'Ledger detail', hint: 'Open the ledger rows behind this figure',
+            search: 'Search memo, entry no, reference…', empty: 'No ledger rows in this period.',
+            newestFirst: 'Newest first', oldestFirst: 'Oldest first',
+            filteredNoBalance: 'Running balances do not apply while a search filter is active: a balance accumulates down an unbroken row chain.',
+          },
           title: 'Financial Reports',
           aging: { party: 'Party', current: 'Current', d1to30: '1-30', d31to60: '31-60', d61to90: '61-90', over90: '90+', total: 'Total' },
           runHint: 'Pick a period and run the report.',
           actions: { run: 'Run', export: 'Export CSV' },
           tabs: { trialBalance: 'Trial Balance', balanceSheet: 'Balance Sheet', profitAndLoss: 'Profit & Loss', cashFlow: 'Cash Flow', generalLedger: 'General Ledger', arAging: 'AR Aging', apAging: 'AP Aging', taxSummary: 'Tax Summary' },
+          // Debit / credit headings come from admin.shared.ledger via moneyPairColumns.
           columns: { code: 'Code', name: 'Account', balance: 'Balance', postingDate: 'Date', memo: 'Memo' },
           trialBalance: { opening: 'Opening', periodDebit: 'Debit', periodCredit: 'Credit', closing: 'Closing', totalPeriodDebit: 'Total Debit', totalPeriodCredit: 'Total Credit', totalClosing: 'Total Closing' },
           balanceSheet: { assets: 'Assets', liabilities: 'Liabilities', equity: 'Equity', totalAssets: 'Total Assets', totalLiabilities: 'Total Liabilities', totalEquity: 'Total Equity', currentEarnings: 'Current Earnings', balanceCheck: 'Balance Check' },
           profitAndLoss: { income: 'Income', expenses: 'Expenses', totalIncome: 'Total Income', totalExpenses: 'Total Expenses', netProfit: 'Net Profit' },
-          generalLedger: { accountPlaceholder: 'Select account', opening: 'Opening', closing: 'Closing', entryNumber: 'Entry No', debit: 'Debit', credit: 'Credit', source: 'Source', balance: 'Balance' },
+            variance: 'Variance',
+          generalLedger: { accountPlaceholder: 'Select account', opening: 'Opening', closing: 'Closing', entryNumber: 'Entry No', source: 'Source', balance: 'Balance' },
           taxSummary: { agency: 'Agency', rateName: 'Tax Rate', rate: 'Rate', outputTax: 'Output Tax', inputTax: 'Input Tax', netTax: 'Net Tax', totalOutput: 'Total Output Tax', totalInput: 'Total Input Tax', totalNet: 'Net Payable' },
           cashFlow: { operating: 'Operating Activities', investing: 'Investing Activities', financing: 'Financing Activities', unclassified: 'Unclassified Accounts', netProfit: 'Net Profit', totalOperating: 'Net Cash from Operating', totalInvesting: 'Net Cash from Investing', totalFinancing: 'Net Cash from Financing', totalUnclassified: 'Net Cash from Unclassified', netCashFlow: 'Net Cash Flow', openingCash: 'Opening Cash', closingCash: 'Closing Cash', check: 'Check' },
           maintenance: {
@@ -2772,7 +3292,7 @@ export const en = {
           actions: { assignments: 'Assignments', ensureVendor: 'Create Payee' },
           confirmEnsureVendor: 'Create a shadow vendor for this employee (payee for reimbursements / advances)?',
           ensureVendorSuccess: 'Payee vendor is ready.',
-          assignments: { titleFor: 'Assignments — {name}', addTitle: 'Add Assignment', add: 'Add', added: 'Assignment added.', deleted: 'Assignment removed.', structure: 'Structure', effectiveFrom: 'Effective From', baseAmount: 'Base Amount', delete: 'Remove', confirmDelete: 'Remove this assignment?' },
+          assignments: { titleFor: 'Assignments - {name}', addTitle: 'Add Assignment', add: 'Add', added: 'Assignment added.', deleted: 'Assignment removed.', structure: 'Structure', effectiveFrom: 'Effective From', baseAmount: 'Base Amount', delete: 'Remove', confirmDelete: 'Remove this assignment?' },
         },
         setup: {
           title: 'Payroll Setup',
@@ -2801,7 +3321,7 @@ export const en = {
           frequency: { monthly: 'Monthly', semiMonthly: 'Semi-monthly', biWeekly: 'Bi-weekly', weekly: 'Weekly' },
           componentType: { earning: 'Earning', deduction: 'Deduction', employerContribution: 'Employer Contribution' },
           form: { periodStart: 'Period Start', periodEnd: 'Period End', payDate: 'Pay Date', frequency: 'Frequency', structure: 'Structure Filter', structurePlaceholder: 'All employees with an assignment', memo: 'Memo' },
-          detail: { grossTotal: 'Gross Total', deductionTotal: 'Deduction Total', employerCostTotal: 'Employer Cost', payslips: 'Payslips', errorCount: '{count} payslip(s) failed to calculate — fix before posting.' },
+          detail: { grossTotal: 'Gross Total', deductionTotal: 'Deduction Total', employerCostTotal: 'Employer Cost', payslips: 'Payslips', errorCount: '{count} payslip(s) failed to calculate - fix before posting.' },
           payslip: { title: 'Payslip', view: 'Detail', employee: 'Employee', baseAmount: 'Base Amount', grossPay: 'Gross Pay', totalDeductions: 'Deductions', netPay: 'Net Pay', paymentStatus: 'Payment', workedDays: 'Worked Days', recalc: 'Recalculate', recalcSuccess: 'Payslip recalculated.', lines: 'Lines', error: 'Error', seq: 'Seq', component: 'Component', type: 'Type', amount: 'Amount', ytd: 'YTD', status: { unpaid: 'Unpaid', paid: 'Paid' } },
           pay: { title: 'Pay', account: 'Funds Account', accountPlaceholder: 'Select a cash account', date: 'Payment Date', method: 'Method', methodPlaceholder: 'e.g. BankTransfer', reference: 'Reference', referencePlaceholder: 'External reference', employees: 'Employees', employeesPlaceholder: 'All unpaid (leave empty)', cancel: 'Cancel', submit: 'Pay', success: 'Payment posted.' },
           actions: { calculate: 'Calculate', post: 'Post', pay: 'Pay', void: 'Void', delete: 'Delete' },
@@ -2827,7 +3347,7 @@ export const en = {
           filter: { statusAny: 'Any status' },
         },
         subscriptions: {
-          title: 'Subscriptions',
+          title: 'Paid Subscriptions',
           cancelAtPeriodEnd: 'Cancel at Period End',
           confirmCancelPrompt: 'Cancel subscription at end of current billing period?',
           columns: { subscriptionNo: 'Subscription No', userId: 'Customer', planName: 'Plan', status: 'Status', cycleType: 'Cycle', startTime: 'Start', nextBillingTime: 'Next Billing', paidAmount: 'Paid Amount', currency: 'Currency', autoRenew: 'Auto Renew' },
@@ -2977,7 +3497,7 @@ export const en = {
         agents: {
           title: 'Agents',
           pageTitle: 'Agents',
-          banner: 'Configure, clone, and monitor your AI agents — execution mode, provider/model, tool groups, and quality/latency/cost tiers at a glance.',
+          banner: 'Configure, clone, and monitor your AI agents - execution mode, provider/model, tool groups, and quality/latency/cost tiers at a glance.',
           noDescription: 'No description',
           cloneConfirm: 'Clone this agent into a new copy?',
           cloneSuccess: 'Agent cloned',
@@ -3013,23 +3533,14 @@ export const en = {
           detail: {
             groups: { setup: 'Setup', config: 'Configuration', resources: 'Resources', operations: 'Operations' },
             basicInfo: {
-              hint: "The agent's core configuration — who it is, which model it runs on, and how it's routed.",
+              hint: "The agent's core configuration - who it is, which model it runs on, and how it's routed.",
               identity: 'Identity', model: 'Model & Sampling', capabilities: 'Routing & Capabilities',
             },
             persona: {
-              hint: "Pick a persona from the shared library to inject a soul/role block. The version history is reused from the agent's config snapshots.",
-              library: 'Persona library', libraryEmpty: 'No personas in the library yet.',
-              applied: 'Applied', new: 'New persona', versions: 'Versions', older: 'older',
-              versionsEmpty: 'No version history yet.', versionPreview: 'Previewing', exitPreview: 'Exit preview',
-              rollback: 'Rollback', rollbackConfirm: 'Roll back to this version? Current config will be snapshotted first.',
-              noPersona: 'No persona', editDetails: 'Edit details', snapshotInstructions: 'Instructions at this version',
+              hint: 'The persona (soul) content is injected as a <soul> block ahead of the system prompt. A single agent has a single persona.',
+              lead: "Describe the agent's persona / role. Leave empty for no soul injection.",
               contentPlaceholder: 'Persona content (Markdown soul/role description)…',
-              saveContent: 'Save content', apply: 'Apply to this agent', clear: 'Clear persona',
-              contentSaved: 'Persona content saved', saveError: 'Failed to save persona', saved: 'Persona saved',
-              newTitle: 'New persona', editTitle: 'Edit persona',
-              fieldName: 'Name', fieldNamePlaceholder: 'e.g. Friendly Support Agent',
-              fieldSlug: 'Slug', fieldSlugPlaceholder: 'e.g. friendly-support',
-              fieldDescription: 'Description', fieldContent: 'Content', cancel: 'Cancel', save: 'Save',
+              discard: 'Discard', save: 'Save persona', saved: 'Persona saved',
             },
             knowledgeHint: 'Assign knowledge bases to this agent. At runtime, RAG retrieval is scoped to only these knowledge bases.',
             knowledgePlaceholder: 'Select knowledge bases…',
@@ -3039,7 +3550,7 @@ export const en = {
             capabilitiesHint: 'Capability tags + routing tiers used by multi-agent routing/handoff to pick the right agent for a task.',
             capabilities: {
               domains: 'Domains', roles: 'Roles',
-              qualityTier: 'Quality tier (1–5)', latencyTier: 'Latency tier (1=fastest)', costTier: 'Cost tier (1=cheapest)',
+              qualityTier: 'Quality tier (1-5)', latencyTier: 'Latency tier (1=fastest)', costTier: 'Cost tier (1=cheapest)',
             },
             tools: {
               add: 'Add tool group', remove: 'Remove', removeConfirm: 'Remove this tool group from the agent?',
@@ -3059,7 +3570,7 @@ export const en = {
               searchPlaceholder: 'Search knowledge bases…',
               docs: 'docs', chunks: 'chunks', assigned: 'Knowledge base assigned', removed: 'Knowledge base removed',
               test: 'Test retrieval', testPlaceholder: 'Type a query to test what this agent would retrieve…',
-              unknownSource: 'Unknown source', noHits: 'No results — try a different query.',
+              unknownSource: 'Unknown source', noHits: 'No results - try a different query.',
             },
             memory: {
               add: 'Add memory', addTitle: 'Add memory', editTitle: 'Edit memory',
@@ -3102,7 +3613,7 @@ export const en = {
             providerPlaceholder: 'openai / anthropic / azure-openai …',
             modelPlaceholder: 'e.g. gpt-4o / claude-3-5-sonnet',
             instructionsPlaceholder: 'High-level system prompt shown to the model on every turn.',
-            personaPlaceholder: 'Optional — pick a persona to inject soul/role context',
+            personaPlaceholder: 'Optional - pick a persona to inject soul/role context',
             personaHint: 'No persona attached. Personas are reusable soul/role templates that prepend a <soul> block to the system prompt.',
             system: 'system',
             recentRuns: 'Recent runs',
@@ -3119,7 +3630,7 @@ export const en = {
               memory: 'Memory',
               runs: 'Runs',
             },
-            // Legacy keys retained — they were the tabs nav before the quadrant
+            // Legacy keys retained - they were the tabs nav before the quadrant
             // redesign and still appear in some downstream locale-key sweeps.
             versionsPlaceholder: 'No versions yet.',
             skillsPlaceholder: 'Select skills…',
@@ -3269,7 +3780,7 @@ export const en = {
             input: 'Initial input',
             inputPlaceholder: 'Enter the initial input for the workflow…',
             userId: 'User ID',
-            userIdPlaceholder: 'Optional — associate with a user',
+            userIdPlaceholder: 'Optional - associate with a user',
             queued: 'Execution queued: {id}',
             failed: 'Run failed',
           },
@@ -3354,7 +3865,7 @@ export const en = {
           search: { placeholder: 'Search by name, slug, or description', keyword: 'Keyword' },
           category: { all: 'All categories', label: 'Category' },
           popular: { button: 'Popular', title: 'Popular Skills', activations: '{count} activations', empty: 'No activation data yet.' },
-          importExport: { export: 'Export', import: 'Import', exportSuccess: 'Exported {count} skills', exportFailed: 'Export failed', importResult: 'Imported {imported}, updated {updated}, failed {failed}', importFailed: 'Import failed', invalidFile: 'Invalid file — expected a skills JSON array' },
+          importExport: { export: 'Export', import: 'Import', exportSuccess: 'Exported {count} skills', exportFailed: 'Export failed', importResult: 'Imported {imported}, updated {updated}, failed {failed}', importFailed: 'Import failed', invalidFile: 'Invalid file - expected a skills JSON array' },
           detail: { slug: 'Slug', scope: 'Scope', status: 'Status', tags: 'Tags', description: 'Description', filePath: 'File Path', whenToUse: 'When To Use', content: 'Content', noContent: 'No content available.' },
           columns: {
             name: 'Name', slug: 'Slug', description: 'Description', version: 'Version',
@@ -3370,7 +3881,7 @@ export const en = {
         providers: {
           title: 'LLM Providers',
           pageTitle: 'LLM Providers',
-          banner: 'Manage LLM provider connections — endpoints, credentials, default models, and live connection diagnostics.',
+          banner: 'Manage LLM provider connections - endpoints, credentials, default models, and live connection diagnostics.',
           deleteConfirm: 'Delete this provider? Agents pinned to it will fail until reassigned.',
           search: { keyword: 'Keyword', placeholder: 'Search by name, type, endpoint or model' },
           badge: { enabled: 'Enabled', disabled: 'Disabled', system: 'System', idle: 'Not tested', testing: 'Testing…', ok: 'Connected', error: 'Failed' },
@@ -3433,7 +3944,7 @@ export const en = {
         knowledge: {
           title: 'Knowledge Bases',
           pageTitle: 'Knowledge Bases',
-          banner: 'Manage vector knowledge bases — documents, embeddings, and search.',
+          banner: 'Manage vector knowledge bases - documents, embeddings, and search.',
           noDescription: 'No description',
           deleteConfirm: 'Delete this knowledge base? Documents and chunks are removed.',
           columns: {
@@ -3564,30 +4075,6 @@ export const en = {
             thresholdHint: 'A ratio between 0 and 1, e.g. 0.8 = 80%',
           },
         },
-        personas: {
-          title: 'Personas',
-          pageTitle: 'Personas',
-          banner: 'Personas are reusable soul / role templates. The Content body is injected as a <soul> block before every conversation of any agent linked to the persona.',
-          noDescription: 'No description',
-          deleteConfirm: 'Delete this persona? Agents linked to it lose their soul injection.',
-          search: { placeholder: 'Search name / slug / description', keyword: 'Keyword' },
-          badge: { system: 'System', custom: 'Custom' },
-          actions: { view: 'View', edit: 'Edit', delete: 'Delete' },
-          form: {
-            name: 'Name', slug: 'Slug', description: 'Description', content: 'Content',
-            scope: 'Scope',
-          },
-          detail: {
-            slug: 'Slug',
-            type: 'Type',
-            description: 'Description',
-            lastModified: 'Last Modified',
-            usedBy: 'Used by agents',
-            noAgents: 'No agents currently use this persona.',
-            content: 'Persona Content (<soul>)',
-            noContent: '(empty)',
-          },
-        },
         workspaceAgents: {
           title: 'Workspace Agents',
           banner: 'These are Agent definitions discovered from AGENT.md files on disk (under ~/.tnzi/agents/ globally or the project .agents/ directory). Edits should happen by modifying the files on disk; this view is read-only. Use this to inspect which agents your framework loaded at startup and to see their full prompts/personas inline.',
@@ -3666,11 +4153,11 @@ export const en = {
           behavior: { allow: 'Allow', ask: 'Ask', deny: 'Deny', weight: 'Weight {n}' },
           scope: { system: 'System', project: 'Project', user: 'User', session: 'Session', weight: 'Weight {n}' },
           decisionChain: {
-            sortHint: 'Sorted by Priority (desc), then Scope weight (desc) — top rule wins.',
+            sortHint: 'Sorted by Priority (desc), then Scope weight (desc) - top rule wins.',
             title: 'How this decision is resolved',
-            priority: '1. Priority — higher priority rules are considered first.',
-            scope: '2. Scope weight — Session (4) > User (3) > Project (2) > System (1).',
-            behavior: '3. Behavior weight — on a tie, Deny > Ask > Allow.',
+            priority: '1. Priority - higher priority rules are considered first.',
+            scope: '2. Scope weight - Session (4) > User (3) > Project (2) > System (1).',
+            behavior: '3. Behavior weight - on a tie, Deny > Ask > Allow.',
           },
           modal: { create: 'Create Permission Rule' },
           deleteConfirm: 'Delete this rule? Active sessions reload rules immediately.',
@@ -3881,6 +4368,6 @@ export const en = {
 
 // `en` is the source of truth for the admin i18n key set. Other locales
 // annotate themselves `: AdminMessages` so the compiler enforces key parity
-// — a missing or stray key becomes a typecheck error instead of a silent
+// - a missing or stray key becomes a typecheck error instead of a silent
 // runtime fallback to the raw key.
 export type AdminMessages = typeof en

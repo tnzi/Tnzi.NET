@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// 评估运行管理控制器 — 提供评估管理、批量评估、趋势分析和版本比较
+/// 评估运行管理控制器 - 提供评估管理、批量评估、趋势分析和版本比较
 /// </summary>
 [DefaultController]
 [Route("admin/ai/evaluations")]

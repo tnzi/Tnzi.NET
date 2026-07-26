@@ -151,7 +151,7 @@ public class FileSystemSkillStoreTests : IDisposable
             ---
             """);
 
-        // FileSystemSkillStore loads all skills — the caller filters by Enabled.
+        // FileSystemSkillStore loads all skills - the caller filters by Enabled.
         // Verify that Enabled=false is parsed correctly from frontmatter.
         var store = CreateStore(paths: [_tempDir]);
         var skills = await store.GetAllAsync();
@@ -181,7 +181,7 @@ public class FileSystemSkillStoreTests : IDisposable
         var first = await store.GetAllAsync();
         first.Count.ShouldBe(1);
 
-        // Add another file after first call — should not appear in second call (cache hit)
+        // Add another file after first call - should not appear in second call (cache hit)
         CreateSkillFile("cache-skill-2", """
             ---
             name: Cache Skill 2
@@ -190,7 +190,7 @@ public class FileSystemSkillStoreTests : IDisposable
             """);
 
         var second = await store.GetAllAsync();
-        second.Count.ShouldBe(1); // still 1 — from cache
+        second.Count.ShouldBe(1); // still 1 - from cache
         ReferenceEquals(first, second).ShouldBeTrue();
     }
 
@@ -483,7 +483,7 @@ public class FileSystemSkillStoreTests : IDisposable
 
         // Internal skills should be hidden from agents
         SkillContextProvider.IsAgentAllowed(internalSkill, "any-agent").ShouldBeTrue(); // IsAgentAllowed doesn't filter internal
-        internalSkill.IsInternal.ShouldBeTrue(); // But the flag is set — FilterByAgent checks this separately
+        internalSkill.IsInternal.ShouldBeTrue(); // But the flag is set - FilterByAgent checks this separately
     }
 
     // -------------------------------------------------------------------------

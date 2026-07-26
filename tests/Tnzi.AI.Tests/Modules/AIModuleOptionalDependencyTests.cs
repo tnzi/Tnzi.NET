@@ -226,7 +226,7 @@ public class AIModuleOptionalDependencyTests
 
         // AIModule registers the engine impls in Configure and the NoOp fallbacks in PostConfigure.
         // Bootstrap through the real phase semantics so the engine is resolvable while the OPTIONAL
-        // sub-modules (Workflow/Skills/Rag) remain at their NoOp fallbacks — exactly the
+        // sub-modules (Workflow/Skills/Rag) remain at their NoOp fallbacks - exactly the
         // "core loaded, sub-modules absent" scenario these tests assert.
         TestHelpers.ConfigureModules(services, configuration, new AIModule());
         return services;

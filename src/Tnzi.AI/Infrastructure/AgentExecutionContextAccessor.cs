@@ -8,7 +8,7 @@ public interface IAgentExecutionContextAccessor
     AgentRunRequest? CurrentRequest { get; set; }
 
     /// <summary>
-    /// 当前执行周期的共享属性包 — 工具与中间件间传递数据（例如 ClarificationRequest、Todos）
+    /// 当前执行周期的共享属性包 - 工具与中间件间传递数据（例如 ClarificationRequest、Todos）
     /// </summary>
     Dictionary<string, object> Properties { get; }
 

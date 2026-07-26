@@ -1,4 +1,4 @@
-/* Tnzi UI-AI base styles — inherits from @tnzi/ui */
+/* Tnzi UI-AI base styles - inherits from @tnzi/ui */
 @import '@tnzi/ui/style.css';
 
 /* ===========================================================================
@@ -28,7 +28,7 @@
   --tnzi-ai-border-strong: rgba(0, 0, 0, 0.20);
   --tnzi-ai-divider:       #ebebeb;
 
-  /* Accent — inherits @tnzi/ui brand primary (teal #0d9488 by default; follows --tnzi-primary) */
+  /* Accent - inherits @tnzi/ui brand primary (teal #0d9488 by default; follows --tnzi-primary) */
   --tnzi-ai-accent:      var(--tnzi-primary);
   --tnzi-ai-accent-soft: rgb(var(--tnzi-primary-rgb) / 0.12);
   --tnzi-ai-accent-glow: rgb(var(--tnzi-primary-rgb) / 0.32);
@@ -37,6 +37,15 @@
   --tnzi-ai-success: #16a34a;
   --tnzi-ai-warning: #d97706;
   --tnzi-ai-danger:  #dc2626;
+  --tnzi-ai-info:    #2563eb;
+
+  /* Foreground for text/icons sitting on an accent or status fill. */
+  --tnzi-ai-on-accent: #ffffff;
+
+  /* Brand monogram lockup (sidebar header + collapsed rail). Tokenised because
+     a fixed near-black chip disappears against the dark sidebar canvas. */
+  --tnzi-ai-brand-mark-bg: linear-gradient(135deg, #1f1f1f 0%, #3a3a3a 100%);
+  --tnzi-ai-brand-mark-fg: #ffffff;
 
   /* Interaction overlays */
   --tnzi-ai-hover:    rgba(55, 53, 47, 0.04);
@@ -63,11 +72,11 @@
   --tnzi-ai-duration-slow: 320ms;
   --tnzi-ai-easing:        cubic-bezier(0.2, 0, 0, 1);
 
-  /* Conversation content width — consumers may widen (e.g. 1100px) via the
+  /* Conversation content width - consumers may widen (e.g. 1100px) via the
      `content-width` prop on TChatApp or by redefining this variable. */
   --tnzi-ai-content-width: 820px;
 
-  /* Scrollbars — applied ONLY inside .t-chat-app / .t-ai-scroll, never global * */
+  /* Scrollbars - applied ONLY inside .t-chat-app / .t-ai-scroll, never global * */
   --tnzi-ai-scrollbar-size:        8px;
   --tnzi-ai-scrollbar-thumb:       rgba(0, 0, 0, 0.18);
   --tnzi-ai-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
@@ -94,6 +103,11 @@
   --tnzi-ai-success: #30d158;
   --tnzi-ai-warning: #f59e0b;
   --tnzi-ai-danger:  #ff453a;
+  --tnzi-ai-info:    #60a5fa;
+
+  /* Inverted so the monogram reads against the near-black sidebar. */
+  --tnzi-ai-brand-mark-bg: linear-gradient(135deg, #efefed 0%, #b8b8b4 100%);
+  --tnzi-ai-brand-mark-fg: #1b1b1a;
 
   --tnzi-ai-hover:    rgba(255, 255, 255, 0.04);
   --tnzi-ai-press:    rgba(255, 255, 255, 0.06);
@@ -116,7 +130,7 @@
 .t-ai-display.md { font-size: 28px; }
 .t-ai-display.sm { font-size: 22px; }
 
-/* AI-specific CSS variables (--tnzi-ai-* namespace) — chat bubble + reasoning */
+/* AI-specific CSS variables (--tnzi-ai-* namespace) - chat bubble + reasoning */
 :root {
   /* Chat message bubbles */
   --tnzi-ai-chat-user-bg: hsl(222.2 47.4% 95%);
@@ -174,7 +188,7 @@
 }
 
 /* ===========================================================================
- * Unified custom scrollbar — scoped to the ui-ai surface so it NEVER leaks
+ * Unified custom scrollbar - scoped to the ui-ai surface so it NEVER leaks
  * into the consumer's global `*` (unlike a raw global rule). Every scroll
  * container inside TChatApp (left nav, thread list, message area, settings,
  * command palette, artifact pane) inherits this automatically; standalone
@@ -213,7 +227,7 @@
 }
 
 /* ===========================================================================
- * Shimmer skeleton — opt-in loading placeholder. Apply `.t-ai-skeleton` to any
+ * Shimmer skeleton - opt-in loading placeholder. Apply `.t-ai-skeleton` to any
  * block (size it yourself) or `.t-ai-chip-skeleton` for a 96×28 pill.
  * ========================================================================= */
 @keyframes t-ai-shimmer {

@@ -106,7 +106,7 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
             // populated inside SaveChanges) are set before we project the response DTO.
             // Under an enabled UoW transaction InsertAsync only tracks the entity (save
             // is deferred to commit), so without this the DTO would carry an empty Id and
-            // a 0001-01-01 timestamp. Repository.SaveChangesAsync routes through the UoW —
+            // a 0001-01-01 timestamp. Repository.SaveChangesAsync routes through the UoW -
             // it starts the deferred physical transaction rather than autocommitting.
             await Repository.SaveChangesAsync(ct);
             return Ok(Mapper.Map<TDto>(entity));

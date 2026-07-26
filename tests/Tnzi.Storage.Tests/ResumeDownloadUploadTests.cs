@@ -42,6 +42,7 @@ public class ResumeDownloadUploadTests
             _mockReferenceRepository.Object,
             _mockStorage.Object,
             optionsMonitor.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             _mockServiceProvider.Object);
     }
 

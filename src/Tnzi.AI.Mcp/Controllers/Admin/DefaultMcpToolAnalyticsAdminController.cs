@@ -6,7 +6,7 @@ namespace Tnzi.AI.Mcp.Controllers.Admin;
 [DefaultController]
 [Route("admin/ai/mcp/tool-analytics")]
 [ApiExplorerSettings(GroupName = "admin")]
-[ApiAuthorize(PermissionName = "ai.mcp.view")]
+[ApiAuthorize(PermissionName = "ai.mcpServer.view")]
 public class DefaultMcpToolAnalyticsAdminController : ApiAdminControllerBase
 {
     private readonly IMcpToolAnalyticsService _analyticsService;
@@ -50,7 +50,7 @@ public class DefaultMcpToolAnalyticsAdminController : ApiAdminControllerBase
     /// 清理过期记录
     /// </summary>
     [HttpDelete("cleanup")]
-    [ApiAuthorize(PermissionName = "ai.mcp.delete")]
+    [ApiAuthorize(PermissionName = "ai.mcpServer.delete")]
     public virtual async Task<ApiResult<int>> Cleanup([FromQuery][Range(1, 3650)] int retentionDays = 90)
     {
         var result = await _analyticsService.CleanupOldRecordsAsync(retentionDays);

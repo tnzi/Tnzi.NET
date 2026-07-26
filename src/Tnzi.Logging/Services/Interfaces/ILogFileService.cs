@@ -9,7 +9,7 @@ namespace Tnzi.Logging.Services.Interfaces;
 /// <c>admin/logs</c> controller endpoints.
 ///
 /// All paths are confined under <c>LoggingOptions.BasePath</c> via
-/// canonicalised path validation — directory-traversal attempts (e.g.
+/// canonicalised path validation; directory-traversal attempts (e.g.
 /// <c>../etc/passwd</c>) are rejected with a 400-style <c>Result.Fail</c>.
 /// </summary>
 public interface ILogFileService

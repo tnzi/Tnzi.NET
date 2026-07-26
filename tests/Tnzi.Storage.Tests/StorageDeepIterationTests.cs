@@ -55,6 +55,7 @@ public class StorageDeepIterationTests
             _mockReferenceRepository.Object,
             _mockStorage.Object,
             optionsMonitor.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             _mockServiceProvider.Object);
     }
 
@@ -63,6 +64,7 @@ public class StorageDeepIterationTests
         return new FileShareService(
             _mockShareRepository.Object,
             _mockFileRepository.Object,
+            TestFileAccessAuthorizer.AllowAll(),
             _mockServiceProvider.Object);
     }
 
@@ -621,7 +623,7 @@ public class StorageDeepIterationTests
 
         // Assert
         Assert.True(result.Succeeded);
-        // Verify entity state — SetTagsList 通过 Distinct() 去重（大小写敏感），只保留唯一值
+        // Verify entity state - SetTagsList 通过 Distinct() 去重（大小写敏感），只保留唯一值
         var tagsList = fileRecord.GetTagsList();
         // "photo" 和 "Photo" 是不同的（Distinct 是大小写敏感的）
         // 但 "photo" 有两个，只保留一个
@@ -726,7 +728,7 @@ public class StorageDeepIterationTests
         var record = new FileRecord();
         record.SetTagsList(new List<string> { " a ", "b", " a ", "c" });
         var tags = record.GetTagsList();
-        Assert.Equal(3, tags.Count); // "a", "b", "c" — Distinct removes duplicate "a"
+        Assert.Equal(3, tags.Count); // "a", "b", "c" - Distinct removes duplicate "a"
         Assert.Contains("a", tags);
         Assert.Contains("b", tags);
         Assert.Contains("c", tags);

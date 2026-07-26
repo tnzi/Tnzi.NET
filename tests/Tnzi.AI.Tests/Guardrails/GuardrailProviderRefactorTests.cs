@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// 现有 Guardrail 的 IGuardrailProvider 实现测试 — 验证双接口一致性和 FailClosed 配置
+/// 现有 Guardrail 的 IGuardrailProvider 实现测试 - 验证双接口一致性和 FailClosed 配置
 /// </summary>
 public class GuardrailProviderRefactorTests
 {

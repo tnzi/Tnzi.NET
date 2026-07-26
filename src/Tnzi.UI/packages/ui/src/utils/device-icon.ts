@@ -2,7 +2,7 @@
  * Device-icon brand colour mapping. The CSS colour value for each OS
  * family is kept here (UI layer) rather than in `@tnzi/core` because the
  * mapping mixes brand-hex (Windows blue, Android green, Linux yellow)
- * with theme-token references (`var(--tnzi-base-text)`) — the
+ * with theme-token references (`var(--tnzi-base-text)`) - the
  * theme-token half is meaningless outside a Tnzi UI shell.
  *
  * Sunk from `@tnzi/ui-admin/pages/_shared/device-info.ts` in 0.2.x.
@@ -13,7 +13,7 @@ import type { DeviceOsFamily } from '@tnzi/core'
 /**
  * Brand-hex colours for each OS family. These are the upstream brand
  * guidelines (microsoft.com / android.com / linux.org press kits) and
- * should not be overridden lightly — the recognisability of the tint is
+ * should not be overridden lightly - the recognisability of the tint is
  * the whole point. Consumers wanting a different palette can pass an
  * override table to {@link deviceIconColor}.
  */
@@ -35,7 +35,7 @@ export const DEFAULT_DEVICE_BRAND_COLORS: Readonly<Record<DeviceOsFamily, string
  * strings so callers can inline without importing extra design tokens.
  *
  * Pass an override table to substitute project-specific brand colours
- * (rare — most apps use the upstream brand hex unchanged).
+ * (rare - most apps use the upstream brand hex unchanged).
  */
 export function deviceIconColor(
   family: DeviceOsFamily,

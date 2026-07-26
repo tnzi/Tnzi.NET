@@ -4,7 +4,7 @@ using Pgvector.EntityFrameworkCore;
 namespace Tnzi.AI.Rag.Data;
 
 /// <summary>
-/// RAG 模块独立 DbContext — 使用 PostgreSQL + pgvector
+/// RAG 模块独立 DbContext - 使用 PostgreSQL + pgvector
 /// </summary>
 /// <remarks>
 /// 实体通过 EntityTypeConfigurationBase.DbContextType 自动绑定到此 DbContext，

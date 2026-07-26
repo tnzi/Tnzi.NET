@@ -138,7 +138,7 @@ public class ToolGuardrailMiddleware : IAiMiddleware, IToolExecutionMiddleware
         string? contentForInspection = null;
         if (_options.CurrentValue.Guardrails.InspectToolArguments && toolInput?.Count > 0)
         {
-            contentForInspection = System.Text.Json.JsonSerializer.Serialize(toolInput);
+            contentForInspection = JsonSerializer.Serialize(toolInput);
         }
 
         return new GuardrailRequest

@@ -41,7 +41,20 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
     /// </summary>
     public void EnableTransaction()
     {
-        Interlocked.Increment(ref _transactionDepth);
+        // 深度 0 → 1 = 开启一个**新的最外层事务**（不是嵌套）。此时必须清掉上一个
+        // 事务留下的 _hasCommitted 标志：该标志的用途是「同一个事务不要提交两次」，
+        // 而工作单元实例在整个 DI 作用域内被复用（UnitOfWorkManager 的 _unitOfWorks
+        // 只在回滚/释放时清空，提交成功后不清）。不清的话，同一作用域内**顺序**发生
+        // 的第二个 ExecuteInUnitOfWorkAsync 会在提交时命中 `_hasCommitted` 早退 ——
+        // 既不 SaveChanges 也不提交，变更留在变更跟踪器里被静默丢弃，且不抛任何异常。
+        //
+        // 触发场景是一个服务顺序调用两个各自带事务的服务（如银行流水的
+        // 「建单据 → 过账 → 确认匹配」），第二段的写入凭空消失。2026-06-11 修过该
+        // 标志毒化的**嵌套**分支（GetUnitOfWork 深度同步），这里是它的顺序分支。
+        if (Interlocked.Increment(ref _transactionDepth) == 1)
+        {
+            _hasCommitted = false;
+        }
     }
 
     public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

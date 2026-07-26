@@ -116,7 +116,7 @@ const selectedAccountIds = ref<string[]>([])
 const previewing = ref(false)
 const running = ref(false)
 
-// Any postable increment (non-skipped, non-zero) enables Execute — even when the
+// Any postable increment (non-skipped, non-zero) enables Execute - even when the
 // net is zero, offsetting per-account revaluations still post.
 const hasPostable = computed(() => (preview.value?.rows ?? []).some((r) => !r.skipReason && r.adjustment !== 0))
 

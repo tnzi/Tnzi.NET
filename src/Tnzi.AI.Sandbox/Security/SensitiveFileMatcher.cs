@@ -6,8 +6,8 @@ namespace Tnzi.AI.Sandbox.Security;
 /// Matches a file name against the configured <c>DeniedPatterns</c> wildcard list
 /// (e.g. <c>.env</c>, <c>*.key</c>, <c>*.pem</c>, <c>credentials*</c>) so the
 /// sandbox can refuse to read or list sensitive files. Patterns are matched
-/// case-insensitively against the leaf file name only — directory components do
-/// not participate — using <see cref="FileSystemName.MatchesSimpleExpression"/>
+/// case-insensitively against the leaf file name only - directory components do
+/// not participate - using <see cref="FileSystemName.MatchesSimpleExpression"/>
 /// (the same simple-expression engine the BCL uses for <c>Directory.GetFiles</c>
 /// search patterns), so <c>*</c> and <c>?</c> behave exactly as a shell glob.
 /// </summary>

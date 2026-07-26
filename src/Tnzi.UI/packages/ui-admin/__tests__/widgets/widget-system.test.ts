@@ -236,7 +236,7 @@ describe('TWidgetQuickActions permission filtering', () => {
   })
 
   it('fails open (shows every tile) before permissions load', () => {
-    // userInfo === null — permissions not yet loaded, so don't hide anything.
+    // userInfo === null - permissions not yet loaded, so don't hide anything.
     const wrapper = mountActions()
     expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(3)
   })
@@ -269,7 +269,7 @@ describe('TWidgetQuickActions module filtering', () => {
     })
   }
 
-  it('hides tiles whose module the backend did not load — even for super users', () => {
+  it('hides tiles whose module the backend did not load - even for super users', () => {
     const auth = useAdminAuthStore()
     auth.setUserInfo({ id: '1', username: 'root', roles: [], permissions: [] })
     auth.setSuperUser(true)
@@ -398,7 +398,7 @@ describe('preset helpers', () => {
   it('defaultWorkbenchWidgets leads with the KPI hero strip', () => {
     const deck = defaultWorkbenchWidgets()
     expect(deck.length).toBeGreaterThan(5)
-    // KPI strip pinned to row 1 per UX feedback — users see the headline
+    // KPI strip pinned to row 1 per UX feedback - users see the headline
     // numbers immediately, then quick actions and detail cards.
     expect(deck[0]?.id).toBe('kpi')
     expect(deck.find((w) => w.id === 'banner')).toBeUndefined()

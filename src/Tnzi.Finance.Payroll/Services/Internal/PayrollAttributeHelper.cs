@@ -28,6 +28,11 @@ public static class PayrollAttributeHelper
             {
                 if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                     return Result.Failure($"Attribute '{property.Name}' must be a scalar value (string, number or boolean).", 400);
+
+                // 合法 JSON 数字可以超出 decimal 值域（如 1e400）：在这里挡住，
+                // 否则它会一路存进库，直到计算工资单时 Parse 才炸
+                if (property.Value.ValueKind == JsonValueKind.Number && !property.Value.TryGetDecimal(out _))
+                    return Result.Failure($"Attribute '{property.Name}' is a number outside the supported range.", 400);
             }
 
             return Result.Success();
@@ -54,7 +59,11 @@ public static class PayrollAttributeHelper
             attributes[property.Name] = property.Value.ValueKind switch
             {
                 JsonValueKind.String => property.Value.GetString() ?? string.Empty,
-                JsonValueKind.Number => property.Value.GetDecimal().ToString(CultureInfo.InvariantCulture),
+                // TryGetDecimal 而非 GetDecimal：超出 decimal 值域的数字原样带出去，
+                // 由 Attr() 在求值时报"不是数字"，而不是在这里抛异常拖垮整批计算
+                JsonValueKind.Number => property.Value.TryGetDecimal(out var number)
+                    ? number.ToString(CultureInfo.InvariantCulture)
+                    : property.Value.GetRawText(),
                 JsonValueKind.True => "true",
                 JsonValueKind.False => "false",
                 _ => string.Empty

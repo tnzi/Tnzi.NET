@@ -78,7 +78,7 @@ public class AgentRunFkTests : IDisposable
     [Fact]
     public async Task AgentRun_WithNonExistentAgentId_IsRejected()
     {
-        // 引用完整性：裸 Guid 不再可写入 — FK 约束拒绝悬挂引用
+        // 引用完整性：裸 Guid 不再可写入 - FK 约束拒绝悬挂引用
         var run = new AgentRun
         {
             AgentId = Guid.NewGuid(), // 不存在的 Agent
@@ -171,8 +171,8 @@ public class AgentRunFkTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 注册 AgentRun FK 测试所需的实体集
-/// （Agent 配置含指向 Provider/AgentPersona 的 FK，须一并注册）。
+/// 测试专用 DbContext - 注册 AgentRun FK 测试所需的实体集
+/// （Agent 配置含指向 Provider 的 FK，须一并注册）。
 /// </summary>
 internal sealed class AgentRunFkDbContext : TnziDbContext<AgentRunFkDbContext>
 {
@@ -187,7 +187,6 @@ internal sealed class AgentRunFkDbContext : TnziDbContext<AgentRunFkDbContext>
     {
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new AgentThreadConfiguration());
         modelBuilder.ApplyConfiguration(new AgentRunConfiguration());
         modelBuilder.ApplyConfiguration(new AgentRunNodeConfiguration());

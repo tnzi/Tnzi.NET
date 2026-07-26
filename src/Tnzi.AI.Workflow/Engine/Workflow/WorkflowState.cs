@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流状态 — 管理步骤间的输入/输出传递
+/// 工作流状态 - 管理步骤间的输入/输出传递
 /// </summary>
 /// <remarks>
 /// 输出以 <see cref="WorkflowStepOutput"/>（文本 + 元数据）存储，
@@ -65,7 +65,12 @@ public partial class WorkflowState
     }
 
     /// <summary>
-    /// 解析模板变量：将 {{stepId}} 替换为对应步骤的输出
+    /// 解析模板变量：将 {{stepId}} 替换为对应步骤的输出（未知 stepId 原样保留）。
+    /// <para>
+    /// 步骤 ID 允许连字符（引擎自动补全的缺省 ID 就是 <c>step-1</c> 这种形式，内置模板也用
+    /// <c>parallel-workers</c> 之类），因此变量名字符集必须含 <c>-</c>，否则这些步骤的输出
+    /// 永远无法被模板引用（占位符原样残留，且在条件门控里会被 fail-closed 判假）。
+    /// </para>
     /// </summary>
     public string ResolveTemplate(string template)
     {
@@ -81,6 +86,6 @@ public partial class WorkflowState
         });
     }
 
-    [GeneratedRegex(@"\{\{(\w+)\}\}")]
+    [GeneratedRegex(@"\{\{([\w-]+)\}\}")]
     private static partial Regex TemplateVariableRegex();
 }

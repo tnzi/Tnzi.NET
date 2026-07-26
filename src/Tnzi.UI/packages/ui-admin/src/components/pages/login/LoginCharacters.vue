@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `LoginCharacters` — four playful geometric characters for the `split`
+ * `LoginCharacters` - four playful geometric characters for the `split`
  * login layout's brand panel. Full port of
  * `careercompass-main/src/components/ui/animated-characters.tsx`
  * (AnimatedCharacters + EyeBall + Pupil), 2026-06-11.
@@ -22,7 +22,7 @@
  *   - The first 800ms of `typing` → the tall and slim characters glance at
  *     each other (eye rows jump to face one another, forced pupil look).
  *   - Password visible → everyone snaps upright (skew 0) and turns their
- *     faces away (forced look up-left) — politely not watching…
+ *     faces away (forced look up-left) - politely not watching…
  *   - …except the tall one, which sneaks a peek every 2-5s for 800ms
  *     (pupils flick toward the form, then away again).
  *
@@ -35,9 +35,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 interface Props {
-  /** The username field has focus — characters lean in / glance at each other. */
+  /** The username field has focus - characters lean in / glance at each other. */
   typing?: boolean
-  /** The password is shown in clear text — characters look away (mostly). */
+  /** The password is shown in clear text - characters look away (mostly). */
   passwordVisible?: boolean
   /** Characters of password typed so far. */
   passwordLength?: number
@@ -205,7 +205,7 @@ function eyeStyle(c: CharacterDef, i: number): Record<string, string> {
   }
 }
 
-/** Forced pupil direction for scripted moments — null falls back to cursor tracking. */
+/** Forced pupil direction for scripted moments - null falls back to cursor tracking. */
 function forcedLook(c: CharacterDef): { x: number; y: number } | null {
   if (pwdVisible.value) {
     if (c.key === 'tall') return peeking.value ? { x: 4, y: 5 } : { x: -4, y: -4 }

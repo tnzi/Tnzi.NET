@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// B6: ContextInjectionMiddleware — idempotency guard prevents duplicate soul/profile/citations
+/// B6: ContextInjectionMiddleware - idempotency guard prevents duplicate soul/profile/citations
 /// when RetryMiddleware re-invokes the inner pipeline on the same shared context.
 /// </summary>
 [Collection("ContextInjectionCache")]
@@ -93,7 +93,7 @@ public class ContextInjection_IdempotencyTests
 
     /// <summary>
     /// Simulates RetryMiddleware re-invoking the inner pipeline twice on the SAME context.
-    /// The second call must be a no-op — exactly one &lt;soul&gt; block in messages.
+    /// The second call must be a no-op - exactly one &lt;soul&gt; block in messages.
     /// </summary>
     [Fact]
     public async Task InvokeAsync_CalledTwiceOnSameContext_InjectsPersonaExactlyOnce()
@@ -109,7 +109,7 @@ public class ContextInjection_IdempotencyTests
         await middleware.InvokeAsync(context, (ctx, ct) =>
             Task.FromResult(new AgentRunResult { Response = "retry" }), CancellationToken.None);
 
-        // Exactly one <soul> tag in the combined messages — not two
+        // Exactly one <soul> tag in the combined messages - not two
         CountOccurrences(context.Messages, "<soul>").ShouldBe(1);
     }
 

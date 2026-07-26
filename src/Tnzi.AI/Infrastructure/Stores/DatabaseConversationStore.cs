@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Stores;
 
 /// <summary>
-/// 数据库对话存储 — 桥接到现有 IAgentThreadInternalService，保持向后兼容
+/// 数据库对话存储 - 桥接到现有 IAgentThreadInternalService，保持向后兼容
 /// </summary>
 /// <remarks>
 /// 此实现要求 conversationId 为 GUID 格式字符串，因底层 AgentThread 实体使用 Guid 主键。

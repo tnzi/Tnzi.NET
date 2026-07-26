@@ -41,11 +41,11 @@ describe('defineAdminApp', () => {
     expect(childNames).toContain('system')
   })
 
-  it('applies the GLOBAL admin theme at bootstrap — anonymous, before login', async () => {
+  it('applies the GLOBAL admin theme at bootstrap - anonymous, before login', async () => {
     // The super-admin-configured global theme must reach the login page and the
     // top-level exception pages (403/404/500), which render OUTSIDE the
     // authenticated shell. So install() kicks off `GET /appearance/admin-theme`
-    // at bootstrap (the endpoint is anonymous), not just once signed in —
+    // at bootstrap (the endpoint is anonymous), not just once signed in -
     // otherwise the theme snapped back to the built-in palette on every refresh
     // of those pages.
     const get = vi.fn(async () => ({
@@ -78,7 +78,7 @@ describe('defineAdminApp', () => {
   it('preserves meta.moduleGate through the RouteRecordRaw → store round-trip (regression)', () => {
     // toAdminRouteRecords() re-maps meta field-by-field; if it forgets to carry
     // `moduleGate` (as it once forgot `permission`), the store sees `undefined`
-    // and NEVER gates the node — the sidebar keeps showing menus for modules the
+    // and NEVER gates the node - the sidebar keeps showing menus for modules the
     // backend never loaded, even for super-admins. Unit tests that seed the store
     // directly bypass this conversion, so this MUST install through the real path.
     const app = createApp({ render: () => h('div') })
@@ -101,7 +101,7 @@ describe('defineAdminApp', () => {
     // that omits identity, the identity subtree becomes unreachable and drops
     // from the menu, while a loaded module (authorization) stays. Super-user
     // bypasses the permission filter (which no longer fails open when logged
-    // out), so this isolates the module gate — which holds for super-admins too.
+    // out), so this isolates the module gate - which holds for super-admins too.
     useAdminAuthStore().setSuperUser(true)
     store.setAvailableModules(new Set(['authorization']))
     expect(store.unavailableRouteNames.has('identity')).toBe(true)
@@ -285,7 +285,7 @@ describe('defineAdminApp', () => {
       client: dummyClient,
       forbiddenComponent: customForbidden,
     })
-    // Find by NAME — the returned table is basePath-prefixed ('/admin/403').
+    // Find by NAME - the returned table is basePath-prefixed ('/admin/403').
     const forbidden = routes.find((r) => r.name === 'forbidden')
     expect(forbidden!.component).toBe(customForbidden)
   })
@@ -442,10 +442,10 @@ describe('defineAdminApp', () => {
 
   it('mirrors the LIVE client token into the admin store when no token is passed (self-fetch mode → isLogin)', async () => {
     // The auth guard's resolveSession + the post-login after() both call
-    // loadPermissions() with no token — the session already lives on the client.
+    // loadPermissions() with no token - the session already lives on the client.
     // loadPermissions must mirror that token so `isLogin` flips true, else a
     // just-authenticated user bounces back to login. getAccessToken is a
-    // `this`-method (reads this._token) — locks in the method-call access too.
+    // `this`-method (reads this._token) - locks in the method-call access too.
     const client = {
       _token: 'live-token',
       get: async () => ({ success: true, code: 200, data: null }),
@@ -518,7 +518,7 @@ describe('defineAdminApp', () => {
     expect(menuKeys).toContain('blog')
     expect(menuKeys).toContain('dashboard')
     // install() wired pinia-plugin-persistedstate, so the OFF above landed in
-    // localStorage — reset it or later tests hydrate the polluted value.
+    // localStorage - reset it or later tests hydrate the polluted value.
     appStore.setShowBuiltInMenus(true)
   })
 
@@ -632,7 +632,7 @@ describe('defineAdminApp', () => {
       const guards: unknown[] = []
       // getAccessToken is a `this`-dependent METHOD (mirrors the real HttpClient
       // `return this.accessToken`), so resolveSession extracting it into a bare
-      // variable and calling it unbound would throw here — locks in the fix.
+      // variable and calling it unbound would throw here - locks in the fix.
       const client = {
         _token: token,
         get: async () => ({ success: true, code: 200, data: null }),
@@ -706,7 +706,7 @@ describe('defineAdminApp', () => {
 
     it('runs the consumer callback FIRST (store still populated), then clears the store', async () => {
       // Order matters: the store MUST still be populated while the consumer's
-      // logout (backend sign-out + redirect) runs — clearing it first nulled
+      // logout (backend sign-out + redirect) runs - clearing it first nulled
       // `userInfo` while the shell was mounted and flashed the full fail-open
       // menu for the 1-2s the backend call took before the redirect.
       let stillLoggedInDuringConsumer: boolean | null = null
@@ -737,7 +737,7 @@ describe('defineAdminApp', () => {
       auth.setSuperUser(true)
 
       await expect(wrapped.user!.onLogout!()).rejects.toThrow('backend logout failed')
-      // The store is still cleared — a failed backend sign-out must not leave a
+      // The store is still cleared - a failed backend sign-out must not leave a
       // stale super-user / permission set to leak into the next sign-in.
       expect(auth.isLogin).toBe(false)
       expect(auth.userInfo).toBeNull()
@@ -752,14 +752,21 @@ describe('defineAdminApp', () => {
         login: vi.fn(async () => {}),
         logout: vi.fn(async () => {}),
         restoreAuth: vi.fn(async () => {}),
-        applyTokenSession: vi.fn(async () => {}),
+        applyTokenSession: vi.fn(async (t: { accessToken: string }) => {
+          auth.accessToken = t.accessToken
+        }),
       }
       const ok = { succeeded: true, success: true, code: 200, data: {} }
+      const tokens = { accessToken: 'a', refreshToken: 'r', expiresIn: 1 }
       const authApi = {
+        loginWithRefreshToken: vi.fn(async () => ({ ...ok, data: { ...tokens } })),
+        verifyTwoFactor: vi.fn(async () => ({ ...ok, data: { ...tokens } })),
+        sendTwoFactorCode: vi.fn(async () => ok),
         sendCodeLoginCode: vi.fn(async () => ok),
         sendPasswordRecoveryCode: vi.fn(async () => ok),
         sendQuickRegisterCode: vi.fn(async () => ok),
-        codeLogin: vi.fn(async () => ({ ...ok, data: { accessToken: 'a', refreshToken: 'r', expiresIn: 1 } })),
+        getCaptchaJson: vi.fn(async () => ({ ...ok, data: { captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 } })),
+        codeLogin: vi.fn(async () => ({ ...ok, data: { ...tokens } })),
         resetPasswordByCode: vi.fn(async () => ok),
         quickRegister: vi.fn(async () => ({ ...ok, data: { userId: 'u', userName: 'n', requirePasswordSetup: false } })),
         setPassword: vi.fn(async () => ok),
@@ -805,7 +812,7 @@ describe('defineAdminApp', () => {
     it('a consumer callback overrides the framework default for its slot', () => {
       const customSendCode = vi.fn(async () => {})
       // sendCode is not wrapped by after() (only pwd/code are), so the override
-      // is the exact function — proving the consumer wins its slot.
+      // is the exact function - proving the consumer wins its slot.
       const { cfg } = installWithRuntime(makeRuntime(), { callbacks: { sendCode: customSendCode } })
       expect(cfg.callbacks!.sendCode).toBe(customSendCode)
     })
@@ -821,14 +828,179 @@ describe('defineAdminApp', () => {
       })
     })
 
-    it('drives pwdLogin through the runtime auth manager (then the framework after() runs)', async () => {
+    it('drives pwdLogin through loginWithRefreshToken + applyTokenSession on success', async () => {
       const runtime = makeRuntime()
       const { cfg } = installWithRuntime(runtime)
       await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
         setTwoFactorRequired: vi.fn(),
         clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
       })
-      expect(runtime.auth.login).toHaveBeenCalledWith({ userName: 'admin', password: 'pw' })
+      expect(runtime.authApi.loginWithRefreshToken).toHaveBeenCalledWith({ userName: 'admin', password: 'pw' })
+      expect(runtime.auth.applyTokenSession).toHaveBeenCalled()
+    })
+
+    it('pwdLogin on a 2FA challenge sets the challenge (no session) instead of failing', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tt', supportedTypes: ['Totp', 'Email'] },
+      })) as never
+      const { cfg } = installWithRuntime(runtime)
+      const setTwoFactorRequired = vi.fn()
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired,
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+      })
+      // Challenge handed to the shell: preferred (first) = TOTP, all enabled
+      // methods carried so the UI can offer a switcher.
+      expect(setTwoFactorRequired).toHaveBeenCalledWith({
+        challengeId: 'tt',
+        userName: 'admin',
+        method: 'totp',
+        methods: ['totp', 'email'],
+      })
+      // No session established, no premature code send for TOTP.
+      expect(runtime.auth.applyTokenSession).not.toHaveBeenCalled()
+      expect(runtime.authApi.sendTwoFactorCode).not.toHaveBeenCalled()
+    })
+
+    it('verifyTwoFactor verifies the code + establishes the session', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tt', supportedTypes: ['Totp'] },
+      })) as never
+      const { cfg } = installWithRuntime(runtime)
+      // Establish the pending challenge (remembers tempToken + type).
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+      })
+      await cfg.callbacks!.verifyTwoFactor!({ challengeId: 'tt', code: '123456' })
+      // TwoFactorType is a string enum matching the wire (PascalCase).
+      expect(runtime.authApi.verifyTwoFactor).toHaveBeenCalledWith({ tempToken: 'tt', code: '123456', type: 'Totp' })
+      expect(runtime.auth.applyTokenSession).toHaveBeenCalled()
+    })
+
+    it('verifyTwoFactor honours a switched method (email) over the challenge default', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tt', supportedTypes: ['Totp', 'Email'] },
+      })) as never
+      const { cfg } = installWithRuntime(runtime)
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+      })
+      // User switched to email in the UI → verify with the email type (2), not the
+      // default TOTP.
+      await cfg.callbacks!.verifyTwoFactor!({ challengeId: 'tt', code: '111111', method: 'email' })
+      expect(runtime.authApi.verifyTwoFactor).toHaveBeenCalledWith({ tempToken: 'tt', code: '111111', type: 'Email' })
+    })
+
+    it('sends a code up front for an SMS/email-preferred 2FA challenge', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tt', supportedTypes: ['Email'] },
+      })) as never
+      const { cfg } = installWithRuntime(runtime)
+      const setTwoFactorRequired = vi.fn()
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired,
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+      })
+      expect(setTwoFactorRequired).toHaveBeenCalledWith({
+        challengeId: 'tt',
+        userName: 'admin',
+        method: 'email',
+        methods: ['email'],
+      })
+      // Email 2FA → the code is delivered so the user has something to enter.
+      expect(runtime.authApi.sendTwoFactorCode).toHaveBeenCalledWith({ tempToken: 'tt', type: 'Email' })
+    })
+
+    it('pwdLogin reveals the captcha (no session) when the backend demands one', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 400,
+        errorCode: 'IDENTITY_CAPTCHA_REQUIRED',
+        errorDetails: { captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 },
+      })) as never
+      const { cfg } = installWithRuntime(runtime)
+      const setCaptchaRequired = vi.fn()
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired,
+        clearCaptcha: vi.fn(),
+      })
+      // The fresh captcha from errorDetails is handed to the shell; no session.
+      expect(setCaptchaRequired).toHaveBeenCalledWith({ captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
+      expect(runtime.auth.applyTokenSession).not.toHaveBeenCalled()
+    })
+
+    it('pwdLogin forwards the captcha id/code it was given', async () => {
+      const runtime = makeRuntime()
+      const { cfg } = installWithRuntime(runtime)
+      await cfg.callbacks!.pwdLogin!(
+        { userName: 'admin', password: 'pw', remember: false, captchaId: 'cid', captchaCode: 'abcd' },
+        { setTwoFactorRequired: vi.fn(), clearTwoFactor: vi.fn(), setCaptchaRequired: vi.fn(), clearCaptcha: vi.fn() },
+      )
+      expect(runtime.authApi.loginWithRefreshToken).toHaveBeenCalledWith({
+        userName: 'admin',
+        password: 'pw',
+        captchaId: 'cid',
+        captchaCode: 'abcd',
+      })
+    })
+
+    it('getCaptcha maps getCaptchaJson to the login-captcha shape', async () => {
+      const runtime = makeRuntime()
+      const { cfg } = installWithRuntime(runtime)
+      const c = await cfg.callbacks!.getCaptcha!('register')
+      expect(runtime.authApi.getCaptchaJson).toHaveBeenCalledWith('register')
+      expect(c).toEqual({ captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
+    })
+
+    it('sendCode forwards the captcha to the quick-register send-code (register purpose)', async () => {
+      const runtime = makeRuntime()
+      const { cfg } = installWithRuntime(runtime)
+      await cfg.callbacks!.sendCode!({
+        account: 'a@b.com',
+        type: 'email',
+        purpose: 'register',
+        captchaId: 'cid',
+        captchaCode: 'abcd',
+      })
+      expect(runtime.authApi.sendQuickRegisterCode).toHaveBeenCalledWith(
+        expect.objectContaining({ captchaId: 'cid', captchaCode: 'abcd' }),
+      )
     })
 
     it('enables the auth guard by default and threads runtime.auth.restoreAuth as the restore hook', async () => {
@@ -920,14 +1092,14 @@ describe('defineAdminApp', () => {
     expect(identityMenu).toBeTruthy()
     const childKeys = (identityMenu!.children ?? []).map((c) => c.key)
     expect(childKeys).not.toContain('identity.tenants')
-    // Sibling entries still render — we only hide the targeted route.
+    // Sibling entries still render - we only hide the targeted route.
     expect(childKeys).toContain('identity.users')
   })
 
   it('hideRoutes is case-sensitive on exact route.name match', () => {
     const { routes } = defineAdminApp({
       client: dummyClient,
-      // Wrong case — should NOT hide anything.
+      // Wrong case - should NOT hide anything.
       hideRoutes: ['Identity.Tenants'],
     })
     const admin = findAdminRoute(routes)
@@ -1092,7 +1264,7 @@ describe('defineAdminApp', () => {
       const login = findByName(routes, 'login')
       const forbidden = findByName(routes, 'forbidden')
       expect(adminRoot?.path).toBe('/')
-      // Login at root must keep its original shape — no leading "//".
+      // Login at root must keep its original shape - no leading "//".
       expect(login?.path).toBe(
         '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
       )

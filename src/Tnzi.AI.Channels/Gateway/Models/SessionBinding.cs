@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// 会话绑定解析结果 — DefaultSessionBinder 的输出
+/// 会话绑定解析结果 - DefaultSessionBinder 的输出
 /// </summary>
 public class SessionBinding
 {

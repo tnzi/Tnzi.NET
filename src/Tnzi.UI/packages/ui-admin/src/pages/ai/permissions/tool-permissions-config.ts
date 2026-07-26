@@ -11,6 +11,7 @@
  * GET/POST/PUT/DELETE persisted-rules endpoints, so the page wires create,
  * edit and delete.
  */
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { h } from 'vue'
 import { NTag, NTooltip } from 'naive-ui'
 import { formatDateTime } from '@tnzi/core'
@@ -26,58 +27,51 @@ import type {
 
 type Translate = (key: string, params?: Record<string, unknown>) => string
 
-// Absolute i18n namespace for this page — TStatusBadge's admin wrapper
+// Absolute i18n namespace for this page - TStatusBadge's admin wrapper
 // resolves `labelKey` from the locale root, so the mapping keys must be fully
 // qualified (not the page-scoped short keys the page translator accepts).
 const PERM_NS = 'admin.modules.ai.permissions'
 
 // ── Enum normalisation ──────────────────────────────────────────────────────
 // The backend serialises these enums as their PascalCase member NAME
-// (JsonStringEnumConverter); a numeric ordinal is still accepted for backward
-// compatibility. Every helper below normalises through these so a `"Deny"`
-// string OR a legacy `2` both resolve to the same tone/weight/label.
+// (global JsonStringEnumConverter), and core's enums are string enums matching
+// that wire form, so a value is always the member name.
+//
+// The ordinal keys ('0' / '1' / '2') that used to sit alongside were left over
+// from core declaring these as NUMERIC enums: the ordinals could never arrive,
+// so they were dead branches advertising a tolerance that did not exist. The
+// normalisers stay as the single entry point for the lookup + fallback.
 type BehaviorName = 'Allow' | 'Ask' | 'Deny'
 type ScopeName = 'System' | 'Project' | 'User' | 'Session'
 
-/** Normalise a behavior value (member name OR ordinal) to its member name. */
+/** Normalise a behavior value to its member name (unknown → the safest, Allow).
+ *  The signature stays wide so loosely-typed wire data still compiles. */
 export function behaviorName(b: PermissionBehavior | string | number): BehaviorName {
-  const map: Record<string, BehaviorName> = {
-    '0': 'Allow', '1': 'Ask', '2': 'Deny',
-    Allow: 'Allow', Ask: 'Ask', Deny: 'Deny',
-  }
+  const map: Record<string, BehaviorName> = { Allow: 'Allow', Ask: 'Ask', Deny: 'Deny' }
   return map[String(b)] ?? 'Allow'
 }
 
-/** Normalise a scope value (member name OR ordinal) to its member name. */
+/** Normalise a scope value to its member name. */
 export function scopeName(s: ToolPermissionScope | string | number): ScopeName {
   const map: Record<string, ScopeName> = {
-    '0': 'System', '1': 'Project', '2': 'User', '3': 'Session',
     System: 'System', Project: 'Project', User: 'User', Session: 'Session',
   }
   return map[String(s)] ?? 'System'
 }
 
-/** behavior enum → unified status pill. Both the member-name (`"Allow"`) and the
- *  legacy ordinal (`0`) key each entry so TStatusBadge's `String(value)` lookup
- *  resolves regardless of wire form. Shared by the persisted-rules columns
- *  (config) and the session-rules columns (page). */
+/** behavior enum → unified status pill. Keyed by member name, which is what
+ *  TStatusBadge's `String(value)` lookup sees on the wire. Shared by the
+ *  persisted-rules columns (config) and the session-rules columns (page). */
 export const behaviorBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
-  0: { type: 'success', labelKey: `${PERM_NS}.behavior.allow` },
-  1: { type: 'warning', labelKey: `${PERM_NS}.behavior.ask` },
-  2: { type: 'error', labelKey: `${PERM_NS}.behavior.deny` },
   Allow: { type: 'success', labelKey: `${PERM_NS}.behavior.allow` },
   Ask: { type: 'warning', labelKey: `${PERM_NS}.behavior.ask` },
   Deny: { type: 'error', labelKey: `${PERM_NS}.behavior.deny` },
 }
 
-/** scope enum → unified status pill (member-name + legacy-ordinal keys).
- *  All scopes share the neutral `info` tone (matches the pre-migration look);
- *  the relative weight is surfaced via the tooltip in the persisted columns. */
+/** scope enum → unified status pill. All scopes share the neutral `info` tone
+ *  (matches the pre-migration look); the relative weight is surfaced via the
+ *  tooltip in the persisted columns. */
 export const scopeBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
-  0: { type: 'info', labelKey: `${PERM_NS}.scope.system` },
-  1: { type: 'info', labelKey: `${PERM_NS}.scope.project` },
-  2: { type: 'info', labelKey: `${PERM_NS}.scope.user` },
-  3: { type: 'info', labelKey: `${PERM_NS}.scope.session` },
   System: { type: 'info', labelKey: `${PERM_NS}.scope.system` },
   Project: { type: 'info', labelKey: `${PERM_NS}.scope.project` },
   User: { type: 'info', labelKey: `${PERM_NS}.scope.user` },
@@ -138,7 +132,7 @@ export function scopeLabel(s: ToolPermissionScope | string | number, t: Translat
   }
 }
 
-/** Persisted-rules columns (no action column — TCrudPage's declarative row
+/** Persisted-rules columns (no action column - TCrudPage's declarative row
  *  actions own the delete affordance). Titles are i18n keys the page translates.
  *  Returns the loosely-typed `ColumnDef[]` that useCrudPage/TCrudPage accept
  *  (the DTO has required fields, so `ColumnDef<DTO>[]` isn't directly assignable
@@ -151,7 +145,7 @@ export function buildPersistedColumns(t: Translate): ColumnDef[] {
       width: 110,
       render: (row) => h(TStatusBadge, { value: row.behavior, mapping: behaviorBadgeMapping }),
     },
-    { key: 'priority', title: 'cols.priority', width: 90, render: (row) => String(row.priority ?? '—') },
+    { key: 'priority', title: 'cols.priority', width: 90, render: (row) => String(row.priority ?? EMPTY_DASH) },
     {
       key: 'scope',
       title: 'cols.scope',
@@ -172,8 +166,8 @@ export function buildPersistedColumns(t: Translate): ColumnDef[] {
       minWidth: 160,
       render: (row) => h('code', { class: 'tnzi-mono text-12px' }, row.toolPattern ?? '*'),
     },
-    { key: 'toolGroup', title: 'cols.toolGroup', width: 120, render: (r) => r.toolGroup ?? '—' },
-    { key: 'serverName', title: 'cols.serverName', width: 120, render: (r) => r.serverName ?? '—' },
+    { key: 'toolGroup', title: 'cols.toolGroup', width: 120, render: (r) => r.toolGroup ?? EMPTY_DASH },
+    { key: 'serverName', title: 'cols.serverName', width: 120, render: (r) => r.serverName ?? EMPTY_DASH },
     {
       key: 'flags',
       title: 'cols.flags',

@@ -134,7 +134,7 @@ public class LoopDetectionMiddlewareTests
 
         // User B's bucket only has 1 hit → no coaching message of any kind.
         Assert.DoesNotContain(userB.Messages, m => m.Role == ChatRole.User);
-        // Sanity: per-user detection still works — A did get warned in its own bucket.
+        // Sanity: per-user detection still works - A did get warned in its own bucket.
         Assert.Contains(userA.Messages, m => m.Role == ChatRole.User && m.Text?.Contains("LOOP DETECTED") == true);
     }
 }

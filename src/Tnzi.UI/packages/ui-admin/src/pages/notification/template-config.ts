@@ -15,7 +15,7 @@ import { TSourceBadge } from '@tnzi/ui'
  *              isReadOnly, filePath, subjectTemplate, contentTemplate.
  *
  * Earlier columns used speculative names (code / name / channel / locale /
- * subject / enabled) that don't exist on the backend DTO — list was blank.
+ * subject / enabled) that don't exist on the backend DTO - list was blank.
  */
 interface NotificationTemplateRow {
   id?: string

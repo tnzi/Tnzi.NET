@@ -731,7 +731,7 @@ public class ExceptionHandlingMiddlewareTests
         // Act
         await middleware.InvokeAsync(context);
 
-        // Assert — the request body was captured into an error log entry
+        // Assert - the request body was captured into an error log entry
         _loggerMock.Verify(
             x => x.Log(
                 LogLevel.Error,
@@ -763,7 +763,7 @@ public class ExceptionHandlingMiddlewareTests
         // Act
         await middleware.InvokeAsync(context);
 
-        // Assert — no log entry ever contains the body (default: buffering off)
+        // Assert - no log entry ever contains the body (default: buffering off)
         _loggerMock.Verify(
             x => x.Log(
                 LogLevel.Error,

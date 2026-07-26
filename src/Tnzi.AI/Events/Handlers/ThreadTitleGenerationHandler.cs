@@ -8,7 +8,7 @@ namespace Tnzi.AI.Events.Handlers;
 /// <remarks>
 /// Runs in an isolated DI scope so that loading and updating the thread does not pollute the
 /// originating request's ChangeTracker. If the handler shared the request DbContext, the
-/// thread entity it tracked here would race with the main flow's SaveChanges batch — a 0-row
+/// thread entity it tracked here would race with the main flow's SaveChanges batch - a 0-row
 /// UPDATE has been observed in that mode. All dependencies are optional because HostingLite
 /// scenarios may not have EF Core or AI services wired up.
 /// </remarks>

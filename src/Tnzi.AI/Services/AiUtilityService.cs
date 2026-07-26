@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// IAiUtility 默认实现 — 通过 IChatClientFactory 构建精简 ChatClient
+/// IAiUtility 默认实现 - 通过 IChatClientFactory 构建精简 ChatClient
 /// </summary>
 public class AiUtilityService : IAiUtility
 {

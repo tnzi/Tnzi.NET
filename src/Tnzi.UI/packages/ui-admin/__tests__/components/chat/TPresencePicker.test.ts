@@ -3,7 +3,7 @@
  *
  * The redesigned picker is an avatar button (status dot) that opens an arrow
  * NPopover whose content is a status menu. NPopover content teleports and does
- * not render reliably in jsdom, so — as with the old NDropdown version — we call
+ * not render reliably in jsdom, so - as with the old NDropdown version - we call
  * the component's internal `select` handler directly: it is the exact function
  * each menu option's click invokes, so the assertion covers the real emit path.
  */

@@ -79,7 +79,7 @@ export interface AuditOperationQueryDto extends PagedQueryDto {
   /** Exact HTTP method filter (e.g. 'GET' / 'POST', case-insensitive). */
   httpMethod?: string;
   /**
-   * true = write operations only (POST/PUT/PATCH/DELETE — the "business
+   * true = write operations only (POST/PUT/PATCH/DELETE - the "business
    * operations" view); false = read requests only (GET/HEAD/OPTIONS etc.);
    * omitted = all requests (request-level audit log view).
    */

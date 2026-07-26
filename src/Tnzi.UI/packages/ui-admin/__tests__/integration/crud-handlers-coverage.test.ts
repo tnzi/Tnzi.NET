@@ -1,10 +1,10 @@
 /**
- * Phase 6.2e — function coverage booster for CRUD-style pages.
+ * Phase 6.2e - function coverage booster for CRUD-style pages.
  *
  * Mount-based integration tests cover lines but NOT the arrow-function CRUD
  * callbacks (createData/updateData/deleteData/rowKey/t) declared inside each
  * page's <script setup>. Those arrows only execute when the real CRUD flow
- * triggers them — which normally requires end-to-end user clicks + form
+ * triggers them - which normally requires end-to-end user clicks + form
  * submissions.
  *
  * This file takes a shortcut: after mount, it reaches into the TCrudPage
@@ -14,7 +14,7 @@
  * raising the function-coverage metric for the corresponding .vue file.
  *
  * NOTE: this is a coverage booster, not a replacement for E2E tests. Real
- * user flows are covered by Playwright specs in Tasks 6.3–6.6.
+ * user flows are covered by Playwright specs in Tasks 6.3-6.6.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -58,7 +58,7 @@ const mkCrud = (seedId = '1') => ({
   importFile: vi.fn(async () => undefined),
 })
 
-// Mock vue-router — some pages call useRoute/useRouter in setup
+// Mock vue-router - some pages call useRoute/useRouter in setup
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {}, params: {}, path: '/', fullPath: '/', hash: '', name: '' }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn() }),
@@ -68,7 +68,7 @@ vi.mock('../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     agents: mkCrud(), threads: mkCrud(), agentRuns: mkCrud(), workflows: mkCrud(),
     workflowRuns: mkCrud(), skills: mkCrud(), providers: mkCrud(), usage: mkCrud(),
-    knowledge: mkCrud(), mcpServers: mkCrud(), quota: mkCrud(), personas: mkCrud(),
+    knowledge: mkCrud(), mcpServers: mkCrud(), quota: mkCrud(),
     evaluations: mkCrud(),
   }),
 }))
@@ -103,7 +103,54 @@ vi.mock('../../src/services/bridges/finance-bridge', () => ({
   ReceiptDocType: { Expense: 'Expense', Bill: 'Bill' },
   BalanceSummaryDifferenceKind: { Missing: 'Missing', Extra: 'Extra', Mismatch: 'Mismatch' },
   PAYMENT_METHODS: ['Cash', 'Check', 'CreditCard', 'DebitCard', 'BankTransfer', 'Wire', 'Other'],
+  FinanceOfferStatus: { Draft: 'Draft', Sent: 'Sent', Accepted: 'Accepted', Declined: 'Declined', Converted: 'Converted', Closed: 'Closed' },
+  BankRuleField: { Description: 'Description', Payee: 'Payee', Reference: 'Reference', Amount: 'Amount' },
+  BankRuleOperator: { Contains: 'Contains', NotContains: 'NotContains', Equals: 'Equals', StartsWith: 'StartsWith', EndsWith: 'EndsWith', GreaterThan: 'GreaterThan', LessThan: 'LessThan' },
+  BankRuleMatchMode: { All: 'All', Any: 'Any' },
+  BankRuleDirection: { Any: 'Any', MoneyIn: 'MoneyIn', MoneyOut: 'MoneyOut' },
   createFinanceBridge: () => ({
+    recurring: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      pause: vi.fn(async () => ({})),
+      resume: vi.fn(async () => ({})),
+      end: vi.fn(async () => ({})),
+      preview: vi.fn(async () => ({ dates: [] })),
+      previewSchedule: vi.fn(async () => ({ dates: [] })),
+      runs: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
+      run: vi.fn(async () => ({ templatesDue: 0, generated: 0, skipped: 0, failed: 0, runs: [] })),
+      runDue: vi.fn(async () => ({ templatesDue: 0, generated: 0, skipped: 0, failed: 0, runs: [] })),
+    },
+    bankRules: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      reorder: vi.fn(async () => undefined),
+      test: vi.fn(async () => ({ evaluated: 0, matched: 0, rows: [] })),
+    },
+    estimates: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      createDraft: vi.fn(async () => ({ id: 'e1' })),
+      update: vi.fn(async () => ({ id: 'e1' })),
+      deleteDraft: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ id: 'e1' })),
+      accept: vi.fn(async () => ({ id: 'e1' })),
+      decline: vi.fn(async () => ({ id: 'e1' })),
+      close: vi.fn(async () => ({ id: 'e1' })),
+      convert: vi.fn(async () => ({ sourceId: 'e1', docType: 'Invoice', docId: 'i1' })),
+    },
+    purchaseOrders: {
+      ...mkCrud(),
+      getById: vi.fn(async () => null),
+      createDraft: vi.fn(async () => ({ id: 'p1' })),
+      update: vi.fn(async () => ({ id: 'p1' })),
+      deleteDraft: vi.fn(async () => undefined),
+      send: vi.fn(async () => ({ id: 'p1' })),
+      accept: vi.fn(async () => ({ id: 'p1' })),
+      decline: vi.fn(async () => ({ id: 'p1' })),
+      close: vi.fn(async () => ({ id: 'p1' })),
+      convert: vi.fn(async () => ({ sourceId: 'p1', docType: 'Bill', docId: 'b1' })),
+    },
     customers: mkCrud(),
     vendors: mkCrud(),
     items: mkCrud(),
@@ -307,7 +354,7 @@ vi.mock('../../src/services/bridges/audit-bridge', () => ({
     logs: { ...mkCrud(), detail: vi.fn(async (id: string) => ({ id, entityEntries: [] })) },
     operations: { ...mkCrud(), detail: vi.fn(async (id: string) => ({ id, entityEntries: [] })) },
   }),
-  // re-export mirror — see audit-bridge.ts (PascalCase string enums).
+  // re-export mirror - see audit-bridge.ts (PascalCase string enums).
   AuditResultType: { Success: 'Success', Failed: 'Failed', Warning: 'Warning' },
   EntityChangeType: { Unchanged: 'Unchanged', Added: 'Added', Modified: 'Modified', Deleted: 'Deleted', Detached: 'Detached' },
 }))
@@ -341,7 +388,7 @@ vi.mock('../../src/services/bridges/storage-bridge', () => ({
 }))
 vi.mock('../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
-    accessLogs: mkCrud(), menus: mkCrud(), dictionaries: mkCrud(), parameters: mkCrud(), scheduledJobs: mkCrud(),
+    accessLogs: mkCrud(), dictionaries: mkCrud(), parameters: mkCrud(), scheduledJobs: mkCrud(),
     features: mkCrud(),
     settingsCenter: {
       getDefinitions: vi.fn(async () => []),
@@ -357,7 +404,6 @@ vi.mock('../../src/services/bridges/system-bridge', () => ({
 // imports many pages into one scope.
 import Agents from '../../src/pages/ai/agents/Agents.vue'
 import Skills from '../../src/pages/ai/skills/Skills.vue'
-import Personas from '../../src/pages/ai/personas/Personas.vue'
 import Knowledge from '../../src/pages/ai/knowledge/Knowledge.vue'
 import McpServers from '../../src/pages/ai/mcp/McpServers.vue'
 import Providers from '../../src/pages/ai/providers/Providers.vue'
@@ -368,6 +414,10 @@ import PaymentSubscriptions from '../../src/pages/payment/Subscriptions.vue'
 import FinanceAccounts from '../../src/pages/finance/Accounts.vue'
 import FinanceExchangeRates from '../../src/pages/finance/ExchangeRates.vue'
 import FinanceFiscalYears from '../../src/pages/finance/FiscalYears.vue'
+import FinanceBankRules from '../../src/pages/finance/BankRules.vue'
+import FinanceRecurring from '../../src/pages/finance/Recurring.vue'
+import FinanceEstimates from '../../src/pages/finance/Estimates.vue'
+import FinancePurchaseOrders from '../../src/pages/finance/PurchaseOrders.vue'
 import FinanceCustomers from '../../src/pages/finance/Customers.vue'
 import FinanceVendors from '../../src/pages/finance/Vendors.vue'
 import FinanceItems from '../../src/pages/finance/Items.vue'
@@ -390,7 +440,6 @@ import Operations from '../../src/pages/audit/Operations.vue'
 import AccessLogs from '../../src/pages/system/AccessLogs.vue'
 import Dictionaries from '../../src/pages/system/Dictionaries.vue'
 import Parameters from '../../src/pages/system/Parameters.vue'
-import Menus from '../../src/pages/system/Menus.vue'
 import ScheduledJobs from '../../src/pages/system/ScheduledJobs.vue'
 import FunctionModules from '../../src/pages/authorization/FunctionModules.vue'
 import EntityRoles from '../../src/pages/authorization/EntityRoles.vue'
@@ -471,7 +520,7 @@ async function exerciseCrud(Page: any) {
       await flushPromises()
     }
 
-    // 4) View mode (no submit — exercises the early-return branch)
+    // 4) View mode (no submit - exercises the early-return branch)
     if (state.items.value.length > 0) {
       state.openView(state.items.value[0])
       await state.submit().catch(() => undefined)
@@ -496,7 +545,7 @@ async function exerciseCrud(Page: any) {
 
 const PAGES: Array<[string, any]> = [
   // AI (Phase 5)
-  ['Agents', Agents], ['Skills', Skills], ['Personas', Personas],
+  ['Agents', Agents], ['Skills', Skills],
   ['Knowledge', Knowledge], ['McpServers', McpServers],
   ['Providers', Providers], ['Quotas', Quotas],
   // Payment / Chat / Notification / Template
@@ -504,6 +553,9 @@ const PAGES: Array<[string, any]> = [
   ['FinanceAccounts', FinanceAccounts], ['FinanceExchangeRates', FinanceExchangeRates],
   ['FinanceFiscalYears', FinanceFiscalYears],
   ['FinanceCustomers', FinanceCustomers], ['FinanceVendors', FinanceVendors],
+  ['FinanceEstimates', FinanceEstimates], ['FinancePurchaseOrders', FinancePurchaseOrders],
+  ['FinanceBankRules', FinanceBankRules],
+  ['FinanceRecurring', FinanceRecurring],
   ['FinanceItems', FinanceItems], ['FinanceBankAccounts', FinanceBankAccounts],
   ['FinanceChecks', FinanceChecks], ['FinanceEftBatches', FinanceEftBatches], ['FinanceReceipts', FinanceReceipts],
   ['PayrollEmployees', PayrollEmployees],
@@ -515,7 +567,7 @@ const PAGES: Array<[string, any]> = [
   ['Tenants', Tenants], ['LoginLogs', LoginLogs],
   ['Logs', Logs], ['Operations', Operations],
   ['AccessLogs', AccessLogs], ['Dictionaries', Dictionaries],
-  ['Parameters', Parameters], ['Menus', Menus],
+  ['Parameters', Parameters],
   ['ScheduledJobs', ScheduledJobs],
   ['FunctionModules', FunctionModules], ['EntityRoles', EntityRoles],
   ['RoleFunctions', RoleFunctions], ['Permissions', Permissions],
@@ -531,11 +583,11 @@ describe('CRUD handlers coverage booster', () => {
 
   for (const [name, Page] of PAGES) {
     it(`exercises ${name} CRUD state`, async () => {
-      // Swallow all errors — this is a coverage-driving test, not a functional assertion
+      // Swallow all errors - this is a coverage-driving test, not a functional assertion
       try {
         await exerciseCrud(Page)
       } catch {
-        // noop — each page's real behavior is tested in its dedicated spec
+        // noop - each page's real behavior is tested in its dedicated spec
       }
       expect(true).toBe(true)
     })

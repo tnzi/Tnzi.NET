@@ -29,12 +29,12 @@ public class ModuleManifestBuilderTests
 
         var manifest = ModuleManifestBuilder.Build(module, []);
 
-        // Services, BackgroundTasks, and Options come from service descriptors — empty when none provided
+        // Services, BackgroundTasks, and Options come from service descriptors - empty when none provided
         Assert.Empty(manifest.Services);
         Assert.Empty(manifest.BackgroundTasks);
         Assert.Empty(manifest.Options);
 
-        // Controllers and Events come from assembly scanning — test assembly may contain them
+        // Controllers and Events come from assembly scanning - test assembly may contain them
         Assert.NotNull(manifest.Controllers);
         Assert.NotNull(manifest.Events);
     }
@@ -84,7 +84,7 @@ public class ModuleManifestBuilderTests
     private static ModuleDescriptor CreateModuleDescriptor()
     {
         // Use ModuleManifestBuilderTests as the type so the assembly is the test assembly.
-        // We need a real ITnziModule instance — use TestModuleA which is defined in this test project.
+        // We need a real ITnziModule instance - use TestModuleA which is defined in this test project.
         var moduleStub = new TestModuleA();
         // Pass ModuleManifestBuilderTests as the type so Assembly = test assembly
         return new ModuleDescriptor(typeof(ModuleManifestBuilderTests), moduleStub);

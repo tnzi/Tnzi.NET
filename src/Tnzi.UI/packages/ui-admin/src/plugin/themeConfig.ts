@@ -1,5 +1,6 @@
 import type { App, InjectionKey } from 'vue'
 import { inject } from 'vue'
+import type { AdminThemePreset } from '../theme/appearancePresets'
 
 /** A color-scheme preset offered in the theme drawer / user preset picker. */
 export interface ThemeColorPreset {
@@ -18,11 +19,18 @@ export interface AdminThemeConfig {
    */
   globalSync?: boolean
   /**
-   * Preset color schemes offered to users. Replaces the built-in
-   * 12-color palette in both the drawer's Preset tab and the
-   * non-privileged users' preset picker.
+   * Preset color schemes (primary color only) offered to users. Feeds the
+   * color-picker swatches in the Appearance tab AND the non-privileged
+   * users' preset picker. Replaces the built-in 12-color palette.
    */
   presets?: ThemeColorPreset[]
+  /**
+   * Full appearance presets (a complete look - colors + mode + layout +
+   * backgrounds + radius + tab style) offered in the drawer's Preset tab.
+   * Replaces the built-in curated looks. Distinct from `presets`, which are
+   * primary-color-only swatches.
+   */
+  appearancePresets?: AdminThemePreset[]
 }
 
 export const ADMIN_THEME_CONFIG_KEY: InjectionKey<AdminThemeConfig> = Symbol(

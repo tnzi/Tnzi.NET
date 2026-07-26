@@ -19,7 +19,7 @@ public interface IWorkspaceAgentAdminService
     Task<Result<List<WorkspaceAgentDto>>> ListAgentsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Discover every workspace persona — currently surfaces the
+    /// Discover every workspace persona - currently surfaces the
     /// PERSONA.md attached to each AGENT.md folder. Stand-alone
     /// PERSONA.md files (without a sibling AGENT.md) are not yet
     /// surfaced because the file-watcher infrastructure doesn't expose

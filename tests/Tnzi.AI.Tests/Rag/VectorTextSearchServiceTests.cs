@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// VectorTextSearchService 单元测试 — 验证向量搜索管线各阶段
+/// VectorTextSearchService 单元测试 - 验证向量搜索管线各阶段
 /// </summary>
 public class VectorTextSearchServiceTests
 {

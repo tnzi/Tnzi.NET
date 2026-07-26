@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Agents;
 
 /// <summary>
-/// 子 Agent 类型注册表 — 管理可用的子 Agent 类型定义
+/// 子 Agent 类型注册表 - 管理可用的子 Agent 类型定义
 /// </summary>
 public interface ISubAgentRegistry
 {

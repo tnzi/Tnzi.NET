@@ -49,7 +49,7 @@ public class Template : MultiTenantAuditedEntity<Guid>
 
     /// <summary>
     /// Optional foreign key to a Template_Layout row whose content should be
-    /// used as the header wrapper when rendering. Nullable — when null, the
+    /// used as the header wrapper when rendering. Nullable - when null, the
     /// engine uses the DefaultLayoutName string lookup path or no header at all.
     /// SetNull cascade preserves templates when the referenced layout is removed.
     /// </summary>

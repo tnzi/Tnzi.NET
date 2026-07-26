@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// Workflow DAG 执行集成测试 — 测试 WorkflowEngine 跨节点交互、条件路由、检查点恢复、
+/// Workflow DAG 执行集成测试 - 测试 WorkflowEngine 跨节点交互、条件路由、检查点恢复、
 /// 并行执行、环路检测和错误处理
 /// </summary>
 public class WorkflowIntegrationTests
@@ -14,7 +14,7 @@ public class WorkflowIntegrationTests
         var services = new ServiceCollection();
         services.AddLogging();
 
-        // Mock AgentFactory — 根据 name 参数返回预设响应
+        // Mock AgentFactory - 根据 name 参数返回预设响应
         var responses = agentResponses ?? new Dictionary<string, string>();
         var mockFactory = new Mock<IAgentFactory>();
         mockFactory
@@ -52,7 +52,7 @@ public class WorkflowIntegrationTests
         nodeCtxMock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
         nodeCtxMock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
 
-        // 延迟绑定 CreateScope — 需要等 SP 构建完成后才能调用
+        // 延迟绑定 CreateScope - 需要等 SP 构建完成后才能调用
         IServiceProvider? builtSp = null;
         nodeCtxMock.Setup(c => c.CreateScope()).Returns(() => builtSp!.CreateScope());
 
@@ -74,7 +74,7 @@ public class WorkflowIntegrationTests
         return sp;
     }
 
-    #region 1. ParallelNode — 两个并行分支均执行
+    #region 1. ParallelNode - 两个并行分支均执行
 
     [Fact]
     public async Task ParallelBranches_BothExecute_AndMergeAtDownstream()
@@ -124,7 +124,7 @@ public class WorkflowIntegrationTests
 
     #endregion
 
-    #region 2. ConditionalNode — 条件分支路由
+    #region 2. ConditionalNode - 条件分支路由
 
     [Fact]
     public async Task ConditionalBranching_RoutesToCorrectBranch()
@@ -197,7 +197,7 @@ public class WorkflowIntegrationTests
 
     #endregion
 
-    #region 3. Checkpoint/Resume — ApprovalNode 暂停 + 恢复
+    #region 3. Checkpoint/Resume - ApprovalNode 暂停 + 恢复
 
     [Fact]
     public async Task CheckpointResume_PausesAtApproval_ThenResumesAndCompletes()
@@ -236,7 +236,7 @@ public class WorkflowIntegrationTests
         var engine = sp.GetRequiredService<WorkflowEngine>();
         var executionId = Guid.NewGuid().ToString("N");
 
-        // Act 1: 首次执行 — 应在 ApprovalNode 处暂停
+        // Act 1: 首次执行 - 应在 ApprovalNode 处暂停
         var options = new WorkflowExecutionOptions
         {
             ExecutionId = executionId,
@@ -258,7 +258,7 @@ public class WorkflowIntegrationTests
         checkpoint.ShouldNotBeNull();
         checkpoint!.CompletedStepIds.ShouldContain("agent-1");
 
-        // Act 2: 恢复执行 — 提交审批通过
+        // Act 2: 恢复执行 - 提交审批通过
         var resumeOptions = new WorkflowExecutionOptions
         {
             ExecutionId = executionId,
@@ -283,7 +283,7 @@ public class WorkflowIntegrationTests
 
     #endregion
 
-    #region 4. Multi-step DAG — Agent→Transform→Agent 数据流转
+    #region 4. Multi-step DAG - Agent→Transform→Agent 数据流转
 
     [Fact]
     public async Task MultiStepDag_DataFlowsBetweenNodes()
@@ -341,7 +341,7 @@ public class WorkflowIntegrationTests
 
     #endregion
 
-    #region 5. Cycle detection — 环路校验
+    #region 5. Cycle detection - 环路校验
 
     [Fact]
     public void CycleDetection_ThrowsOnCircularDependencies()
@@ -361,7 +361,7 @@ public class WorkflowIntegrationTests
 
     #endregion
 
-    #region 6. Error in node — 节点失败传播
+    #region 6. Error in node - 节点失败传播
 
     [Fact]
     public async Task NodeFailure_SetsWorkflowStatusToFailed()
@@ -462,7 +462,7 @@ public class WorkflowIntegrationTests
     #region Helper: InMemoryCheckpointStore
 
     /// <summary>
-    /// 内存检查点存储 — 用于测试
+    /// 内存检查点存储 - 用于测试
     /// </summary>
     private sealed class InMemoryCheckpointStore : IWorkflowCheckpointStore
     {

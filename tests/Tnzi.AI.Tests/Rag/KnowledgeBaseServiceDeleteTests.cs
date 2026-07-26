@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// KnowledgeBaseService.DeleteAsync 单元测试 — 验证软删 KB 时图谱节点/边被显式删除
+/// KnowledgeBaseService.DeleteAsync 单元测试 - 验证软删 KB 时图谱节点/边被显式删除
 /// （KB 软删不触发 FK 级联，图谱数据须与 chunk/doc 同等对待，否则永久残留悬挂数据）。
 /// </summary>
 public class KnowledgeBaseServiceDeleteTests

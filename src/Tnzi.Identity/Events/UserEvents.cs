@@ -339,7 +339,7 @@ public class PersonalDataExportedEvent : EventBase
 /// <remarks>
 /// Published whenever a user's role membership changes (assign / remove /
 /// create-with-roles / delete). The Authorization module subscribes to this
-/// to invalidate its <c>FunctionAuthCache</c> per-user entry — without this
+/// to invalidate its <c>FunctionAuthCache</c> per-user entry - without this
 /// signal the cache (30 min TTL) would let a revoked user retain elevated
 /// permissions for up to a TTL window.
 ///
@@ -386,7 +386,7 @@ public enum UserRolesChangeType
     Removed,
     /// <summary>User was created with an initial role set.</summary>
     CreatedWithRoles,
-    /// <summary>User was deleted — all role memberships dropped.</summary>
+    /// <summary>User was deleted - all role memberships dropped.</summary>
     UserDeleted,
 }
 

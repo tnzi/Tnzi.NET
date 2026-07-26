@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { NTag } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -37,7 +38,7 @@ export function buildProblemColumns(
       key: 'error',
       title: t('columns.error'),
       ellipsis: { tooltip: true },
-      render: (row) => row.error ?? '—',
+      render: (row) => row.error ?? EMPTY_DASH,
     },
   ]
 }

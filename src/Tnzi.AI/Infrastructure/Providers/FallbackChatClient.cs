@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// 降级 ChatClient — 主提供商失败时按顺序尝试备选提供商
+/// 降级 ChatClient - 主提供商失败时按顺序尝试备选提供商
 /// </summary>
 /// <remarks>
 /// 实现 IChatClient 的装饰器模式，在主客户端调用失败时自动降级到备选客户端。
@@ -83,14 +83,14 @@ internal sealed class FallbackChatClient : IChatClient
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested && !isLast && !hasYielded)
                 {
-                    // 尚未输出任何 chunk — 可安全降级到下一个 provider
+                    // 尚未输出任何 chunk - 可安全降级到下一个 provider
                     _logger.LogWarning(ex, "Provider #{Index} streaming failed before any output, trying next. Error: {Error}", i, ex.Message);
                     cleanFail = true;
                     break;
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested && hasYielded)
                 {
-                    // 已输出部分 chunk — 无法干净回退，让异常传播
+                    // 已输出部分 chunk - 无法干净回退，让异常传播
                     _logger.LogWarning(ex, "Provider #{Index} streaming failed after partial output, cannot fall back", i);
                     throw;
                 }

@@ -46,14 +46,16 @@ public class UserAgentParserService : IUserAgentParserService
         }
 
         // 检测是否为移动设备
+        // 平板判定必须先于移动判定：MobileRegex 本身就匹配 iPad，
+        // 若先判 IsMobile，Tablet 分支永远不可达，iPad 会被归为 Mobile
         info.IsMobile = MobileRegex.IsMatch(userAgent);
-        if (info.IsMobile)
-        {
-            info.DeviceType = DeviceTypes.Mobile;
-        }
-        else if (userAgent.Contains("iPad", StringComparison.OrdinalIgnoreCase))
+        if (userAgent.Contains("iPad", StringComparison.OrdinalIgnoreCase))
         {
             info.DeviceType = DeviceTypes.Tablet;
+        }
+        else if (info.IsMobile)
+        {
+            info.DeviceType = DeviceTypes.Mobile;
         }
         else
         {
@@ -93,7 +95,8 @@ public class UserAgentParserService : IUserAgentParserService
     /// </summary>
     private string NormalizeBrowserName(string browser)
     {
-        return browser.ToLower() switch
+        // 必须用 ToLowerInvariant：ToLower() 走当前区域，土耳其语等区域会把 "MSIE" 映射成 "msıe"，匹配落空
+        return browser.ToLowerInvariant() switch
         {
             "msie" or "trident" => "Internet Explorer",
             "edg" => "Microsoft Edge",

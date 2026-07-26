@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, h, inject, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
-import { NMenu, type MenuOption } from 'naive-ui'
+import { NMenu, NConfigProvider, darkTheme, lightTheme, type MenuOption, type GlobalTheme } from 'naive-ui'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminSidebar from './TAdminSidebar.vue'
 import TAdminMixNavRail from './TAdminMixNavRail.vue'
+import TSidebarSettingsFooter from './TSidebarSettingsFooter.vue'
 import TAdminTopMenu from './TAdminTopMenu.vue'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import TAdminHeader from './TAdminHeader.vue'
@@ -145,13 +146,26 @@ const themeStore = useAdminThemeStore()
 const routeStore = useAdminRouteStore()
 
 // Phase B: optionally consume the @tnzi/ui theme context to detect dark mode
-// (used to gate invertSider — see siderInverted below). Tests that mount
+// (used to gate invertSider - see siderInverted below). Tests that mount
 // without the plugin get `undefined` and we treat that as "light".
 const themeContext = inject<ThemeContext | undefined>(THEME_CONTEXT_KEY, undefined)
 const isDark = computed(() => themeContext?.isDark.value === true)
 const primaryColor = computed(
   () => themeContext?.settings.value.colors.primary ?? '#646cff',
 )
+
+// The header-hosted top menu (horizontal / hybrid) renders on whatever surface
+// the header is painted, but naive's NMenu reads the GLOBAL naive theme - on a
+// custom dark header its labels would be near-black and its teleported submenu
+// popovers stark white. naive themes travel through Teleport via
+// provide/inject (same mechanism as useOverlayTheme), so an abstract provider
+// keyed on the header tone keeps both the labels and the popovers coherent
+// with the chrome.
+const topMenuTheme = computed<GlobalTheme | undefined>(() => {
+  if (themeStore.headerTone === 'dark') return isDark.value ? undefined : darkTheme
+  if (themeStore.headerTone === 'light') return isDark.value ? lightTheme : undefined
+  return undefined
+})
 
 // useRoute() throws if no router is installed (TAdminShell.test mounts
 // without one). Fall back to a stable empty descriptor so the mix-layout
@@ -197,7 +211,7 @@ const effectiveMenuKey = computed<string>(() => {
 // Phase E: layered menu state (active 1st level, 2nd level slices, etc.)
 // shared across hybrid layout modes. Mirrors soybean's
 // `provideMixMenuContext()`. Without this, the 4 hybrid modes can only
-// render the full menu tree everywhere — they look identical.
+// render the full menu tree everywhere - they look identical.
 const menuCtx = useAdminMenuContext({
   menus: computed(() => routeStore.menus),
   routeName: effectiveMenuKey,
@@ -214,6 +228,11 @@ const menuCtx = useAdminMenuContext({
 const {
   effectiveMode,
   siderInverted,
+  siderLightSurface,
+  headerSurface,
+  tabSurface,
+  footerSurface,
+  contentSurface,
   topMenuVariant,
   showMainSider,
   siderItems,
@@ -241,6 +260,13 @@ const {
   menuCtx,
 })
 
+// Toggler visibility keys off the EFFECTIVE mode, not the raw layout
+// preference: on mobile every layout (incl. a horizontal preference)
+// degrades to the vertical drawer, and the toggler is the only way to open
+// it - keying off the raw preference left horizontal users with no menu at
+// all on phones.
+const showHeaderToggler = computed<boolean>(() => effectiveMode.value !== 'horizontal')
+
 function onMenuSelect(menu: AdminMenuItem): void {
   // On mobile, tapping a nav item should dismiss the drawer (standard
   // mobile pattern) so the user lands on the content rather than being
@@ -249,7 +275,7 @@ function onMenuSelect(menu: AdminMenuItem): void {
   emit('menuSelect', menu)
 }
 
-// Phase E — top menu select dispatches differently per layout mode:
+// Phase E - top menu select dispatches differently per layout mode:
 // - horizontal: leaf navigation, just emit
 // - top-hybrid-header-first: 1st level click sets the active 1st level
 //   (sider re-renders with new children). If the item has no children,
@@ -293,25 +319,25 @@ function closeMobileDrawer(): void {
   appStore.setSiderCollapse(true)
 }
 
-// ── vertical-mix layout state — strict soybean parity ─────────────
+// ── vertical-mix layout state - strict soybean parity ─────────────
 // Reference: D:\Github\soybean-admin-example\src\layouts\modules\
 //   global-menu\modules\vertical-mix-menu.vue + context\index.ts
 //
 // Interaction contract (click-driven, NOT hover-driven):
 //   • Click a 1st level rail item with children → updates
 //     menuCtx.activeFirstLevelMenuKey (which drives secondLevelMenus
-//     directly — no separate `override` ref) and opens the drawer.
+//     directly - no separate `override` ref) and opens the drawer.
 //   • Click a 1st level rail item without children → navigates.
 //   • mouseleave the mix region → closes the drawer; if not pinned,
 //     also restores activeFirstLevelMenuKey to the route's owner.
-//   • Hover inside the region does NOT change which children show —
+//   • Hover inside the region does NOT change which children show -
 //     that would diverge from soybean's design.
 //   • Pinned (`mixSiderFixed`) → drawer stays open, the outer wrapper
 //     occupies real layout width (pushes content right). Unpinned →
 //     drawer is absolutely positioned, floating over the content.
 //
 // State refs:
-//   • mixDrawerVisible — toggled by click (open) / mouseleave (close).
+//   • mixDrawerVisible - toggled by click (open) / mouseleave (close).
 //     Replaces the older `mixDrawerHover` + `mixFirstLevelOverride`
 //     pair, which inverted the soybean semantics and caused the
 //     "drawer always shows IAM children" bug.
@@ -332,14 +358,14 @@ const showMixDrawer = computed<boolean>(
   () => hasMixChildren.value && (mixDrawerVisible.value || appStore.mixSiderFixed),
 )
 
-/** Outer wrapper width — only reserves space when the drawer is pinned
+/** Outer wrapper width - only reserves space when the drawer is pinned
  *  (matches soybean's `appStore.mixSiderFixed && hasChildMenus`). When
  *  not pinned, the absolute inner aside floats over the main content. */
 const mixWrapperWidth = computed<number>(() =>
   appStore.mixSiderFixed && hasMixChildren.value ? subSiderWidth.value : 0,
 )
 
-/** Inner aside width — animates from 0 → mixChildMenuWidth when the
+/** Inner aside width - animates from 0 → mixChildMenuWidth when the
  *  drawer should be shown. Always set; CSS does the transition. */
 const mixInnerWidth = computed<number>(() =>
   showMixDrawer.value ? subSiderWidth.value : 0,
@@ -360,7 +386,7 @@ const mixChildOptions = computed<MenuOption[]>(() =>
   mixChildren.value.map(mixChildToOption),
 )
 
-// Phase G — vertical-mix drawer NMenu auto-expands the ancestor path of
+// Phase G - vertical-mix drawer NMenu auto-expands the ancestor path of
 // the current route so a freshly-rendered drawer doesn't hide the active
 // leaf inside a collapsed group. soybean does this via `getSelectedMenuKeyPath`.
 const mixDrawerExpandedKeys = computed<string[]>(() => {
@@ -396,7 +422,7 @@ function findMenuItem(key: string): AdminMenuItem | null {
 
 /** soybean parity: `handleSelectMenu(key)` in vertical-mix-menu.vue.
  *  Drives `menuCtx.handleSelectFirstLevelMenu` directly so secondLevelMenus
- *  recomputes from the new active key — no intermediate override ref.
+ *  recomputes from the new active key - no intermediate override ref.
  *
  *  • Has children → switch active 1st level + open drawer (no navigate)
  *  • No children → switch active 1st level + navigate (drawer closes
@@ -407,7 +433,7 @@ function onMixPrimarySelect(menu: AdminMenuItem): void {
     mixDrawerVisible.value = true
     return
   }
-  // Leaf 1st level — close the drawer (matches soybean's drawerVisible=false
+  // Leaf 1st level - close the drawer (matches soybean's drawerVisible=false
   // after a leaf select) and let the consumer's router.push fire.
   if (!appStore.mixSiderFixed) {
     mixDrawerVisible.value = false
@@ -470,7 +496,7 @@ onBeforeUnmount(() => {
 /** soybean parity: `handleResetActiveMenu` in vertical-mix-menu.vue.
  *  Closes the drawer + (when not pinned) restores the active 1st level
  *  to whichever group owns the current route. Mouseenter is intentionally
- *  not wired — hovering the region must not open or change the drawer
+ *  not wired - hovering the region must not open or change the drawer
  *  (click-only contract). */
 function onMixMouseleave(): void {
   if (appStore.mixSiderFixed) return
@@ -505,10 +531,10 @@ function onMixMouseleave(): void {
         themeStore.scrollMode === 'wrapper' ? themeStore.headerHeight + 'px' : '0px',
     }"
   >
-    <!-- vertical-mix mouse region — soybean parity.
+    <!-- vertical-mix mouse region - soybean parity.
          Single mouseleave fires for the *entire* rail+sub-sider strip,
          not per-aside, so the drawer doesn't close while the cursor
-         crosses the gap between them. NO mouseenter — the contract is
+         crosses the gap between them. NO mouseenter - the contract is
          click-driven, hovering must not change drawer state. -->
     <div
       v-if="effectiveMode === 'vertical-mix' && !appStore.isMobile && showMainSider"
@@ -522,13 +548,20 @@ function onMixMouseleave(): void {
           :inverted="siderInverted"
           :is-mini="appStore.siderCollapse"
           :theme-color="primaryColor"
-          :on-toggle-collapse="() => appStore.toggleSiderCollapse()"
           @select="onMixNavRailSelect"
         >
           <template #header>
             <slot name="sider-header">
               <TSystemLogo :icon="sider.brandIcon" :icon-size="32" layout="icon-only" :title="''" />
             </slot>
+          </template>
+          <!-- Footer: the shared Settings + built-in-menus actions (same as the
+               full sider) - otherwise vertical-mix would silently drop the
+               settings entry. No collapse toggler here: the header toggler
+               already collapses the rail. -->
+          <template #footer>
+            <TSidebarSettingsFooter v-if="!$slots['sider-footer']" @menu-select="onMenuSelect" />
+            <slot v-else name="sider-footer" />
           </template>
         </TAdminMixNavRail>
       </aside>
@@ -545,13 +578,18 @@ function onMixMouseleave(): void {
       >
         <aside
           class="t-admin-shell__sub-sider"
-          :class="{ 't-admin-shell__sub-sider--open': showMixDrawer }"
+          :class="{
+            't-admin-shell__sub-sider--open': showMixDrawer,
+            't-admin-shell__sub-sider--inverted': themeStore.siderTone === 'dark',
+            't-admin-shell__sub-sider--surface-light': themeStore.siderTone === 'light',
+          }"
           :style="{ width: `${mixInnerWidth}px` }"
         >
           <header class="t-admin-shell__sub-sider-header">
             <h2 class="t-admin-shell__sub-sider-title">{{ title }}</h2>
             <TPinToggler
               :pinned="appStore.mixSiderFixed"
+              :size="15"
               @toggle="appStore.toggleMixSiderFixed"
             />
           </header>
@@ -562,6 +600,7 @@ function onMixMouseleave(): void {
               :expanded-keys="mixDrawerExpandedKeys"
               mode="vertical"
               :indent="18"
+              :inverted="themeStore.siderTone === 'dark'"
               @update:value="onMixChildSelect"
             />
           </div>
@@ -569,7 +608,7 @@ function onMixMouseleave(): void {
       </div>
     </div>
 
-    <!-- Full-height primary sider — vertical mode only. vertical-mix is the
+    <!-- Full-height primary sider - vertical mode only. vertical-mix is the
          mouse-region above; the hybrid (top-hybrid-header-first) children
          sider is rendered INSIDE the main column below the header (soybean
          horizontal-mix parity) so the header spans the full width instead of
@@ -587,6 +626,7 @@ function onMixMouseleave(): void {
         :brand-subtitle="sider.brandSubtitle"
         :brand-icon="sider.brandIcon"
         :inverted="siderInverted"
+        :light-surface="siderLightSurface"
         :items="siderItems"
         :hide-header="shouldRenderHeaderLogo"
         @menu-select="onMenuSelect"
@@ -606,13 +646,15 @@ function onMixMouseleave(): void {
         v-if="headerVisible"
         :title="title"
         :fixed="header.fixed ?? themeStore.fixedHeader"
-        :show-toggler="header.showToggler ?? true"
+        :surface="headerSurface"
+        :show-toggler="header.showToggler ?? showHeaderToggler"
         :show-search="header.showSearch ?? themeStore.globalSearchVisible"
         :show-fullscreen="header.showFullscreen ?? themeStore.fullscreenVisible"
         :show-theme-btn="header.showThemeBtn ?? true"
         :show-theme-schema-btn="header.showThemeSchemaBtn ?? themeStore.themeSchemaVisible"
         :show-lang-switch="header.showLangSwitch ?? themeStore.multilingualVisible"
         :show-reload="header.showReload ?? themeStore.reloadVisible"
+        :max-inline-actions="topMenuVariant ? 2 : undefined"
         @open-search="onOpenSearch"
         @open-theme-drawer="onOpenThemeDrawer"
         @locale-change="onLocaleChange"
@@ -622,8 +664,12 @@ function onMixMouseleave(): void {
              has nowhere to live unless we surface it in the header.
              Default to a built-in TSystemLogo here when the consumer
              hasn't supplied #header-logo; vertical / vertical-mix
-             leave it to the sider header so we skip. -->
-        <template #logo>
+             leave it to the sider header so we skip. Only pass the #logo
+             slot when it will actually render something - otherwise the empty
+             logo wrapper (padding + flex gap) pushes the leading toggler ~12px
+             to the right in vertical / vertical-mix modes where the brand lives
+             in the sider. -->
+        <template v-if="shouldRenderHeaderLogo || $slots['header-logo']" #logo>
           <slot name="header-logo">
             <TSystemLogo
               v-if="shouldRenderHeaderLogo"
@@ -635,14 +681,23 @@ function onMixMouseleave(): void {
             />
           </slot>
         </template>
-        <!-- Top menu lives inside the header for horizontal & hybrid modes -->
+        <!-- Top menu lives inside the header for horizontal & hybrid modes.
+             The abstract provider re-themes the menu (and its teleported
+             submenu popovers) to match a custom dark/light header surface. -->
         <template v-if="topMenuVariant" #menu>
-          <TAdminTopMenu
-            :mode="topMenuVariant"
-            :items="topItems"
-            :active-key="topActiveKey"
-            @menu-select="onTopMenuSelect"
-          />
+          <NConfigProvider abstract :theme="topMenuTheme">
+            <!-- `full` mode must receive the LEAF route key (the selectable
+                 entries are the dropdown children) - the first-level key only
+                 matches a non-selectable submenu header and naive would render
+                 no selected state at all. Hybrid keeps the first-level key
+                 (its entries ARE the first-level items). -->
+            <TAdminTopMenu
+              :mode="topMenuVariant"
+              :items="topItems"
+              :active-key="topMenuVariant === 'full' ? effectiveMenuKey : topActiveKey"
+              @menu-select="onTopMenuSelect"
+            />
+          </NConfigProvider>
         </template>
         <!-- Breadcrumb is suppressed in horizontal / hybrid modes: the top
              menu already lives in the header and provides the navigation
@@ -691,7 +746,7 @@ function onMixMouseleave(): void {
             effectiveMode === 'top-hybrid-header-first' && showMainSider,
         }"
       >
-        <!-- Hybrid children sider — sits under the full-width header, to the
+        <!-- Hybrid children sider - sits under the full-width header, to the
              left of the content. Header logo is rendered in the header so we
              always hide the sider's own header. -->
         <aside
@@ -704,6 +759,7 @@ function onMixMouseleave(): void {
             :width="primarySiderWidth"
             :collapsed-width="sider.collapsedWidth ?? themeStore.siderCollapsedWidth"
             :inverted="siderInverted"
+            :light-surface="siderLightSurface"
             :items="siderItems"
             :hide-header="true"
             @menu-select="onMenuSelect"
@@ -718,19 +774,21 @@ function onMixMouseleave(): void {
           <TAdminTabs
             v-if="tabsVisible"
             :fixed="themeStore.fixedTab"
+            :surface="tabSurface"
             :close-by-middle-click="tabs.closeByMiddleClick ?? true"
             :draggable="tabs.draggable ?? true"
             :show-reload="tabs.showReload ?? true"
             @tab-click="(tab) => emit('tabClick', tab)"
           />
 
-          <TAdminContent :transition-name="resolvedTransition">
+          <TAdminContent :transition-name="resolvedTransition" :surface="contentSurface">
             <slot />
           </TAdminContent>
 
           <TAdminFooter
             v-if="footerVisible"
             :fixed="themeStore.fixedFooter"
+            :surface="footerSurface"
             :copyright="footer.copyright"
             :links="footer.links"
           >
@@ -773,6 +831,7 @@ function onMixMouseleave(): void {
           :brand-subtitle="sider.brandSubtitle"
           :brand-icon="sider.brandIcon"
           :inverted="siderInverted"
+          :light-surface="siderLightSurface"
           @menu-select="onMenuSelect"
         />
       </aside>
@@ -818,7 +877,7 @@ function onMixMouseleave(): void {
 }
 
 /* vertical-mix mouse region: a flex strip that owns both the rail and
-   the sub-sider so a single mouseleave triggers the drawer close — see
+   the sub-sider so a single mouseleave triggers the drawer close - see
    the matching template comment above. */
 .t-admin-shell__mix-region {
   display: flex;
@@ -826,7 +885,7 @@ function onMixMouseleave(): void {
   height: 100%;
 }
 
-/* sub-sider wrapper — reserves layout width only when pinned.
+/* sub-sider wrapper - reserves layout width only when pinned.
    Mirrors soybean's `<div class="relative h-full transition-width-300"
    :style="{ width: fixed && hasChildren ? width : '0px' }">` pattern. */
 .t-admin-shell__sub-sider-wrapper {
@@ -836,7 +895,7 @@ function onMixMouseleave(): void {
   transition: width var(--tnzi-admin-motion-duration-base, 0.25s) var(--tnzi-admin-motion-ease-in-out, ease);
 }
 
-/* sub-sider — absolutely positioned inside the wrapper so its open/close
+/* sub-sider - absolutely positioned inside the wrapper so its open/close
    animation floats over the main content instead of pushing it. Width
    transitions independently from the wrapper. */
 .t-admin-shell__sub-sider {
@@ -852,7 +911,7 @@ function onMixMouseleave(): void {
   white-space: nowrap;
   box-shadow: var(--tnzi-shadow-sider, 2px 0 8px 0 rgb(29 35 41 / 5%));
   /* Must outrank TAdminHeader (z-index 80) so the drawer's own header
-     row — which sits at y=0 to align with the layout header line —
+     row - which sits at y=0 to align with the layout header line -
      isn't clipped by the (sticky) page header. soybean avoids this by
      teleporting the drawer inside the sider container, which sits in
      a separate stacking context above the main column; we replicate
@@ -870,8 +929,35 @@ function onMixMouseleave(): void {
   flex-shrink: 0;
   border-bottom: 1px solid var(--tnzi-border, #e5e7eb);
 }
+/* Adaptive sub-sider - the second-level drawer inherits its bg from the SIDER
+   surface (--tnzi-admin-sider-bg), so when a CUSTOM sider color is set its
+   menu text + header/right borders must follow that tone too. Gated on the
+   sider tone (not `invertSider`, which keeps the sub-sider white by design).
+   Mirrors the main sider's inverted / surface-light treatment. Remapping
+   `--tnzi-border` fixes both the header's bottom border and the aside's own
+   right border (which were a fixed light line on a dark drawer). */
+.t-admin-shell__sub-sider--inverted {
+  --tnzi-base-text: var(--tnzi-admin-sider-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  --tnzi-border: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  border-right-color: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+}
+.t-admin-shell__sub-sider--inverted :deep(.n-menu) {
+  --n-item-text-color: var(--tnzi-admin-sider-fg, rgba(255, 255, 255, 0.75));
+}
+.t-admin-shell__sub-sider--surface-light {
+  --tnzi-base-text: var(--tnzi-admin-sider-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  --tnzi-border: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+  border-right-color: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+}
+.t-admin-shell__sub-sider--surface-light :deep(.n-menu) {
+  --n-item-text-color: var(--tnzi-admin-sider-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --n-item-text-color-hover: var(--tnzi-primary);
+  --n-item-text-color-active: var(--tnzi-primary);
+}
 .t-admin-shell__sub-sider-title {
-  /* Phase G — soybean uses font-weight 700 + primary colour for the
+  /* Phase G - soybean uses font-weight 700 + primary colour for the
      mix-drawer title (`text-16px text-primary font-bold`). */
   margin: 0;
   font-size: 16px;
@@ -914,7 +1000,7 @@ function onMixMouseleave(): void {
   flex-direction: row;
 }
 
-/* Hybrid children sider — a vertical menu column under the full-width
+/* Hybrid children sider - a vertical menu column under the full-width
    header. Same chrome (bg + right border) as the primary sider; width is
    set inline so it animates on collapse. */
 .t-admin-shell__hybrid-sider {
@@ -926,7 +1012,7 @@ function onMixMouseleave(): void {
   transition: width var(--tnzi-admin-motion-duration-base, 0.25s) var(--tnzi-admin-motion-ease-in-out, ease);
 }
 
-/* Tabs + content + footer stack — to the right of the hybrid sider, or
+/* Tabs + content + footer stack - to the right of the hybrid sider, or
    full-width in every other mode. */
 .t-admin-shell__main-stack {
   display: flex;
@@ -969,7 +1055,7 @@ function onMixMouseleave(): void {
   display: none;
 }
 
-/* Phase B (next-up): invertSider is no longer driven by this wrapper hack —
+/* Phase B (next-up): invertSider is no longer driven by this wrapper hack -
    TAdminSidebar will accept an `:inverted` prop and propagate it to the
    inner <NMenu :inverted> so menu items also flip. The wrapper class
    lingers only as a state marker for any consumer-side custom overrides. */

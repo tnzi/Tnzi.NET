@@ -310,7 +310,7 @@ public class StatisticsServiceTests
     [Fact]
     public async Task GetRevenueTrendAsync_WeeklyGranularity_AggregatesByWeek()
     {
-        // Arrange — 2026-02-02 (周一) ~ 2026-02-15 (周日)
+        // Arrange - 2026-02-02 (周一) ~ 2026-02-15 (周日)
         var monday = new DateTime(2026, 2, 2, 10, 0, 0, DateTimeKind.Utc); // Monday
         var payments = new List<PaymentEntity>
         {
@@ -792,7 +792,7 @@ public class StatisticsServiceTests
         SetupCouponUsageQueryable(usages);
         SetupPromotionQueryable(promotions);
 
-        // Act — filter to last 7 days
+        // Act - filter to last 7 days
         var result = await _service.GetPromotionAnalyticsAsync(topN: 10, startDate: now.AddDays(-7));
 
         // Assert
@@ -855,7 +855,7 @@ public class StatisticsServiceTests
         SetupCouponUsageQueryable(usages);
         SetupPromotionQueryable(promotions);
 
-        // Act — limit to top 2
+        // Act - limit to top 2
         var result = await _service.GetPromotionAnalyticsAsync(topN: 2);
 
         // Assert
@@ -938,7 +938,7 @@ public class StatisticsServiceTests
         SetupRefundQueryable(refunds);
         SetupPaymentQueryable(new List<PaymentEntity>());
 
-        // Act — filter to last 7 days
+        // Act - filter to last 7 days
         var result = await _service.GetRefundAnalyticsAsync(startDate: now.AddDays(-7));
 
         // Assert
@@ -979,7 +979,7 @@ public class StatisticsServiceTests
             new() { Id = Guid.NewGuid(), PaymentId = Guid.NewGuid(), RefundAmount = 50m, Reason = "Test", Status = RefundStatus.Succeeded, CompletedTime = now, BusinessOrderNo = "O1", CreationTime = now.AddHours(-24) },
             // Completed in 48 hours
             new() { Id = Guid.NewGuid(), PaymentId = Guid.NewGuid(), RefundAmount = 30m, Reason = "Test", Status = RefundStatus.Succeeded, CompletedTime = now, BusinessOrderNo = "O2", CreationTime = now.AddHours(-48) },
-            // Pending (no CompletedTime) — should not affect avg
+            // Pending (no CompletedTime) - should not affect avg
             new() { Id = Guid.NewGuid(), PaymentId = Guid.NewGuid(), RefundAmount = 100m, Reason = "Test", Status = RefundStatus.Pending, BusinessOrderNo = "O3", CreationTime = now.AddHours(-12) },
         };
 

@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// 测试用 IMcpServerCatalog stub — 直接由 IOptions&lt;AIOptions&gt;.Mcp.Servers 物化，
+/// 测试用 IMcpServerCatalog stub - 直接由 IOptions&lt;AIOptions&gt;.Mcp.Servers 物化，
 /// 复刻生产 catalog 的总开关语义（Enabled=false → 空列表），不接 DB 注册表。
 /// 供 MCP provider 单测在不关心 DB 合并行为时复用。
 /// </summary>

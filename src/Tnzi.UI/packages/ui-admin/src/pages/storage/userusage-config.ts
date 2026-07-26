@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import type { DataTableColumns } from 'naive-ui'
 import type { UserStorageUsageDto } from '@tnzi/core/services/storage'
 
@@ -10,7 +11,7 @@ export function buildUsageColumns(
       key: 'userId',
       title: t('columns.userId'),
       ellipsis: { tooltip: true },
-      render: (row) => row.userId ?? '—',
+      render: (row) => row.userId ?? EMPTY_DASH,
     },
     {
       key: 'fileCount',

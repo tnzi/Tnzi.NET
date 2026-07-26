@@ -8,13 +8,13 @@ namespace Tnzi.AI.Tests.Skills;
 /// The sanitizer's only job is to refuse <i>structural</i> prompt-injection
 /// vectors in a user-supplied skill parameter before that value is spliced
 /// into the trusted SKILL.md body during template rendering. It deliberately
-/// does NOT try to do semantic detection — that responsibility belongs to
+/// does NOT try to do semantic detection - that responsibility belongs to
 /// <c>PromptInjectionGuardrail</c> at the input-guardrail layer.
 /// </summary>
 public class SkillParameterSanitizerTests
 {
     // ------------------------------------------------------------------ //
-    // Happy paths — ordinary structured values must always be accepted.
+    // Happy paths - ordinary structured values must always be accepted.
     // ------------------------------------------------------------------ //
 
     [Theory]
@@ -22,7 +22,7 @@ public class SkillParameterSanitizerTests
     [InlineData("security review")]
     [InlineData("high")]
     [InlineData("zh-CN")]
-    [InlineData("My Custom Style — line 1\nline 2")]
+    [InlineData("My Custom Style - line 1\nline 2")]
     [InlineData("multi\r\nline\r\nvalue")]
     [InlineData("contains a single - dash, plus -- two of them")]
     public void Sanitize_OrdinaryValue_Allows(string value)
@@ -72,7 +72,7 @@ public class SkillParameterSanitizerTests
     }
 
     // ------------------------------------------------------------------ //
-    // Stand-alone separators must be rejected — they can break out of the
+    // Stand-alone separators must be rejected - they can break out of the
     // system-prompt block when the LLM treats `---` as a section divider.
     // ------------------------------------------------------------------ //
 
@@ -94,7 +94,7 @@ public class SkillParameterSanitizerTests
     [Fact]
     public void Sanitize_InlineDashes_DoesNotMatchSeparator()
     {
-        // Dashes inside running text must still pass — only stand-alone
+        // Dashes inside running text must still pass - only stand-alone
         // separator lines are dangerous.
         var result = SkillParameterSanitizer.Sanitize("scope", "this--dashed--phrase passes");
         result.IsAllowed.ShouldBeTrue();
@@ -135,7 +135,7 @@ public class SkillParameterSanitizerTests
     [Fact]
     public void Sanitize_TabAndNewlines_Allowed()
     {
-        // Whitespace must pass — multiline parameter values are legitimate.
+        // Whitespace must pass - multiline parameter values are legitimate.
         var result = SkillParameterSanitizer.Sanitize("scope", "line1\tcol\nline2\r\nline3");
         result.IsAllowed.ShouldBeTrue();
     }
@@ -174,7 +174,7 @@ public class SkillParameterSanitizerTests
     [Fact]
     public void Sanitize_ZeroOrNegativeLengthLimit_DisablesCap()
     {
-        // A 0 or negative `maxLength` is treated as "no length cap" — useful
+        // A 0 or negative `maxLength` is treated as "no length cap" - useful
         // for callers that have already enforced their own limit upstream.
         var huge = new string('a', SkillParameterSanitizer.DefaultMaxParameterLength * 4);
         var result = SkillParameterSanitizer.Sanitize("scope", huge, maxLength: 0);
@@ -182,7 +182,7 @@ public class SkillParameterSanitizerTests
     }
 
     // ------------------------------------------------------------------ //
-    // SkillTemplateEngine integration — sanitizer is reached on the render path.
+    // SkillTemplateEngine integration - sanitizer is reached on the render path.
     // ------------------------------------------------------------------ //
 
     [Fact]

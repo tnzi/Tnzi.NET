@@ -8,19 +8,29 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 {
     private readonly IRepository<UserSession, Guid> _repository;
     private readonly IRepository<User, Guid>? _userRepository;
+    // Optional - validity cache for the per-request OnTokenValidated check, so an
+    // authenticated request doesn't hit the DB for every call. Invalidated on revoke.
+    private readonly ICache? _cache;
+    private readonly SessionOptions _sessionOptions;
+
+    private const string ValidityCachePrefix = "identity:session:valid:";
 
     public DatabaseSessionService(IRepository<UserSession, Guid> repository, IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
-        // Optional — only needed by GetActiveUsersAsync, resolved lazily so
+        // Optional - only needed by GetActiveUsersAsync, resolved lazily so
         // existing call paths and tests that don't register the user repository
         // still construct the service successfully.
         _userRepository = serviceProvider.GetService<IRepository<User, Guid>>();
+        _cache = serviceProvider.GetService<ICache>();
+        _sessionOptions = serviceProvider.GetService<IOptions<SessionOptions>>()?.Value ?? new SessionOptions();
     }
 
+    private static string ValidityCacheKey(Guid sessionId) => ValidityCachePrefix + sessionId.ToString("N");
+
     /// <inheritdoc />
-    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent)
+    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
     {
         var session = new UserSession
         {
@@ -30,11 +40,62 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             UserAgent = userAgent,
             CreationTime = DateTime.UtcNow,
             LastActivityTime = DateTime.UtcNow,
+            ExpiresAt = expiresAt,
             IsRevoked = false
         };
 
         await _repository.InsertAsync(session);
         return session.Id;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsSessionValidAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var cacheSeconds = _sessionOptions.ValidationCacheSeconds;
+        var useCache = _cache != null && cacheSeconds > 0;
+        var cacheKey = ValidityCacheKey(sessionId);
+
+        if (useCache)
+        {
+            var cached = await _cache!.GetAsync<bool?>(cacheKey);
+            if (cached.HasValue)
+            {
+                return cached.Value;
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var valid = await _repository
+            .Where(s => s.Id == sessionId && !s.IsRevoked && (s.ExpiresAt == null || s.ExpiresAt > now))
+            .AnyAsync();
+
+        if (useCache)
+        {
+            await _cache!.SetAsync<bool?>(cacheKey, valid, TimeSpan.FromSeconds(cacheSeconds));
+        }
+
+        return valid;
+    }
+
+    private async Task InvalidateValidityCacheAsync(params Guid[] sessionIds)
+    {
+        if (_cache == null || sessionIds.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var sessionId in sessionIds)
+        {
+            if (sessionId != Guid.Empty)
+            {
+                await _cache.RemoveAsync(ValidityCacheKey(sessionId));
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -120,6 +181,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         session.IsRevoked = true;
         session.RevokedAt = DateTime.UtcNow;
         await _repository.UpdateAsync(session);
+        await InvalidateValidityCacheAsync(sessionId);
 
         LogInformation("Session revoked: {SessionId}", sessionId);
         return Ok();
@@ -148,6 +210,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             if (sessions.Any())
             {
                 await _repository.UpdateManyAsync(sessions);
+                await InvalidateValidityCacheAsync(sessions.Select(s => s.Id).ToArray());
             }
         });
 
@@ -176,6 +239,24 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    public async Task<Result> RenewSessionAsync(Guid sessionId, DateTime expiresAt)
+    {
+        var session = await _repository.GetAsync(sessionId);
+        if (session == null || session.IsRevoked)
+        {
+            return Ok();
+        }
+
+        session.LastActivityTime = DateTime.UtcNow;
+        session.ExpiresAt = expiresAt;
+        await _repository.UpdateAsync(session);
+        // 续期后有效性可能延长，清缓存让下次校验读到新值。
+        await InvalidateValidityCacheAsync(sessionId);
+
+        return Ok();
+    }
+
+    /// <inheritdoc />
     public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
     {
         var cutoffTime = DateTime.UtcNow - inactiveThreshold;
@@ -196,6 +277,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         }
 
         await _repository.UpdateManyAsync(expiredSessions);
+        await InvalidateValidityCacheAsync(expiredSessions.Select(s => s.Id).ToArray());
 
         LogInformation("Cleaned {Count} expired sessions (inactive since {CutoffTime})", expiredSessions.Count, cutoffTime);
         return Ok(expiredSessions.Count);

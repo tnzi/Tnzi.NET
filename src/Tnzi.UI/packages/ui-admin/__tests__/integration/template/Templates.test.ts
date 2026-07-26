@@ -71,15 +71,18 @@ describe('Templates page (Phase 3.36)', () => {
     const { default: Templates } = await import('../../../src/pages/template/Templates.vue')
     const wrapper = mount(Templates, { global: { stubs } })
     await nextTick()
-    expect(wrapper.find('.t-crud-page').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell').exists()).toBe(true)
   })
 
-  it('renders data table after fetch', async () => {
+  // A template is content, so the library renders tiles showing a slice of the
+  // body rather than a table of its metadata.
+  it('renders one card per template, showing the body excerpt', async () => {
     const { default: Templates } = await import('../../../src/pages/template/Templates.vue')
     const wrapper = mount(Templates, { global: { stubs } })
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
-    expect(wrapper.find('.dt').exists()).toBe(true)
+    expect(wrapper.findAll('.tpl-card').length).toBeGreaterThan(0)
+    expect(wrapper.text()).toContain('welcome-email')
   })
 })
 

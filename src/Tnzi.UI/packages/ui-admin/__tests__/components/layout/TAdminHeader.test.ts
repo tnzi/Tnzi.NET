@@ -22,7 +22,7 @@ describe('TAdminHeader', () => {
 
   it('renders no logo block when no logo slot is supplied (Phase I.7.7+)', () => {
     // Phase I.7.7: the header no longer auto-renders `title` as a fallback
-    // logo — the logo lives in the sidebar (`TAdminSidebar`) in vertical
+    // logo - the logo lives in the sidebar (`TAdminSidebar`) in vertical
     // layout modes, and consumers wanting the title in the header opt in
     // via the `#logo` slot.
     const wrapper = mount(TAdminHeader, { props: { title: 'Tnzi Admin' } })

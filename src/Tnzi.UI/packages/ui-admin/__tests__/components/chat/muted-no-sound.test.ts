@@ -7,7 +7,7 @@
  * The sound guard lives in TChatHost's `onNewMessage` callback (see
  * src/components/chat/TChatHost.vue). We mount TChatHost, capture the
  * `onNewMessage` handler that was passed to useChatRealtime, and call it
- * directly with muted/unmuted payloads — this is the real execution path.
+ * directly with muted/unmuted payloads - this is the real execution path.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -96,7 +96,7 @@ const globalConfig = {
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
-describe('TChatHost — muted conversations do not play sound', () => {
+describe('TChatHost - muted conversations do not play sound', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()

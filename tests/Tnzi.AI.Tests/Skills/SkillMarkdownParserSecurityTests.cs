@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// SkillMarkdownParser 安全验证集成测试 — 验证 frontmatter 安全检查
+/// SkillMarkdownParser 安全验证集成测试 - 验证 frontmatter 安全检查
 /// </summary>
 public class SkillMarkdownParserSecurityTests
 {

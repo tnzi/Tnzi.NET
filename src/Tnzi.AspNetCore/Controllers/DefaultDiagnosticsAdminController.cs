@@ -2,8 +2,8 @@
 namespace Tnzi.AspNetCore.Controllers;
 
 /// <summary>
-/// Diagnostics admin controller base class
-/// Provides exception statistics query and management endpoints
+/// Default diagnostics admin controller (activated by HostingModule).
+/// Provides exception statistics, controller/module inspection and the admin manifest.
 /// </summary>
 [Route("admin/diagnostics")]
 [DefaultController]
@@ -125,7 +125,7 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Get the module health report — dependency integrity and initialization status
+    /// Get the module health report - dependency integrity and initialization status
     /// across all loaded modules. Read-only; inherits the class-level diagnostics
     /// view permission.
     /// </summary>
@@ -153,14 +153,14 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Get the admin manifest — the subset of loaded modules and admin
+    /// Get the admin manifest - the subset of loaded modules and admin
     /// controllers shaped for a frontend that wants to auto-render menus
     /// and CRUD pages.
     ///
     /// Powers the <c>useAdminModuleManifest()</c> composable in
     /// <c>@tnzi/ui-admin</c> 0.2.4+. The DTO is intentionally flatter than
     /// <see cref="GetModules"/>: one entity per admin route prefix, with
-    /// the HTTP methods that prefix exposes — so the frontend can decide
+    /// the HTTP methods that prefix exposes - so the frontend can decide
     /// whether to surface a page (only if route is reachable) and whether
     /// to enable Create/Update/Delete UX (based on supported verbs).
     /// </summary>
@@ -282,7 +282,7 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
 }
 
 /// <summary>
-/// Module health report — dependency integrity and initialization status.
+/// Module health report - dependency integrity and initialization status.
 /// Serialization shape for <c>GET /admin/diagnostics/modules/health</c>.
 /// </summary>
 public class ModuleHealthReportDto

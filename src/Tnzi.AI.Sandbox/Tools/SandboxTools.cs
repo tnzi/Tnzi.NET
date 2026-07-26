@@ -7,13 +7,13 @@ using Tnzi.Security.Claims;
 namespace Tnzi.AI.Sandbox.Tools;
 
 /// <summary>
-/// 沙箱工具组 — bash / ls / read_file / write_file / str_replace 五个工具。
+/// 沙箱工具组 - bash / ls / read_file / write_file / str_replace 五个工具。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 工具方法签名只包含 LLM 可见参数（进入 JSON schema）。运行环境
 /// （<see cref="ISandbox"/> + threadId）不在签名中，而是在调用时从
-/// <see cref="IAgentExecutionContextAccessor"/> 解析 — 由
+/// <see cref="IAgentExecutionContextAccessor"/> 解析 - 由
 /// <c>SandboxMiddleware</c> 在每次 Agent 运行期间发布
 /// <see cref="SandboxToolEnvironment"/>（finally 移除）。
 /// </para>
@@ -26,7 +26,7 @@ namespace Tnzi.AI.Sandbox.Tools;
 public class SandboxTools : IAIToolProvider
 {
     /// <summary>
-    /// Output/stderr truncation budget for the audit/event payload — keeps
+    /// Output/stderr truncation budget for the audit/event payload - keeps
     /// the audit row bounded while leaving the agent's return value intact.
     /// </summary>
     private const int MaxAuditOutputBytes = 2048;
@@ -35,7 +35,7 @@ public class SandboxTools : IAIToolProvider
 
     private const string SandboxUnavailableMessage =
         "Sandbox is not available in this execution context. Sandbox tools require an active sandbox " +
-        "provisioned per agent run by the sandbox middleware — ensure the sandbox module is enabled " +
+        "provisioned per agent run by the sandbox middleware. Ensure the sandbox module is enabled " +
         "(AI:Sandbox:Enabled) and the request carries a thread id.";
 
     private readonly IVirtualPathTranslator _translator;
@@ -99,7 +99,7 @@ public class SandboxTools : IAIToolProvider
         // handed verbatim to a host shell, so if a translated /mnt path resolves
         // outside the thread directory (via `..` segments embedded in the virtual
         // path) refuse the command rather than let it escape. This is NOT a true
-        // jail — it cannot reason about shell-constructed paths — but it closes the
+        // jail - it cannot reason about shell-constructed paths - but it closes the
         // obvious `/mnt/workspace/../../../etc/passwd` style bypass. Runs before the
         // quota reservation so an escaping command does not consume a quota slot.
         if (!IsTranslatedCommandWithinThreadDir(translatedCommand, threadId))
@@ -114,7 +114,7 @@ public class SandboxTools : IAIToolProvider
             return new { stdout = string.Empty, stderr = escapeResult.Error, exit_code = -1, note = (string?)null };
         }
 
-        // Thread-level resource quota check — pre-flight before reaching the shell.
+        // Thread-level resource quota check - pre-flight before reaching the shell.
         // CheckAsync atomically reserves a command slot (hard cap); quota denials are
         // reported back through the same event/audit pipeline as command-blacklist
         // denials so dashboards see a unified "denied" stream.
@@ -302,7 +302,7 @@ public class SandboxTools : IAIToolProvider
     }
 
     /// <summary>
-    /// 环境缺失时的结构化错误 — 返回给 LLM，绝不抛异常。
+    /// 环境缺失时的结构化错误 - 返回给 LLM，绝不抛异常。
     /// </summary>
     private object SandboxUnavailable()
     {
@@ -340,7 +340,7 @@ public class SandboxTools : IAIToolProvider
         }
         catch (Exception ex)
         {
-            // Silent catch — observability publication must not break the agent flow.
+            // Silent catch - observability publication must not break the agent flow.
             _logger.LogWarning(ex, "Failed to publish SandboxCommandExecutedEvent for sandbox {SandboxId}", sandbox.Id);
         }
     }
@@ -369,7 +369,7 @@ public class SandboxTools : IAIToolProvider
     /// resolves inside that directory once <c>..</c> segments collapse. Returns
     /// <c>true</c> when no escaping token is found. This is intentionally
     /// conservative (it inspects literal tokens only and cannot follow shell
-    /// constructs) — under the Local provider it is a hardening layer, not a jail.
+    /// constructs) - under the Local provider it is a hardening layer, not a jail.
     /// </summary>
     private bool IsTranslatedCommandWithinThreadDir(string translatedCommand, Guid threadId)
     {
@@ -403,7 +403,7 @@ public class SandboxTools : IAIToolProvider
             }
             catch
             {
-                // An unparseable token is suspicious — fail closed.
+                // An unparseable token is suspicious - fail closed.
                 return false;
             }
 

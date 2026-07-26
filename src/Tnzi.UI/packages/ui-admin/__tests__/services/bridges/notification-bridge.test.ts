@@ -148,7 +148,7 @@ describe('notification-bridge', () => {
     await expect(bridge.messages.update('id', {})).rejects.toThrow()
   })
 
-  // ---- templates sub-contract (backend gap — stubs reject) ----
+  // ---- templates sub-contract (backend gap - stubs reject) ----
 
   it('templates.fetch rejects with backend-gap error', async () => {
     const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never })
@@ -171,7 +171,7 @@ describe('notification-bridge', () => {
     expect(typeof result.isHtml).toBe('boolean')
   })
 
-  // ---- subscriptions sub-contract (backend gap — stubs reject) ----
+  // ---- subscriptions sub-contract (backend gap - stubs reject) ----
 
   it('subscriptions.fetch rejects with backend-gap error', async () => {
     const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never })

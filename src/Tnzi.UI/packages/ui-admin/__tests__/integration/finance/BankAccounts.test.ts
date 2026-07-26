@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Bank Accounts page — TCrudPage over the bank account profile CRUD, plus a
+ * Bank Accounts page - TCrudPage over the bank account profile CRUD, plus a
  * set-next-check-number modal opened from a row action.
  */
 vi.mock('../../../src/plugin/client', () => ({

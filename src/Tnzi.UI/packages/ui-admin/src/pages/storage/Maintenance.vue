@@ -1,6 +1,6 @@
 <template>
   <!--
-    Maintenance — temporary-file housekeeping (TContentPage, no back). Lists
+    Maintenance - temporary-file housekeeping (TContentPage, no back). Lists
     unreferenced temporary files older than N hours (`cleanup.temporaryFiles`)
     and exposes a Cleanup trigger (`cleanup.trigger`) that physically deletes
     them. The age threshold drives both the listing and the cleanup.

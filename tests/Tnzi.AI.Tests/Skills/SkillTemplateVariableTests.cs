@@ -82,7 +82,7 @@ public class SkillTemplateVariableTests
     [Fact]
     public void Render_BuiltInVariableWithoutContext_KeepsPlaceholder()
     {
-        // No context provided — built-in variables remain as-is (no error, since they're recognized)
+        // No context provided - built-in variables remain as-is (no error, since they're recognized)
         var skill = MakeSkill("Session: {{SESSION_ID}}");
 
         var result = _engine.Render(skill, null, null);
@@ -124,7 +124,7 @@ public class SkillTemplateVariableTests
     [Fact]
     public void Render_NullContextValues_KeepsPlaceholder()
     {
-        // Context provided but values are null — should keep placeholder
+        // Context provided but values are null - should keep placeholder
         var skill = MakeSkill("Agent: {{AGENT_NAME}}");
         var context = new SkillRenderContext { AgentName = null };
 

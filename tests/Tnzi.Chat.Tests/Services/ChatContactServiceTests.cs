@@ -16,9 +16,9 @@ public class ChatContactServiceTests
             sp.GetRequiredService<IRepository<UserDetail, Guid>>(),
             sp.GetRequiredService<IPresenceService>(),
             sp.GetRequiredService<IOptionsSnapshot<ChatOptions>>(),
-            // Optional — null unless a test registers a super-admin source.
+            // Optional - null unless a test registers a super-admin source.
             sp.GetService<IFunctionAuthorizationService>(),
-            // Optional — null unless a test registers a chat.use gate.
+            // Optional - null unless a test registers a chat.use gate.
             sp.GetService<IChatAccessService>());
 
     private static IServiceProvider BuildSp(List<User> users, Guid currentUserId, List<UserDetail>? details = null, IReadOnlySet<Guid>? superAdmins = null, IReadOnlySet<Guid>? disabledUsers = null)
@@ -162,7 +162,7 @@ public class ChatContactServiceTests
         var sp = BuildSp(new List<User> { alice, bob, meUser }, me, disabledUsers: new HashSet<Guid> { bob.Id });
         var svc = BuildService(sp);
 
-        // Users without chat.use can't participate — they must not appear in the
+        // Users without chat.use can't participate - they must not appear in the
         // new-chat / add-member picker.
         var result = await svc.SearchUsersAsync("");
 

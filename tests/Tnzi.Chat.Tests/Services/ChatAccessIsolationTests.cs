@@ -50,7 +50,7 @@ public class DirectChatInterceptionTests : ChatAccessGatedTestBase
         r.Succeeded.ShouldBeFalse();
         r.Code.ShouldBe(403);
 
-        // Nothing persisted — my own view of the thread is empty.
+        // Nothing persisted - my own view of the thread is empty.
         var thread = (await Conversations.GetMessagesAsync(conv.Id, new MessageThreadQueryDto())).Data!;
         thread.Messages.Count.ShouldBe(0);
     }
@@ -75,7 +75,7 @@ public class GroupIsolationTests : ChatAccessGatedTestBase
     {
         // Create the group with only the still-enabled member, then seed the disabled
         // user directly as a member row. This models "joined while enabled, later lost
-        // chat.use" — the only way a disabled user is in a group now that
+        // chat.use" - the only way a disabled user is in a group now that
         // CreateGroup/AddMembers drop currently-disabled ids (see GroupChatUseExclusionTests).
         var g = (await Group.CreateGroupAsync(new CreateGroupDto { Title = "T", MemberIds = new List<Guid> { Normal } })).Data!;
         await Members.InsertAsync(new ConversationMember { ConversationId = g.Id, UserId = Disabled, Role = MemberRole.Member });
@@ -111,12 +111,12 @@ public class MessageBlockExclusionTests : Integration.IntegrationTestBase
     {
         // Fail-open base (no gate): messages land normally. Then isolate one message for
         // me (as if received while I was disabled) and confirm it stays hidden even though
-        // I can use chat now (re-enabled) — the block row, not the current chat.use, decides.
+        // I can use chat now (re-enabled) - the block row, not the current chat.use, decides.
         var g = (await Group.CreateGroupAsync(new CreateGroupDto { Title = "H", MemberIds = new List<Guid> { Guid.NewGuid() } })).Data!;
         var m1 = (await Conversations.SendMessageAsync(g.Id, new SendMessageDto { Content = "one" })).Data!;
         var m2 = (await Conversations.SendMessageAsync(g.Id, new SendMessageDto { Content = "two" })).Data!;
 
-        // Isolate m1 for me — as if it arrived while I was disabled.
+        // Isolate m1 for me - as if it arrived while I was disabled.
         var blocks = ServiceProvider.GetRequiredService<IRepository<MessageBlock, Guid>>();
         await blocks.InsertAsync(new MessageBlock { MessageId = m1.Id, UserId = CurrentUserId });
         await DbContext.SaveChangesAsync();

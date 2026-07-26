@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Chart of Accounts page — TCrudPage with a seed-default toolbar action and a
+ * Chart of Accounts page - TCrudPage with a seed-default toolbar action and a
  * dynamic parent-account fieldRenderer fed from the account tree.
  * Mocks the finance-bridge boundary (page convention).
  */

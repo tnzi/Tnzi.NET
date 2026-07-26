@@ -11,8 +11,6 @@ interface IFormProps<T = Record<string, unknown>> {
   disabled?: boolean;
   showRequireMark?: boolean;
   size?: 'small' | 'medium' | 'large';
-  class?: string | string[];
-  style?: string | Record<string, string | number>;
 }
 
 interface IFormEmits<T = Record<string, unknown>> {

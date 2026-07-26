@@ -87,7 +87,7 @@
         </template>
       </TPageHeader>
 
-      <!-- Phone downward-expanding search panel — one field per row, the
+      <!-- Phone downward-expanding search panel - one field per row, the
            action buttons pinned to the right of their own row. -->
       <div
         v-if="bp.isSm.value && mobilePanel !== 'none'"
@@ -141,6 +141,15 @@
       />
     </NCard>
 
+    <!-- 头部关掉时抽屉挂在外层：它原本嵌在头部卡里，会随头部一起消失。 -->
+    <TCrudSearchDrawer
+      v-if="showInlineSearch && hasAdvanced && !bp.isSm.value"
+      v-model:show="advancedOpen"
+      :state="props.state"
+      :search-fields="searchFields"
+      :translate="translate"
+    />
+
     <!-- Consumer custom search area (full replacement). -->
     <NCard
       v-if="$slots.search"
@@ -151,7 +160,7 @@
       <slot name="search" />
     </NCard>
 
-    <!-- Optional KPI strip — sits between the white header card and the list
+    <!-- Optional KPI strip - sits between the white header card and the list
          card (content-page standard: header → KPI row → list). Typically a
          `TKpiRow` of `TKpiCard`s. -->
     <div v-if="$slots.kpis" class="t-list-shell__kpis">
@@ -183,7 +192,7 @@
 
     <!-- ── LIST card ──
          Toolbar (#header-extra): create / refresh / export / import /
-         column-settings (#toolbar) — these stay in the list container.
+         column-settings (#toolbar) - these stay in the list container.
          Optional left filters via #toolbarLeft. -->
     <NCard
       :bordered="false"
@@ -194,10 +203,30 @@
            action buttons (create / refresh / export / import / columns).
            Rendered in the card content (not the NCard header) so it shows
            reliably even without a card title. Only rendered when it has
-           something to show — a list with no actions/filters skips it
+           something to show - a list with no actions/filters skips it
            entirely (no empty gap above the table). -->
       <div v-if="hasToolbar" class="t-list-shell__toolbar">
         <div class="t-list-shell__toolbar-left">
+          <!-- 头部关掉时（tab 内嵌列表的标准用法）搜索入口补到工具栏里：
+               否则 `searchFields` 会随头部一起消失，而那是框架承诺过的能力。 -->
+          <template v-if="showInlineSearch">
+            <NInput
+              v-model:value="simpleQuery"
+              clearable
+              size="small"
+              :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
+              class="t-list-shell__inline-keyword"
+              @keydown.enter="onSimpleSearch"
+              @clear="onSimpleClear"
+            >
+              <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+            </NInput>
+            <NButton size="small" @click="onSimpleSearch">{{ t('admin.crud.search') }}</NButton>
+            <NButton v-if="hasAdvanced" size="small" tertiary @click="advancedOpen = true">
+              <template #icon><TSvgIcon icon="mdi:tune-variant" :size="16" /></template>
+              {{ t('admin.crud.advanced') }}
+            </NButton>
+          </template>
           <slot name="toolbarLeft" />
         </div>
         <div class="t-list-shell__actions">
@@ -292,7 +321,7 @@
          is deep-linkable + Back-closeable for free), but a different chrome:
          `view` action → this right drawer with the page's `#detail` body;
          create/edit → the modal above. Rendered only when the page supplies a
-         `#detail` slot — otherwise `view` stays in the form modal (back-compat). -->
+         `#detail` slot - otherwise `view` stays in the form modal (back-compat). -->
     <TDrawerShell
       v-if="$slots.detail"
       :show="props.state.formModal.visible.value && props.state.formModal.mode.value === 'view'"
@@ -334,7 +363,7 @@ export interface TListShellProps<T, TId extends string | number = string | numbe
   /** `page` (default) flex-fills the page height; `container` is content-sized for embedding. */
   mode?: 'page' | 'container'
   /** When false the whole white header card (TPageHeader + search) is not
-      rendered — for shells nested inside a page that already owns the single
+      rendered - for shells nested inside a page that already owns the single
       title bar (otherwise TPageHeader falls back to the route meta title and
       renders a duplicate bar). Default true. */
   showHeader?: boolean
@@ -412,11 +441,20 @@ function t(key: string): string {
 }
 
 // The list-card toolbar renders only when it has at least one action or
-// filter — otherwise it's skipped so the table doesn't get an empty gap
+// filter - otherwise it's skipped so the table doesn't get an empty gap
 // above it. The card content owns its own top inset (CSS), independent of
 // whether this toolbar exists.
+/**
+ * 头部被关掉（`showHeader=false`，tab 内嵌列表的标准用法）时，把搜索入口补进工具栏。
+ * 头部在时不补——那会渲染出两个搜索框。
+ */
+const showInlineSearch = computed(
+  () => !props.showHeader && props.showSearch !== false && (props.showDefaultSearch !== false || hasAdvanced.value),
+)
+
 const hasToolbar = computed(
   () =>
+    showInlineSearch.value ||
     !!slots.toolbarLeft ||
     !!slots.primary ||
     !!slots.toolbar ||
@@ -439,7 +477,7 @@ const mobilePanel = ref<'none' | 'keyword' | 'advanced'>(
   props.defaultAdvancedMode && !!props.searchFields?.length ? 'advanced' : 'none',
 )
 const mobileAdvRef = ref<{ apply: () => void; reset: () => void } | null>(null)
-// The mobile keyword NInput — focused when the user taps 🔍 so the keyboard
+// The mobile keyword NInput - focused when the user taps 🔍 so the keyboard
 // pops immediately (this is a user-initiated expand, not an auto-open surprise).
 const mobileKeywordRef = ref<{ focus: () => void } | null>(null)
 function toggleMobilePanel(mode: 'keyword' | 'advanced'): void {
@@ -479,7 +517,7 @@ function castFormData(data: unknown): Partial<T> | null {
   return data as Partial<T> | null
 }
 
-// The view drawer renders only when the page supplies a `#detail` body — gated
+// The view drawer renders only when the page supplies a `#detail` body - gated
 // in the template via the reactive `$slots.detail` (a `computed(() => slots.x)`
 // would NOT re-evaluate when a conditional slot appears, so use `$slots`
 // directly). Its title is derived from the viewed record via `detailTitle`.
@@ -543,6 +581,12 @@ const paginationConfig = computed(() => {
 </script>
 
 <style scoped>
+/* 内联关键字框（头部关掉时）限宽：工具栏是给动作的，搜索不该占满整行。 */
+.t-list-shell__inline-keyword {
+  width: 200px;
+  max-width: 100%;
+}
+
 /* Spacing convention: ONE 12px scale. Cards carry a single uniform 12px
    inset; vertical rhythm comes from flex-column `gap` (gap-y), NOT per-child
    padding/margin; cards are separated by the root `gap`. */
@@ -578,7 +622,7 @@ const paginationConfig = computed(() => {
   padding: 12px;
 }
 /* The list card's content is a flex column whose vertical rhythm is owned by
-   `gap` (gap-y) — toolbar / body / footer add no padding or margin of their
+   `gap` (gap-y) - toolbar / body / footer add no padding or margin of their
    own. */
 .t-list-shell__list-card :deep(.n-card-content) {
   display: flex;
@@ -614,7 +658,7 @@ const paginationConfig = computed(() => {
 .t-list-shell__error-body { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .t-list-shell__error-msg { word-break: break-word; flex: 1 1 auto; }
 
-/* Toolbar + footer carry no own padding/margin — card inset + flex gap space them. */
+/* Toolbar + footer carry no own padding/margin - card inset + flex gap space them. */
 .t-list-shell__toolbar {
   flex-shrink: 0;
   display: flex;
@@ -635,7 +679,7 @@ const paginationConfig = computed(() => {
 .t-list-shell__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .t-list-shell__action { font-weight: 400; }
 /* Trailing icon-only buttons (Refresh / Columns) keep the same `tertiary`
-   background as the adjacent text buttons (Export / Import) — they are NOT
+   background as the adjacent text buttons (Export / Import) - they are NOT
    bare icons. A slightly tighter horizontal padding makes them read as
    compact square buttons while still carrying the button surface. */
 .t-list-shell__trailing-icon { padding-inline: 8px; }
@@ -647,7 +691,7 @@ const paginationConfig = computed(() => {
 .t-list-shell__adv-toggle :deep(.n-button__content) { color: var(--tnzi-base-text-muted, #6b7280); }
 .t-list-shell__adv-toggle:hover :deep(.n-button__content) { color: var(--tnzi-primary); }
 
-/* Phone downward-expanding search panel — one field per row, action buttons
+/* Phone downward-expanding search panel - one field per row, action buttons
    pinned right on their own row. Sits below the page-header bar, separated by
    a hairline so it reads as a distinct zone of the white header card. */
 .t-list-shell__mobile-search {

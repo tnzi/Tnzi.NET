@@ -27,7 +27,6 @@ public class FinanceModule : TnziApplicationModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         context.Services.AddTnziOptions<FinanceOptions, FinanceOptionsValidator>(context.Configuration);
-        context.Services.AddTnziOptions<FinanceEncryptionOptions, FinanceEncryptionOptionsValidator>(context.Configuration);
         return Task.CompletedTask;
     }
 
@@ -41,6 +40,9 @@ public class FinanceModule : TnziApplicationModule
         // 基建服务
         // 注：IDocumentNumberService（无缺口连续编号）已上移核心，由 EFCoreModule 统一注册
         context.Services.AddScoped<IExchangeRateService, ExchangeRateService>();
+        // 封账进度可托管给外部审批系统：契约把"可整体替换"写成了 TryAddScoped，
+        // 注册就必须真的是 TryAdd，否则先注册自己实现的消费方会被框架默认覆盖。
+        context.Services.TryAddScoped<ILedgerLockService, LedgerLockService>();
         context.Services.AddScoped<IFiscalYearService, FiscalYearService>();
 
         // 会计核心
@@ -48,13 +50,18 @@ public class FinanceModule : TnziApplicationModule
         context.Services.AddScoped<IJournalEntryService, JournalEntryService>();
         context.Services.AddScoped<ILedgerPostingService, LedgerPostingService>();
         context.Services.AddScoped<LedgerPostingEngine>();
+        // 冲销 × 银行对账守卫：冲销漏斗（引擎 BuildReversalAsync）与只读的
+        // ILedgerPostingService.GetReversibilityAsync 共用，保证两处判定不漂移
+        context.Services.AddScoped<ReversalGuard>();
         // 余额汇总（批次 F）：维护器随引擎无条件累加；读路径 reader 按 UseBalanceSummary 门控
         context.Services.AddScoped<BalanceSummaryMaintainer>();
         context.Services.AddScoped<BalanceSummaryReader>();
+        context.Services.AddScoped<GeneralLedgerReader>();
         context.Services.AddScoped<IBalanceSummaryService, BalanceSummaryService>();
 
         // 主数据（P2a：往来方 / 目录 / 税模型）
         context.Services.AddScoped<ICustomerService, CustomerService>();
+        context.Services.AddScoped<IPartyLedgerService, PartyLedgerService>();
         context.Services.AddScoped<IVendorService, VendorService>();
         context.Services.AddScoped<IItemService, ItemService>();
         context.Services.AddScoped<ITaxService, TaxService>();
@@ -65,6 +72,14 @@ public class FinanceModule : TnziApplicationModule
         context.Services.AddScoped<FinanceDocumentHelper>();
         // 过账前钩子链：消费应用注册 IFinancePostingGuard 实现即可在过账/作废/冲销前否决（如审批门）
         context.Services.AddScoped<PostingGuardRunner>();
+        context.Services.AddScoped<ICustomerStatementService, CustomerStatementService>();
+        // 催收强度是策略：消费应用注册自己的实现即胜出。
+        context.Services.TryAddScoped<IDunningPolicy, DefaultDunningPolicy>();
+        context.Services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
+        context.Services.AddScoped<IDocumentCommentService, DocumentCommentService>();
+        context.Services.AddScoped<OfferComposer>();
+        context.Services.AddScoped<IEstimateService, EstimateService>();
+        context.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
         context.Services.AddScoped<IInvoiceService, InvoiceService>();
         context.Services.AddScoped<IBillService, BillService>();
         context.Services.AddScoped<IExpenseService, ExpenseService>();
@@ -75,32 +90,6 @@ public class FinanceModule : TnziApplicationModule
         // P3a 银行域
         context.Services.AddScoped<ITransferService, TransferService>();
         context.Services.AddScoped<IReconciliationService, ReconciliationService>();
-
-        // P3「输出与摄取」— 块 0 基建：敏感字段加密 + 银行账户档案 + 往来方银行账户
-        context.Services.AddScoped<IFinanceDataProtector, FinanceDataProtector>();
-        context.Services.AddScoped<IBankAccountService, BankAccountService>();
-        context.Services.AddScoped<IPartyBankAccountService, PartyBankAccountService>();
-
-        // P3「输出与摄取」— 块 1 银行流水导入
-        context.Services.AddScoped<BankMatchEngine>();
-        context.Services.AddScoped<IBankFeedService, BankFeedService>();
-
-        // P3「输出与摄取」— 块 2 支票打印
-        context.Services.AddScoped<CheckNumberAllocator>();
-        // ICheckDocumentRenderer 契约留核心，默认实现（PdfSharp）由可选子模块 Tnzi.Finance.Documents 提供
-        // （核心刻意零 PdfSharp 引用，纯会计消费者不被传递拉入 PdfSharp）。未加载该子模块时 CheckService
-        // 的 print/reprint/calibration 返回 501 引导，与 Tnzi.Finance.Ai 的 IReceiptExtractor 同构。
-        context.Services.AddScoped<ICheckService, CheckService>();
-        // 付款作废联动作废关联支票
-        context.Services.AddEventHandler<FinanceDocumentVoidedEvent, PaymentVoidedCheckHandler>();
-
-        // P3「输出与摄取」— 块 3 EFT 输出
-        // 文件组装器可整体替换：消费应用先注册自己的实现以适配银行方言
-        context.Services.TryAddScoped<IEftFileComposer, DefaultEftFileComposer>();
-        context.Services.AddScoped<IEftService, EftService>();
-
-        // P3「输出与摄取」— 块 4 收据采集（提取器 IReceiptExtractor 是消费层策略，由消费应用注册；核心可选注入，未注册则 ExtractAsync 返回 501）
-        context.Services.AddScoped<IReceiptCaptureService, ReceiptCaptureService>();
 
         // 多币种深化：未实现汇兑损益期末重估
         context.Services.AddScoped<IRevaluationService, RevaluationService>();

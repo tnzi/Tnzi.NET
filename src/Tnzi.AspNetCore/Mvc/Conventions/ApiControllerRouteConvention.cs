@@ -214,7 +214,7 @@ public class ApiControllerRouteProvider : IApplicationModelProvider
             return input;
         }
 
-        var result = new System.Text.StringBuilder();
+        var result = new StringBuilder();
         result.Append(char.ToLowerInvariant(input[0]));
 
         for (int i = 1; i < input.Length; i++)

@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// MCP 客户端-服务端集成测试 — 在 Provider 层验证 Tool/Resource/Prompt 的发现、聚合、故障隔离和缓存失效。
+/// MCP 客户端-服务端集成测试 - 在 Provider 层验证 Tool/Resource/Prompt 的发现、聚合、故障隔离和缓存失效。
 /// 使用 Mock IMcpClientAdapter 模拟 MCP 服务器，不启动外部进程。
 /// </summary>
 public class McpClientServerIntegrationTests

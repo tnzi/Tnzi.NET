@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// Gateway 会话信息 DTO — 描述一个活跃的 Gateway 会话
+/// Gateway 会话信息 DTO - 描述一个活跃的 Gateway 会话
 /// </summary>
 public class GatewaySession
 {

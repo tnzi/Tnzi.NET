@@ -9,7 +9,7 @@ namespace Tnzi.Authorization.Permissions;
 /// <remarks>
 /// <para>
 /// <b>Why</b>: provider-declared permissions used to live only in the
-/// in-memory <see cref="PermissionManager"/> snapshot — they were
+/// in-memory <see cref="PermissionManager"/> snapshot - they were
 /// invisible to admin pages and couldn't be FK-referenced by
 /// <c>RoleFunction</c>. This seeder closes that gap so a developer can:
 /// </para>
@@ -65,18 +65,23 @@ public class PermissionDbSeeder
     /// </summary>
     /// <returns>
     /// Number of rows inserted + updated. Zero on no-op runs (re-startup
-    /// with unchanged providers). Failures are logged but do not throw —
+    /// with unchanged providers). Failures are logged but do not throw -
     /// startup must not block on this auxiliary step.
     /// </returns>
     public async Task<int> SeedAsync(IEnumerable<IPermissionDefinitionProvider> providers, CancellationToken cancellationToken = default)
     {
         Check.NotNull(providers);
 
+        // Materialise once: the sequence is enumerated here and counted in the
+        // closing log line, and a deferred GetServices() enumerable would resolve
+        // a second set of provider instances on the second pass.
+        var providerList = providers as IReadOnlyCollection<IPermissionDefinitionProvider> ?? providers.ToList();
+
         // Collapse all provider outputs into one context. Duplicate names
         // across providers are first-wins (matches PermissionManager's
-        // existing semantics — see LoadFromProviders there).
+        // existing semantics - see LoadFromProviders there).
         var context = new PermissionDefinitionContext();
-        foreach (var provider in providers)
+        foreach (var provider in providerList)
         {
             try
             {
@@ -149,7 +154,7 @@ public class PermissionDbSeeder
                 if (existing.ParentId != parentId) { existing.ParentId = parentId; changed = true; }
                 // Reclaim ownership: if a row was admin-created with the
                 // same code, mark it system-managed now that a provider
-                // declares it. This is intentional — code-as-truth wins.
+                // declares it. This is intentional - code-as-truth wins.
                 if (!existing.IsSystemManaged) { existing.IsSystemManaged = true; changed = true; }
                 if (changed)
                 {
@@ -180,7 +185,7 @@ public class PermissionDbSeeder
         var functionByCode = existingFunctions.ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase);
         foreach (var perm in context.Permissions.Values)
         {
-            // The group is the permission's parent module — fall back to
+            // The group is the permission's parent module - fall back to
             // ParentName for declarations made outside a group block.
             var moduleCode = perm.Group?.Name ?? perm.ParentName;
             if (string.IsNullOrEmpty(moduleCode))
@@ -205,7 +210,7 @@ public class PermissionDbSeeder
                 if (existing.Name != perm.DisplayName) { existing.Name = perm.DisplayName; changed = true; }
                 if (existing.Description != perm.Description) { existing.Description = perm.Description; changed = true; }
                 // Category is a code-owned contract (like Name/Description),
-                // not an admin toggle — the provider declaration wins.
+                // not an admin toggle - the provider declaration wins.
                 if (existing.Category != perm.Category) { existing.Category = perm.Category; changed = true; }
                 if (!existing.IsSystemManaged) { existing.IsSystemManaged = true; changed = true; }
                 if (changed)
@@ -282,7 +287,7 @@ public class PermissionDbSeeder
 
         _logger.LogInformation(
             "PermissionDbSeeder: {Count} module/function row(s) inserted, updated or retired from {ProviderCount} provider(s).",
-            touched, providers.Count());
+            touched, providerList.Count);
         return touched;
     }
 

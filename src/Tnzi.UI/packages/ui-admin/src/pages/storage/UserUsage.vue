@@ -1,6 +1,6 @@
 <template>
   <!--
-    UserUsage — per-user storage quota overview (TContentPage, no back).
+    UserUsage - per-user storage quota overview (TContentPage, no back).
     Default view = top-N storage consumers (`userUsage.topUsers`). An optional
     user-ID lookup (`userUsage.forUser`) pins a single user's row to the top of
     the table for spot checks.
@@ -38,7 +38,7 @@
       <div class="flex flex-wrap gap-24px">
         <div>
           <div class="text-12px text-muted">{{ t('columns.userId') }}</div>
-          <div class="font-600">{{ pinnedUser.userId ?? '—' }}</div>
+          <div class="font-600">{{ pinnedUser.userId ?? EMPTY_DASH }}</div>
         </div>
         <div>
           <div class="text-12px text-muted">{{ t('columns.fileCount') }}</div>
@@ -67,6 +67,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { onMounted, ref } from 'vue'
 import { NButton, NCard, NInput, NInputNumber } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -93,7 +94,7 @@ const pinnedUser = ref<UserStorageUsageDto | null>(null)
 
 const usageColumns = buildUsageColumns(t)
 
-// User IDs are GUIDs — reject malformed input client-side so we never fire a
+// User IDs are GUIDs - reject malformed input client-side so we never fire a
 // request the backend would reject (or that would silently return an empty row).
 const GUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 

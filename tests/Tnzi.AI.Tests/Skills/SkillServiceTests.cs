@@ -483,7 +483,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // ActivateAsync — Requirements Validation
+    // ActivateAsync - Requirements Validation
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -517,7 +517,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // CreateAsync — System Skill Conflict
+    // CreateAsync - System Skill Conflict
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -547,7 +547,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // CreateAsync — User Scope Without Auth
+    // CreateAsync - User Scope Without Auth
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -570,7 +570,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // CreateAsync — With Constraints
+    // CreateAsync - With Constraints
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -606,7 +606,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // CreateAsync — no service-layer permission gate (FIX 1 regression proof)
+    // CreateAsync - no service-layer permission gate (FIX 1 regression proof)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -639,7 +639,7 @@ public class SkillServiceTests : IDisposable
     {
         // Regression test for PD-5 admin regression: a deny-all IPermissionChecker (simulating
         // Authorization module loaded without the undeclared permission seeded) must NOT block
-        // the create — the service-layer gate was removed, so the admin endpoint's own
+        // the create - the service-layer gate was removed, so the admin endpoint's own
         // ApiAdminControllerBase authorization is the sole gate.
         var input = new CreateSkillDto
         {
@@ -683,7 +683,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // CreateAsync — TenantId persistence (B1)
+    // CreateAsync - TenantId persistence (B1)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -787,7 +787,7 @@ public class SkillServiceTests : IDisposable
         // T1 already has "shared-slug" as a Tenant-scoped skill.
         // T2 should be allowed to create the same slug because the dup-check is tenant-scoped.
         // This test proves the predicate includes TenantId by compiling and evaluating it
-        // against two in-memory rows — same slug, different tenants.
+        // against two in-memory rows - same slug, different tenants.
         var tenantId1 = Guid.NewGuid();
         var tenantId2 = Guid.NewGuid();
 
@@ -863,7 +863,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // UpdateAsync — Ownership Check
+    // UpdateAsync - Ownership Check
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -890,7 +890,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // UpdateAsync — Constraint Merge
+    // UpdateAsync - Constraint Merge
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -922,7 +922,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // GetUsageStatsAsync — dual-source merged counts
+    // GetUsageStatsAsync - dual-source merged counts
     // -------------------------------------------------------------------------
 
     private void SetupRepositoryQueryable(List<SkillEntity> data)
@@ -1015,7 +1015,7 @@ public class SkillServiceTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // DeleteAsync — Ownership Check
+    // DeleteAsync - Ownership Check
     // -------------------------------------------------------------------------
 
     [Fact]

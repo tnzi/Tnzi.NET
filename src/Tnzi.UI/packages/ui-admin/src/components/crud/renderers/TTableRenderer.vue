@@ -15,6 +15,7 @@
     :selected-keys="checkedRowKeys"
     :serial-start="serialStart"
     :empty-text="emptyText"
+    :card-props="cardPropsFn"
     @toggle="onToggleOne"
   >
     <template v-if="hasRowActions" #actions="{ row }">
@@ -59,6 +60,7 @@
     :checked-row-keys="checkedRowKeys"
     :flex-height="mode === 'page'"
     :scroll-x="scrollX"
+    :row-props="dataTableRowProps"
     remote
     @update:checked-row-keys="onUpdateCheckedRowKeys"
   >
@@ -97,25 +99,33 @@ export interface TTableRendererProps<T, TId extends string | number = string | n
   state: UseCrudPageReturn<T, TId>
   mode?: 'page' | 'container'
   showSelection?: boolean
-  /** Explicit operation-column width. When set it always wins — including
+  /** Explicit operation-column width. When set it always wins - including
       over the declarative `rowActions` auto-estimate. Leave unset (default)
       to let declarative actions auto-size the column; the legacy
       `#rowActions` slot falls back to a fixed 150px when unset. */
   rowActionsWidth?: number
-  /** Declarative operation actions — when supplied the renderer draws
+  /** Declarative operation actions - when supplied the renderer draws
       `TRowActions` itself (table cell + card footer) and the operation column
       auto-sizes to fit (no fixed width). */
   rowActions?: RowAction<T>[]
   /** Max inline action slots before the tail collapses into More▾ (default 2). */
   rowActionsMaxInline?: number
-  /** Disable action collapsing — render every action inline. */
+  /** Disable action collapsing - render every action inline. */
   rowActionsCollapse?: boolean
   /** Optional row-key override (defaults to `state.rowKey`). Mirrors the
       legacy `TCrudPage` `rowKey` prop so the wrapper can pass it through. */
   rowKey?: (row: T) => TId
   /** Disable the mobile card fallback and always render the data table
-      (with horizontal scroll). Defaults to false — mobile gets cards. */
+      (with horizontal scroll). Defaults to false - mobile gets cards. */
   disableMobileCards?: boolean
+  /**
+   * Per-row attributes (naive `row-props`). The common use is making the whole
+   * row open the record: `(row) => ({ style: 'cursor:pointer', onClick: ... })`.
+   * The same function drives the mobile card list, so a drill-in works on a
+   * phone without the page wiring it twice. Row actions and the selection
+   * checkbox stop propagation, so they keep working over a clickable row.
+   */
+  rowProps?: (row: T) => Record<string, unknown>
   translate?: (key: string) => string
 }
 
@@ -144,7 +154,7 @@ const hasDeclarativeActions = computed(() => (props.rowActions?.length ?? 0) > 0
 const hasRowActions = computed(() => hasDeclarativeActions.value || !!slots.rowActions)
 
 /** Legacy fixed width for the `#rowActions` slot when no explicit width is
- *  given — the fixed-right operation column needs a concrete width. */
+ *  given - the fixed-right operation column needs a concrete width. */
 const LEGACY_ROW_ACTIONS_WIDTH = 150
 
 /** Operation column width: an explicit `rowActionsWidth` always wins (even
@@ -201,6 +211,51 @@ const dataTableRowKey = computed(() =>
   castRow<(row: Record<string, unknown>) => string | number>(props.rowKey ?? props.state.rowKey),
 )
 
+/**
+ * `rowProps` reaches both renderers from one declaration: naive's `row-props`
+ * on the table, `card-props` on the mobile card list (which takes an extra
+ * `index` the caller does not need). Left undefined when the page declared
+ * none, so neither renderer pays for an empty attribute function.
+ */
+const dataTableRowProps = computed(() =>
+  props.rowProps ? (row: Record<string, unknown>) => props.rowProps!(row as T) : undefined,
+)
+const cardPropsFn = computed(() =>
+  props.rowProps ? (row: Record<string, unknown>) => props.rowProps!(row as T) : undefined,
+)
+
+/**
+ * Cell attributes that keep a click inside the cell instead of letting it reach
+ * the row.
+ *
+ * When a page declares `rowProps` for a whole-row drill-in, the selection
+ * checkbox and the operation buttons live INSIDE that click target. Without this
+ * stop, ticking a checkbox or pressing "Post" would also navigate away - the
+ * action fires and the page changes under the user, which reads as the button
+ * being broken. Only applied when a row-level handler actually exists, so tables
+ * without a drill-in keep naive's untouched cell behaviour.
+ */
+const stopRowActivation = computed(() =>
+  props.rowProps
+    ? () => ({
+        onClick: (e: MouseEvent) => e.stopPropagation(),
+        // Keyboard activation bubbles the same way (Enter on a focused button).
+        onKeydown: (e: KeyboardEvent) => {
+          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation()
+        },
+      })
+    : undefined,
+)
+
+/** Merge the row-activation guard into a column's own `cellProps`, if any. */
+function guardedCellProps(
+  own?: (row: unknown, rowIndex: number) => Record<string, unknown>,
+): ((row: unknown, rowIndex: number) => Record<string, unknown>) | undefined {
+  const guard = stopRowActivation.value
+  if (!guard) return own
+  return (row, rowIndex) => ({ ...(own?.(row, rowIndex) ?? {}), ...guard() })
+}
+
 const dataTableColumns = computed(() => {
   const base: Record<string, unknown>[] = []
   if (props.showSelection) {
@@ -208,11 +263,11 @@ const dataTableColumns = computed(() => {
       type: 'selection',
       fixed: 'left',
       width: 40,
-      cellProps: (_row: unknown, rowIndex: number) => {
+      cellProps: guardedCellProps((_row: unknown, rowIndex: number) => {
         const q = props.state.query.value
         const serial = (q.pageIndex - 1) * q.pageSize + rowIndex + 1
         return { title: `#${serial}` }
-      },
+      }),
     })
   }
   for (const c of props.state.columnSettings.visibleColumns.value) {
@@ -237,6 +292,9 @@ const dataTableColumns = computed(() => {
       width: actionColumnWidth.value,
       align: 'center',
       fixed: 'right',
+      // The operation cell must swallow its own clicks when the row itself is a
+      // drill-in target; otherwise pressing an action ALSO navigates.
+      cellProps: guardedCellProps(),
       render: (row: unknown) =>
         hasDeclarativeActions.value
           ? renderRowActions(row as T)
@@ -247,7 +305,7 @@ const dataTableColumns = computed(() => {
 })
 
 /** Assumed minimum width (px) for a column that declares neither `width`
- *  nor `minWidth` — used only to estimate {@link scrollX}. */
+ *  nor `minWidth` - used only to estimate {@link scrollX}. */
 const DEFAULT_MIN_COL_WIDTH = 120
 
 /**
@@ -255,9 +313,9 @@ const DEFAULT_MIN_COL_WIDTH = 120
  * `min-width` while keeping the table `width: 100%`, so:
  *  - container ≥ scrollX → columns stretch to fill (no scrollbar, no gap)
  *  - container < scrollX → the table scrolls horizontally instead of crushing
- * We sum each column's MINIMUM acceptable width — its `minWidth` (elastic
+ * We sum each column's MINIMUM acceptable width - its `minWidth` (elastic
  * floor), falling back to a fixed `width`, else a {@link DEFAULT_MIN_COL_WIDTH}
- * floor — so a horizontal scrollbar appears only when the columns genuinely
+ * floor - so a horizontal scrollbar appears only when the columns genuinely
  * can't fit, not on every wide-ish or empty table the way the old fixed-width
  * sum did. The selection + actions columns are `fixed`, which forces naive
  * into scroll mode, so scrollX stays set whenever there is content to size.

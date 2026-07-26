@@ -42,7 +42,7 @@ public class DefaultCorsInitializer : ICorsInitializer
 
         if (string.IsNullOrEmpty(corsOptions.PolicyName))
         {
-            throw new TnziException("The PolicyName of the Tnzi:AspNetCore:Cors node in the configuration file cannot be empty.");
+            throw new TnziException("The PolicyName of the AspNetCore:Cors node in the configuration file cannot be empty.");
         }
 
         services.AddCors(opts => opts.AddPolicy(corsOptions.PolicyName, policy =>

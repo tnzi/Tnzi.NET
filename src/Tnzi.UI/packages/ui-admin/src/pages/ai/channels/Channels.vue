@@ -1,10 +1,10 @@
 <template>
   <!--
-    Channels — surfaces /admin/channels/* and /admin/gateway/* exposed by
+    Channels - surfaces /admin/channels/* and /admin/gateway/* exposed by
     `Tnzi.AI.Channels`. A KPI strip plus three tabs:
-      • Adapters    — registered channel adapters (name + streaming capability)
-      • Connections — IGateway live WebSocket connections (control plane)
-      • Bindings    — ISessionBinder 4-scope session-binding rules
+      • Adapters - registered channel adapters (name + streaming capability)
+      • Connections - IGateway live WebSocket connections (control plane)
+      • Bindings - ISessionBinder 4-scope session-binding rules
 
     The module is an optional sub-module of Tnzi.AI; when it is not loaded the
     bridge surfaces `null`/empty values and the page renders a friendly
@@ -35,14 +35,14 @@
             </NTag>
           </template>
         </TKpiCard>
-        <TKpiCard :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? 0">
+        <TKpiCard :label="t('kpi.gatewayConn')" :value="gatewayStatus?.connectedWebSocketCount ?? null">
           <template #extra>
             <NTag size="small" :type="gatewayStatus?.enabled ? 'success' : 'default'" :bordered="false">
               {{ gatewayStatus?.enabled ? t('status.enabled') : t('status.disabled') }}
             </NTag>
           </template>
         </TKpiCard>
-        <TKpiCard :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? 0" />
+        <TKpiCard :label="t('kpi.activeSessions')" :value="gatewayStatus?.activeSessionCount ?? null" />
         <TKpiCard :label="t('kpi.bindings')" :value="bindings.length" />
       </TKpiRow>
 
@@ -149,6 +149,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import {
   NAlert,
@@ -191,7 +192,7 @@ const adapters = ref<ChannelAdapterDto[]>([])
 const connections = ref<GatewayConnectionInfo[]>([])
 const bindings = ref<SessionBindingRuleDto[]>([])
 
-// Absolute i18n namespace — TStatusBadge's admin wrapper resolves `labelKey`
+// Absolute i18n namespace - TStatusBadge's admin wrapper resolves `labelKey`
 // from the locale root, so mapping keys must be fully qualified.
 const CH_NS = 'admin.modules.ai.channels'
 
@@ -265,8 +266,8 @@ const connectionColumns: DataTableColumns<GatewayConnectionInfo> = [
       h('code', { class: 'tnzi-mono text-11px' }, row.connectionId),
   },
   { title: () => t('cols.clientType'), key: 'clientType', width: 120 },
-  { title: () => t('cols.user'), key: 'userId', width: 220, render: (r) => r.userId ?? '—' },
-  { title: () => t('cols.deviceNode'), key: 'deviceNodeId', width: 180, render: (r) => r.deviceNodeId ?? '—' },
+  { title: () => t('cols.user'), key: 'userId', width: 220, render: (r) => r.userId ?? EMPTY_DASH },
+  { title: () => t('cols.deviceNode'), key: 'deviceNodeId', width: 180, render: (r) => r.deviceNodeId ?? EMPTY_DASH },
   {
     title: () => t('cols.connectedAt'),
     key: 'connectedAt',

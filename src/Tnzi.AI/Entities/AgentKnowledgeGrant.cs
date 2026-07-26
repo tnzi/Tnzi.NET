@@ -3,7 +3,7 @@ namespace Tnzi.AI.Entities;
 /// <summary>
 /// Agent ↔ 知识库授权 junction 实体。把一个 Agent 与一个知识库（按 Id）关联起来，
 /// 取代 <see cref="Agent"/> 原先的 KnowledgeBaseIds JSON 列。FK 仅指向同程序集的 <see cref="Agent"/>。
-/// Agent-to-knowledge-base grant junction — associates an Agent with a knowledge base (by Id),
+/// Agent-to-knowledge-base grant junction - associates an Agent with a knowledge base (by Id),
 /// replacing <see cref="Agent"/>'s former KnowledgeBaseIds JSON column. FK targets the same-assembly
 /// <see cref="Agent"/> only.
 /// </summary>

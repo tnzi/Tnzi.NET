@@ -7,6 +7,12 @@ import 'virtual:uno.css'
 
 export * from './components'
 export * from './headless'
+// North-American accounting presentation conventions as pure functions
+// (parenthesised negatives, tabular figures, unambiguous dates). Public so
+// consumer report builders, CSV writers and chart labels produce the same
+// strings as the built-in finance pages.
+export * from './utils/placeholders'
+export * from './utils/finance-format'
 export * from './pages'
 export * from './stores'
 // Real route table + auth/permission guards. (Replaced the legacy
@@ -21,7 +27,7 @@ export * from './presets'
 // business tiles), and the default deck preset.
 export * from './widgets'
 
-// Bridge plumbing — envelope helpers (`ensureOk` / `unwrapResult`, re-exported
+// Bridge plumbing - envelope helpers (`ensureOk` / `unwrapResult`, re-exported
 // from @tnzi/core) + the CRUD query/result adapters, surfaced at the package
 // root so consumer bridges import the whole set from `@tnzi/ui-admin` instead
 // of copying `services/_mappers` (which is otherwise not on the public surface).
@@ -35,7 +41,7 @@ export {
   pageArray,
 } from './services/_mappers'
 export type { BridgeCrudContract } from './services/types'
-// CRUD bridge factories — declare an endpoint base instead of hand-writing the
+// CRUD bridge factories - declare an endpoint base instead of hand-writing the
 // per-resource unwrap/ensureOk plumbing (see services/defineCrudBridge.ts).
 export { defineCrudBridge, defineChildBridge } from './services/defineCrudBridge'
 export type { CrudBridge, CrudBridgeOptions, ChildBridge } from './services/defineCrudBridge'

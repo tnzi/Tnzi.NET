@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetLineChart` — reusable line chart widget.
+ * `TWidgetLineChart` - reusable line chart widget.
  *
  * Wraps `useEcharts` so consumers can drop a small line/area chart into
  * any Workbench cell with just data. Reactively re-renders on prop
@@ -24,7 +24,7 @@ interface Props {
   area?: boolean
   /** Smooth (spline) lines. Default `true`. */
   smooth?: boolean
-  /** Line colours — cycles through per series. Defaults to the echarts theme palette. */
+  /** Line colours - cycles through per series. Defaults to the echarts theme palette. */
   palette?: string[]
 }
 

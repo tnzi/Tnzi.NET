@@ -2,6 +2,8 @@ export { default as TChunkFileUpload } from './TChunkFileUpload.vue'
 export { default as TDataCardList } from './TDataCardList.vue'
 export { default as TResponsiveTable } from './TResponsiveTable.vue'
 export { default as TEntityCard } from './TEntityCard.vue'
+export { default as TItemCard } from './TItemCard.vue'
+export type { ItemCardTag, ItemCardMeta, ItemCardTone } from './TItemCard.vue'
 export { default as TKpiCard } from './TKpiCard.vue'
 /** @deprecated renamed to TKpiCard (avoids the @tnzi/ui globally-registered <TStatCard> collision). */
 export { default as TStatCard } from './TKpiCard.vue'

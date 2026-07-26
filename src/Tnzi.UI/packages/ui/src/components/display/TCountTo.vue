@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 /**
- * Animated number counter — rolls from `startValue` to `endValue` over
+ * Animated number counter - rolls from `startValue` to `endValue` over
  * `duration` ms with a customizable easing curve. Used by dashboards
  * (KPI cards), counters in landing pages, and any place a big number
  * deserves a moment of attention.

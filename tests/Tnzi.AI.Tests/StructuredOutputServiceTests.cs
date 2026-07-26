@@ -196,7 +196,7 @@ public class StructuredOutputServiceTests
             .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, """{"name":"Frank","age":35}""")));
 
         var service = CreateService();
-        // Explicitly disable strict mode — service should use ChatResponseFormat.Json
+        // Explicitly disable strict mode - service should use ChatResponseFormat.Json
         var options = new StructuredOutputOptions { StrictMode = false };
         await service.GetStructuredOutputAsync<PersonDto>("Return JSON", options);
 

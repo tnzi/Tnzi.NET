@@ -31,13 +31,13 @@ export interface RowAction<T = Record<string, unknown>> {
   /** Button text. Plain string, an i18n key, or a per-row function. Omit for
    *  the built-in `edit`/`view`/`delete` keys to get the framework labels. */
   label?: string | ((row: T) => string)
-  /** Naive button type — `error` for destructive, `primary` for the main action. */
+  /** Naive button type - `error` for destructive, `primary` for the main action. */
   type?: RowActionType
   /** Optional leading iconify icon. */
   icon?: string
   /** Click handler. The built-in factories wire this to the CRUD state. */
   onClick?: (row: T) => void | Promise<void>
-  /** Conditional visibility — when it returns false the action is dropped for
+  /** Conditional visibility - when it returns false the action is dropped for
    *  that row (replaces the `isEnabled ? {enable} : {disable}` idiom). */
   show?: (row: T) => boolean
   /** Per-row disabled state. */
@@ -110,7 +110,7 @@ export function deleteAction<T, TId extends string | number = string | number>(
 export interface RowActionsLayout {
   /** Max inline slots before the tail collapses into More▾ (default 2). */
   maxInline?: number
-  /** Disable collapsing — render every action inline (default false). */
+  /** Disable collapsing - render every action inline (default false). */
   collapse?: boolean
 }
 

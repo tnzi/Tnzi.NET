@@ -7,7 +7,7 @@ using Tnzi.AspNetCore.Models;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultChatController 单元测试 — 覆盖 UserId 强制覆盖、参数传递、Result → ApiResult 转换
+/// DefaultChatController 单元测试 - 覆盖 UserId 强制覆盖、参数传递、Result → ApiResult 转换
 /// </summary>
 public class DefaultChatControllerTests
 {

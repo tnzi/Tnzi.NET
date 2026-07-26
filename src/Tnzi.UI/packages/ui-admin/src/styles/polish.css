@@ -1,17 +1,17 @@
 /**
- * Global polish — scrollbars, focus rings, selection colors, and the
+ * Global polish - scrollbars, focus rings, selection colors, and the
  * little touches that make an admin app feel handcrafted.
  *
  * Applied app-wide via `styles/index.css`.
  */
 
-/* ===== Custom scrollbars — reserved-gutter overlay style =====
+/* ===== Custom scrollbars - reserved-gutter overlay style =====
  *
  * Design goals (user-stated):
  *   1. Showing the scrollbar must NOT push content sideways.
  *   2. The scrollbar must NOT cover (occlude) content.
  *
- * Strategy — permanently reserve an 5px gutter on every scrollable
+ * Strategy - permanently reserve an 5px gutter on every scrollable
  * element, with a transparent thumb that fades in on hover. Because
  * the gutter is always present, the scrollbar appearing/disappearing
  * never triggers a layout shift; because the thumb lives inside the
@@ -19,7 +19,7 @@
  *
  * Why not `width: 0 → 5px on hover` (the macOS-overlay illusion)?
  *   That toggling causes WebKit to re-layout the scrollable element
- *   by exactly 5px every time the cursor enters or leaves — the
+ *   by exactly 5px every time the cursor enters or leaves - the
  *   "jumping content" the user reported.
  *
  * Why not `scrollbar-gutter: stable` alone?
@@ -57,8 +57,8 @@ body *::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* Hover the scrollable element (or any of its descendants — cursor is
-   usually over the content, not the empty gutter) — fade the thumb in.
+/* Hover the scrollable element (or any of its descendants - cursor is
+   usually over the content, not the empty gutter) - fade the thumb in.
    Firefox `scrollbar-color` follows the same hover trigger. */
 body *:hover {
   scrollbar-color: rgb(var(--tnzi-border-rgb, 230 230 240) / 0.45) transparent;
@@ -68,13 +68,13 @@ body *:hover::-webkit-scrollbar-thumb {
   background: rgb(var(--tnzi-border-rgb, 230 230 240) / 0.45);
 }
 
-/* Direct hover on the thumb — slight primary tint so the user can
+/* Direct hover on the thumb - slight primary tint so the user can
    confirm grab affordance. */
 body *::-webkit-scrollbar-thumb:hover {
   background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.55) !important;
 }
 
-/* Active drag — slightly darker tint for grab feedback. */
+/* Active drag - slightly darker tint for grab feedback. */
 body *::-webkit-scrollbar-thumb:active {
   background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.7) !important;
 }
@@ -84,7 +84,7 @@ body *::-webkit-scrollbar-thumb:active {
  * documentation views, etc.) under the new TAdminContent which itself
  * does NOT scroll. Wrap the page body in `<div class="t-page-scroll">…`
  * to get a flex-filling vertical scroll surface. CRUD-style pages
- * (TCrudPage) don't need this — they manage their own internal scroll
+ * (TCrudPage) don't need this - they manage their own internal scroll
  * via NDataTable's `flex-height`. */
 .t-page-scroll {
   flex: 1 1 auto;
@@ -109,12 +109,12 @@ body *::-webkit-scrollbar-thumb:active {
  * internal grid/flex layouts (Organizations) stretch their
  * inner regions to the card height without each page repeating the
  * Naive-UI specific selector. Pages that just render a NForm /
- * NDataTable inside the card still benefit — the card background
+ * NDataTable inside the card still benefit - the card background
  * fills to the footer, and the inner content stays top-aligned by
  * the normal flex-column flow.
  *
  * Note: Naive UI's NCard uses hyphenated `.n-card-content` (not BEM
- * `__content`) for the body slot — easy to get wrong. */
+ * `__content`) for the body slot - easy to get wrong. */
 .t-page-scroll > .n-card:only-child {
   min-height: 100%;
   display: flex;
@@ -129,7 +129,7 @@ body *::-webkit-scrollbar-thumb:active {
 
 /* ── Stacked page root (fills TAdminContent height) ──
  * Apply to a page's root `<div>` to get the same vertical-flex shell that
- * TCrudPage uses internally — a height-100% flex column that lets the
+ * TCrudPage uses internally - a height-100% flex column that lets the
  * table-card grow to claim the residual height. Use together with
  * `.t-table-card` on the NCard that contains the primary NDataTable.
  *
@@ -162,7 +162,7 @@ body *::-webkit-scrollbar-thumb:active {
  * the built-in pagination footer stays anchored at the card's bottom.
  *
  * Naive UI's content slot class is `.n-card-content` (dash, NOT BEM
- * `.n-card__content`) — easy to typo. */
+ * `.n-card__content`) - easy to typo. */
 .t-table-card {
   flex: 1 1 auto;
   min-height: 0;
@@ -183,14 +183,14 @@ body *::-webkit-scrollbar-thumb:active {
 /* ── Constrained content column (detail / form max-width) ──
  * Wrap a detail page's form or long-form content in this so inputs stop
  * stretching edge-to-edge on ultrawide displays. Data tables, which DO
- * want the full width, simply stay unwrapped — that's the "fill" escape
+ * want the full width, simply stay unwrapped - that's the "fill" escape
  * hatch. Mirrors BotDetail's `.body { max-width: 920px }` pattern.
  *
  * The cap is a CSS var, so a page or theme can widen / narrow / disable it
  * without forking the class. Set it on any ancestor (or via TDetailLayout's
  * `content-max-width` prop, which writes it onto the layout root):
  *   --tnzi-detail-content-max: 1100px;   (widen)
- *   --tnzi-detail-content-max: none;     (full-bleed — let the form fill too)
+ *   --tnzi-detail-content-max: none;     (full-bleed - let the form fill too)
  *
  * Stays left-aligned and keeps the scrollbar at the panel edge (the wrapper
  * is capped, the scroll container around it is not). To centre instead, add
@@ -234,7 +234,10 @@ body *::-webkit-scrollbar-thumb:active {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--tnzi-container-bg);
+  /* The tab container is a content card - follow the theme drawer's
+     "Card / List" background (`--tnzi-admin-card-bg`); base container color
+     when unset. */
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   padding: 0 12px 12px;
@@ -281,7 +284,7 @@ body *::-webkit-scrollbar-thumb:active {
 }
 /* Card-in-a-card flattening. When a full list-shell page (TCrudPage table /
    TCardPage cards) is embedded as a tab's content, its own white list-card
-   would double the tab container's surface — a second card + a second 12px
+   would double the tab container's surface - a second card + a second 12px
    inset + a stray shadow, pushing the content out of line with the tab bar.
    Drop the inner card's shadow and its content padding so the table OR the
    card grid sits flush inside the pane. Tables and cards are treated alike, so
@@ -298,7 +301,7 @@ body *::-webkit-scrollbar-thumb:active {
    in a border-less NCard purely for its title + header-extra action. But the
    tab container already IS the white surface, so that NCard's 16px horizontal
    inset just pushes the block out of line with the flush KPI rows / tables /
-   forms beside it — the "double inset" a card-in-a-card creates. Drop only the
+   forms beside it - the "double inset" a card-in-a-card creates. Drop only the
    horizontal padding; the title's own top/bottom rhythm is kept. Opt-in so it
    never touches TKpiCard (`.t-stat-card`), TEntityCard, list-shell cards, or
    any deliberately padded/shadowed dashboard tile. */
@@ -310,6 +313,212 @@ body *::-webkit-scrollbar-thumb:active {
 .t-table-tabs__pane .t-tab-card > .n-card__footer {
   padding-left: 0;
   padding-right: 0;
+}
+
+/* ── Adaptive foreground for the content-area container surfaces ──
+ *
+ * The chrome surfaces (sider / header / tab / footer) receive their tone as a
+ * PROP from the shell and flip foreground via component `--inverted` /
+ * `--surface-light` variants. The page-header bar and the content cards are
+ * rendered by the pages themselves, so the theme store instead publishes their
+ * tone as a root data-attribute (`data-tnzi-ph-tone` / `data-tnzi-card-tone`)
+ * that these global rules key off to remap the local text tokens: a dark
+ * container gets light text, a light container (under dark mode) gets dark
+ * text. A custom `--tnzi-admin-{page-header,card}-fg` always wins. Naive
+ * NCard / NDataTable text is flipped in tandem by the shell's `naiveOverrides`
+ * (which reads the same tone). */
+:root[data-tnzi-ph-tone='dark'] .t-admin-content .t-page-header--surface {
+  --tnzi-base-text: var(--tnzi-admin-page-header-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  color: var(--tnzi-base-text);
+}
+:root[data-tnzi-ph-tone='light'] .t-admin-content .t-page-header--surface {
+  --tnzi-base-text: var(--tnzi-admin-page-header-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  color: var(--tnzi-base-text);
+}
+/* Every CONTENT card flips its scoped-CSS foreground with the card tone. A
+   custom card color repaints the card background (naive `Card.color` for
+   NCards, `--tnzi-admin-card-bg` for the scoped-CSS card divs), but scoped CSS
+   inside a card reads the @tnzi/ui `--tnzi-base-text*` / `--tnzi-border` tokens,
+   which stay at their LIGHT :root values - so on a DARK card the card's own
+   headings / labels / KPI numbers / dividers would be dark-on-dark (naive text
+   auto-flips, custom scoped text does not). Remap those tokens for every content
+   card so they flip in step with the background. Covers naive NCards
+   (TKpiCard / TDashboardPage / list / detail / card-grid cards) via `.n-card`
+   plus the hand-rolled card divs. The list-page header card is EXCLUDED - it
+   follows the page-header tone, not the card tone. */
+:root[data-tnzi-card-tone='dark'] .t-admin-content .n-card:not(.t-list-shell__header-card),
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-content-page__card,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-table-tabs,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-detail-layout__panel,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-detail-layout__nav,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-data-cards__card,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-run-monitor__list,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-log-viewer-page__sidebar,
+:root[data-tnzi-card-tone='dark'] .t-admin-content .t-log-viewer-page__toolbar {
+  --tnzi-base-text: var(--tnzi-admin-card-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  --tnzi-border: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  color: var(--tnzi-base-text);
+}
+:root[data-tnzi-card-tone='light'] .t-admin-content .n-card:not(.t-list-shell__header-card),
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-content-page__card,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-table-tabs,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-detail-layout__panel,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-detail-layout__nav,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-data-cards__card,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-run-monitor__list,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-log-viewer-page__sidebar,
+:root[data-tnzi-card-tone='light'] .t-admin-content .t-log-viewer-page__toolbar {
+  --tnzi-base-text: var(--tnzi-admin-card-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  --tnzi-border: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+  color: var(--tnzi-base-text);
+}
+/* @tnzi/ui's TWidgetCard self-paints `--tnzi-container-bg` on its NCard root
+   (scoped specificity beats naive's Card.color), so the dashboard widgets would
+   stay fixed when a custom card color is set. Re-point them to the "Card / List"
+   surface here - kept in the admin layer so @tnzi/ui stays unaware of the admin
+   token. (`:root` prefix lifts specificity above the ui-package scoped rule.) */
+:root .t-admin-content .t-widget-card {
+  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
+}
+
+/* The list-page header (TListShell) is a naive NCard wrapping a plain
+   TPageHeader, so the blanket `Card.color` override (which paints the content
+   cards for the "Card / List" surface) would swallow it. But it is the page's
+   HEADER band - re-point it to the "Page header" surface by overriding naive's
+   own `--n-color` on the card element (`!important` so it wins over the
+   generated Card theme regardless of selector order). Its search-card sibling
+   stays with the content cards. Content pages already own their header via
+   `.t-page-header--surface`. */
+.t-list-shell__header-card.n-card {
+  --n-color: var(--tnzi-admin-page-header-bg, var(--tnzi-container-bg)) !important;
+  background-color: var(--n-color);
+}
+:root[data-tnzi-ph-tone='dark'] .t-admin-content .t-list-shell__header-card {
+  --tnzi-base-text: var(--tnzi-admin-page-header-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  color: var(--tnzi-base-text);
+}
+:root[data-tnzi-ph-tone='light'] .t-admin-content .t-list-shell__header-card {
+  --tnzi-base-text: var(--tnzi-admin-page-header-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  color: var(--tnzi-base-text);
+}
+
+/* ── Active menu item on CUSTOM dark chrome ──
+ *
+ * naive keeps the ACTIVE menu item's text in the primary color. On the
+ * built-in inverted sider that's fine (the stock navy was picked to contrast
+ * the default accents), but a CUSTOM dark sider/header can share the accent's
+ * hue family (deep green chrome + green accent, aubergine chrome + aubergine
+ * accent - measured as low as 1.4:1) and the active label melts into the
+ * background. When the chrome color is a custom override (tone attr present),
+ * pin the active text/icon to a guaranteed-readable near-white - the
+ * hue-tinted active pill still carries the accent, and resting text keeps
+ * following `--tnzi-admin-sider-fg`. Covers the vertical sider, the
+ * vertical-mix sub-sider and the hybrid sider (all render TAdminSidebar or
+ * the sub-sider wrapper); both plain and `-inverted`/`-horizontal` token
+ * spellings are set because naive picks per menu mode. */
+:root[data-tnzi-sider-tone='dark'] .t-admin-sidebar--inverted .n-menu,
+:root[data-tnzi-sider-tone='dark'] .t-admin-shell__sub-sider--inverted .n-menu {
+  --n-item-text-color-active: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-active-hover: #ffffff;
+  --n-item-text-color-active-hover-inverted: #ffffff;
+  --n-item-icon-color-active: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-active-hover: #ffffff;
+  --n-item-icon-color-active-hover-inverted: #ffffff;
+  --n-item-text-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-child-active-hover: #ffffff;
+  --n-item-text-color-child-active-hover-inverted: #ffffff;
+  --n-item-icon-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-arrow-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-arrow-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+}
+/* Top-menu submenu popovers (teleported NDropdowns tagged by TAdminTopMenu)
+   follow the HEADER surface color whenever the header carries a custom
+   background (tone attr present) - a stock naive popover floating under an
+   aubergine/espresso/cream header reads as a foreign element. Text color is
+   handled by the menu's theme provider (dark header → dark theme); the
+   active option is pinned readable below for same-hue accents. */
+:root[data-tnzi-header-tone] .t-admin-top-menu__dropdown.n-dropdown-menu {
+  /* --n-color drives both the popover body AND its arrow, so the dropdown
+     (incl. the arrow TAdminTopMenu enables) matches the header seamlessly. */
+  --n-color: var(--tnzi-admin-header-bg) !important;
+  background-color: var(--tnzi-admin-header-bg);
+}
+/* A dropdown painted the same color as the header needs DEPTH to separate
+   from it (a taller header even overlaps the popover top): a hairline light
+   ring + a stronger floating shadow keep the popover and its arrow readable
+   against same-color chrome without shifting them away from the menu item. */
+:root[data-tnzi-header-tone='dark'] .t-admin-top-menu__dropdown.n-dropdown-menu {
+  --n-option-text-color-active: rgba(255, 255, 255, 0.95);
+  --n-option-text-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-option-color-active: rgb(255 255 255 / 0.12);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 10px 28px rgba(0, 0, 0, 0.45);
+}
+:root[data-tnzi-header-tone='dark'] .t-admin-top-menu__dropdown .n-popover-arrow {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* Same guarantee for the header-hosted top menu (horizontal / hybrid layouts)
+   on a custom dark header - the unified-chrome looks put the menu there. Hover
+   is included: TAdminTopMenu points hover text at the primary color, which
+   melts into same-hue chrome exactly like the active state. */
+:root[data-tnzi-header-tone='dark'] .t-admin-header .n-menu {
+  /* The active pill (TAdminTopMenu paints it by class) mirrors the inverted
+     sidebar's tint on a custom dark header. */
+  --tnzi-admin-menu-item-active-bg: var(--tnzi-admin-inverted-active-bg, rgb(var(--tnzi-primary-rgb) / 0.18));
+  --n-item-text-color-hover: #ffffff;
+  --n-item-text-color-hover-horizontal: #ffffff;
+  --n-item-text-color-hover-inverted: #ffffff;
+  --n-item-text-color-active: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-active-horizontal: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-active-hover: #ffffff;
+  --n-item-text-color-active-hover-horizontal: #ffffff;
+  --n-item-text-color-active-hover-inverted: #ffffff;
+  --n-item-icon-color-active: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-active-horizontal: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-active-hover: #ffffff;
+  --n-item-icon-color-active-hover-horizontal: #ffffff;
+  --n-item-icon-color-active-hover-inverted: #ffffff;
+  --n-item-text-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-child-active-horizontal: rgba(255, 255, 255, 0.95);
+  --n-item-text-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-child-active-horizontal: rgba(255, 255, 255, 0.95);
+  --n-item-icon-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+  --n-arrow-color-child-active: rgba(255, 255, 255, 0.95);
+  --n-arrow-color-child-active-horizontal: rgba(255, 255, 255, 0.95);
+  --n-arrow-color-child-active-inverted: rgba(255, 255, 255, 0.95);
+}
+
+/* ── Overlays are chrome, not content surfaces ──
+ *
+ * TModalShell / TDrawerShell reset their naive theme to the global mode (see
+ * useOverlayTheme) so an overlay opened from a dark-card page doesn't inherit
+ * the content area's inner dark theme through the Teleport. Mirror that on the
+ * CSS-token layer: `--tnzi-admin-{card,page-header}-bg` live on :root, so a
+ * self-painting card div rendered inside a drawer (e.g. TDetailSection's bar)
+ * would still pick up the content card color. Clear the tokens inside overlays
+ * so those divs fall back to the neutral container color, matching the reset
+ * naive theme. The tone-flip rules above are `.t-admin-content`-scoped and so
+ * never reach here. */
+.n-modal,
+.n-drawer,
+.n-popover {
+  --tnzi-admin-card-bg: initial;
+  --tnzi-admin-page-header-bg: initial;
 }
 
 /* ── Reading-width caps for form-centric pages ──
@@ -346,11 +555,11 @@ body *::-webkit-scrollbar-thumb:active {
   margin-right: auto;
 }
 
-/* ── Navigation menus — fully hidden scrollbar (no gutter) ──
+/* ── Navigation menus - fully hidden scrollbar (no gutter) ──
  * The sidebar / mix rail / vertical-mix sub-sider all carry their own
  * brand identity; an even-5px gutter cuts into the icon column on
  * narrow rail widths and looks like a glitch. Hide the scrollbar
- * entirely — keyboard / wheel scrolling still works.
+ * entirely - keyboard / wheel scrolling still works.
  * Selector specificity (1 class + 1 pseudo = 0,1,1) outranks the
  * global `body *::-webkit-scrollbar` (0,0,2) so this wins without
  * !important. */
@@ -366,7 +575,7 @@ body *::-webkit-scrollbar-thumb:active {
   height: 0;
 }
 
-/* ===== Focus ring — accessibility + visual hint ===== */
+/* ===== Focus ring - accessibility + visual hint ===== */
 /* Only show focus-ring for keyboard nav (`:focus-visible` not `:focus`)
    to avoid distracting click users. */
 .t-admin-shell *:focus-visible {
@@ -400,7 +609,7 @@ body *::-webkit-scrollbar-thumb:active {
  * most touch-screen laptops. Apple's HIG and Google's Material Design
  * both recommend at minimum 44×44 / 48×48 touch targets. Our default
  * 36×36 icon buttons read fine with a mouse but are uncomfortably
- * small with a thumb — bump them on coarse pointers only so desktop
+ * small with a thumb - bump them on coarse pointers only so desktop
  * density doesn't suffer.
  *
  * Components opt in by using `.t-admin-header__icon-btn`,
@@ -415,7 +624,7 @@ body *::-webkit-scrollbar-thumb:active {
      opted into the shared icon-btn class → below the 44px minimum. */
   .t-header-bell__trigger,
   .t-chat-launcher,
-  /* Modal / drawer close (X) — the primary (often only) dismiss affordance on a
+  /* Modal / drawer close (X) - the primary (often only) dismiss affordance on a
      phone once maskClosable is off. naive renders it ~20-28px. */
   .n-base-close {
     min-width: 44px;
@@ -449,18 +658,18 @@ body *::-webkit-scrollbar-thumb:active {
  * Tailwind / UnoCSS preflight emits
  *   `button, [type="submit"], … { background-color: transparent }`
  * with selector specificity (0,1,0). Naive UI's `.n-button { background-color:
- * var(--n-color) }` is also (0,1,0) — they tie, so cascade order decides, and
+ * var(--n-color) }` is also (0,1,0) - they tie, so cascade order decides, and
  * preflight wins when the reset is imported after naive-ui's CSS-in-JS injects
  * its rules (or when naive-ui's rules use `:where()` to keep specificity at 0).
  *
  * Result: primary/info/success/warning/error buttons render as transparent
- * outlines with white text on white surfaces — basically invisible.
+ * outlines with white text on white surfaces - basically invisible.
  *
  * Fix: double the class selector to raise specificity to (0,2,0) and restore
  * the var-driven background / border / hover / pressed colors. Applies app-
  * wide so login/dialog/popover buttons recover too, not just admin-shell ones.
  */
-/* ONLY restore background — naive-ui draws the button outline via a
+/* ONLY restore background - naive-ui draws the button outline via a
    `.n-button__border` pseudo element, NOT on the button itself.
    Reapplying `border: var(--n-border)` here was producing a double
    border (1px from the pseudo + 1px from this rule) and the button
@@ -488,7 +697,7 @@ body *::-webkit-scrollbar-thumb:active {
  *   `<i class="n-base-icon"><svg viewBox="0 0 20 20">…`
  * Naive sizes the icon box to 1em (28px) and the SVG to `width/height: 1em`.
  * But the global svg reset leaves `min-width: 0` on the SVG, so its *used*
- * width collapses to the glyph's min-content (~12px) — the icons end up the
+ * width collapses to the glyph's min-content (~12px) - the icons end up the
  * right height but visibly thin/squished. Restoring `min-width: 1em` pins the
  * SVG back to its intended square 28×28 box. Scoped to the preview toolbar so
  * no other naive icon is affected. */
@@ -504,9 +713,42 @@ body *::-webkit-scrollbar-thumb:active {
   padding: 0 16px;
 }
 
-/* Darker preview backdrop — naive's default 30% black is too light, so a small
+/* Darker preview backdrop - naive's default 30% black is too light, so a small
    image floats ambiguously over the page (no clear front/back separation). A
    stronger scrim makes any preview, large or small, read as a distinct layer. */
 .n-image-preview-overlay {
   background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* Drill-in link rendered inside a data-table cell (customer / vendor name).
+   A real <button> so it is keyboard-reachable; styled as a link because that
+   is what it behaves like. */
+.fin-party-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px dashed transparent;
+}
+
+.fin-party-link:hover,
+.fin-party-link:focus-visible {
+  color: var(--tnzi-primary);
+  border-bottom-color: currentColor;
+}
+
+.fin-party-link:focus-visible {
+  outline: 2px solid var(--tnzi-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A lapsed validity / expected date on a live estimate or purchase order -
+   the one thing in that row that needs chasing today. */
+.fin-offer-lapsed {
+  color: var(--tnzi-error);
+  font-weight: 600;
 }

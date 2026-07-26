@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Channels.Abstractions;
 
 /// <summary>
-/// 平台适配器接口 — 每个 IM 平台一个实现
+/// 平台适配器接口 - 每个 IM 平台一个实现
 /// </summary>
 public interface IChannelAdapter : IAsyncDisposable
 {

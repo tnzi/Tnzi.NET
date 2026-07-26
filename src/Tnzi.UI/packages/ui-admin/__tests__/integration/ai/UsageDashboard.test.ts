@@ -3,12 +3,12 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Phase 5 Task 5.9 — UsageDashboard analytics page test.
+ * Phase 5 Task 5.9 - UsageDashboard analytics page test.
  *
  * Lessons applied:
  *   - 1: setActivePinia in beforeEach (translatePageKey reads admin app store)
  *   - 12: bridge mocked at the boundary, NOT @tnzi/core directly
- *   - 17: partial-failure tolerance — Promise.allSettled fan-out, surface
+ *   - 17: partial-failure tolerance - Promise.allSettled fan-out, surface
  *         per-source error banner without losing the successful cards
  */
 const summaryMock = vi.fn(async () => ({
@@ -312,13 +312,13 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     // NTabs renders every pane into the DOM (display toggle, not v-if), so the
     // tab bodies are present without a click.
     const text = wrapper.text()
-    // Cost tab — total + per-provider rows.
+    // Cost tab - total + per-provider rows.
     expect(wrapper.find('[data-test="cost-tab"]').exists()).toBe(true)
     expect(text).toContain('anthropic')
-    // Feedback tab — agent feedback rows keyed by agent id.
+    // Feedback tab - agent feedback rows keyed by agent id.
     expect(wrapper.find('[data-feedback-agent="a1"]').exists()).toBe(true)
     expect(text).toContain('helpful')
-    // Logs tab — usage-log detail row.
+    // Logs tab - usage-log detail row.
     expect(wrapper.find('[data-test="logs-tab"]').exists()).toBe(true)
     expect(text).toContain('chat')
   })

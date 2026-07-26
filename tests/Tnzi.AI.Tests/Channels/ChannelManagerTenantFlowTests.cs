@@ -13,7 +13,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Channels;
 
 /// <summary>
-/// P0 入站租户填充链端到端门禁 — 从 <see cref="ChannelManager"/> 的真实入站处理入口
+/// P0 入站租户填充链端到端门禁 - 从 <see cref="ChannelManager"/> 的真实入站处理入口
 /// （bus → ProcessMessageAsync → Gateway → SessionBinder）喂一条 <see cref="InboundMessage"/>，
 /// 证明渠道 adapter options 配置的 TenantId 沿
 /// <c>IChannelAdapter.TenantId → GatewayRequest.TenantId → SessionBindingContext.TenantId</c>
@@ -64,7 +64,7 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
     }
 
     // =====================================================================
-    // 核心门禁 — 渠道归属租户 A 的入站消息命中租户 A 的规则，绝不命中租户 B
+    // 核心门禁 - 渠道归属租户 A 的入站消息命中租户 A 的规则，绝不命中租户 B
     // =====================================================================
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
     }
 
     // =====================================================================
-    // 装配 — 真实 ChannelManager + 真实 Bus + 真实 DefaultGateway + 真实 DefaultSessionBinder
+    // 装配 - 真实 ChannelManager + 真实 Bus + 真实 DefaultGateway + 真实 DefaultSessionBinder
     //（DB 规则经真实仓储/过滤器管理器加载），仅 Runtime/ThreadStore/ThreadService 为测试替身
     // =====================================================================
 
@@ -247,7 +247,7 @@ public sealed class ChannelManagerTenantFlowTests : IDisposable
     // 测试替身
     // =====================================================================
 
-    /// <summary>模拟"配置了归属租户"的渠道适配器 — TenantId 唯一来源是 adapter（即 options）本身。</summary>
+    /// <summary>模拟"配置了归属租户"的渠道适配器 - TenantId 唯一来源是 adapter（即 options）本身。</summary>
     private sealed class FakeChannelAdapter : IChannelAdapter
     {
         public FakeChannelAdapter(string name, Guid? tenantId)

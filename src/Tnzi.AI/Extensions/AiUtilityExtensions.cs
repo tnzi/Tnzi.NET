@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Extensions;
 
 /// <summary>
-/// IAiUtility 扩展方法 — 提供常用 AI 任务的便捷封装
+/// IAiUtility 扩展方法 - 提供常用 AI 任务的便捷封装
 /// </summary>
 public static class AiUtilityExtensions
 {

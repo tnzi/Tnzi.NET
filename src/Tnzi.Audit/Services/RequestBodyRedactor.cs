@@ -3,7 +3,7 @@ namespace Tnzi.Audit.Services;
 
 /// <summary>
 /// Redacts sensitive fields from JSON request body content.
-/// Thread-safe and stateless — safe for singleton registration.
+/// Thread-safe and stateless - safe for singleton registration.
 /// </summary>
 public class RequestBodyRedactor
 {

@@ -1,10 +1,11 @@
 /**
- * Parameter config — same backend as Dictionary (`/admin/settings`, SettingDto).
+ * Parameter config - same backend as Dictionary (`/admin/settings`, SettingDto).
  * The UI surface is the typed-parameter view: every row carries a `valueType`
  * (SettingValueType, serialized by the backend's global JsonStringEnumConverter
  * as its member name "String" | "Integer" | "Boolean" | "Json") and the value
  * editor switches its input shape on it.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -21,7 +22,7 @@ interface ParameterRow {
 
 function valueTypeLabel(v?: string): string {
   // Wire value is the enum member name; only "Json" gets a nicer display cap.
-  return v === 'Json' ? 'JSON' : (v ?? '—')
+  return v === 'Json' ? 'JSON' : (v ?? EMPTY_DASH)
 }
 
 export const parameterColumns: ColumnDef<ParameterRow>[] = [
@@ -57,7 +58,7 @@ function valueEditorType(model: Record<string, unknown>): 'text' | 'number' | 's
 export const parameterFormSchema: FormSchemaItem[] = [
   // The setting key is immutable once created (UpdateSettingDto has no Key), so
   // typeFn swaps it to the locked renderer (registered in Parameters.vue) when
-  // the model already has an id — new rows keep the editable text input.
+  // the model already has an id - new rows keep the editable text input.
   {
     key: 'key',
     labelKey: 'form.key', label: 'Key',

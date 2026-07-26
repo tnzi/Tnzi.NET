@@ -206,11 +206,11 @@ public sealed partial class RestrictiveSqlValidator : ISqlValidator
     /// <list type="bullet">
     ///   <item>Block comments <c>/* ... */</c></item>
     ///   <item>Line comments <c>-- ...</c> (ANSI) and <c>#...</c> (MySQL)</item>
-    ///   <item>Single-quoted string literals — both <c>''</c> doubled-quote escape (ANSI/PG/SQL Server)
+    ///   <item>Single-quoted string literals - both <c>''</c> doubled-quote escape (ANSI/PG/SQL Server)
     ///         and backslash escapes (<c>\'</c>, <c>\\</c>) used by MySQL in default mode.</item>
     /// </list>
     /// Single quotes themselves are preserved so token boundaries survive.
-    /// <para>Known limitations (documented for the tokenizer fallback path only — gated behind
+    /// <para>Known limitations (documented for the tokenizer fallback path only - gated behind
     /// <see cref="SqlToolOptions.AllowNonTSqlDialects"/>=true): PostgreSQL dollar-quoted strings
     /// (<c>$tag$...$tag$</c>) are NOT stripped; do not rely on the tokenizer if your AI surface
     /// can produce them.</para>
@@ -232,7 +232,7 @@ public sealed partial class RestrictiveSqlValidator : ISqlValidator
                 continue;
             }
 
-            // ANSI -- and MySQL # line comments — both run to end-of-line.
+            // ANSI -- and MySQL # line comments - both run to end-of-line.
             if ((ch == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
                 || ch == '#')
             {
@@ -248,7 +248,7 @@ public sealed partial class RestrictiveSqlValidator : ISqlValidator
                 i++;
                 while (i < sql.Length)
                 {
-                    // MySQL backslash escape — skip the following char without treating it as a delimiter.
+                    // MySQL backslash escape - skip the following char without treating it as a delimiter.
                     if (sql[i] == '\\' && i + 1 < sql.Length)
                     {
                         i += 2;
@@ -256,7 +256,7 @@ public sealed partial class RestrictiveSqlValidator : ISqlValidator
                     }
                     if (sql[i] == '\'')
                     {
-                        // ANSI doubled-quote escape — two single quotes inside a literal.
+                        // ANSI doubled-quote escape - two single quotes inside a literal.
                         if (i + 1 < sql.Length && sql[i + 1] == '\'')
                         {
                             i += 2;

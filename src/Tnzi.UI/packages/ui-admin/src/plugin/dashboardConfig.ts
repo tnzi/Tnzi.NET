@@ -1,5 +1,5 @@
 /**
- * `useAdminDashboardConfig()` — install-time configuration for the default
+ * `useAdminDashboardConfig()` - install-time configuration for the default
  * Dashboard page shipped by `@tnzi/ui-admin` (Phase J / 0.2.71+).
  *
  * The default `Dashboard.vue` page consumes this via `inject()` so the
@@ -43,7 +43,7 @@ export function provideAdminDashboardConfig(
 
 /**
  * Inject the consumer-supplied dashboard config. Returns `null` when no
- * `defineAdminApp({ dashboard: … })` was passed — the page then renders
+ * `defineAdminApp({ dashboard: … })` was passed - the page then renders
  * the bundled default widget set.
  */
 export function useAdminDashboardConfig(): AdminDashboardConfig | null {

@@ -213,6 +213,11 @@ public static class StringExtensions
     /// <summary>
     /// 移除HTML标签
     /// </summary>
+    /// <remarks>
+    /// 纯粹的标签剥离：标签替换为空串,因此 <c>&lt;p&gt;a&lt;/p&gt;&lt;p&gt;b&lt;/p&gt;</c> 会粘成
+    /// "ab",且不解码 HTML 实体。要把 HTML 转成可读正文(短信、纯文本邮件、摘要),用
+    /// <see cref="HtmlToPlainText"/>。
+    /// </remarks>
     public static string RemoveHtmlTags(this string str)
     {
         if (string.IsNullOrEmpty(str))
@@ -220,6 +225,36 @@ public static class StringExtensions
 
         return Regex.Replace(str, "<.*?>", string.Empty);
     }
+
+    /// <summary>
+    /// 把 HTML 转为可读纯文本(标签→空格、实体解码、空白折叠)
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="RemoveHtmlTags"/> 的区别在于它面向"给人读"的场景：
+    /// <list type="bullet">
+    /// <item>标签替换为 <b>空格</b>而非空串,块级元素相邻的词不会被粘连成一个词;</item>
+    /// <item>解码 <c>&amp;amp;</c> / <c>&amp;nbsp;</c> 等实体,否则纯文本里会残留转义源码;</item>
+    /// <item>折叠连续空白并 Trim,去掉 HTML 缩进带来的大片空隙。</item>
+    /// </list>
+    /// 典型用途：由富文本正文派生短信内容、纯文本邮件副本或列表摘要。
+    /// </remarks>
+    public static string HtmlToPlainText(this string? str)
+    {
+        if (string.IsNullOrEmpty(str))
+            return string.Empty;
+
+        var text = Regex.Replace(str, HtmlTagPattern, " ");
+        return Regex.Replace(WebUtility.HtmlDecode(text), "\\s+", " ").Trim();
+    }
+
+    /// <summary>
+    /// 一个 HTML 标签：属性值内的 <c>&gt;</c> 由引号分支吸收,不会把标签提前截断
+    /// </summary>
+    /// <remarks>
+    /// 朴素的 <c>&lt;[^&gt;]+&gt;</c> 会在 <c>&lt;a title="a &gt; b"&gt;</c> 的第一个 <c>&gt;</c> 处
+    /// 收尾,把剩下的属性文本当正文吐出来。
+    /// </remarks>
+    private const string HtmlTagPattern = "<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>";
 
     #endregion
 

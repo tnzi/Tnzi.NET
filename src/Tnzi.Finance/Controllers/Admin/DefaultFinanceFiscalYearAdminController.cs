@@ -9,13 +9,42 @@ namespace Tnzi.Finance.Controllers.Admin;
 public class DefaultFinanceFiscalYearAdminController : ApiAdminControllerBase
 {
     private readonly IFiscalYearService _fiscalYearService;
+    private readonly ILedgerLockService _ledgerLockService;
 
-    public DefaultFinanceFiscalYearAdminController(IFiscalYearService fiscalYearService)
+    public DefaultFinanceFiscalYearAdminController(IFiscalYearService fiscalYearService, ILedgerLockService ledgerLockService)
     {
         _fiscalYearService = Check.NotNull(fiscalYearService);
+        _ledgerLockService = Check.NotNull(ledgerLockService);
     }
 
     protected IFiscalYearService FiscalYearService => _fiscalYearService;
+    protected ILedgerLockService LedgerLockService => _ledgerLockService;
+
+    /// <summary>
+    /// 读取封账状态（账已封到哪一天、是否设了口令）
+    /// </summary>
+    /// <remarks>
+    /// 与会计年度同处一个控制器：两者都是"期间控制"，操作员在同一个屏幕上决定
+    /// "这一期能不能再动"。但权限码各自独立（见 FinancePermissions）。
+    /// </remarks>
+    [HttpGet("closing-date")]
+    [ApiAuthorize(PermissionName = "finance.ledgerLock.view")]
+    public virtual async Task<ApiResult<LedgerLockDto>> GetClosingDate()
+    {
+        var result = await _ledgerLockService.GetAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 设定 / 推进 / 解除封账日（已设口令时须提供）
+    /// </summary>
+    [HttpPut("closing-date")]
+    [ApiAuthorize(PermissionName = "finance.ledgerLock.update")]
+    public virtual async Task<ApiResult<LedgerLockDto>> SetClosingDate([FromBody] SetLedgerLockDto request)
+    {
+        var result = await _ledgerLockService.SetAsync(request);
+        return result.ToApiResult();
+    }
 
     /// <summary>
     /// 获取全部会计年度

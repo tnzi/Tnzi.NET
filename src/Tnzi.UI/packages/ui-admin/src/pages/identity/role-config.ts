@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -5,7 +6,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
 /**
- * Role search fields — align with backend `RoleListQueryDto`:
+ * Role search fields - align with backend `RoleListQueryDto`:
  * `keyword` (free text on name/description) + `isSystem` + `isDefault`.
  */
 export const roleSearchFields: FormSchemaItem[] = [
@@ -44,7 +45,7 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
   { key: 'name', title: 'columns.name', minWidth: 150 },
   { key: 'description', title: 'columns.description', minWidth: 180 },
   // Binary flags render positive-state-only: a grey "Custom"/"User" tag on
-  // every ordinary row is visual noise — show a tag only when the flag is
+  // every ordinary row is visual noise - show a tag only when the flag is
   // set, an em dash otherwise.
   {
     key: 'isDefault',
@@ -56,7 +57,7 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
             value: true,
             mapping: { true: { type: 'success', labelKey: 'admin.shared.status.default' } },
           })
-        : h('span', { class: 'text-muted' }, '—'),
+        : h('span', { class: 'text-muted' }, EMPTY_DASH),
   },
   {
     key: 'isSystem',
@@ -68,12 +69,12 @@ export const roleColumns: ColumnDef<RoleRow>[] = [
             value: true,
             mapping: { true: { type: 'info', labelKey: 'admin.shared.status.system' } },
           })
-        : h('span', { class: 'text-muted' }, '—'),
+        : h('span', { class: 'text-muted' }, EMPTY_DASH),
   },
   {
     key: 'creationTime',
     title: 'columns.creationTime',
-    // 170 — absolute timestamps ("05/12/2026, 00:03:58") wrap onto two
+    // 170 - absolute timestamps ("05/12/2026, 00:03:58") wrap onto two
     // lines at the previous 140.
     width: 170,
     render: (row) => h(TRelativeTime, { value: row.creationTime }),

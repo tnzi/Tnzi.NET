@@ -36,7 +36,7 @@ export interface UseDataQueryOptions<
 }
 
 /**
- * Return type of useDataQuery — DataQueryController plus lifecycle methods.
+ * Return type of useDataQuery - DataQueryController plus lifecycle methods.
  */
 export type UseDataQueryReturn<
   TItem,

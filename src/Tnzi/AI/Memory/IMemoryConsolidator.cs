@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// 记忆合并器 — 对比新记忆与已有记忆，决定 ADD/UPDATE/DELETE/NOOP
+/// 记忆合并器 - 对比新记忆与已有记忆，决定 ADD/UPDATE/DELETE/NOOP
 /// </summary>
 /// <remarks>
 /// 默认实现为 LlmMemoryConsolidator（使用 LLM 做语义比对），
@@ -11,7 +11,7 @@ namespace Tnzi.AI.Memory;
 public interface IMemoryConsolidator
 {
     /// <summary>
-    /// 合并判断 — 对比新记忆与已有相似记忆
+    /// 合并判断 - 对比新记忆与已有相似记忆
     /// </summary>
     /// <param name="newMemory">新提取的记忆内容</param>
     /// <param name="existingMemories">已有的相似记忆（通过 SearchAsync 检索）</param>
@@ -37,12 +37,12 @@ public record MemoryConsolidationResult(
 /// </summary>
 public enum MemoryAction
 {
-    /// <summary>新增 — 新记忆包含新信息</summary>
+    /// <summary>新增 - 新记忆包含新信息</summary>
     Add,
-    /// <summary>更新 — 新记忆更新/替代已有记忆</summary>
+    /// <summary>更新 - 新记忆更新/替代已有记忆</summary>
     Update,
-    /// <summary>删除 — 新记忆与已有记忆矛盾，应删除旧记忆</summary>
+    /// <summary>删除 - 新记忆与已有记忆矛盾，应删除旧记忆</summary>
     Delete,
-    /// <summary>无操作 — 新记忆与已有记忆重复</summary>
+    /// <summary>无操作 - 新记忆与已有记忆重复</summary>
     Noop
 }

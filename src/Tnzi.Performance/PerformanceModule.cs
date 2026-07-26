@@ -34,19 +34,14 @@ public class PerformanceModule : TnziInfrastructureModule
 
         if (!config.Enabled)
         {
-            // 注册空操作收集器，避免下游注入 IPerformanceCollector 时 DI 失败
-            context.Services.AddSingleton<IPerformanceCollector>(provider =>
-            {
-                return new PerformanceCollector(1);
-            });
+            // 关闭时中间件不会注册，因此不会有采样进来；这里仍注册一个容量 1 的
+            // 收集器（等效空操作），避免下游注入 IPerformanceCollector 时 DI 解析失败
+            context.Services.AddSingleton<IPerformanceCollector>(_ => new PerformanceCollector(1));
             return Task.CompletedTask;
         }
 
         // 注册性能收集器
-        context.Services.AddSingleton<IPerformanceCollector>(provider =>
-        {
-            return new PerformanceCollector(config.MaxHistorySize);
-        });
+        context.Services.AddSingleton<IPerformanceCollector>(_ => new PerformanceCollector(config.MaxHistorySize));
 
         return Task.CompletedTask;
     }
@@ -70,7 +65,7 @@ public class PerformanceModule : TnziInfrastructureModule
         }
 
         // 注册性能分析中间件（应该在请求追踪中间件之后）
-        app.UseMiddleware<Middleware.PerformanceMiddleware>();
+        app.UseMiddleware<PerformanceMiddleware>();
 
         return Task.CompletedTask;
     }

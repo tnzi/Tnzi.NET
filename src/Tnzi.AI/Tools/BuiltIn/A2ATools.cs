@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tools.BuiltIn;
 
 /// <summary>
-/// A2A (Agent-to-Agent) 工具 — 让 LLM 调用远程 Agent 完成任务
+/// A2A (Agent-to-Agent) 工具 - 让 LLM 调用远程 Agent 完成任务
 /// </summary>
 [AIToolGroup("a2a", "Agent-to-Agent", "Invoke remote AI agents via A2A protocol")]
 public class A2ATools : IAIToolProvider

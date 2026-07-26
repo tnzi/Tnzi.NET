@@ -11,6 +11,7 @@ export * as Payment from './payment';
 export * as Finance from './finance';
 export * as Payroll from './payroll';
 export * as Chat from './chat';
+export * as Presence from './presence';
 export * as Notification from './notification';
 export * as Storage from './storage';
 export * as System from './system';

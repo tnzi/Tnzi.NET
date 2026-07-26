@@ -5,10 +5,10 @@
 /**
  * Notification type.
  *
- * String enum (member name = value) — the backend registers a global
+ * String enum (member name = value) - the backend registers a global
  * JsonStringEnumConverter, so every enum field serializes as its PascalCase
  * member name; the enum members mirror Tnzi.Notification.Metadata.NotificationType
- * (Email / Sms / Push — there is no InApp on the backend). Inbound query params
+ * (Email / Sms / Push - there is no InApp on the backend). Inbound query params
  * accept both the string and the legacy numeric value.
  */
 export enum NotificationType {

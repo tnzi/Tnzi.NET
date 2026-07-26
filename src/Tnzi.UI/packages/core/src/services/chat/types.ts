@@ -1,12 +1,16 @@
 /**
- * Chat Module Types — system-level instant messaging (IM)
+ * Chat Module Types - system-level instant messaging (IM)
  * Aligned with Tnzi.NET backend Chat module (Tnzi.Chat/Dtos/*.cs)
  */
 
 import type { SortedPagedQueryDto } from '../../types/pagination';
+// Presence types moved to @tnzi/core/services/presence (independent module, mirrors the
+// backend Tnzi.Identity.Presence extraction). Imported for use in the chat DTOs below and
+// re-exported for back-compat so existing `@tnzi/core/services/chat` imports keep resolving.
+import { UserPresenceStatus, type UserPresenceDto, type SetPresenceDto } from '../presence/types';
 
 // ============================================
-// IM (Instant Messaging) Types — /conversations/*
+// IM (Instant Messaging) Types - /conversations/*
 // ============================================
 
 // String enums (member name = value): the backend registers a global
@@ -67,21 +71,21 @@ export interface BroadcastDto { content: string; roleIds?: string[]; userIds?: s
 export interface ChatContactDto { userId: string; name: string; avatarFileId?: string | null; }
 
 /**
- * Message sound preset (synthesised client-side via WebAudio — no binary assets).
+ * Message sound preset (synthesised client-side via WebAudio - no binary assets).
  * Two families: attention (longer, for closed window / non-active conversation) and
  * subtle (short/gentle, for in-conversation send+receive). `None` = silent.
  * Values mirror the backend `ChatSoundEffect` enum member names (wire PascalCase).
  */
 export enum ChatSoundEffect {
   None = 'None',
-  // Attention (notification) family — longer, multi-note
+  // Attention (notification) family - longer, multi-note
   Chime = 'Chime',
   DingDong = 'DingDong',
   TriTone = 'TriTone',
   Marimba = 'Marimba',
   Pulse = 'Pulse',
   Bell = 'Bell',
-  // Subtle (in-conversation) family — short, gentle
+  // Subtle (in-conversation) family - short, gentle
   Pop = 'Pop',
   Tick = 'Tick',
   Blip = 'Blip',
@@ -114,7 +118,7 @@ export interface ChatClientConfigDto {
   enablePresence: boolean;
   /** Whether users may set the "Invisible" status (false hides the option). */
   allowInvisible: boolean;
-  /** Master toggle — false silences every chat sound. */
+  /** Master toggle - false silences every chat sound. */
   enableMessageSound: boolean;
   /** Sound for messages arriving while the window is closed or in a non-active conversation. */
   notificationSound: ChatSoundEffect;
@@ -127,16 +131,15 @@ export interface ChatClientConfigDto {
   enableFileMessages: boolean;
 }
 
-export enum UserPresenceStatus { Online = 'Online', Away = 'Away', Busy = 'Busy', Invisible = 'Invisible', Offline = 'Offline' }
-export interface UserPresenceDto { userId: string; status: UserPresenceStatus; lastSeenAt?: string | null }
-export interface SetPresenceDto { status: UserPresenceStatus }
+export { UserPresenceStatus };
+export type { UserPresenceDto, SetPresenceDto };
 export interface ChatContactProfileDto { userId: string; name: string; avatarFileId?: string | null; status: UserPresenceStatus; lastSeenAt?: string | null; email?: string | null; phone?: string | null; bio?: string | null }
 export interface ConversationMemberSettingsDto { isMuted?: boolean; isSticky?: boolean; isHidden?: boolean; remark?: string | null; alias?: string | null }
 export interface UpdateNoticeDto { notice?: string | null }
 export interface SearchMessagesParams { keyword: string; before?: string; limit?: number }
 
 // ============================================
-// IM Admin (system maintenance) Types — /admin/chat/*
+// IM Admin (system maintenance) Types - /admin/chat/*
 // ============================================
 
 /** Global chat statistics overview. Backend: ChatStatisticsDto */

@@ -27,7 +27,7 @@ public class SettingChangedEventHandler : IEventHandler<SettingChangedEvent>
 
     public async Task HandleAsync(SettingChangedEvent @event, CancellationToken cancellationToken = default)
     {
-        // 仅对 Global 作用域感兴趣 — IConfiguration 与实时广播都只反映部署级全局配置；
+        // 仅对 Global 作用域感兴趣 - IConfiguration 与实时广播都只反映部署级全局配置；
         // 租户/用户级配置走 ISettingService 单条读取，不进 IConfiguration 也不广播。
         if (@event.Scope != SettingScope.Global)
             return;

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills.Controllers;
 
 /// <summary>
-/// 用户端技能控制器 — 提供技能浏览、激活、个人技能 CRUD 功能。
+/// 用户端技能控制器 - 提供技能浏览、激活、个人技能 CRUD 功能。
 /// </summary>
 [DefaultController]
 [Route("skills")]

@@ -24,7 +24,7 @@ public class TemplateConfiguration : EntityTypeConfigurationBase<Template, Guid>
 
         // Optional header/footer layout FKs → Template_Layout. SetNull on delete
         // so removing a shared layout does not cascade into every template that
-        // referenced it — preserves content at the cost of losing the wrapper.
+        // referenced it - preserves content at the cost of losing the wrapper.
         builder.HasOne<Layout>()
             .WithMany()
             .HasForeignKey(t => t.HeaderLayoutId)

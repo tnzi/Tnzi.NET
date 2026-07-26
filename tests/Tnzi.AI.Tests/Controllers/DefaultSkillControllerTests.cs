@@ -7,7 +7,7 @@ using Tnzi.AspNetCore.Models;
 namespace Tnzi.AI.Tests.Controllers;
 
 /// <summary>
-/// DefaultSkillController 单元测试 — 覆盖参数传递、Result → ApiResult 转换
+/// DefaultSkillController 单元测试 - 覆盖参数传递、Result → ApiResult 转换
 /// </summary>
 public class DefaultSkillControllerTests
 {

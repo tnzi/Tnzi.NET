@@ -76,7 +76,7 @@ public class GatewayMessageSerializationTests
         // Act
         var json = JsonSerializer.Serialize(message, JsonOptions);
 
-        // Assert — event 类型不需要 id，序列化后 id 字段应被省略
+        // Assert - event 类型不需要 id，序列化后 id 字段应被省略
         Assert.DoesNotContain("\"id\"", json);
 
         var deserialized = JsonSerializer.Deserialize<GatewayMessage>(json, JsonOptions);
@@ -89,7 +89,7 @@ public class GatewayMessageSerializationTests
     [Fact]
     public void SessionScope_HasExpectedValues()
     {
-        // Assert — 验证枚举包含所有预期值
+        // Assert - 验证枚举包含所有预期值
         var values = Enum.GetValues<SessionScope>();
         Assert.Equal(4, values.Length);
         Assert.Contains(SessionScope.Global, values);
@@ -152,13 +152,13 @@ public class GatewayMessageSerializationTests
             FinishReason = "stop"
         };
 
-        // Assert — 普通块
+        // Assert - 普通块
         Assert.Equal("Hello", chunk.TextDelta);
         Assert.False(chunk.IsFinal);
         Assert.Equal(threadId, chunk.ThreadId);
         Assert.Null(chunk.FinishReason);
 
-        // Assert — 最终块
+        // Assert - 最终块
         Assert.Null(finalChunk.TextDelta);
         Assert.True(finalChunk.IsFinal);
         Assert.Equal("stop", finalChunk.FinishReason);

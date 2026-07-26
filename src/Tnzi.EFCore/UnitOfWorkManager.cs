@@ -45,7 +45,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
                     // started (via the UoW's EnsureTransactionStartedAsync) BEFORE saving.
                     // A bare dbContext.SaveChangesAsync as the first save inside an enabled-
                     // but-not-yet-started transaction runs in autocommit mode, escaping the
-                    // transaction (a later rollback can't undo it) — the same hazard already
+                    // transaction (a later rollback can't undo it), the same hazard already
                     // fixed for EfCoreRepository.SaveChangesAsync (2026-07-02). This is the
                     // transaction-safe path behind ApplicationService.FlushAsync.
                     var unitOfWork = GetUnitOfWork(dbContextType);

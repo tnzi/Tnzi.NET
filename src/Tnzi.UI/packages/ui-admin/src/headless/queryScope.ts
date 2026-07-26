@@ -12,17 +12,17 @@ import {
  *
  * Several independent UI states (a detail page's active section, a CRUD list's
  * open overlay, a custom drawer) each OWN one query key and read/write only
- * their own — e.g. `?section=tools&detail=view:42`. {@link useSectionRoute}
+ * their own - e.g. `?section=tools&detail=view:42`. {@link useSectionRoute}
  * and `useDetail`'s overlay routing both build on this so they compose in a
  * single URL without colliding: namespacing is the query string's native
  * shape (one key per owner), no custom codec needed.
  *
  * Why the query (not the `#hash`): query params are the industry-standard
  * carrier for shareable UI state (tabs, open overlays, filters), and the hash
- * stays free for real anchors — a consumer's `scrollBehavior` that resolves
+ * stays free for real anchors - a consumer's `scrollBehavior` that resolves
  * `to.hash` as an element selector keeps working. The multi-instance tab
  * system keys tabs on route `name`/`path`, so query changes never fork a tab
- * (routes opting into `meta.multiTab` are the one exception — do not combine
+ * (routes opting into `meta.multiTab` are the one exception - do not combine
  * that flag with query-synced details/sections on the same route).
  */
 
@@ -68,7 +68,7 @@ export interface UseQueryScopeReturn {
  * Two-way bind ONE query key. The low-level primitive behind
  * {@link useSectionRoute} (sections) and `useDetail`'s overlay routing.
  * Degrades to an inert local ref when no router is present (unit tests) or
- * `enabled` is false — `set` then only updates `value` locally and `active()`
+ * `enabled` is false - `set` then only updates `value` locally and `active()`
  * returns false, so a consumer can cleanly skip its URL reconcilers.
  */
 export function useQueryScope(

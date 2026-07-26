@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 对话存储抽象 — 解耦对话持久化方式
+/// 对话存储抽象 - 解耦对话持久化方式
 /// </summary>
 /// <remarks>
 /// <para>
@@ -38,7 +38,7 @@ public interface IConversationStore
     /// <param name="conversationId">对话 ID</param>
     /// <param name="role">消息角色</param>
     /// <param name="content">消息内容</param>
-    /// <param name="messageId">可选预生成消息 ID — 让流式管线提前将 ID 暴露给客户端。null 时由实现生成。</param>
+    /// <param name="messageId">可选预生成消息 ID - 让流式管线提前将 ID 暴露给客户端。null 时由实现生成。</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>持久化后的消息 ID（实现自由选择编码方式）。</returns>
     Task<string> AppendMessageAsync(string conversationId, string role, string content, string? messageId = null, CancellationToken ct = default);

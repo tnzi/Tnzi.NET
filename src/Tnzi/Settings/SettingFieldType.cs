@@ -2,7 +2,7 @@ namespace Tnzi.Settings;
 
 /// <summary>
 /// 配置中心字段类型。决定前端渲染控件与后端值校验方式。
-/// 注意：不提供列表类型 — .NET 配置绑定要求列表用 Key:0/Key:1 索引键，
+/// 注意：不提供列表类型 - .NET 配置绑定要求列表用 Key:0/Key:1 索引键，
 /// 单条 Setting 行无法绑定 List&lt;T&gt;；列表/复杂配置请用自定义分区组件。
 /// </summary>
 // 无 [ExperimentalApi]：该 attribute 的 AttributeUsage 不含 Enum（CS0592）；

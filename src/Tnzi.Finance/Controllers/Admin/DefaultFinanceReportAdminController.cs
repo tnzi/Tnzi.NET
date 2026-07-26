@@ -48,13 +48,19 @@ public class DefaultFinanceReportAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 总账明细（单科目，分页）
+    /// 总账明细（单科目，分页；可选按关键字与来源类型筛选）
     /// </summary>
+    /// <remarks>
+    /// 筛选条件下推数据库，分页与总数都是筛选后的口径。筛选生效时响应的
+    /// <c>isFiltered</c> 为 true 且余额三件套（期初/期末/运行余额）不适用并置 0，
+    /// 呈现端应据此隐藏余额列
+    /// </remarks>
     [HttpGet("general-ledger/{accountId:guid}")]
     public virtual async Task<ApiResult<GeneralLedgerReportDto>> GetGeneralLedger(
-        Guid accountId, [FromQuery] DateTime from, [FromQuery] DateTime to, [FromQuery] PagedQueryDto paging)
+        Guid accountId, [FromQuery] DateTime from, [FromQuery] DateTime to, [FromQuery] PagedQueryDto paging,
+        [FromQuery] GeneralLedgerFilterDto? filter = null)
     {
-        var result = await _reportService.GetGeneralLedgerAsync(accountId, from, to, paging);
+        var result = await _reportService.GetGeneralLedgerAsync(accountId, from, to, paging, filter);
         return result.ToApiResult();
     }
 

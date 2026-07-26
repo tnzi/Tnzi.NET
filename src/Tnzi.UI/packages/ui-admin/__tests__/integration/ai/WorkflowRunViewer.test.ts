@@ -6,7 +6,7 @@ vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     // Phase J: WorkflowRunViewer now pulls the workflow list for the filter
-    // dropdown on mount — mock the workflows surface as well.
+    // dropdown on mount - mock the workflows surface as well.
     workflows: {
       fetch: vi.fn(async () => ({
         items: [

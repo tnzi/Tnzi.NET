@@ -6,7 +6,7 @@ import ExceptionView from '../../../src/pages/exception/ExceptionView.vue'
 import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
 
 // ExceptionView reads the concrete error from `route.meta.exceptionType` and
-// wires the CTAs to vue-router — mock both so we can drive the type + assert
+// wires the CTAs to vue-router - mock both so we can drive the type + assert
 // navigation without a full router.
 const push = vi.fn(() => Promise.resolve())
 const back = vi.fn()

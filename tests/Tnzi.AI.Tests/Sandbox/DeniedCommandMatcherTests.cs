@@ -22,7 +22,7 @@ public class DeniedCommandMatcherTests
         ["mkfs", "shutdown", "reboot", "halt", "poweroff", "init", "fdisk", "dd"];
 
     // ------------------------------------------------------------------ //
-    // Backwards-compatibility — existing substring behaviour must be kept.
+    // Backwards-compatibility - existing substring behaviour must be kept.
     // ------------------------------------------------------------------ //
 
     [Fact]
@@ -56,7 +56,7 @@ public class DeniedCommandMatcherTests
     }
 
     // ------------------------------------------------------------------ //
-    // Prefix list — the main new capability (token-level, bypass-resistant).
+    // Prefix list - the main new capability (token-level, bypass-resistant).
     // ------------------------------------------------------------------ //
 
     [Fact]
@@ -89,7 +89,7 @@ public class DeniedCommandMatcherTests
     [Fact]
     public void Prefix_AfterCommandSeparator_Denied()
     {
-        // `;` and `&&` form distinct segments — second segment is the attack.
+        // `;` and `&&` form distinct segments - second segment is the attack.
         var denied = DeniedCommandMatcher.IsDenied(
             Analyzer, "echo hi && shutdown -h now", DefaultSubstrings, DefaultPrefixes, out var reason);
 
@@ -109,7 +109,7 @@ public class DeniedCommandMatcherTests
     [Fact]
     public void Prefix_BannedWordInsideArgument_Allowed()
     {
-        // The word "shutdown" appears as an argument, not as the binary —
+        // The word "shutdown" appears as an argument, not as the binary -
         // must NOT be denied (otherwise we'd block legitimate uses like
         // logging or echoing dangerous words).
         var denied = DeniedCommandMatcher.IsDenied(

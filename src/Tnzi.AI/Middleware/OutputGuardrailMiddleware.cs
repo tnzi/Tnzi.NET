@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 输出 Guardrail 中间件 — After: 检查 AI 响应输出。
+/// 输出 Guardrail 中间件 - After: 检查 AI 响应输出。
 /// 流式模式下使用滑动窗口缓冲检查。
 /// </summary>
 public class OutputGuardrailMiddleware : IAiMiddleware
@@ -85,7 +85,7 @@ public class OutputGuardrailMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 流式输出 Guardrail — 滑动窗口缓冲检查。
+    /// 流式输出 Guardrail - 滑动窗口缓冲检查。
     /// 当没有注册任何 IOutputGuardrail 或 StreamingBufferSize 为 0 时，直接透传不缓冲。
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -112,11 +112,6 @@ public class OutputGuardrailMiddleware : IAiMiddleware
 
         await foreach (var chunk in next(context, cancellationToken))
         {
-            if (rejected)
-            {
-                break;
-            }
-
             if (chunk.Text != null)
             {
                 buffer.Append(chunk.Text);
@@ -141,9 +136,11 @@ public class OutputGuardrailMiddleware : IAiMiddleware
                 }
                 pendingChunks.Clear();
 
-                // 保留尾部重叠区域用于跨窗口检测（如关键词跨越窗口边界）
-                var overlapSize = _options.CurrentValue.Guardrails.StreamingOverlapSize;
-                if (buffer.Length > overlapSize)
+                // 保留尾部重叠区域用于跨窗口检测（如关键词跨越窗口边界）。
+                // 必须严格小于窗口大小：overlap >= bufferSize 时缓冲区永不收缩，
+                // 之后每来一个 chunk 都会重跑一次 guardrail（LLM-Judge 成本失控）。
+                var overlapSize = Math.Min(_options.CurrentValue.Guardrails.StreamingOverlapSize, bufferSize - 1);
+                if (overlapSize > 0 && buffer.Length > overlapSize)
                 {
                     var overlap = buffer.ToString(buffer.Length - overlapSize, overlapSize);
                     buffer.Clear();

@@ -6,19 +6,19 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// P1 多租户集成门禁 — 证明 IScopedResource 实体（Provider / AgentPersona）在
+/// P1 多租户集成门禁 - 证明 IScopedResource 实体（Provider）在
 /// <b>多租户开启（MultiTenancyOptions.Enabled = true）</b>且存在当前租户上下文时，
 /// 其 System 行（TenantId=null）<b>不会</b>被 EF Core 全局多租户查询过滤器隐藏。
 /// <para>
-/// 这是整个"共享资源 Scope 模式"的核心证明：因为 Provider/AgentPersona 有意<b>不</b>实现
-/// <see cref="IMultiTenant"/>，全局过滤器 <c>e.TenantId == currentTenant</c> 根本不会附加到它们的查询，
-/// 所以 System 行对所有真实租户都可见。可见性改由服务层（ProviderService / AgentPersonaService）
+/// 这是整个"共享资源 Scope 模式"的核心证明：因为 Provider 有意<b>不</b>实现
+/// <see cref="IMultiTenant"/>，全局过滤器 <c>e.TenantId == currentTenant</c> 根本不会附加到它的查询，
+/// 所以 System 行对所有真实租户都可见。可见性改由服务层（ProviderService）
 /// 通过 Scope + TenantId 联合过滤强制（System ∪ 当前租户）。
 /// </para>
 /// <para>
 /// 反证（对照组）：<see cref="Agent"/> 是真正的 <see cref="IMultiTenant"/> 实体。
 /// 一条 TenantId=null 的 Agent 在当前租户 A 下被全局过滤器隐藏，证明过滤器确实在生效，
-/// 反衬出 Provider/Persona 正确地"退出"了多租户过滤。
+/// 反衬出 Provider 正确地"退出"了多租户过滤。
 /// </para>
 /// </summary>
 public class SharedResourceScopeMtGateTests : IDisposable
@@ -32,7 +32,7 @@ public class SharedResourceScopeMtGateTests : IDisposable
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
 
-        // Mapster 默认配置（同名属性自动映射，AgentPersonaService.MapTo/ProjectTo 需要）
+        // Mapster 默认配置（同名属性自动映射，ProviderService.ProjectTo 需要）
         MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
 
         // 用"无当前租户"的种子上下文创建表结构 + 写入精确的 TenantId 行：
@@ -51,7 +51,7 @@ public class SharedResourceScopeMtGateTests : IDisposable
     }
 
     // =====================================================================
-    // 核心证明 A — 直查 DbContext：System 行在 MT 开启 + 当前租户 A 下存活
+    // 核心证明 A - 直查 DbContext：System 行在 MT 开启 + 当前租户 A 下存活
     // =====================================================================
 
     [Fact]
@@ -64,28 +64,15 @@ public class SharedResourceScopeMtGateTests : IDisposable
         var allNames = await ctx.Set<Provider>().Select(p => p.Name).ToListAsync();
 
         allNames.ShouldContain("system-provider",
-            "System Provider (TenantId=null) MUST survive the global multi-tenant filter — " +
+            "System Provider (TenantId=null) MUST survive the global multi-tenant filter - " +
             "Provider opts out of IMultiTenant, so no e.TenantId==current clause is applied.");
         // Tenant-B 行也在底层返回（无全局过滤器）；服务层才负责把它挡掉（见证明 C）。
         allNames.ShouldContain("tenant-b-provider");
     }
 
-    [Fact]
-    public async Task MtEnabled_TenantA_SystemPersona_NotHiddenByGlobalFilter()
-    {
-        await using var ctx = CreateContext(currentTenantId: _tenantA);
-
-        var allSlugs = await ctx.Set<AgentPersona>().Select(p => p.Slug).ToListAsync();
-
-        allSlugs.ShouldContain("system-persona",
-            "System AgentPersona (TenantId=null) MUST survive the global multi-tenant filter — " +
-            "AgentPersona opts out of IMultiTenant.");
-        allSlugs.ShouldContain("tenant-b-persona");
-    }
-
     // =====================================================================
-    // 核心证明 B — 反证对照：真正的 IMultiTenant 实体(Agent) 的 System 行 *会* 被隐藏
-    // 这证明全局过滤器确实在生效，Provider/Persona 是有意退出了它。
+    // 核心证明 B - 反证对照：真正的 IMultiTenant 实体(Agent) 的 System 行 *会* 被隐藏
+    // 这证明全局过滤器确实在生效，Provider 是有意退出了它。
     // =====================================================================
 
     [Fact]
@@ -104,14 +91,14 @@ public class SharedResourceScopeMtGateTests : IDisposable
 
         // 当前租户 A 下：TenantId=null 的 "system-agent" 被过滤器隐藏（反衬过滤器在生效），
         names.ShouldNotContain("system-agent",
-            "A genuinely IMultiTenant Agent with TenantId=null is HIDDEN under tenant A — " +
+            "A genuinely IMultiTenant Agent with TenantId=null is HIDDEN under tenant A - " +
             "this proves the global filter IS active, which is exactly what Provider/Persona opted out of.");
         // 同理 Tenant-B 的 Agent 对租户 A 不可见。
         names.ShouldNotContain("tenant-b-agent");
     }
 
     // =====================================================================
-    // 核心证明 C — 经服务层：租户 A 看到 System ∪ 自己，绝不看到 Tenant-B
+    // 核心证明 C - 经服务层：租户 A 看到 System ∪ 自己，绝不看到 Tenant-B
     // =====================================================================
 
     [Fact]
@@ -129,21 +116,6 @@ public class SharedResourceScopeMtGateTests : IDisposable
         names.ShouldNotContain("tenant-b-provider"); // 其他租户行不可见
     }
 
-    [Fact]
-    public async Task AgentPersonaService_TenantA_SeesSystemAndOwn_NeverTenantB()
-    {
-        await using var ctx = CreateContext(currentTenantId: _tenantA);
-        var service = CreateAgentPersonaService(ctx, _tenantA);
-
-        var result = await service.GetListAsync(new AgentPersonaQueryDto { PageIndex = 1, PageSize = 50 });
-
-        result.Succeeded.ShouldBeTrue(result.Message);
-        var slugs = result.Data!.Items.Select(p => p.Slug).ToList();
-        slugs.ShouldContain("system-persona");
-        slugs.ShouldContain("tenant-a-persona");
-        slugs.ShouldNotContain("tenant-b-persona");
-    }
-
     // =====================================================================
     // 种子 + 工厂
     // =====================================================================
@@ -155,12 +127,6 @@ public class SharedResourceScopeMtGateTests : IDisposable
             new Provider { Name = "system-provider", ProviderType = "OpenAI", Scope = ResourceScope.System, TenantId = null },
             new Provider { Name = "tenant-a-provider", ProviderType = "OpenAI", Scope = ResourceScope.Tenant, TenantId = _tenantA },
             new Provider { Name = "tenant-b-provider", ProviderType = "OpenAI", Scope = ResourceScope.Tenant, TenantId = _tenantB });
-
-        // AgentPersona：System + Tenant-A + Tenant-B
-        ctx.Set<AgentPersona>().AddRange(
-            new AgentPersona { Name = "System", Slug = "system-persona", Content = "x", Scope = ResourceScope.System, TenantId = null },
-            new AgentPersona { Name = "Tenant A", Slug = "tenant-a-persona", Content = "x", Scope = ResourceScope.Tenant, TenantId = _tenantA },
-            new AgentPersona { Name = "Tenant B", Slug = "tenant-b-persona", Content = "x", Scope = ResourceScope.Tenant, TenantId = _tenantB });
 
         // 对照组 Agent（真正的 IMultiTenant）：在无租户上下文下种子，TenantId 保持显式赋值不被改写。
         ctx.Set<Agent>().AddRange(
@@ -205,13 +171,6 @@ public class SharedResourceScopeMtGateTests : IDisposable
         return new ProviderService(repo, new StubDataProtectionProvider(), httpFactory.Object, sp, new StubCurrentTenant(tenantId));
     }
 
-    private AgentPersonaService CreateAgentPersonaService(SharedResourceMtDbContext ctx, Guid tenantId)
-    {
-        var repo = new EFCoreRepository<SharedResourceMtDbContext, AgentPersona, Guid>(ctx);
-        var sp = new ServiceCollection().AddLogging().BuildServiceProvider();
-        return new AgentPersonaService(sp, repo, new StubCurrentTenant(tenantId));
-    }
-
     // =====================================================================
     // Stubs
     // =====================================================================
@@ -240,8 +199,8 @@ public class SharedResourceScopeMtGateTests : IDisposable
 }
 
 /// <summary>
-/// 测试专用 DbContext — 注册 Provider(IScopedResource) / AgentPersona(IScopedResource) /
-/// Agent(IMultiTenant 对照组)。通过显式传入 <see cref="MultiTenancyOptions"/> 控制 MT 开关。
+/// 测试专用 DbContext - 注册 Provider(IScopedResource) / Agent(IMultiTenant 对照组)。
+/// 通过显式传入 <see cref="MultiTenancyOptions"/> 控制 MT 开关。
 /// </summary>
 internal sealed class SharedResourceMtDbContext : TnziDbContext<SharedResourceMtDbContext>
 {
@@ -257,7 +216,6 @@ internal sealed class SharedResourceMtDbContext : TnziDbContext<SharedResourceMt
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
-        modelBuilder.ApplyConfiguration(new AgentPersonaConfiguration());
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
 
         base.OnModelCreating(modelBuilder);

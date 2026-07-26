@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Providers;
 
 /// <summary>
-/// IChatMessageProcessor 实现测试 — DeepSeek/Gemini/MiniMax 消息处理
+/// IChatMessageProcessor 实现测试 - DeepSeek/Gemini/MiniMax 消息处理
 /// </summary>
 public class ChatMessageProcessorTests
 {

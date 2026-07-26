@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Guardrails;
 
 /// <summary>
-/// Prompt 注入检测 Guardrail — 基于关键词模式匹配检测常见注入模式
+/// Prompt 注入检测 Guardrail - 基于关键词模式匹配检测常见注入模式
 /// </summary>
 /// <remarks>
 /// 基础防护层，使用关键词匹配检测明显的 Prompt 注入尝试。

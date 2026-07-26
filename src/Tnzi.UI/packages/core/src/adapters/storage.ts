@@ -16,6 +16,12 @@ export type StorageType = 'local' | 'session' | 'memory';
 
 /**
  * Serializer options for complex object storage.
+ *
+ * Applies to the TYPE-SAFE pair only (`get` / `set`); the string pair
+ * (`getItem` / `setItem`) always stores the raw string it was handed. Supplying
+ * a serializer swaps out the default `JSON.stringify` / `JSON.parse` in every
+ * backend (including memory), so a value round-trips identically no matter
+ * which backend the adapter ended up on.
  */
 export interface SerializerOptions {
   serialize: (value: unknown) => string;
@@ -58,6 +64,12 @@ export interface StorageOptions {
 // ============================================
 
 import { useLogger } from './logger';
+import { createAdapterSingleton } from './singleton';
+
+const JSON_SERIALIZER: SerializerOptions = {
+  serialize: (value) => JSON.stringify(value),
+  deserialize: (value) => JSON.parse(value),
+};
 
 /**
  * Log a warning when a storage write fails (e.g. quota exceeded).
@@ -79,30 +91,25 @@ function warnStorageError(operation: string, key: string, error: unknown): void 
 // ============================================
 
 /**
- * Shared factory for Web Storage API adapters (localStorage/sessionStorage).
+ * Adapter over a live Web Storage object (localStorage / sessionStorage).
  */
-function createWebStorageAdapter(
-  getStorage: () => Storage | null,
-  prefix: string
+function createNativeStorageAdapter(
+  storage: Storage,
+  prefix: string,
+  serializer: SerializerOptions
 ): StorageAdapter {
-  const storage = typeof window !== 'undefined' ? getStorage() : null;
-
   return {
     getItem(key: string): string | null {
-      if (!storage) return null;
       return storage.getItem(prefix + key);
     },
     setItem(key: string, value: string): void {
-      if (!storage) return;
       try { storage.setItem(prefix + key, value); }
       catch (e) { warnStorageError('setItem', key, e); }
     },
     removeItem(key: string): void {
-      if (!storage) return;
       storage.removeItem(prefix + key);
     },
     clear(): void {
-      if (!storage) return;
       if (prefix) {
         const keys = Object.keys(storage).filter(k => k.startsWith(prefix));
         keys.forEach(k => storage.removeItem(k));
@@ -111,23 +118,19 @@ function createWebStorageAdapter(
       }
     },
     get<T>(key: string): T | null {
-      if (!storage) return null;
       try {
         const item = storage.getItem(prefix + key);
-        return item ? JSON.parse(item) : null;
+        return item ? (serializer.deserialize(item) as T) : null;
       } catch { return null; }
     },
     set<T>(key: string, value: T): void {
-      if (!storage) return;
-      try { storage.setItem(prefix + key, JSON.stringify(value)); }
+      try { storage.setItem(prefix + key, serializer.serialize(value)); }
       catch (e) { warnStorageError('set', key, e); }
     },
     remove(key: string): void {
-      if (!storage) return;
       storage.removeItem(prefix + key);
     },
     keys(): string[] {
-      if (!storage) return [];
       const result: string[] = [];
       for (let i = 0; i < storage.length; i++) {
         const key = storage.key(i);
@@ -138,65 +141,162 @@ function createWebStorageAdapter(
       return result;
     },
     has(key: string): boolean {
-      if (!storage) return false;
       return storage.getItem(prefix + key) !== null;
     },
   };
 }
 
 /**
+ * Inert adapter used when there is no DOM at all (SSR, node unit tests).
+ *
+ * Deliberately NOT a memory store: a server-side module singleton outlives the
+ * request that wrote to it, so one user's tokens would leak into the next
+ * request. Writes are dropped, reads report empty.
+ */
+function createNoopStorageAdapter(): StorageAdapter {
+  return {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+    get: () => null,
+    set: () => {},
+    remove: () => {},
+    keys: () => [],
+    has: () => false,
+  };
+}
+
+/**
+ * Resolve the backing store for a Web Storage adapter.
+ *
+ * Reading `window.localStorage` can THROW rather than return null: Safari
+ * private mode and sandboxed iframes raise a SecurityError from the property
+ * getter itself. That is why the probe is wrapped, and why it runs lazily -
+ * doing it at module scope made a single throwing getter break the import of
+ * this whole module (and therefore of every entry point that pulls it in).
+ */
+function resolveWebStorage(
+  pick: () => Storage,
+  prefix: string,
+  serializer: SerializerOptions
+): StorageAdapter {
+  if (typeof window === 'undefined') {
+    return createNoopStorageAdapter();
+  }
+  try {
+    return createNativeStorageAdapter(pick(), prefix, serializer);
+  } catch (error) {
+    useLogger().warn('[Storage] Web Storage is unavailable, falling back to memory:', error);
+    return createMemoryStorageAdapter(prefix, serializer);
+  }
+}
+
+/**
+ * Shared factory for Web Storage API adapters (localStorage/sessionStorage).
+ * The backend is resolved on first use, never at import time.
+ */
+function createWebStorageAdapter(
+  pick: () => Storage,
+  prefix: string,
+  serializer: SerializerOptions
+): StorageAdapter {
+  let delegate: StorageAdapter | null = null;
+  const target = (): StorageAdapter => (delegate ??= resolveWebStorage(pick, prefix, serializer));
+
+  return {
+    getItem: (key) => target().getItem(key),
+    setItem: (key, value) => target().setItem(key, value),
+    removeItem: (key) => target().removeItem(key),
+    clear: () => target().clear(),
+    get: <T>(key: string) => target().get<T>(key),
+    set: <T>(key: string, value: T) => target().set<T>(key, value),
+    remove: (key) => target().remove(key),
+    keys: () => target().keys(),
+    has: (key) => target().has(key),
+  };
+}
+
+/**
  * Create localStorage adapter with type-safe operations.
  */
-export function createLocalStorageAdapter(prefix: string = ''): StorageAdapter {
-  return createWebStorageAdapter(() => window.localStorage, prefix);
+export function createLocalStorageAdapter(
+  prefix: string = '',
+  serializer: SerializerOptions = JSON_SERIALIZER
+): StorageAdapter {
+  return createWebStorageAdapter(() => window.localStorage, prefix, serializer);
 }
 
 /**
  * Create sessionStorage adapter with type-safe operations.
  */
-export function createSessionStorageAdapter(prefix: string = ''): StorageAdapter {
-  return createWebStorageAdapter(() => window.sessionStorage, prefix);
+export function createSessionStorageAdapter(
+  prefix: string = '',
+  serializer: SerializerOptions = JSON_SERIALIZER
+): StorageAdapter {
+  return createWebStorageAdapter(() => window.sessionStorage, prefix, serializer);
 }
 
 /**
  * Create memory storage adapter.
  * Useful for SSR or temporary storage.
+ *
+ * `prefix` namespaces the keys exactly like the Web Storage adapters do, so an
+ * adapter can be swapped between backends without changing what a caller sees.
+ * A custom `serializer` forces `get`/`set` to round-trip through it; with the
+ * default the value is stored as-is (no serialization cost in memory).
  */
-export function createMemoryStorageAdapter(): StorageAdapter {
+export function createMemoryStorageAdapter(
+  prefix: string = '',
+  serializer?: SerializerOptions
+): StorageAdapter {
   const store = new Map<string, unknown>();
+  const k = (key: string) => prefix + key;
 
   return {
     // String-based operations
     getItem(key: string): string | null {
-      const value = store.get(key);
+      const value = store.get(k(key));
       if (value === undefined) return null;
       return typeof value === 'string' ? value : JSON.stringify(value);
     },
     setItem(key: string, value: string): void {
-      store.set(key, value);
+      store.set(k(key), value);
     },
     removeItem(key: string): void {
-      store.delete(key);
+      store.delete(k(key));
     },
     clear(): void {
-      store.clear();
+      if (!prefix) {
+        store.clear();
+        return;
+      }
+      for (const key of Array.from(store.keys())) {
+        if (key.startsWith(prefix)) store.delete(key);
+      }
     },
 
     // Type-safe operations
     get<T>(key: string): T | null {
-      return (store.get(key) ?? null) as T | null;
+      const value = store.get(k(key));
+      if (value === undefined) return null;
+      if (!serializer) return value as T;
+      try { return serializer.deserialize(value as string) as T; }
+      catch { return null; }
     },
     set<T>(key: string, value: T): void {
-      store.set(key, value);
+      store.set(k(key), serializer ? serializer.serialize(value) : value);
     },
     remove(key: string): void {
-      store.delete(key);
+      store.delete(k(key));
     },
     keys(): string[] {
-      return Array.from(store.keys());
+      const all = Array.from(store.keys());
+      if (!prefix) return all;
+      return all.filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length));
     },
     has(key: string): boolean {
-      return store.has(key);
+      return store.has(k(key));
     },
   };
 }
@@ -205,19 +305,18 @@ export function createMemoryStorageAdapter(): StorageAdapter {
 // Singleton
 // ============================================
 
-const _fallback: StorageAdapter = createLocalStorageAdapter();
-let _active: StorageAdapter | null = null;
+const _slot = createAdapterSingleton<StorageAdapter>('storage', () => createLocalStorageAdapter());
 
 export function setStorageAdapter(adapter: StorageAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useStorage(): StorageAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetStorageAdapter(): void {
-  _active = null;
+  _slot.reset();
 }
 
 // ============================================
@@ -226,17 +325,18 @@ export function resetStorageAdapter(): void {
 
 /**
  * Create storage adapter based on storage type.
+ * `prefix` and `serializer` are honoured by every backend.
  */
 export function createStorageAdapter(options: StorageOptions = {}): StorageAdapter {
-  const { type = 'local', prefix = '' } = options;
+  const { type = 'local', prefix = '', serializer } = options;
 
   switch (type) {
     case 'session':
-      return createSessionStorageAdapter(prefix);
+      return createSessionStorageAdapter(prefix, serializer ?? JSON_SERIALIZER);
     case 'memory':
-      return createMemoryStorageAdapter();
+      return createMemoryStorageAdapter(prefix, serializer);
     case 'local':
     default:
-      return createLocalStorageAdapter(prefix);
+      return createLocalStorageAdapter(prefix, serializer ?? JSON_SERIALIZER);
   }
 }

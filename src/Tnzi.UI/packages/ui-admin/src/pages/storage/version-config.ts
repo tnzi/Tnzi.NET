@@ -21,7 +21,7 @@ export const versionFormSchema: FormSchemaItem[] = [
   { key: 'description',  labelKey: 'form.description', label: 'Note',        type: 'textarea' },
 ]
 
-// Advanced search — GetVersions filters by fileId (cross-file audit) and
+// Advanced search - GetVersions filters by fileId (cross-file audit) and
 // currentOnly. The backend treats currentOnly=false/absent as "all versions"
 // and only filters when true, so a switch off = all, on = current-only.
 export const versionSearchFields: FormSchemaItem[] = [

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
-/// 基于 LLM 的查询改写器 — 使用 LLM 将用户查询改写为更适合语义搜索的形式
+/// 基于 LLM 的查询改写器 - 使用 LLM 将用户查询改写为更适合语义搜索的形式
 /// </summary>
 /// <remarks>
 /// <para>

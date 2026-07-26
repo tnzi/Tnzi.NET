@@ -9,7 +9,7 @@ import type { CSSProperties } from 'vue'
 import type { EChartsOption } from 'echarts'
 
 /**
- * Generic ECharts panel — accepts a pre-built EChartsOption (or a builder
+ * Generic ECharts panel - accepts a pre-built EChartsOption (or a builder
  * function) and handles lifecycle / theme reactivity / resize via the shared
  * useEcharts headless composable (loaded only when echarts is usable).
  *
@@ -21,9 +21,9 @@ import type { EChartsOption } from 'echarts'
 interface Props {
   /** ECharts option spec. Mutating this triggers a chart redraw. */
   option: EChartsOption | null | undefined
-  /** Container height — string ('320px') or number (px). Default 280px. */
+  /** Container height - string ('320px') or number (px). Default 280px. */
   height?: string | number
-  /** Renderer — canvas (default) or svg for crisp screenshots. */
+  /** Renderer - canvas (default) or svg for crisp screenshots. */
   renderer?: 'canvas' | 'svg'
 }
 

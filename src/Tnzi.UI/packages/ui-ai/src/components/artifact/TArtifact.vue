@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TArtifact — Artifact panel container
+ * TArtifact - Artifact panel container
  */
 
 import { NButton, NTooltip } from 'naive-ui';

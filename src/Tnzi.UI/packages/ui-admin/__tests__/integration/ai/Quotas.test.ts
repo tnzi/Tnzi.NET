@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Quotas integration test — budget cost dashboard + per-user quota CRUD.
+ * Quotas integration test - budget cost dashboard + per-user quota CRUD.
  *
  * Asserts:
  *  - the quota rules table still renders its rows;
@@ -168,7 +168,7 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
   it('mounts, fetches quotas on mount, and renders one card per rule', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    // Quota rules are now a card list (TCardPage) — one entity card per rule.
+    // Quota rules are now a card list (TCardPage) - one entity card per rule.
     const cards = wrapper.findAll('.t-entity-card')
     expect(cards).toHaveLength(2)
     expect(wrapper.text()).toContain('user-001'.slice(0, 8))
@@ -187,7 +187,7 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
     // coloured `warning` because the budget status is WarningThreshold (1).
     // Multiple progress bars now render (the budget usage KPI + per-card usage
     // bars in the rules list). The budget usage KPI bar is coloured `warning`
-    // because the budget status is WarningThreshold (1) — assert it is present.
+    // because the budget status is WarningThreshold (1) - assert it is present.
     const progresses = wrapper.findAll('.n-progress-stub')
     expect(progresses.length).toBeGreaterThan(0)
     expect(progresses.some((p) => p.attributes('data-status') === 'warning')).toBe(true)

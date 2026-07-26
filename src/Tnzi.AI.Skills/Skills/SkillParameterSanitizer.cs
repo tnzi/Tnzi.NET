@@ -7,9 +7,9 @@ namespace Tnzi.AI.Skills;
 /// <remarks>
 /// <para>
 /// This is intentionally narrow in scope. It protects against the
-/// <i>structural</i> family of prompt-injection attacks — chat-template
+/// <i>structural</i> family of prompt-injection attacks - chat-template
 /// control tokens, system/user role markers, stand-alone Markdown/YAML
-/// separators, and control characters — that arise specifically because a
+/// separators, and control characters - that arise specifically because a
 /// parameter value gets spliced into a system prompt at render time.
 /// </para>
 /// <para>

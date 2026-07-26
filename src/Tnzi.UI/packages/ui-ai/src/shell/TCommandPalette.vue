@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TCommandPalette — Cmd+K-style action launcher modal.
+ * TCommandPalette - Cmd+K-style action launcher modal.
  *
  * Consumer supplies an action list and v-model:open. Internally uses
  * useCommandPalette for filter/navigation state. Teleported to body.
  */
-import { onMounted, onBeforeUnmount, ref, watch, nextTick, toRef } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, toRef } from 'vue'
 import { Icon } from '@iconify/vue'
+import { useFocusTrap } from '@tnzi/ui'
 import { useCommandPalette, type CommandAction } from '@/composables/useCommandPalette'
+import { useBodyScrollLock } from '@/composables/useBodyScrollLock'
 
 const props = withDefaults(
   defineProps<{
@@ -32,16 +34,24 @@ const emit = defineEmits<{
 const actionsRef = toRef(() => props.actions as readonly CommandAction[])
 const palette = useCommandPalette({ actions: actionsRef, maxResults: props.maxResults })
 const inputEl = ref<HTMLInputElement | null>(null)
+const dialogEl = ref<HTMLElement | null>(null)
+
+/* Without a trap, Tab walks straight out of an `aria-modal` dialog into the
+   page behind it and focus never comes back on close. useFocusTrap keeps Tab
+   inside `dialogEl`, moves focus to the search input on open, and restores the
+   previously focused element on close. It also owns Escape. */
+useFocusTrap(dialogEl, () => palette.open.value, {
+  onEscape: () => palette.hide(),
+  initialFocus: () => inputEl.value,
+})
+
+useBodyScrollLock(() => palette.open.value)
 
 watch(
   () => props.modelValue,
   (next) => {
-    if (next) {
-      palette.show()
-      nextTick(() => inputEl.value?.focus())
-    } else {
-      palette.hide()
-    }
+    if (next) palette.show()
+    else palette.hide()
   },
   { immediate: true },
 )
@@ -66,10 +76,8 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
   if (!palette.open.value) return
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    palette.hide()
-  } else if (event.key === 'ArrowDown') {
+  // Escape is handled by useFocusTrap's onEscape.
+  if (event.key === 'ArrowDown') {
     event.preventDefault()
     palette.moveDown()
   } else if (event.key === 'ArrowUp') {
@@ -100,7 +108,7 @@ onBeforeUnmount(() => {
         aria-label="Command palette"
         @click.self="palette.hide()"
       >
-        <div class="t-cmdk">
+        <div ref="dialogEl" class="t-cmdk">
           <div class="t-cmdk__input-row">
             <Icon icon="lucide:search" class="t-cmdk__icon" />
             <input

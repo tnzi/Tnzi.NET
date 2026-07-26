@@ -3,7 +3,7 @@ using Tnzi.AI.Infrastructure.Mcp;
 namespace Tnzi.AI.Tests.Infrastructure.Mcp;
 
 /// <summary>
-/// McpResourceProvider 单元测试 — 资源发现与读取
+/// McpResourceProvider 单元测试 - 资源发现与读取
 /// </summary>
 public class McpResourceProviderTests
 {

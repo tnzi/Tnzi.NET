@@ -5,9 +5,9 @@ namespace Tnzi.AI.Rag;
 /// <para>
 /// Supports multiple vector store backends via <c>AI:Rag:VectorStoreProvider</c> configuration:
 /// <list type="bullet">
-/// <item><c>Auto</c> (default) — Uses PgVectorStore, can be overridden by pre-registering a custom IVectorStore</item>
-/// <item><c>PostgreSQL</c> — PgVectorStore (requires PostgreSQL with pgvector extension)</item>
-/// <item><c>InMemory</c> — InMemoryVectorStore (development/testing only, data not persisted)</item>
+/// <item><c>Auto</c> (default) - Uses PgVectorStore, can be overridden by pre-registering a custom IVectorStore</item>
+/// <item><c>PostgreSQL</c> - PgVectorStore (requires PostgreSQL with pgvector extension)</item>
+/// <item><c>InMemory</c> - InMemoryVectorStore (development/testing only, data not persisted)</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -60,7 +60,7 @@ public class AIRagModule : TnziApplicationModule
             case "PostgreSQL":
                 services.AddSingleton<IVectorStore, PgVectorStore>();
                 break;
-            default: // "Auto" — 注册默认 PgVectorStore。TryAdd 表达「让位于更早模块预注册的真实实现」：
+            default: // "Auto" - 注册默认 PgVectorStore。TryAdd 表达「让位于更早模块预注册的真实实现」：
                 // 本模块 Configure 相注册天然先于 AIModule PostConfigure 阶段的 NoOpVectorStore 回退（TryAdd），
                 // 故此处 TryAdd 对 NoOp 天然胜出；若更早 Configure 的模块已注册自定义 IVectorStore 则保留之。
                 services.TryAddSingleton<IVectorStore, PgVectorStore>();

@@ -1,7 +1,7 @@
 /**
  * Shared mapping helpers used by all module bridges.
  *
- * Introduced in Phase 3 Task 3.6 — centralises the universal query+result
+ * Introduced in Phase 3 Task 3.6 - centralises the universal query+result
  * adapters so subsequent bridge fills import rather than copy.
  *
  * 0.2.72+ (C4): `CrudPageResult<T>` is now an alias for `@tnzi/core`'s
@@ -10,7 +10,7 @@
  * so downstream consumers see a consistent surface.
  *
  * The envelope helpers `unwrapResult` / `ensureOk` moved to `@tnzi/core`
- * (`http/response`) — the ApiResult contract is core's, not admin-specific — and
+ * (`http/response`) - the ApiResult contract is core's, not admin-specific - and
  * are re-exported here so the built-in bridges keep their `from './_mappers'`
  * imports unchanged and consumer bridges can pull the whole plumbing set from
  * one place (`@tnzi/ui-admin` or `@tnzi/core`).
@@ -27,7 +27,13 @@ export function mapQueryToListRequest(query: CrudPageQuery): Record<string, unkn
     pageSize: query.pageSize,
     keyword: query.searchText || undefined,
     sortBy: query.sortField,
-    sortOrder: query.sortOrder ?? undefined,
+    // The wire name is `sortDescending`, not `sortOrder`. No backend DTO
+    // declares a `SortOrder` string for direction (the `SortOrder` properties
+    // that do exist are integer display-order columns on entities), so the
+    // previous `sortOrder: 'asc' | 'desc'` was silently discarded on arrival
+    // and server-side sorting never worked. Omitted entirely when no direction
+    // is set, so the backend keeps its own default.
+    sortDescending: query.sortOrder ? query.sortOrder === 'desc' : undefined,
     ...query.filters,
   }
 }
@@ -55,7 +61,7 @@ export function mapResultToCrud<T>(
 /**
  * 0.2.72+ (C4): Wrap a freshly-built 4-field paged record into a full
  * `PagedList<T>`. Lighter than `mapResultToCrud` because the input is
- * already aligned with the destination contract — call sites just want
+ * already aligned with the destination contract - call sites just want
  * the `totalPages` / `hasPreviousPage` / `hasNextPage` fill-in.
  *
  * Used by bridges that build the result inline from heterogeneous backend

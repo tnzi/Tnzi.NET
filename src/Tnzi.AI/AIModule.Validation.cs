@@ -23,7 +23,7 @@ public partial class AIModule
                     "AI text search or chat history memory is enabled, but ITextSearchService is still a no-op fallback. Register a real ITextSearchService implementation.");
             }
 
-            // Paths 为空时不再报错 — FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
+            // Paths 为空时不再报错 - FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
         }
 
         if (options.ContextProviders.Enabled
@@ -54,7 +54,7 @@ public partial class AIModule
     }
 
     /// <summary>
-    /// 可选子模块 NoOp 回退探测表 — 覆盖 <see cref="INoOpService"/> 的全部回退注册。
+    /// 可选子模块 NoOp 回退探测表 - 覆盖 <see cref="INoOpService"/> 的全部回退注册。
     /// </summary>
     /// <remarks>
     /// 不包含 <c>ITextSearchService</c>：当 TextSearch/ChatHistoryMemory 启用却仍是 NoOp 时，
@@ -91,7 +91,7 @@ public partial class AIModule
     ];
 
     /// <summary>
-    /// 校验引擎运行时配置 — 当启用需要 LLM Provider 的功能时，必须存在已启用的 Provider。
+    /// 校验引擎运行时配置 - 当启用需要 LLM Provider 的功能时，必须存在已启用的 Provider。
     /// </summary>
     private static void ValidateProviderRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
     {
@@ -140,7 +140,7 @@ public partial class AIModule
         var toolsWithSkills = allTools.Where(t => t.RequiresSkillSlugs is { Count: > 0 }).ToList();
         if (toolsWithSkills.Count == 0) return;
 
-        // ISkillRegistry is scoped — create a temporary scope for startup validation
+        // ISkillRegistry is scoped - create a temporary scope for startup validation
         using var scope = serviceProvider.CreateScope();
         var skillRegistry = scope.ServiceProvider.GetService<ISkillRegistry>();
         if (skillRegistry == null) return;

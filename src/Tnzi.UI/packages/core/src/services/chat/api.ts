@@ -1,5 +1,5 @@
 /**
- * Chat Module API — system-level instant messaging (IM)
+ * Chat Module API - system-level instant messaging (IM)
  * Aligned with Tnzi.NET backend Chat controllers
  */
 
@@ -7,7 +7,7 @@ import type { HttpClient } from '../../http/http';
 import type {
   ConversationListItemDto, ConversationDto, ChatMessageDto, MessageThreadDto,
   SendMessageDto, CreateGroupDto, AddMembersDto, ChatContactDto, BroadcastDto,
-  ConversationMemberSettingsDto, ChatContactProfileDto, UserPresenceDto, UserPresenceStatus,
+  ConversationMemberSettingsDto, ChatContactProfileDto,
   ChatClientConfigDto,
   ChatStatisticsDto, AdminConversationQueryDto, AdminConversationListItemDto,
   AdminConversationDetailDto, PresenceOverviewDto, PresenceOverviewQueryDto,
@@ -16,13 +16,13 @@ import type {
 import type { PagedList } from '../../types/pagination';
 
 // ============================================
-// IM (Instant Messaging) API — /conversations/*
+// IM (Instant Messaging) API - /conversations/*
 // ============================================
 
 const CONV = '/conversations';
 
 /**
- * Chat IM API (User) — real-time instant messaging conversations
+ * Chat IM API (User) - real-time instant messaging conversations
  * Backend: DefaultConversationController [Route("conversations")]
  */
 export function useChatImApi(client: HttpClient) {
@@ -121,34 +121,19 @@ export function useChatImApi(client: HttpClient) {
   };
 }
 
-/**
- * Presence API (User) — online status (manual + auto)
- * Backend: DefaultPresenceController [Route("presence")]
- */
-export function usePresenceApi(client: HttpClient) {
-  return {
-    /** Set my manual status - PUT /presence */
-    setStatus: (status: UserPresenceStatus) =>
-      client.put<void>('/presence', { status }),
-
-    /** Get my (manual) status - GET /presence/me */
-    getMyStatus: () =>
-      client.get<UserPresenceStatus>('/presence/me'),
-
-    /** Resolve effective status for users - GET /presence?userIds=... */
-    getPresence: (userIds: string[]) =>
-      client.get<UserPresenceDto[]>('/presence', { params: { userIds } }),
-  };
-}
+// Presence API moved to @tnzi/core/services/presence (independent module). Re-exported here
+// for back-compat so existing `import { usePresenceApi } from '@tnzi/core/services/chat'`
+// keeps working (chat-im-bridge et al.). The presence factory adds reportActivity/getConfig.
+export { usePresenceApi } from '../presence/api';
 
 // ============================================
-// Admin API (system maintenance) — /admin/chat/*
+// Admin API (system maintenance) - /admin/chat/*
 // ============================================
 
 const ADMIN_CHAT = '/admin/chat';
 
 /**
- * Chat Broadcast API (Admin) — send system notifications
+ * Chat Broadcast API (Admin) - send system notifications
  * Backend: DefaultChatAdminController [Route("admin/chat")]
  */
 export function useChatBroadcastApi(client: HttpClient) {
@@ -160,7 +145,7 @@ export function useChatBroadcastApi(client: HttpClient) {
 }
 
 /**
- * Chat Admin API — global conversation / message / presence maintenance.
+ * Chat Admin API - global conversation / message / presence maintenance.
  * Backend: DefaultChatAdminController [Route("admin/chat")]
  */
 export function useChatAdminApi(client: HttpClient) {

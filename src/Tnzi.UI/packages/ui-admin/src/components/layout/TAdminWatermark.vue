@@ -7,7 +7,7 @@ import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 /**
  * Floating watermark overlay reading config from `useAdminThemeStore`.
  *
- * Renders nothing when watermark is disabled — zero footprint by default.
+ * Renders nothing when watermark is disabled - zero footprint by default.
  * When enabled the text combines a user-defined string with optional
  * username + date suffixes.
  */

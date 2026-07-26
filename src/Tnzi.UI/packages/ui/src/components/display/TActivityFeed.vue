@@ -2,7 +2,7 @@
   <!--
     Vertical activity / comment feed: an optional composer at the top, then one
     row per item (rendered through the `#item` scoped slot, typically a
-    `TNoteCard`) joined by a connector line, with an empty state. Generic — the
+    `TNoteCard`) joined by a connector line, with an empty state. Generic - the
     caller owns the item shape and rendering.
   -->
   <div class="t-activity-feed">

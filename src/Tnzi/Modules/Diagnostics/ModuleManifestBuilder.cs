@@ -1,7 +1,7 @@
 namespace Tnzi.Modules.Diagnostics;
 
 /// <summary>
-/// 模块清单构建器 — 从 ServiceDescriptor 列表和程序集扫描中自动生成 <see cref="ModuleManifest"/>
+/// 模块清单构建器 - 从 ServiceDescriptor 列表和程序集扫描中自动生成 <see cref="ModuleManifest"/>
 /// </summary>
 public static class ModuleManifestBuilder
 {
@@ -36,7 +36,7 @@ public static class ModuleManifestBuilder
     /// <summary>
     /// 从 ServiceDescriptor 列表中提取模块程序集内的服务注册
     /// </summary>
-    private static IReadOnlyList<ServiceExport> ExtractServices(List<ServiceDescriptor> descriptors, System.Reflection.Assembly moduleAssembly)
+    private static IReadOnlyList<ServiceExport> ExtractServices(List<ServiceDescriptor> descriptors, Assembly moduleAssembly)
     {
         var result = new List<ServiceExport>();
 
@@ -69,13 +69,13 @@ public static class ModuleManifestBuilder
     /// <summary>
     /// 从程序集安全获取所有类型（处理 ReflectionTypeLoadException）
     /// </summary>
-    private static Type[] GetAssemblyTypes(System.Reflection.Assembly assembly)
+    private static Type[] GetAssemblyTypes(Assembly assembly)
     {
         try
         {
             return assembly.GetTypes();
         }
-        catch (System.Reflection.ReflectionTypeLoadException ex)
+        catch (ReflectionTypeLoadException ex)
         {
             // 部分程序集加载失败时，返回已成功加载的类型
             return ex.Types.Where(t => t != null).ToArray()!;
@@ -149,7 +149,7 @@ public static class ModuleManifestBuilder
     /// <summary>
     /// 从 ServiceDescriptor 列表中提取模块程序集内的 IConfigureOptions&lt;T&gt; 注册
     /// </summary>
-    private static IReadOnlyList<string> ExtractOptions(List<ServiceDescriptor> descriptors, System.Reflection.Assembly moduleAssembly)
+    private static IReadOnlyList<string> ExtractOptions(List<ServiceDescriptor> descriptors, Assembly moduleAssembly)
     {
         var result = new List<string>();
         var seen = new HashSet<Type>();

@@ -1,7 +1,7 @@
 /**
  * @tnzi/ui/stores/app
  *
- * Application state store — thin Pinia wrapper delegating to core
+ * Application state store - thin Pinia wrapper delegating to core
  * AppStateManager. All UI state logic (theme, language, notifications, modals,
  * connection, persistence) lives in AppStateManager; this store only proxies
  * reactive state. The manager also wires the `fullscreenchange` listener in its

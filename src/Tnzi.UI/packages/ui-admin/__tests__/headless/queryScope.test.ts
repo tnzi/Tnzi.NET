@@ -39,7 +39,7 @@ describe('useQueryScope', () => {
     await flushPromises()
     expect(router.currentRoute.value.query.detail).toBe('view:42')
 
-    // Back closes it — value follows the URL back to null.
+    // Back closes it - value follows the URL back to null.
     router.back()
     await flushPromises()
     expect(router.currentRoute.value.query.detail).toBeUndefined()
@@ -60,7 +60,7 @@ describe('useQueryScope', () => {
     api().set('view:42', 'push')
     await flushPromises()
     expect(router.currentRoute.value.query).toEqual({ page: '2', kw: 'x', detail: 'view:42' })
-    // The fragment stays free for real anchors — never cleared by a scope write.
+    // The fragment stays free for real anchors - never cleared by a scope write.
     expect(router.currentRoute.value.hash).toBe('#anchor')
   })
 

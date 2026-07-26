@@ -9,29 +9,52 @@ import type CropperJs from 'cropperjs'
 
 interface Props {
   modelValue?: string | null
-  shape?: 'circle' | 'square'
+  /** Outline / border-radius preset. `square` = 4px, `rounded` = 8px, `circle` = 50%. */
+  shape?: 'circle' | 'square' | 'rounded'
+  /** Preview box width. Number = px; string = any CSS length (e.g. `'200px'`). Default 96. */
+  width?: number | string
+  /** Preview box height. Number = px; string = any CSS length. Default 96 (rectangle when ≠ width). */
+  height?: number | string
+  /** How the loaded image fills the box. `cover` (default, fills + crops) or `contain` (fits whole image). */
+  objectFit?: 'cover' | 'contain'
   cropper?: boolean
   aspectRatio?: number
   accept?: string
   maxSizeMb?: number
   upload: (file: File | Blob) => Promise<{ id?: string; url: string }>
   disabled?: boolean
+  /** Simple centered placeholder text shown when empty. Overridden by the `#placeholder` slot. */
+  placeholder?: string
+  /** Native tooltip shown on hover over the upload area (e.g. accepted formats / size). */
+  title?: string
+  /** Show a corner control to clear the current image (only rendered when a value is set). */
+  removable?: boolean
+  /** Accessible label + tooltip for the remove control. */
+  removeLabel?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: null,
   shape: 'circle',
+  width: 96,
+  height: 96,
+  objectFit: 'cover',
   cropper: true,
   aspectRatio: 1,
   accept: 'image/*',
   maxSizeMb: 5,
   disabled: false,
+  placeholder: undefined,
+  title: undefined,
+  removable: false,
+  removeLabel: 'Remove',
 })
 
 const emit = defineEmits<{
   'update:modelValue': [url: string]
   'update:fileId': [id: string | undefined]
   change: [payload: { id?: string; url: string }]
+  remove: []
   error: [message: string]
 }>()
 
@@ -59,6 +82,15 @@ const previewClass = computed(() => [
   `t-image-upload--${props.shape}`,
   { 't-image-upload--disabled': props.disabled },
 ])
+
+function toCssSize(value: number | string): string {
+  return typeof value === 'number' ? `${value}px` : value
+}
+
+const previewStyle = computed(() => ({
+  width: toCssSize(props.width),
+  height: toCssSize(props.height),
+}))
 
 // ---------------------------------------------------------------------------
 // File validation
@@ -91,6 +123,17 @@ function isAcceptedType(file: File, accept: string): boolean {
 function handlePreviewClick(): void {
   if (props.disabled) return
   fileInputRef.value?.click()
+}
+
+// ---------------------------------------------------------------------------
+// Remove current image
+// ---------------------------------------------------------------------------
+
+function handleRemove(): void {
+  if (props.disabled) return
+  emit('update:modelValue', '')
+  emit('update:fileId', undefined)
+  emit('remove')
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +180,28 @@ async function openCropper(file: File): Promise<void> {
   cropperModalOpen.value = true
 }
 
+// Contain-fit the loaded image inside the crop canvas (centred) and place the
+// selection box over it. Idempotent - safe to call again once the canvas
+// reaches its final size (see onCropperModalEntered).
+function fitCropperToCanvas(): void {
+  if (!cropperInstance) return
+
+  // v2 renders the <cropper-image> at its natural size anchored at the canvas
+  // origin; without this a photo larger than the dialog shows only its
+  // top-left corner and the crop box lands on the wrong region.
+  cropperInstance.getCropperImage()?.$center('contain')
+
+  // v2 configures the crop ratio + initial size on the selection web component;
+  // the old `aspectRatio`/`viewMode`/`autoCropArea` constructor options are gone.
+  // Reset AFTER centring so the box is placed over the now-visible image.
+  const selection = cropperInstance.getCropperSelection()
+  if (selection) {
+    selection.aspectRatio = props.aspectRatio
+    selection.initialCoverage = 0.9
+    selection.$reset()
+  }
+}
+
 async function initCropperOnMount(): Promise<void> {
   if (!cropperContainerRef.value) return
 
@@ -152,14 +217,20 @@ async function initCropperOnMount(): Promise<void> {
   const cropper = new Cropper(cropperContainerRef.value)
   cropperInstance = cropper
 
-  // v2 configures the crop ratio + initial size on the selection web component;
-  // the old `aspectRatio`/`viewMode`/`autoCropArea` constructor options are gone.
-  const selection = cropper.getCropperSelection()
-  if (selection) {
-    selection.aspectRatio = props.aspectRatio
-    selection.initialCoverage = 0.9
-    selection.$reset()
-  }
+  // Wait for the internal <cropper-image> to finish loading before the first fit.
+  const image = cropper.getCropperImage()
+  await image?.$ready()
+  // The dialog may have been cancelled/confirmed while the image was loading.
+  if (cropperInstance !== cropper) return
+  fitCropperToCanvas()
+}
+
+// The modal's open transition animates/scales its box, so a fit computed while
+// it plays is measured against a transformed, not-yet-final canvas and lands
+// off-centre. Re-fit once the transition settles and the canvas is at its final,
+// stable size - this is the authoritative centring for the fast-image case.
+function onCropperModalEntered(): void {
+  fitCropperToCanvas()
 }
 
 async function confirmCrop(): Promise<void> {
@@ -236,6 +307,8 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
     <NSpin :show="loading">
       <div
         :class="previewClass"
+        :style="previewStyle"
+        :title="title"
         data-testid="image-upload-preview"
         @click="handlePreviewClick"
       >
@@ -243,16 +316,37 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
           v-if="modelValue"
           :src="modelValue"
           class="t-image-upload__img"
+          :style="{ objectFit }"
           alt="Preview"
         />
         <div v-else class="t-image-upload__placeholder">
-          <span class="t-image-upload__plus">+</span>
+          <!-- Consumers can fully replace the empty-state content (icon + text)
+               via the #placeholder slot; otherwise a `placeholder` text prop, or
+               finally the default `+` glyph, is shown. -->
+          <slot name="placeholder">
+            <span v-if="placeholder" class="t-image-upload__placeholder-text">{{ placeholder }}</span>
+            <span v-else class="t-image-upload__plus">+</span>
+          </slot>
         </div>
       </div>
     </NSpin>
 
+    <!-- Remove control (only when a value is set and removing is enabled) -->
+    <button
+      v-if="removable && modelValue && !disabled"
+      type="button"
+      class="t-image-upload__remove"
+      :title="removeLabel"
+      :aria-label="removeLabel"
+      @click.stop="handleRemove"
+    >
+      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+      </svg>
+    </button>
+
     <!-- Cropper modal -->
-    <NModal v-model:show="cropperModalOpen" :mask-closable="false">
+    <NModal v-model:show="cropperModalOpen" :mask-closable="false" @after-enter="onCropperModalEntered">
       <div class="t-image-upload__cropper-dialog">
         <div class="t-image-upload__cropper-container">
           <img
@@ -276,16 +370,54 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
 <style scoped>
 .t-image-upload {
   display: inline-block;
+  position: relative;
+}
+
+/* Corner remove control - a soft floating chip tucked onto the top-right edge.
+   Hidden at rest, it fades in when the avatar is hovered (or focused for a11y)
+   so it never clutters the resting state. */
+.t-image-upload__remove {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--tnzi-container-bg, #fff);
+  color: var(--tnzi-base-text-muted, #8a8a8a);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.75);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.t-image-upload:hover .t-image-upload__remove,
+.t-image-upload__remove:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.t-image-upload__remove:hover {
+  color: #fff;
+  background: var(--tnzi-error, #e64340);
 }
 
 .t-image-upload__input {
   display: none;
 }
 
-/* Preview container */
+/* Preview container - size comes from the `width`/`height` props (inline style). */
 .t-image-upload__preview {
-  width: 96px;
-  height: 96px;
   overflow: hidden;
   cursor: pointer;
   border: 1px dashed var(--tnzi-border);
@@ -306,6 +438,10 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
 
 .t-image-upload--square {
   border-radius: 4px;
+}
+
+.t-image-upload--rounded {
+  border-radius: 8px;
 }
 
 .t-image-upload--disabled {
@@ -333,6 +469,13 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
   line-height: 1;
 }
 
+.t-image-upload__placeholder-text {
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 /* Cropper dialog */
 .t-image-upload__cropper-dialog {
   background: var(--tnzi-container-bg);
@@ -347,6 +490,14 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
   height: 320px;
   overflow: hidden;
   background: var(--tnzi-cropper-canvas-bg, rgb(0 0 0 / 85%));
+}
+
+/* The dynamically-inserted <cropper-canvas> defaults to `min-height: 100px`
+   with no `height`, so it collapses well short of the 320px dialog. Force it
+   to fill the container so the crop area uses the full height. */
+.t-image-upload__cropper-container :deep(cropper-canvas) {
+  width: 100%;
+  height: 100%;
 }
 
 .t-image-upload__cropper-img {

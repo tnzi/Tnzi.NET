@@ -66,11 +66,11 @@
     </TCardPage>
 
     <!--
-      Document management drawer — per knowledge base: documents + search test.
+      Document management drawer - per knowledge base: documents + search test.
       A custom secondary surface driven by `useDetail` (mode 'drawer') + rendered
       by the single `TDetailHost` renderer, so it is deep-linkable
       (`?manage=view:<kbId>`), refresh-survivable and Back-closeable for free.
-      `:footer="false"` — the panel's controls live in the body; the X closes it.
+      `:footer="false"` - the panel's controls live in the body; the X closes it.
     -->
     <TDetailHost :state="manageDetail" :title="managed?.name ?? ''" :width="720" :footer="false" :translate="t">
       <template #default>
@@ -207,7 +207,7 @@ import type {
 const t = makePageTranslator('ai.knowledge')
 
 // ui-admin does not wrap the shell with NMessageProvider in every host, so
-// `useMessage()` may throw — guard and fall back to inline status panels.
+// `useMessage()` may throw - guard and fall back to inline status panels.
 const message = (() => {
   try {
     return useMessage()
@@ -255,7 +255,7 @@ async function onReindex(item: KnowledgeBaseDto): Promise<void> {
 
 // --- document management drawer --------------------------------------------
 // A custom secondary overlay driven by the single detail engine (`useDetail`,
-// mode 'drawer') — deep-linked as `?manage=view:<kbId>`, refresh-survivable and
+// mode 'drawer') - deep-linked as `?manage=view:<kbId>`, refresh-survivable and
 // Back-closeable for free. `source: crud` hydrates a cold-load deep link from
 // the loaded list, waiting for the first fetch automatically.
 const manageDetail = useDetail<KnowledgeBaseDto>({
@@ -274,7 +274,7 @@ async function openManage(row: KnowledgeBaseDto): Promise<void> {
   await manageDetail.open('view', row)
 }
 
-// Reset the panel + load documents whenever the drawer (re)binds to a KB —
+// Reset the panel + load documents whenever the drawer (re)binds to a KB -
 // covers in-session open AND a `#manage:view:<id>` deep link / refresh.
 watch(() => manageDetail.data.value, async (kb) => {
   if (!kb) return
@@ -300,7 +300,7 @@ async function loadDocuments(): Promise<void> {
 }
 
 // DocumentStatus arrives as the PascalCase member name (JsonStringEnumConverter)
-// or, for legacy payloads, the numeric ordinal — normalise both to a stable
+// or, for legacy payloads, the numeric ordinal - normalise both to a stable
 // member-name key so the status badge + processing-row detection stay correct.
 type DocStatusName = 'Processing' | 'Completed' | 'Failed'
 function documentStatusName(status: unknown): DocStatusName {
@@ -367,7 +367,7 @@ const documentColumns: DataTableColumns<KnowledgeDocumentDto> = [
   },
 ]
 
-// Declarative row action for the document table — TResponsiveTable synthesises
+// Declarative row action for the document table - TResponsiveTable synthesises
 // the trailing operation column (and folds it into the mobile card footer).
 const documentRowActions: RowAction<KnowledgeDocumentDto>[] = [
   {
@@ -386,7 +386,7 @@ async function refreshDocStatus(row: KnowledgeDocumentDto): Promise<void> {
     const updated = await bridge.knowledge.getDocumentStatus(managed.value.id, row.id)
     documents.value = documents.value.map((d) => (d.id === updated.id ? updated : d))
   } catch {
-    // ignore — transient polling failure; the row keeps its prior status.
+    // ignore - transient polling failure; the row keeps its prior status.
   }
 }
 

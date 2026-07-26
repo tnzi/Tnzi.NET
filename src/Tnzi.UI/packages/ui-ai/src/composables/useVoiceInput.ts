@@ -1,7 +1,7 @@
-import { ref, type Ref, onUnmounted } from 'vue';
+import { readonly, ref, type Ref, onUnmounted } from 'vue';
 
 // ---------------------------------------------------------------------------
-// Web Speech API — local type subset
+// Web Speech API - local type subset
 //
 // `lib.dom.d.ts` ships partial Web Speech declarations whose presence varies
 // across TS releases (`SpeechRecognitionEvent` / `SpeechRecognitionErrorEvent`
@@ -147,10 +147,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 
   onUnmounted(() => stop());
 
+  // `readonly()`, NOT `Object.freeze()`: freezing a ref makes its own
+  // `_rawValue` / `_value` data properties non-writable, so every later
+  // `isListening.value = …` from the recogniser callbacks throws
+  // `TypeError: Cannot assign to read only property '_rawValue'` in strict
+  // mode. `readonly()` returns a read-only PROXY and leaves the source ref
+  // writable, which is what the `Readonly<Ref<…>>` return type means.
   return {
-    isListening: Object.freeze(isListening),
-    isSupported: Object.freeze(isSupported),
-    error: Object.freeze(error),
+    isListening: readonly(isListening),
+    isSupported: readonly(isSupported),
+    error: readonly(error),
     start,
     stop,
   };

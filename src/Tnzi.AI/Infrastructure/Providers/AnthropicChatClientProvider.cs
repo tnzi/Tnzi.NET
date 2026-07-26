@@ -3,7 +3,7 @@ using Anthropic;
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// Anthropic 原生 ChatClient 提供商 — 通过官方 Anthropic SDK 直接对接 Claude API。
+/// Anthropic 原生 ChatClient 提供商 - 通过官方 Anthropic SDK 直接对接 Claude API。
 /// SDK 原生支持 TextReasoningContent（thinking/reasoning），无需兼容层。
 /// </summary>
 public class AnthropicChatClientProvider : IChatClientProvider
@@ -23,7 +23,7 @@ public class AnthropicChatClientProvider : IChatClientProvider
     }
 
     /// <summary>
-    /// 创建 IChatClient — 使用 Anthropic SDK 原生 IChatClient 适配器 + thinking 装饰器
+    /// 创建 IChatClient - 使用 Anthropic SDK 原生 IChatClient 适配器 + thinking 装饰器
     /// </summary>
     public IChatClient CreateChatClient(ProviderOptions options, string model)
     {

@@ -1,9 +1,9 @@
 namespace Tnzi.AI.Tests.Workflow;
 
 /// <summary>
-/// WorkflowService.RunAsync / RunStreamingAsync 执行驱动测试 — 覆盖两条新行为：
-/// (1) HITL guard — 含 approval/interrupt 语义节点的非 DAG 工作流 fail-fast，不静默挂死；
-/// (2) Observability — 所有执行模式（含 Sequential）都创建 WorkflowExecution 行，
+/// WorkflowService.RunAsync / RunStreamingAsync 执行驱动测试 - 覆盖两条新行为：
+/// (1) HITL guard - 含 approval/interrupt 语义节点的非 DAG 工作流 fail-fast，不静默挂死；
+/// (2) Observability - 所有执行模式（含 Sequential）都创建 WorkflowExecution 行，
 ///     使 GetExecutions / watchdog 可见。
 /// </summary>
 public class WorkflowServiceExecutionTests
@@ -134,7 +134,7 @@ public class WorkflowServiceExecutionTests
     }
 
     // -----------------------------------------------------------------------
-    // (2) Observability — Sequential/Parallel also create WorkflowExecution rows
+    // (2) Observability - Sequential/Parallel also create WorkflowExecution rows
     // -----------------------------------------------------------------------
 
     [Fact]

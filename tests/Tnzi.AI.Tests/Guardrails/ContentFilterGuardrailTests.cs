@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Guardrails;
 
 /// <summary>
-/// ContentFilterGuardrail 单元测试 — 验证输出内容过滤的各种场景
+/// ContentFilterGuardrail 单元测试 - 验证输出内容过滤的各种场景
 /// </summary>
 public class ContentFilterGuardrailTests
 {

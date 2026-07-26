@@ -342,7 +342,7 @@ export interface UserSessionDto {
   id: string;
   userId: string;
   /**
-   * User name — populated by the global session list (GET /admin/sessions,
+   * User name - populated by the global session list (GET /admin/sessions,
    * batch-joined against the user table); the per-user endpoints leave it
    * null (the caller already knows the user).
    */
@@ -374,7 +374,7 @@ export interface DeviceStatItem {
 }
 
 /**
- * Active user summary — backs the admin "active users" picker on the session
+ * Active user summary - backs the admin "active users" picker on the session
  * management page. Lets admins discover who is currently signed in without
  * exposing a full user list.
  */
@@ -482,7 +482,7 @@ export interface UpdateOrganizationBatchDto {
  * Public auth configuration returned by `GET /auth/config` (anonymous).
  * Drives which login methods / register / recovery / third-party buttons the
  * login page shows, per backend deployment config. Contains only boolean
- * switches and the list of enabled OAuth providers — never any secret.
+ * switches and the list of enabled OAuth providers - never any secret.
  */
 export interface AuthConfigDto {
   // Account identifiers accepted by password login
@@ -614,6 +614,10 @@ export interface PasswordStrengthResultDto {
 export interface SendQuickRegisterCodeDto {
   email?: string | null;
   phoneNumber?: string | null;
+  /** Image-captcha id (required when the backend enables the register captcha). */
+  captchaId?: string;
+  /** Image-captcha code the user typed (required when the register captcha is on). */
+  captchaCode?: string;
 }
 
 /**
@@ -749,13 +753,44 @@ export interface VerifyTwoFactorDto {
 }
 
 /**
- * 2FA status DTO
+ * Per-method 2FA state (one entry per method type).
+ */
+export interface TwoFactorMethodDto {
+  /** Method type. */
+  type: TwoFactorType;
+  /** Can be configured/enabled (address confirmed for SMS/email; TOTP always). */
+  available: boolean;
+  /** Currently enabled. */
+  enabled: boolean;
+  /** Is the user's preferred method (shown first at login). */
+  isPreferred: boolean;
+  /** The channel is enabled at the deployment level, but the user hasn't set up /
+   *  verified the matching address (phone / email) yet - so it can't be enabled
+   *  until they do. The UI shows the row disabled with a "verify your …" hint.
+   *  Always false for TOTP (no address needed). */
+  requiresAddress?: boolean;
+}
+
+/**
+ * 2FA status DTO. Each method (SMS / email / TOTP) is independently enableable;
+ * `isEnabled` is the aggregate (any method on). `methods` carries per-method
+ * state; `preferredType` is the login-default method.
  */
 export interface TwoFactorStatusDto {
   isEnabled: boolean;
   supportedTypes: TwoFactorType[];
+  /** @deprecated alias of `preferredType`. */
   currentType?: TwoFactorType | null;
   isTotpEnabled: boolean;
+  preferredType?: TwoFactorType | null;
+  methods: TwoFactorMethodDto[];
+}
+
+/**
+ * Request carrying a single 2FA method type (disable-method / set-preferred).
+ */
+export interface TwoFactorMethodRequestDto {
+  type: TwoFactorType;
 }
 
 /**

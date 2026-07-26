@@ -1,5 +1,5 @@
 <template>
-  <TDetailSection :title="groupTitle" :hint="group.description ?? undefined">
+  <TDetailSection :title="groupTitle" :icon="group.icon ?? undefined" :hint="group.description ?? undefined">
     <template #actions>
       <NTag v-if="readonly" size="small" type="warning" :bordered="false">
         {{ t('admin.modules.system.settings.state.viewOnly') }}
@@ -41,7 +41,7 @@
       />
 
       <!-- Subsections: fields sharing a subsection collapse into one section
-           (default-expanded). Purely presentational — still one Save/Discard bar
+           (default-expanded). Purely presentational - still one Save/Discard bar
            and one whole-group save. -->
       <NCollapse
         v-if="subsectionGroups.length"
@@ -102,7 +102,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ updated: [group: SettingsCenterGroupDto]; refresh: [] }>()
 
-// ui-admin shells don't always wrap with NMessageProvider — useSafeMessage
+// ui-admin shells don't always wrap with NMessageProvider - useSafeMessage
 // degrades to a no-op MessageApi instead of throwing.
 const message = useSafeMessage()
 
@@ -117,7 +117,7 @@ const resetting = ref(false)
 // Concurrent-edit awareness: another session changed a key belonging to this
 // group. Clean panel → ask the page for a silent re-fetch; dirty panel → show
 // a banner instead of clobbering the user's in-progress edits. The panel's own
-// save triggers a broadcast loopback — suppressed via a short post-save window.
+// save triggers a broadcast loopback - suppressed via a short post-save window.
 const stale = ref(false)
 let lastLocalWriteAt = 0
 watch(lastSettingsChange, (change) => {
@@ -147,7 +147,7 @@ const groupTitle = computed(() => {
 })
 
 // Split fields into a default area (no subsection) and ordered subsection
-// groups (first appearance wins the ordering). Presentation only — the form /
+// groups (first appearance wins the ordering). Presentation only - the form /
 // dirty / save state below still spans the whole group.
 const defaultFields = computed(() => props.group.fields.filter((f) => !f.subsection))
 
@@ -184,7 +184,7 @@ function serializeValue(field: SettingsCenterFieldDto, value: FieldValue): strin
   if (value == null || value === '') return null
   if (field.type === 'Boolean') return value === true ? 'true' : 'false'
   if (typeof value === 'number') {
-    // 后端 decimal.TryParse 不接受科学计数法（1e-7）— 强制十进制展开
+    // 后端 decimal.TryParse 不接受科学计数法（1e-7）- 强制十进制展开
     return value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 })
   }
   return String(value)
@@ -234,7 +234,7 @@ function validateField(field: SettingsCenterFieldDto, serialized: string | null)
     try {
       if (!new RegExp(`^(?:${field.pattern})$`).test(serialized)) return v('pattern')
     } catch {
-      // .NET-only regex syntax the JS engine can't parse — the backend still validates.
+      // .NET-only regex syntax the JS engine can't parse - the backend still validates.
     }
   }
 

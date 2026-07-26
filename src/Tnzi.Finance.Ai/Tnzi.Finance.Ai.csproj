@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <!-- IReceiptExtractor 契约随银行域走（收据采集属银行域摄取） -->
+    <ProjectReference Include="..\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
   </ItemGroup>

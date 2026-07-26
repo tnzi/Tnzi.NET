@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Chunking;
 
 /// <summary>
-/// 语义分块策略 — 基于句子间嵌入相似度在语义边界处拆分文本
+/// 语义分块策略 - 基于句子间嵌入相似度在语义边界处拆分文本
 /// </summary>
 /// <remarks>
 /// <para>
@@ -191,7 +191,7 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
     }
 
     /// <summary>
-    /// 强制执行块大小限制 — 合并过小的块，拆分过大的块
+    /// 强制执行块大小限制 - 合并过小的块，拆分过大的块
     /// </summary>
     private List<string> EnforceChunkSizeLimits(List<string> chunks, int maxChunkSize, int chunkOverlap)
     {

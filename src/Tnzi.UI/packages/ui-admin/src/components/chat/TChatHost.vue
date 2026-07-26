@@ -59,13 +59,13 @@ if (client) {
     onNewMessage: (p) => {
       const conv = store.conversations.find(c => c.id === p.conversationId)
       if (!conv) {
-        // Message for a conversation not yet in the list (new direct/group) —
+        // Message for a conversation not yet in the list (new direct/group) -
         // refetch so it appears; no sound for the very first surfacing.
         void store.fetchConversations()
         return
       }
       if (store.windowVisible && p.conversationId === store.activeId) {
-        // applyIncomingMessage already appended the body incrementally — just
+        // applyIncomingMessage already appended the body incrementally - just
         // clear the unread since the user is looking at this thread. Requires
         // the window to be VISIBLE: activeId survives closing the window, and
         // without this guard a closed window silently marked messages read

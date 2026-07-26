@@ -1,0 +1,46 @@
+/**
+ * Dialog severity styling.
+ *
+ * `DialogAdapter` maps `DialogOptions.type` to one of these classes (see
+ * `adapters/dialog.ts`). Everything is expressed through Vant's own custom
+ * properties, so the colors follow the active Vant theme, including
+ * `.van-theme-dark`. `type: 'info'` intentionally has no class: it is the
+ * default dialog look.
+ */
+
+.t-dialog-success {
+  --van-dialog-confirm-button-text-color: var(--van-success-color);
+}
+
+.t-dialog-warning {
+  --van-dialog-confirm-button-text-color: var(--van-warning-color);
+}
+
+.t-dialog-error {
+  --van-dialog-confirm-button-text-color: var(--van-danger-color);
+}
+
+.t-dialog-success .van-dialog__header {
+  color: var(--van-success-color);
+}
+
+.t-dialog-warning .van-dialog__header {
+  color: var(--van-warning-color);
+}
+
+.t-dialog-error .van-dialog__header {
+  color: var(--van-danger-color);
+}
+
+/* Body of the adapter's prompt() dialog: message line + a Vant field. */
+.t-dialog-prompt {
+  padding: 12px 0;
+}
+
+.t-dialog-prompt__message {
+  margin: 0 0 4px;
+  padding: 0 16px;
+  color: var(--van-text-color);
+  font-size: var(--van-font-size-md);
+  text-align: center;
+}

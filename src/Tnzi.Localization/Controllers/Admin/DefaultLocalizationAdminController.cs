@@ -1,8 +1,8 @@
 namespace Tnzi.Localization.Controllers.Admin;
 
 /// <summary>
-/// Localization admin controller base
-/// Provides missing translation management endpoints for administrators
+/// Default localization admin controller (activated by HostingModule).
+/// Provides missing translation management endpoints for administrators.
 /// </summary>
 [Route("admin/localization")]
 [DefaultController]
@@ -12,7 +12,7 @@ public class DefaultLocalizationAdminController : ApiAdminControllerBase
     protected readonly IMissingTranslationTracker MissingTranslationTracker;
 
     /// <summary>
-    /// Initialize localization admin controller base
+    /// Initialize the localization admin controller
     /// </summary>
     public DefaultLocalizationAdminController(IMissingTranslationTracker missingTranslationTracker)
     {

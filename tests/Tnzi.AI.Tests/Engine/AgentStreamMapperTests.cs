@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Engine;
 
 /// <summary>
-/// AgentStreamMapper 参数化测试 — 验证 BuildStreamEvent / TryMapFailure 与原始三处实现完全等价。
+/// AgentStreamMapper 参数化测试 - 验证 BuildStreamEvent / TryMapFailure 与原始三处实现完全等价。
 /// </summary>
 public class AgentStreamMapperTests
 {

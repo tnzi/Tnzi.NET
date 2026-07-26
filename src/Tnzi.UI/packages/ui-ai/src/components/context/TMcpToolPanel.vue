@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TMcpToolPanel — MCP tool status panel
+ * TMcpToolPanel - MCP tool status panel
  */
 
 import { NPopover, NButton, NScrollbar } from 'naive-ui';

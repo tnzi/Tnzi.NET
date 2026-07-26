@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// EvaluationService 单元测试 — 覆盖 GetById / GetList / Delete
+/// EvaluationService 单元测试 - 覆盖 GetById / GetList / Delete
 /// </summary>
 public class EvaluationServiceTests
 {
@@ -194,7 +194,7 @@ public class EvaluationServiceTests
     }
 
     // -------------------------------------------------------------------------
-    // RunBatchAsync — per-target DI scope isolation (B10)
+    // RunBatchAsync - per-target DI scope isolation (B10)
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -213,7 +213,7 @@ public class EvaluationServiceTests
 
         var dto = new BatchEvaluationDto { Targets = targets, Cases = cases };
 
-        // Track scopes created — each target must get its own
+        // Track scopes created - each target must get its own
         var scopesCreated = 0;
 
         // Each scope resolves a fresh IEvaluationService backed by its own repo/evaluator
@@ -255,7 +255,7 @@ public class EvaluationServiceTests
 
         var svc = CreateService();
 
-        // Act — should not throw InvalidOperationException from concurrent EF context use
+        // Act - should not throw InvalidOperationException from concurrent EF context use
         var exception = await Record.ExceptionAsync(() => svc.RunBatchAsync(dto));
 
         // Assert

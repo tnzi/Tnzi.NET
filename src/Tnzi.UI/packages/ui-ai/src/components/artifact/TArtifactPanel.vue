@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TArtifactPanel — Manus-inspired side artifact panel.
+ * TArtifactPanel - Manus-inspired side artifact panel.
  *
  * Supports two modes:
  *
- * **Single-file mode** — pass `artifact: { title, content }`. The panel
+ * **Single-file mode** - pass `artifact: { title, content }`. The panel
  * renders a single Shiki-highlighted code view with a title row.
  *
- * **Project mode** — pass `files: ArtifactFile[]`. The panel grows a
+ * **Project mode** - pass `files: ArtifactFile[]`. The panel grows a
  * file list sidebar on the left, a breadcrumb path at the top, and lets
  * the user pick which file to view via `v-model:active-file`.
  *
@@ -18,12 +18,12 @@
  * - **Resizable width** via a left-edge drag handle (`v-model:width`,
  *   bounded by `minWidth` / `maxWidth`)
  * - **Built-in Shiki highlighting** via the `useCodeHighlight` composable
- *   — Shiki is dynamically imported only when the panel mounts
+ * - Shiki is dynamically imported only when the panel mounts
  * - **Toolbar** with copy / download / open-external + custom slot
  * - `#preview` / `#history` slots for tab content overrides
  *
  * Theme defaults to `github-light` (matches Manus's read-only code view).
- * Different from the lightweight `Artifact` container — this one owns
+ * Different from the lightweight `Artifact` container - this one owns
  * tabs, resize, file selection and Shiki rendering.
  */
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
@@ -80,10 +80,25 @@ const props = withDefaults(
     previewDevice?: 'desktop' | 'tablet' | 'mobile'
     /** Hide the desktop/tablet/mobile toggle in the preview chrome. */
     hidePreviewDeviceToggle?: boolean
-    /** Iframe `sandbox` attribute. Default locks down everything except
-     *  `allow-scripts allow-same-origin allow-forms allow-popups`. Pass
-     *  an empty string to disable sandboxing entirely. */
-    iframeSandbox?: string
+    /**
+     * Iframe `sandbox` attribute for the preview pane.
+     *
+     * Defaults to `allow-scripts allow-forms allow-popups` and deliberately
+     * omits `allow-same-origin`: this panel exists to preview untrusted,
+     * model-generated HTML, and `allow-scripts` + `allow-same-origin`
+     * together void the sandbox (the framed document can reach
+     * `parent.document`, read/write the host's storage, and even strip its
+     * own `sandbox` attribute).
+     *
+     * Only opt back in when the previewed content is first-party and
+     * genuinely needs same-origin access:
+     * `:iframe-sandbox="'allow-scripts allow-same-origin'"`.
+     *
+     * An empty string renders `sandbox=""`, which is the strictest possible
+     * setting (every restriction applied). To remove the attribute entirely
+     * and run the frame unsandboxed, pass `null` explicitly.
+     */
+    iframeSandbox?: string | null
     /** Current panel width in pixels. v-model:width. */
     width?: number
     /** Minimum width allowed by the resize handle. */
@@ -104,7 +119,7 @@ const props = withDefaults(
     previewUrl: '',
     previewDevice: 'desktop',
     hidePreviewDeviceToggle: false,
-    iframeSandbox: 'allow-scripts allow-same-origin allow-forms allow-popups',
+    iframeSandbox: 'allow-scripts allow-forms allow-popups',
     width: 520,
     minWidth: 320,
     maxWidth: 900,
@@ -186,7 +201,7 @@ function basename(path: string): string {
 /* --- File tree construction --------------------------------------------
    Convert the flat `files` array (each with a `path` like "src/App.tsx")
    into a recursive tree so the file list can render nested folders with
-   collapse/expand. Folders are inferred from path segments — there's no
+   collapse/expand. Folders are inferred from path segments - there's no
    concept of an empty folder. Files inside the same folder are grouped
    under their common parent folder node. */
 interface TreeNode {
@@ -258,7 +273,7 @@ const fileTree = computed<TreeNode[]>(() => {
   return root
 })
 
-/* Folder open/closed state — defaults to all expanded so the user sees
+/* Folder open/closed state - defaults to all expanded so the user sees
    the full project structure on first open. Toggled per-path via the
    chevron click on each folder row. */
 const collapsedFolders = ref<Set<string>>(new Set())
@@ -274,7 +289,7 @@ function isFolderOpen(path: string): boolean {
 
 /* Flatten the visible tree into a single render list. Each row knows
    its depth and whether it's a folder so the template can render a
-   single v-for instead of recursive components — simpler + avoids
+   single v-for instead of recursive components - simpler + avoids
    recursive component registration. */
 interface FlatRow {
   node: TreeNode
@@ -347,6 +362,10 @@ function onResizeMove(e: MouseEvent): void {
   emit('update:width', next)
 }
 
+/* Copy-confirmation reset, cleared on unmount so the callback cannot fire
+   against a destroyed component. */
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null
+
 function onResizeEnd(): void {
   isDragging.value = false
   document.removeEventListener('mousemove', onResizeMove)
@@ -357,6 +376,7 @@ function onResizeEnd(): void {
 
 onBeforeUnmount(() => {
   if (isDragging.value) onResizeEnd()
+  if (copyResetTimer != null) clearTimeout(copyResetTimer)
 })
 
 /* Reset active file when files array changes shape (e.g. switching
@@ -372,8 +392,7 @@ watch(
 /* --- Preview chrome state ---------------------------------------------
    Local URL input value lives in `previewUrlInput` so the user can edit
    freely; on Enter we emit `preview:navigate` for the consumer to handle
-   (e.g. update an iframe src). The iframe ref is exposed for refresh —
-   we reset its src to itself which causes a full reload. */
+   (e.g. update an iframe src). The iframe ref is exposed for refresh - we reset its src to itself which causes a full reload. */
 const previewUrlInput = ref<string>(props.previewUrl)
 const iframeRef = ref<HTMLIFrameElement | null>(null)
 
@@ -433,9 +452,13 @@ async function handleCopy(): Promise<void> {
   try {
     await navigator.clipboard.writeText(item.content)
     copied.value = true
-    setTimeout(() => (copied.value = false), 1500)
+    if (copyResetTimer != null) clearTimeout(copyResetTimer)
+    copyResetTimer = setTimeout(() => {
+      copyResetTimer = null
+      copied.value = false
+    }, 1500)
   } catch {
-    /* clipboard permission denied — silent */
+    /* clipboard permission denied - silent */
   }
   emit('copy', item.content)
 }
@@ -657,7 +680,7 @@ function selectFile(path: string): void {
                   class="t-artifact-panel__iframe"
                   :style="{ width: previewIframeWidth }"
                   :src="previewUrl"
-                  :sandbox="iframeSandbox || undefined"
+                  :sandbox="iframeSandbox ?? undefined"
                   title="Artifact preview"
                   loading="lazy"
                 />
@@ -1004,7 +1027,9 @@ function selectFile(path: string): void {
 .t-artifact-panel__iframe {
   height: 100%;
   border: none;
-  background: #ffffff;
+  /* The framed document paints its own background; this only fills the
+     letterboxing around a narrower device width. */
+  background: var(--tnzi-ai-surface);
   max-width: 100%;
 }
 .t-artifact-panel__empty {
@@ -1055,7 +1080,7 @@ function selectFile(path: string): void {
   background: transparent;
   font-family: inherit;
   /* Shiki emits `<span class="line">…</span>\n` for each source line.
-     The `\n` inside <pre> already creates the visual line break — making
+     The `\n` inside <pre> already creates the visual line break - making
      `.line` `display: block` would stack them as blocks AND keep the
      `\n` newline, producing a blank row between every line. Leave the
      spans inline so the natural newlines are the only separators. */

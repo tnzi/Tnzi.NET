@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * `TAdminLoginCard` — soybean-style production login card.
+ * `TAdminLoginCard` - soybean-style production login card.
  *
  * Provides the visual + form layout. Consumer wires the auth call via the
  * `onLogin` prop (returning a Promise).
  *
- * `variant` — `'page'` (default, legacy: wraps card in a full-page main + radial
+ * `variant` - `'page'` (default, legacy: wraps card in a full-page main + radial
  * background) or `'standalone'` (just the NCard, useful when TLoginPage owns
  * the outer chrome).
  *
@@ -124,7 +124,7 @@ const rules = computed<FormRules>(() => ({
 async function handleSubmit(): Promise<void> {
   submitError.value = ''
   try {
-    // Field-level validation via NForm rules — throws if invalid.
+    // Field-level validation via NForm rules - throws if invalid.
     await formRef.value?.validate()
   } catch {
     // Naive-UI shows inline errors automatically; nothing else to do.

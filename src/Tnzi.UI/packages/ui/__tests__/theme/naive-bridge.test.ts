@@ -47,7 +47,7 @@ describe('buildNaiveThemeOverrides', () => {
     expect(overrides.common?.errorColor).toBe('#d03050')
   })
 
-  it('is pure — does not mutate input settings', () => {
+  it('is pure - does not mutate input settings', () => {
     const naiveOverrides = { common: { primaryColorHover: '#000000' } }
     const settings = { ...defaultThemeSettings, naiveOverrides }
     const snapshot = JSON.stringify(naiveOverrides)
@@ -93,7 +93,7 @@ describe('resolveThemeMode', () => {
     expect(result.resolved).toBe('dark')
     expect(mockWindow.matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: dark)')
     expect(addListener).toHaveBeenCalledTimes(1)
-    expect(onChange).not.toHaveBeenCalled() // per contract — only on change, not initial
+    expect(onChange).not.toHaveBeenCalled() // per contract - only on change, not initial
 
     result.cleanup?.()
     expect(removeListener).toHaveBeenCalledTimes(1)

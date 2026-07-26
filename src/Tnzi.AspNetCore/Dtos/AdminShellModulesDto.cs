@@ -2,7 +2,7 @@
 namespace Tnzi.AspNetCore.Dtos;
 
 /// <summary>
-/// Admin shell runtime module manifest — the set of framework business modules
+/// Admin shell runtime module manifest - the set of framework business modules
 /// the host has actually loaded, shaped for the admin frontend to gate which
 /// module menus / routes are reachable (so a module the backend never loaded
 /// doesn't surface a dead menu that 404s on click).
@@ -10,7 +10,7 @@ namespace Tnzi.AspNetCore.Dtos;
 /// Returned by <c>GET admin/shell/modules</c>. Unlike the richer diagnostics
 /// <c>admin/diagnostics/admin-manifest</c> (gated on <c>system.diagnostics.view</c>),
 /// this payload carries no technical detail and is readable by ANY signed-in
-/// admin user — module-availability gating must hold for super-admins and
+/// admin user - module-availability gating must hold for super-admins and
 /// permission-exempt paths too, so the signal cannot sit behind a permission
 /// code that a plain business admin lacks.
 /// </summary>
@@ -39,7 +39,7 @@ public class AdminShellModuleDto
 
     /// <summary>
     /// Whether the module is enabled. A module can be loaded yet disabled via
-    /// config — the frontend hides its menu in that case too.
+    /// config - the frontend hides its menu in that case too.
     /// </summary>
     public bool IsEnabled { get; set; }
 }

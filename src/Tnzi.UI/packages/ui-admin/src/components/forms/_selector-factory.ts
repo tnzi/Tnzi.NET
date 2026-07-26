@@ -17,7 +17,7 @@ export type SelectorSize = 'tiny' | 'small' | 'medium' | 'large'
  *
  * Key behaviour (fixed 2026-06-27): a `seen` map accumulates every option the
  * fetcher has ever returned, so an already-selected value keeps its label even
- * after the search list changes — without it, switching the search term in a
+ * after the search list changes - without it, switching the search term in a
  * multi-select dropped the labels of previously-picked tags back to raw ids
  * (the bug that made callers hand-roll their own `NSelect` instead of reusing
  * these). Also ships `clearable` + a pass-through `size` so the selectors sit
@@ -43,7 +43,7 @@ export function createSelectorComponent(name: string) {
       // Latest search results.
       const results = ref<SelectorOption[]>([])
       const loading = ref(false)
-      // Every option ever seen, keyed by value — so selected-but-not-in-results
+      // Every option ever seen, keyed by value - so selected-but-not-in-results
       // values can be re-hydrated with their label (see component doc).
       const seen = new Map<string, SelectorOption>()
       let searchTimer: ReturnType<typeof setTimeout> | null = null

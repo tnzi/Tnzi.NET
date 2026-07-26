@@ -3,7 +3,7 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// ToolResolver 单元测试 — 验证 C# 工具 / OpenAPI 工具 / MCP 工具的解析与合并
+/// ToolResolver 单元测试 - 验证 C# 工具 / OpenAPI 工具 / MCP 工具的解析与合并
 /// </summary>
 public class ToolResolverTests
 {
@@ -182,19 +182,19 @@ public class ToolResolverTests
 
         var result = await resolver.ResolveToolsAsync(null);
 
-        // MCP disabled — no tools
+        // MCP disabled - no tools
         result.ShouldBeNull();
         mcpProvider.Verify(p => p.GetToolsAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ------------------------------------------------------------------
-    // Deduplication — same tool name from multiple sources
+    // Deduplication - same tool name from multiple sources
     // ------------------------------------------------------------------
 
     [Fact]
     public async Task ResolveToolsAsync_DuplicateNameAcrossMcp_CSharpWins()
     {
-        // C# tool named "tool_a" and MCP tool named "tool_a" — C# takes priority
+        // C# tool named "tool_a" and MCP tool named "tool_a" - C# takes priority
         var mcpTool = CreateNamedTool("tool_a");
         var mcpProvider = new Mock<IMcpToolProvider>();
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
@@ -240,7 +240,7 @@ public class ToolResolverTests
     }
 
     // ------------------------------------------------------------------
-    // OpenAPI tools — loaded when configured
+    // OpenAPI tools - loaded when configured
     // ------------------------------------------------------------------
 
     [Fact]
@@ -253,7 +253,7 @@ public class ToolResolverTests
 
         var resolver = CreateResolver(options: options);
 
-        // OpenAPI is disabled — no exception, no tools
+        // OpenAPI is disabled - no exception, no tools
         var result = await resolver.ResolveToolsAsync(null);
         result.ShouldBeNull();
     }
@@ -300,7 +300,7 @@ public class ToolResolverTests
         mcpProvider.Setup(p => p.GetToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { mcpTool });
 
-        // No approvalHandler passed (null) — WrapWithApproval returns original list
+        // No approvalHandler passed (null) - WrapWithApproval returns original list
         var resolver = CreateResolver(
             mcpToolProvider: mcpProvider.Object,
             options: options,
@@ -532,7 +532,7 @@ public class ToolResolverTests
     [Fact]
     public async Task ResolveToolsAsync_OpenApiTools_WithNoGovernance_NotWrapped()
     {
-        // Arrange: governance off (default) — OpenAPI tools must NOT be wrapped
+        // Arrange: governance off (default) - OpenAPI tools must NOT be wrapped
         var options = CreateOptionsMonitor(o =>
         {
             o.ToolApproval = new ToolApprovalOptions { Enabled = false };

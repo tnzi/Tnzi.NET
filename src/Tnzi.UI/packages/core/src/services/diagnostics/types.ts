@@ -1,5 +1,5 @@
 /**
- * Diagnostics Module Types — mirrors `Tnzi.AspNetCore.Dtos.*` on the .NET side.
+ * Diagnostics Module Types - mirrors `Tnzi.AspNetCore.Dtos.*` on the .NET side.
  *
  * Models the read-only-ish diagnostics surface exposed by
  * `Tnzi.AspNetCore/Controllers/DefaultDiagnosticsAdminController`
@@ -18,7 +18,7 @@ export interface ExceptionSummaryDto {
   totalCount: number;
   /** Counts grouped by exception type (C# Dictionary<string,int>). */
   byType: Record<string, number>;
-  /** Counts grouped by HTTP status code (C# Dictionary<int,int> — keys serialize as strings). */
+  /** Counts grouped by HTTP status code (C# Dictionary<int,int> - keys serialize as strings). */
   byStatusCode: Record<string, number>;
   /** Counts grouped by business error code (C# Dictionary<string,int>). */
   byErrorCode: Record<string, number>;

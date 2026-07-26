@@ -148,7 +148,7 @@
     <!-- TIcon Component -->
     <div class="demo-block">
       <h2>TIcon Component</h2>
-      <p class="demo-desc">The <code>&lt;TIcon&gt;</code> wrapper provides named size presets (xs–3xl), color, and spin animation.</p>
+      <p class="demo-desc">The <code>&lt;TIcon&gt;</code> wrapper provides named size presets (xs-3xl), color, and spin animation.</p>
       <PreviewBox>
         <div style="display: flex; flex-direction: column; gap: 24px;">
           <div style="display: flex; align-items: center; gap: 16px;">

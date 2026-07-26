@@ -1,5 +1,5 @@
 /**
- * Dictionary config — a Settings view scoped to the `Dictionary` group.
+ * Dictionary config - a Settings view scoped to the `Dictionary` group.
  *
  * There is no separate Dictionary entity: the backend exposes key/value
  * Settings, so this page maps to the settings bridge sub-contract with its
@@ -15,7 +15,7 @@ import { renderSettingValue } from './setting-value-cell'
 
 /** Group every dictionary entry lives under (see Dictionaries.vue). */
 export const DICTIONARY_GROUP = 'Dictionary'
-/** List filter prefix — matches the dedicated group so parameters stay out. */
+/** List filter prefix - matches the dedicated group so parameters stay out. */
 export const DICTIONARY_GROUP_PREFIX = 'Dict'
 
 interface DictionaryRow {

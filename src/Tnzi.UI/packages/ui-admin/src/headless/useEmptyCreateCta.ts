@@ -6,7 +6,7 @@ export interface UseEmptyCreateCtaReturn {
   showCreateCta: ComputedRef<boolean>
   /** Translated button label (falls back to 'Create' without a translator). */
   createCtaLabel: ComputedRef<string>
-  /** Click handler — opens the create form via `state.openCreate()`. */
+  /** Click handler - opens the create form via `state.openCreate()`. */
   onEmptyCreate: () => void
 }
 
@@ -16,9 +16,9 @@ export interface UseEmptyCreateCtaReturn {
  *
  * The CTA only shows on a *first-load* empty list:
  *  - the page is creatable (`state.canCreate !== false` and `openCreate`
- *    exists — read-only pages built without `createData` show no CTA), and
+ *    exists - read-only pages built without `createData` show no CTA), and
  *  - no keyword / advanced filter is active. A search or filter pass with
- *    zero hits keeps the plain empty visual — a Create button there reads
+ *    zero hits keeps the plain empty visual - a Create button there reads
  *    as noise ("create what, my search term?").
  *
  * Written defensively (optional chaining) because tests and embedding

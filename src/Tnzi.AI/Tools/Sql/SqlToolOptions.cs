@@ -13,7 +13,7 @@ public sealed class SqlToolOptions
 
     /// <summary>
     /// Allow validation of non-T-SQL dialects via the fallback tokenizer.
-    /// Default <c>false</c> — only T-SQL passes validation by default because the fallback
+    /// Default <c>false</c> - only T-SQL passes validation by default because the fallback
     /// has weaker guarantees than a real AST parser.
     /// </summary>
     public bool AllowNonTSqlDialects { get; set; } = false;
@@ -44,7 +44,7 @@ public sealed class SqlToolOptions
 
     /// <summary>
     /// Optional whitelist of named connection strings the executor will accept.
-    /// Empty means "any" — production deployments should pin this to dedicated read-only DSNs.
+    /// Empty means "any" - production deployments should pin this to dedicated read-only DSNs.
     /// </summary>
     public string[] AllowedConnectionNames { get; set; } = Array.Empty<string>();
 }

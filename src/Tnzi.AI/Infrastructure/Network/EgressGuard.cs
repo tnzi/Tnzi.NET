@@ -4,7 +4,7 @@ using System.Net.Sockets;
 namespace Tnzi.AI.Infrastructure.Network;
 
 /// <summary>
-/// SSRF egress guard — validates outbound URLs before HTTP requests are issued.
+/// SSRF egress guard - validates outbound URLs before HTTP requests are issued.
 /// Blocks loopback, RFC1918 private, link-local, and IPv6 ULA/link-local ranges.
 /// All resolved IPs are checked so DNS rebinding is mitigated.
 /// </summary>
@@ -62,7 +62,7 @@ public static class EgressGuard
         }
         catch (SocketException)
         {
-            // DNS resolution failure — block to fail secure
+            // DNS resolution failure - block to fail secure
             return $"DNS resolution failed for '{host}'. Access denied.";
         }
 
@@ -85,7 +85,7 @@ public static class EgressGuard
         if (IPAddress.IsLoopback(address))
             return true;
 
-        // ::ffff:x.x.x.x — extract the embedded IPv4 and recurse
+        // ::ffff:x.x.x.x - extract the embedded IPv4 and recurse
         if (address.IsIPv4MappedToIPv6)
             return IsBlockedAddress(address.MapToIPv4());
 
@@ -93,7 +93,7 @@ public static class EgressGuard
         {
             var bytes = address.GetAddressBytes();
 
-            // 0.0.0.0 — wildcard
+            // 0.0.0.0 - wildcard
             if (bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0)
                 return true;
 

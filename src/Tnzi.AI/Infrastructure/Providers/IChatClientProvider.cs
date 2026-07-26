@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// ChatClient 提供商接口 — 可插拔的 AI 提供商抽象
+/// ChatClient 提供商接口 - 可插拔的 AI 提供商抽象
 /// </summary>
 /// <remarks>
 /// 每个提供商（OpenAI、Azure、Anthropic 等）实现此接口。

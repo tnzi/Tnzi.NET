@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Bank Reconciliation page — TCrudPage list + worksheet drawer with
+ * Bank Reconciliation page - TCrudPage list + worksheet drawer with
  * cleared-line selection and a live difference bar.
  */
 vi.mock('../../../src/plugin/client', () => ({

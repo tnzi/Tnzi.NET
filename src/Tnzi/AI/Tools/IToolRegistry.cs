@@ -64,7 +64,7 @@ public interface IToolRegistry
     /// 按工具<b>名称</b>解析单个工具（per-tool 授权用），并按用户权限过滤。
     /// 与 <see cref="GetToolsByGroupsWithPermissions"/> 对称：未知名称跳过，权限不足的工具被排除
     /// （授权是允许哪些工具的白名单，权限仍然门控访问）。
-    /// Resolves individual tools by NAME (for per-tool grants), permission-filtered — symmetric with
+    /// Resolves individual tools by NAME (for per-tool grants), permission-filtered - symmetric with
     /// <see cref="GetToolsByGroupsWithPermissions"/>: unknown names skipped, permission-gated tools excluded
     /// (a grant is an allow-list of WHICH tools; permissions still gate access).
     /// 默认实现遍历 <see cref="GetAllTools"/> 按名称匹配，保持现有实现兼容。

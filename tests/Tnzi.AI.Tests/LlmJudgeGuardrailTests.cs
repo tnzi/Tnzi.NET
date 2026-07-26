@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// LlmJudgeGuardrail 单元测试 — 验证 LLM-as-Judge 输入/输出评估
+/// LlmJudgeGuardrail 单元测试 - 验证 LLM-as-Judge 输入/输出评估
 /// </summary>
 public class LlmJudgeGuardrailTests
 {
@@ -256,7 +256,7 @@ public class LlmJudgeGuardrailTests
         var options = CreateOptions(o => o.Enabled = true);
         var guardrail = new LlmJudgeGuardrail(mockFactory.Object, options, Mock.Of<ILogger<LlmJudgeGuardrail>>());
 
-        // 无法解析的响应 — fail-open
+        // 无法解析的响应 - fail-open
         var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
         result.IsAllowed.ShouldBeTrue();
     }

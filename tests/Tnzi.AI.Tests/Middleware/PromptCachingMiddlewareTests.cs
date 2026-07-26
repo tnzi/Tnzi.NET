@@ -256,7 +256,7 @@ public class PromptCachingMiddlewareTests
     }
 
     // -------------------------------------------------------------------------
-    // Task 19: Static/Dynamic boundary — two breakpoints
+    // Task 19: Static/Dynamic boundary - two breakpoints
     // -------------------------------------------------------------------------
 
     [Fact]

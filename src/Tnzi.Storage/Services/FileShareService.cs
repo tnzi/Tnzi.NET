@@ -7,21 +7,30 @@ public class FileShareService : ApplicationService, IFileShareService
 {
     private readonly IRepository<FileShare, Guid> _shareRepository;
     private readonly IRepository<FileRecord, Guid> _fileRepository;
+    private readonly IFileAccessAuthorizer _accessAuthorizer;
 
     public FileShareService(
         IRepository<FileShare, Guid> shareRepository,
         IRepository<FileRecord, Guid> fileRepository,
+        IFileAccessAuthorizer accessAuthorizer,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
         _shareRepository = Check.NotNull(shareRepository);
         _fileRepository = Check.NotNull(fileRepository);
+        _accessAuthorizer = Check.NotNull(accessAuthorizer);
     }
 
     public async Task<Result<FileShare>> CreateShareAsync(Guid fileId, DateTime? expiresAt = null, int? maxAccessCount = null, string? password = null, CancellationToken cancellationToken = default)
     {
         var fileRecord = await _fileRepository.GetAsync(fileId, cancellationToken);
         if (fileRecord == null)
+            return Fail<FileShare>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // A share link is a bearer credential for the file's bytes. Minting one
+        // for a file you may not even read would hand that credential out, so
+        // this needs write-level rights, not merely the file's id.
+        if (!await _accessAuthorizer.CanWriteAsync(fileRecord, cancellationToken))
             return Fail<FileShare>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         // 生成唯一的分享令牌

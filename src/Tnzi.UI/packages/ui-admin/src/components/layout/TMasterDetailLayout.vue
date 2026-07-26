@@ -1,13 +1,13 @@
 <template>
   <!--
-    Master-detail layout primitive — a list/tree pane on the left and a
+    Master-detail layout primitive - a list/tree pane on the left and a
     detail/preview/timeline pane on the right. Encapsulates the responsive
     grid + fill-height chain + mobile stacking that ~6 built-in pages
     (Permissions / RoleFunctions / Organizations / AgentRunMonitor /
     WorkflowRunViewer / EvaluationViewer) each used to hand-roll.
 
     Layout-only by design: selection state, data and inner content stay with
-    the consumer (a tree, a list, cards — the primitive is agnostic). Drop it
+    the consumer (a tree, a list, cards - the primitive is agnostic). Drop it
     inside a `TContentPage card scroll="fill"` (or any fill-height flex parent)
     and both panes fill the available height and scroll internally; below the
     `stackAt` breakpoint the master moves above the detail with a capped

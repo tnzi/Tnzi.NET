@@ -30,7 +30,7 @@ public class PromptCachingOptions
     /// </summary>
     /// <remarks>
     /// Anthropic 3-tier caching: system messages + recent user messages + tool definitions.
-    /// Note: Anthropic has a 4-block cache limit — auto-disable when OAuth token detected.
+    /// Note: Anthropic has a 4-block cache limit - auto-disable when OAuth token detected.
     /// </remarks>
     public int CacheRecentUserMessages { get; set; }
 
@@ -42,8 +42,8 @@ public class PromptCachingOptions
     /// <summary>
     /// 启用 static/dynamic 双断点边界优化（默认启用）
     /// <para>
-    /// 第一断点：静态内容（Agent Instructions + Tool schemas）— 跨请求缓存命中率高
-    /// 第二断点：动态内容（Memory + Context + Skills）— 会话内缓存命中率高
+    /// 第一断点：静态内容（Agent Instructions + Tool schemas）- 跨请求缓存命中率高
+    /// 第二断点：动态内容（Memory + Context + Skills）- 会话内缓存命中率高
     /// </para>
     /// </summary>
     public bool CacheStaticDynamicBoundary { get; set; } = true;

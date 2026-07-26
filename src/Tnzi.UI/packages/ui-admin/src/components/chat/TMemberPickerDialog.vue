@@ -25,7 +25,7 @@
       </button>
     </div>
 
-    <!-- Candidate list — fixed height on desktop so the dialog footprint stays
+    <!-- Candidate list - fixed height on desktop so the dialog footprint stays
          constant; on a phone (isSm) it flexes to a dvh-capped height so it
          never exceeds the viewport with the keyboard up. Inline height:
          NScrollbar's root does not inherit the scoped attr. -->

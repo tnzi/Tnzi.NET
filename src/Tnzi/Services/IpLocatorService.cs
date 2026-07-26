@@ -102,7 +102,9 @@ public class IpLocatorService : IIpLocatorService
                 return null;
 
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            var apiResult = JsonSerializer.Deserialize<IpApiResponse>(json);
+            // ip-api.com 返回的字段是 camelCase（status/regionName/...），必须用大小写不敏感的
+            // 反序列化选项，否则所有属性都绑不上，Status 恒为空、本方法恒返回 null
+            var apiResult = JsonSerializer.Deserialize<IpApiResponse>(json, TnziJsonDefaults.Options);
 
             if (apiResult == null || apiResult.Status != "success")
                 return null;
@@ -198,8 +200,9 @@ public class IpLocatorService : IIpLocatorService
             // IPv6 地址
             var bytes = address.GetAddressBytes();
             
-            // ::1 (localhost)
-            if (bytes.All(b => b == 0) && bytes[15] == 1)
+            // ::1 (localhost): 前 15 字节为 0 且末字节为 1
+            // （不能写成 bytes.All(b => b == 0)，那要求末字节也为 0，与 bytes[15] == 1 互斥，分支永不成立）
+            if (bytes[15] == 1 && bytes.Take(15).All(b => b == 0))
                 return true;
             
             // fe80::/10 (链路本地地址)

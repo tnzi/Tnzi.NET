@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TPopoverMenu — Floating dropdown menu container.
+ * TPopoverMenu - Floating dropdown menu container.
  *
  * Pure layout primitive for any "click a button to open a small list of
  * actions" pattern. Provides:
@@ -11,12 +11,12 @@
  *   - Default slot for menu items (use `.t-popover-menu__item` class)
  *   - Anchored positioning relative to the closest positioned ancestor
  *
- * Items are NOT a separate component — consumers compose them with raw
+ * Items are NOT a separate component - consumers compose them with raw
  * buttons styled by the `.t-popover-menu__item` / `__item-toggle` /
  * `__item-check` classes. This keeps the API minimal while letting
  * consumers add icons, badges, dividers, and toggles freely.
  *
- * The component does NOT manage trigger button state — wrap your trigger
+ * The component does NOT manage trigger button state - wrap your trigger
  * + this menu in a positioned parent and toggle `open` from the trigger's
  * click handler. See playground `AppShell.vue` for examples.
  */
@@ -30,7 +30,7 @@ const props = withDefaults(
     label?: string
     /** Min-width of the menu. Default 200px. */
     minWidth?: number
-    /** Max-width — wider for menus with longer item text. Default 320px. */
+    /** Max-width - wider for menus with longer item text. Default 320px. */
     maxWidth?: number
     /**
      * Anchor side. `'right'` aligns the menu's right edge with the
@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 
-/* Item primitives — exposed via :deep so consumers can use them on raw
+/* Item primitives - exposed via :deep so consumers can use them on raw
    button / label elements inside the default slot without needing to
    wrap them in another component. */
 .t-popover-menu :deep(.t-popover-menu__item) {

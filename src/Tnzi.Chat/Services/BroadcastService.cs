@@ -71,7 +71,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
 
         // System-wide notification: enumerate every (non-deleted) user. The repository's
         // global query filter excludes soft-deleted users. This loads user rows to project
-        // their ids — acceptable for an admin broadcast (the per-user fan-out below is the
+        // their ids - acceptable for an admin broadcast (the per-user fan-out below is the
         // dominant cost); very large deployments would override with a queued mechanism.
         BroadcastTargetType targetType;
         string summary;
@@ -80,7 +80,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
         if (input.All)
         {
             // Multi-tenant guard: User is NOT IMultiTenant (no TenantId), so the global query
-            // filter cannot scope this enumeration to the current tenant — "every user" would
+            // filter cannot scope this enumeration to the current tenant - "every user" would
             // span all tenants and leak one tenant's broadcast to the others. Require explicit
             // role/user targeting in multi-tenant mode.
             if (_multiTenancyOptions.Value.Enabled)
@@ -90,7 +90,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
             // maintenance/operations accounts, not business recipients, and a
             // "notify everyone" business message has no meaning for them (it would
             // just fill their System conversation with business noise). Explicit
-            // role/user targeting (the else branch) is honoured as-is — if an operator
+            // role/user targeting (the else branch) is honoured as-is - if an operator
             // deliberately targets a super-admin role, that is intentional.
             var excludedIds = _functionAuthorization == null
                 ? new List<Guid>()
@@ -130,7 +130,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
         }
 
         // Admin-UI broadcast: plain text, provenance carried by the CurrentUser (SenderId).
-        // Unlike the direct/rich paths this always records the log — even a resolved-but-empty
+        // Unlike the direct/rich paths this always records the log - even a resolved-but-empty
         // "All users" audience is a real admin action worth an audit row.
         var notification = new ChatNotification { Content = input.Content };
         var delivered = await DeliverAsync(targetIds, notification);
@@ -195,7 +195,7 @@ public class BroadcastService : ApplicationService, IBroadcastService
                     };
                     await _conversationRepository.InsertAsync(conv, ct);
 
-                    // Create member with UnreadCount=1 directly — avoids querying the DB for
+                    // Create member with UnreadCount=1 directly - avoids querying the DB for
                     // the just-inserted member whose Id hasn't been generated yet (only happens
                     // in SaveChangesAsync).
                     var newMember = new ConversationMember
@@ -291,9 +291,12 @@ public class BroadcastService : ApplicationService, IBroadcastService
                 }, ct);
             });
         }
-        catch
+        catch (Exception ex)
         {
-            // Logging the broadcast is auxiliary; never fail the broadcast over it.
+            // Logging the broadcast is auxiliary; never fail the broadcast over it. Still
+            // surface the failure - a silently missing audit row is indistinguishable from
+            // a broadcast that never happened.
+            Logger.LogWarning(ex, "Failed to record the broadcast audit row ({TargetType}, {Summary})", targetType, summary);
         }
     }
 }

@@ -9,7 +9,7 @@ public class FunctionAuthCache
     private readonly ICache _cache;
     private static readonly TimeSpan DefaultCacheExpiration = TimeSpan.FromMinutes(30);
     /// <summary>
-    /// SuperAdmin 全功能目录是 "all enabled ModuleFunction.Code" — 它只随
+    /// SuperAdmin 全功能目录是 "all enabled ModuleFunction.Code" - 它只随
     /// `ModuleFunction.IsEnabled` / `FunctionModule.IsEnabled` 变化，跟用户
     /// 无关。给它一个独立的、更长的 TTL，避免每次 super-admin 操作（如菜单
     /// 渲染、UI 列出全权限）都做一次全表扫描。

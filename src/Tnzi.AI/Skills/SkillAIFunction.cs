@@ -67,11 +67,12 @@ public sealed class SkillAIFunction : AIFunction
             return new ValueTask<object?>((object)errorMessage);
         }
 
-        // 通过约束执行器验证（如果可用）
-        if (_constraintEnforcer is not null)
-        {
-            var constraintResult = _constraintEnforcer.Apply(_skill, new SkillConstraintContext());
-        }
+        // 这里刻意不做约束执行：激活技能的工具组/模型/Provider 约束由
+        // SkillConstraintMiddleware(Order=450) 针对真实的工具与模型上下文统一执行。
+        // 本方法只负责产出渲染后的技能内容，enforcer 仅作为构造契约保留
+        // （由 SkillContextProvider 传入）。此前这里用空 SkillConstraintContext 调了一次
+        // Apply 并丢弃结果 —— 纯无效调用，已移除。
+        _ = _constraintEnforcer;
 
         return new ValueTask<object?>((object)renderResult.RenderedContent);
     }

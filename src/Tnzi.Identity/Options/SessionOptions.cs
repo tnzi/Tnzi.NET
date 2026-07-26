@@ -56,5 +56,27 @@ public class SessionOptions
     /// 启用后，会话信息同时写入 Redis 和数据库
     /// </summary>
     public bool KeepDatabaseAuditLog { get; set; } = false;
+
+    /// <summary>
+    /// 是否强制会话校验（多设备登录/单设备/限并发的真正生效开关）。
+    /// 默认：true。启用后：登录签发的 access token 携带 session_id，JWT Bearer 的
+    /// OnTokenValidated 每请求校验会话有效性（撤销/过期即 401），刷新令牌也校验会话。
+    /// 设为 false 则退回旧行为（令牌仍带 session_id 但不校验），仅作应急逃生开关。
+    /// </summary>
+    public bool EnforceSessionValidation { get; set; } = true;
+
+    /// <summary>
+    /// 会话有效性校验的缓存秒数（仅数据库存储模式）。默认：30。
+    /// OnTokenValidated 每请求校验会话，缓存避免每请求命中数据库；撤销时主动失效缓存，
+    /// 故本地实例即时生效，跨实例（多节点共享数据库）最多滞后本值秒数。0 表示不缓存（每请求查库）。
+    /// Redis 存储模式直接读缓存，不受此值影响。
+    /// </summary>
+    public int ValidationCacheSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// 会话维护后台任务运行间隔（分钟）。默认：60。清理过期令牌 + 撤销长期失活会话，
+    /// 避免幽灵会话累积影响并发计数。小于 5 时按 5 处理；0 表示禁用后台维护。
+    /// </summary>
+    public int MaintenanceIntervalMinutes { get; set; } = 60;
 }
 

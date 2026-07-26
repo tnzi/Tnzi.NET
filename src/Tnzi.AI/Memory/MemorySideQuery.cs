@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Memory;
 
 /// <summary>
-/// IMemorySideQuery 默认实现 — 通过 IAiUtility 轻量 LLM 调用预筛记忆相关性
+/// IMemorySideQuery 默认实现 - 通过 IAiUtility 轻量 LLM 调用预筛记忆相关性
 /// </summary>
 public class MemorySideQuery : IMemorySideQuery
 {

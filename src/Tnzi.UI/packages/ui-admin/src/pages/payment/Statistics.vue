@@ -1,6 +1,6 @@
 <template>
   <!--
-    Statistics — revenue overview + trend + subscription metrics
+    Statistics - revenue overview + trend + subscription metrics
     backed by /admin/payment-statistics/*. Header KPI strip → revenue
     trend chart (line) → side-by-side channel distribution + subscription
     metrics card → plan distribution table.
@@ -30,7 +30,7 @@
     <div class="t-pay-stats-page flex flex-col gap-16px min-h-0">
     <TKpiRow cols="2 s:3 m:6">
       <TKpiCard :label="t('kpi.revenue')" :value="formatMoney(overview?.totalRevenue)" icon="mdi:cash" />
-      <TKpiCard :label="t('kpi.transactions')" :value="overview?.totalTransactions ?? 0">
+      <TKpiCard :label="t('kpi.transactions')" :value="overview?.totalTransactions ?? null">
         <template #extra>
           <NTag size="tiny" :bordered="false" type="success">
             {{ t('kpi.successCount', { n: overview?.successfulTransactions ?? 0 }) }}
@@ -43,7 +43,7 @@
         </template>
       </TKpiCard>
       <TKpiCard :label="t('kpi.mrr')" :value="formatMoney(metrics?.monthlyRecurringRevenue)" icon="mdi:repeat" />
-      <TKpiCard :label="t('kpi.activeSubs')" :value="metrics?.activeSubscriptions ?? overview?.activeSubscriptions ?? 0" />
+      <TKpiCard :label="t('kpi.activeSubs')" :value="metrics?.activeSubscriptions ?? overview?.activeSubscriptions ?? null" />
       <TKpiCard :label="t('kpi.churn')" :value="formatPercent(metrics?.churnRate)" />
     </TKpiRow>
 
@@ -103,6 +103,7 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { TKpiCard, TKpiRow } from '../../components/data'
@@ -153,7 +154,7 @@ const granularityOptions = [
 ]
 
 function formatMoney(n: number | null | undefined): string {
-  if (n == null) return '—'
+  if (n == null) return EMPTY_DASH
   try {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
@@ -165,7 +166,7 @@ function formatMoney(n: number | null | undefined): string {
   }
 }
 function formatPercent(n: number | null | undefined): string {
-  if (n == null) return '—'
+  if (n == null) return EMPTY_DASH
   return `${(n * 100).toFixed(2)}%`
 }
 

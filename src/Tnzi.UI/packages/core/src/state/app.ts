@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/state/app
  *
- * Application state manager — pure logic layer.
+ * Application state manager - pure logic layer.
  */
 
 import { reactive } from '@vue/reactivity';

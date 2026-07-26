@@ -81,12 +81,13 @@
           </NPopconfirm>
         </div>
       </template>
-      <div v-else class="t-member-popover__error">—</div>
+      <div v-else class="t-member-popover__error">{{ EMPTY_DASH }}</div>
     </div>
   </NPopover>
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref, computed, watch } from 'vue'
 import { NPopover, NPopconfirm, NButton, NSpin } from 'naive-ui'
 import { Icon } from '@iconify/vue'
@@ -97,7 +98,7 @@ import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../pages/_shared/translate'
 import TChatAvatar from './TChatAvatar.vue'
 
-// Popover must clear the chat NModal — give it a z-index above it. It also opens
+// Popover must clear the chat NModal - give it a z-index above it. It also opens
 // to the LEFT (into the message area, like WeChat) rather than the default "top":
 // the member grid sits in the narrow right-side info panel, so a top-row avatar's
 // "top" popover would extend above the window and get clipped by the viewport.

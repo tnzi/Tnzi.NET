@@ -3,14 +3,17 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Invoices page — read-only list + #detail drawer + useDetail line editor.
+ * Invoices page - read-only list + #detail drawer + useDetail line editor.
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// Mutable so a test can arrive with a hand-off in the URL.
+const routeQuery = vi.hoisted(() => ({ current: {} as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {}, params: {}, path: '/admin/finance/invoices', fullPath: '/admin/finance/invoices', hash: '', name: 'finance.invoices', meta: {} }),
+  useRoute: () => ({ query: routeQuery.current, params: {}, path: '/admin/finance/invoices', fullPath: '/admin/finance/invoices', hash: '', name: 'finance.invoices', meta: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }))
 
@@ -88,11 +91,25 @@ describe('Finance Invoices page', () => {
     setActivePinia(createPinia())
     fetchList.mockClear()
     listOnly.mockClear()
+    routeQuery.current = {}
   })
 
   it('mounts and loads its data', async () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  // The customer work surface hands off with `?entry=new&party=<id>`. `new` is
+  // useDetail's create token - spelling it `create` silently opens nothing,
+  // which typecheck and a push-payload assertion both wave through.
+  it('opens a pre-filled draft from a customer hand-off', async () => {
+    routeQuery.current = { entry: 'new', party: 'p9' }
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const editor = wrapper.findComponent({ name: 'DocumentEditor' })
+    expect(editor.exists()).toBe(true)
+    expect(editor.props('entry')).toMatchObject({ partyId: 'p9' })
   })
 })

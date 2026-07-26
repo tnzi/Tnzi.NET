@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TMathBlock — Math formula rendering
+ * TMathBlock - Math formula rendering
  *
  * Uses KaTeX to render LaTeX math expressions.
  * Falls back to raw expression on parse error.

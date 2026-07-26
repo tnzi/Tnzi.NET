@@ -92,7 +92,7 @@ public class SkillRegistryTests : IDisposable
     [Fact]
     public async Task GetAvailableSkillsAsync_DeduplicatesBySlug_SystemWins()
     {
-        // Two skills with the same slug but different scopes should deduplicate — System wins
+        // Two skills with the same slug but different scopes should deduplicate - System wins
         CreateSkillFile("skill-a", """
             ---
             name: Duplicate Skill
@@ -245,13 +245,13 @@ public class SkillRegistryTests : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // GetBySlugAsync — Direct Lookup (no full scan)
+    // GetBySlugAsync - Direct Lookup (no full scan)
     // -------------------------------------------------------------------------
 
     [Fact]
     public async Task GetBySlugAsync_DirectLookup_DoesNotLoadAllSkills()
     {
-        // Create two skills but only look up one — direct lookup should not load all
+        // Create two skills but only look up one - direct lookup should not load all
         CreateSkillFile("skill-a", "---\nname: Skill A\ndescription: Description A.\n---");
         CreateSkillFile("skill-b", "---\nname: Skill B\ndescription: Description B.\n---");
 

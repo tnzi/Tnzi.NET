@@ -240,7 +240,7 @@ import { PermissionCategory } from '@tnzi/core/services/authorization'
 type PermissionRow = ModuleFunctionDto
 
 /**
- * One grouped "surface" (panel) — every permission code sharing a prefix
+ * One grouped "surface" (panel) - every permission code sharing a prefix
  * (`user.view` / `user.create` / … → `user`), mirroring TPermissionMatrix's
  * grouping so operators see the same mental model in the catalogue browser
  * and the assignment matrix.
@@ -350,7 +350,7 @@ function onSelectModule(keys: Array<string | number>): void {
 }
 
 // ─── Permission list (headless useCrudPage: data + form modal + permission
-//     gating via authorization.permission.* — the grouped table below renders
+//     gating via authorization.permission.* - the grouped table below renders
 //     crud.items itself instead of TCrudPage) ─────────────────────────────────
 
 const crud = useCrudPage<PermissionRow>({

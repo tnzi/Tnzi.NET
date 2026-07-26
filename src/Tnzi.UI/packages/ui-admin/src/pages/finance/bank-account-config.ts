@@ -1,3 +1,5 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
+import { fmtDate } from './money'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
@@ -8,7 +10,6 @@ import {
   type BankAccountDto,
 } from '../../services/bridges/finance-bridge'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { formatDateOnly } from '@tnzi/core'
 
 /** All-optional row shape (house pattern) so ColumnDef stays assignable. */
 export type BankAccountRow = Partial<BankAccountDto>
@@ -20,28 +21,28 @@ const SCHEME_BADGE: Record<string, { label: string; type: 'info' | 'success' }> 
 
 /** Masked account number cell ("••••1234"), or a dash when unset. */
 function maskedCell(masked?: string | null): string {
-  if (!masked) return '—'
+  if (!masked) return EMPTY_DASH
   return masked.length <= 4 ? `••••${masked}` : masked
 }
 
 export function buildBankAccountColumns(t: (key: string) => string): ColumnDef<BankAccountRow>[] {
   return [
-    { key: 'name', title: t('columns.name'), minWidth: 160, primary: true, render: (r) => r.name ?? '—' },
-    { key: 'accountName', title: t('columns.account'), minWidth: 160, render: (r) => r.accountName ?? r.accountId ?? '—' },
-    { key: 'bankName', title: t('columns.bankName'), minWidth: 140, mobileHidden: true, render: (r) => r.bankName ?? '—' },
+    { key: 'name', title: t('columns.name'), minWidth: 160, primary: true, render: (r) => r.name ?? EMPTY_DASH },
+    { key: 'accountName', title: t('columns.account'), minWidth: 160, render: (r) => r.accountName ?? r.accountId ?? EMPTY_DASH },
+    { key: 'bankName', title: t('columns.bankName'), minWidth: 140, mobileHidden: true, render: (r) => r.bankName ?? EMPTY_DASH },
     {
       key: 'scheme',
       title: t('columns.scheme'),
       width: 110,
       render: (r) => {
         const meta = SCHEME_BADGE[String(r.scheme ?? '')]
-        return meta ? h(TStatusBadge, { value: String(r.scheme ?? ''), type: meta.type, label: t(meta.label) }) : '—'
+        return meta ? h(TStatusBadge, { value: String(r.scheme ?? ''), type: meta.type, label: t(meta.label) }) : EMPTY_DASH
       },
     },
     { key: 'accountNumberMasked', title: t('columns.accountNumber'), width: 130, render: (r) => maskedCell(r.accountNumberMasked) },
-    { key: 'currency', title: t('columns.currency'), width: 90, mobileHidden: true, render: (r) => r.currency ?? '—' },
-    { key: 'nextCheckNumber', title: t('columns.nextCheckNumber'), width: 130, render: (r) => String(r.nextCheckNumber ?? '—') },
-    { key: 'lastFeedSyncTime', title: t('columns.lastSync'), width: 140, mobileHidden: true, render: (r) => formatDateOnly(r.lastFeedSyncTime, { utc: true }) },
+    { key: 'currency', title: t('columns.currency'), width: 90, mobileHidden: true, render: (r) => r.currency ?? EMPTY_DASH },
+    { key: 'nextCheckNumber', title: t('columns.nextCheckNumber'), width: 130, render: (r) => String(r.nextCheckNumber ?? EMPTY_DASH) },
+    { key: 'lastFeedSyncTime', title: t('columns.lastSync'), width: 140, mobileHidden: true, render: (r) => fmtDate(r.lastFeedSyncTime) },
   ]
 }
 
@@ -54,7 +55,7 @@ function isUsAba(model: Record<string, unknown>): boolean {
   return model.scheme !== BankNumberScheme.CaEft
 }
 
-/** New records only (create form) — the starting check number is fixed after creation. */
+/** New records only (create form) - the starting check number is fixed after creation. */
 function isCreate(model: Record<string, unknown>): boolean {
   return model.id == null
 }
@@ -83,7 +84,7 @@ const LAYOUT_OPTIONS = [
  * update, leaving it blank keeps the current number; the list only ever shows
  * the masked tail. It is a custom field type because storing it at all is a
  * deployment capability (it must be encrypted at rest, so an unset encryption
- * key means the backend refuses the write) — the page reads that capability and
+ * key means the backend refuses the write) - the page reads that capability and
  * greys the input rather than letting the user type a number and eat a 400.
  * The starting check number is captured at create; afterwards it is read-only
  * in the list and changed through the row action.

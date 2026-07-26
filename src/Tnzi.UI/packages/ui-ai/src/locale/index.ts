@@ -23,3 +23,22 @@ export function createAiI18n(messages: AiLocaleMessages = en): Ref<AiLocaleMessa
 export function useAiI18n(): Ref<AiLocaleMessages> {
   return inject(AI_I18N_KEY, ref(en) as Ref<AiLocaleMessages>);
 }
+
+/**
+ * Substitute `{name}` placeholders in a message.
+ *
+ * Several catalogue entries carry placeholders (`{count}`, `{seconds}`,
+ * `{size}`); this is the one helper that fills them, so components do not each
+ * hand-roll a `.replace()`. Unknown placeholders are left untouched, which
+ * makes a typo visible instead of silently blanking the string.
+ *
+ * @example formatAiMessage(t.mcp.toolCount, { count: 12 }) // '12 tools'
+ */
+export function formatAiMessage(
+  template: string,
+  values: Readonly<Record<string, string | number>>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
+    key in values ? String(values[key]) : match,
+  );
+}

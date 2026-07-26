@@ -8,7 +8,7 @@ import { useAdminAuthStore } from './useAdminAuthStore'
 
 /** Default FEATURE FLAGS (groups / sounds / presence / limits) used as the base
  *  every real `GET /chat/config` payload is spread over. `enabled: true` here is
- *  only the flag base — it is NOT a fail-open: `loadConfig()` forces `enabled`
+ *  only the flag base - it is NOT a fail-open: `loadConfig()` forces `enabled`
  *  back to `false` whenever the config can't be confirmed (null/forbidden/empty
  *  result or a throw), so a user without `chat.use` is deny-by-default and never
  *  calls chat's 403-guarded endpoints. The pre-load `config` ref (below) likewise
@@ -37,7 +37,7 @@ export const DEFAULT_CHAT_CONFIG: ChatClientConfigDto = Object.freeze({
  * disappearing toast. Cleared once the message sends (the real DTO replaces it).
  */
 export interface ChatMessageView extends ChatMessageDto {
-  /** A send that failed — the bubble shows the red retry marker + reason. */
+  /** A send that failed - the bubble shows the red retry marker + reason. */
   failed?: boolean
   /** Failure reason surfaced in-window (the backend 403 message, etc.). */
   failReason?: string
@@ -46,7 +46,7 @@ export interface ChatMessageView extends ChatMessageDto {
 }
 
 export const useChatStore = defineStore('admin-chat', () => {
-  // Monotonic id for local (failed) message placeholders — unique per store.
+  // Monotonic id for local (failed) message placeholders - unique per store.
   let clientSeq = 0
   let bridge: ChatImBridge | null = null
 
@@ -54,7 +54,7 @@ export const useChatStore = defineStore('admin-chat', () => {
   // Deployment-level feature config (server ChatOptions projection) + this
   // user's `chat.use` grant. Starts `enabled: false` (pessimistic): chat is
   // deny-by-default, so the launcher stays hidden until GET /chat/config
-  // confirms the grant — no icon flash for a disabled user. loadConfig() flips
+  // confirms the grant - no icon flash for a disabled user. loadConfig() flips
   // it from the server value, or fails open to DEFAULT_CHAT_CONFIG.
   const config = ref<ChatClientConfigDto>({ ...DEFAULT_CHAT_CONFIG, enabled: false })
   const activeId = ref<string | null>(null)
@@ -82,7 +82,7 @@ export const useChatStore = defineStore('admin-chat', () => {
   async function fetchConversations() {
     loading.value = true
     // `?? []` keeps the `conversations` ref invariant (never undefined) even if a
-    // bridge/backend hands back null — every getter (totalUnread/sorted/map) reads it.
+    // bridge/backend hands back null - every getter (totalUnread/sorted/map) reads it.
     try { conversations.value = (await requireBridge().listConversations()) ?? [] }
     finally { loading.value = false }
   }
@@ -94,8 +94,8 @@ export const useChatStore = defineStore('admin-chat', () => {
       const cfg = await requireBridge().getConfig()
       // DENY-BY-DEFAULT: enable chat ONLY from a real config payload (the backend
       // projects `enabled` from the user's `chat.use` grant). A null / forbidden /
-      // empty result — e.g. a `{ succeeded, data: null }` envelope unwrapped to
-      // null, or a 401 during the login→redirect token transition — must NOT
+      // empty result - e.g. a `{ succeeded, data: null }` envelope unwrapped to
+      // null, or a 401 during the login→redirect token transition - must NOT
       // fail-open into `enabled: true`. Spreading such a null over DEFAULT
       // (`{ ...DEFAULT, ...null }` → enabled:true) mounted TChatHost for a user
       // WITHOUT chat.use, which then hit the 403-guarded /conversations +

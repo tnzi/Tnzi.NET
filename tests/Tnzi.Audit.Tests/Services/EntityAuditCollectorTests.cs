@@ -1,7 +1,7 @@
 namespace Tnzi.Audit.Tests.Services;
 
 /// <summary>
-/// EntityAuditCollector 单元测试 — per-request 实体变更累积与 drain 语义
+/// EntityAuditCollector 单元测试 - per-request 实体变更累积与 drain 语义
 /// </summary>
 public class EntityAuditCollectorTests
 {

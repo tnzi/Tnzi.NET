@@ -374,7 +374,7 @@ public class SummarizationMiddlewareTests
 
     #endregion
 
-    #region ResolveContextWindow — provider-aware context window
+    #region ResolveContextWindow - provider-aware context window
 
     [Fact]
     public async Task ProviderContextWindow_SmallWindow_TriggersSummarization()
@@ -426,7 +426,7 @@ public class SummarizationMiddlewareTests
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
 
-        // 摘要应被触发 — 因为 provider 的上下文窗口（32K）比全局默认（128K）小得多
+        // 摘要应被触发 - 因为 provider 的上下文窗口（32K）比全局默认（128K）小得多
         capturedMessages.ShouldNotBeNull();
         capturedMessages!.ShouldContain(m => m.Text != null && m.Text.Contains("[Conversation summary:"));
         mockChatClient.Verify(c => c.GetResponseAsync(

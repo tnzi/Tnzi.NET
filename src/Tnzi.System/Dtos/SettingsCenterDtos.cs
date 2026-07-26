@@ -50,6 +50,12 @@ public class SettingsCenterGroupDto
     public int Order { get; set; }
 
     /// <summary>
+    /// 是否为框架内置配置组（来自 <c>Tnzi.*</c> 程序集）。消费应用自有 <c>[RuntimeSetting]</c>
+    /// 组为 false。前端「内置菜单」开关关闭时只隐藏内置组，消费方配置组始终保留。
+    /// </summary>
+    public bool IsBuiltIn { get; set; }
+
+    /// <summary>
     /// 当前用户是否可修改本组（持有 <c>{group}.settings.{slug}.update</c> 码或超管）。
     /// 为 false 时前端渲染为只读（用户有 view 权但无 update 权）。
     /// </summary>

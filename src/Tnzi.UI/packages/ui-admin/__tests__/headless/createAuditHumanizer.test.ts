@@ -1,3 +1,4 @@
+import { EMPTY_DASH } from '../../src/utils/placeholders'
 import { describe, it, expect } from 'vitest'
 import { createAuditHumanizer } from '../../src/headless/createAuditHumanizer'
 import { EntityChangeType, type AuditEntityEntryDto } from '@tnzi/core/services/audit'
@@ -26,9 +27,9 @@ describe('createAuditHumanizer', () => {
     expect(h2.entity('StaffProfile')).toBe('Staff member')
   })
 
-  it('formats values: empty → em-dash, booleans, shortened GUID, plain passthrough', () => {
-    expect(h.value('')).toBe('—')
-    expect(h.value(null)).toBe('—')
+  it('formats values: empty → placeholder, booleans, shortened GUID, plain passthrough', () => {
+    expect(h.value('')).toBe(EMPTY_DASH)
+    expect(h.value(null)).toBe(EMPTY_DASH)
     expect(h.value('true')).toBe('Yes')
     expect(h.value('false')).toBe('No')
     expect(h.value('3f2504e0-4f89-41d3-9a0c-0305e82c3301')).toBe('3f2504e0…')
@@ -54,6 +55,6 @@ describe('createAuditHumanizer', () => {
   it('formatValue override takes precedence, then falls through', () => {
     const h3 = createAuditHumanizer({ formatValue: (raw) => (raw === 'X' ? 'custom' : undefined) })
     expect(h3.value('X')).toBe('custom')
-    expect(h3.value('')).toBe('—')
+    expect(h3.value('')).toBe(EMPTY_DASH)
   })
 })

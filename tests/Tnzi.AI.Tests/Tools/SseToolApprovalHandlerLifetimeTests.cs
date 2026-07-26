@@ -11,7 +11,7 @@ namespace Tnzi.AI.Tests.Tools;
 /// <summary>
 /// Verifies that <see cref="SseToolApprovalHandler"/> is registered as Singleton and does not
 /// cause a captive-dependency violation when <see cref="ApprovalRequestCollector"/> (Scoped)
-/// is also in the container — the handler must NOT directly inject the collector.
+/// is also in the container - the handler must NOT directly inject the collector.
 /// </summary>
 public class SseToolApprovalHandlerLifetimeTests
 {

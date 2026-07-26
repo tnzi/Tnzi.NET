@@ -4,6 +4,8 @@
  * Platform-agnostic dialog adapter.
  */
 
+import { createAdapterSingleton } from './singleton';
+
 export interface DialogOptions {
   title?: string;
   content?: string;
@@ -39,17 +41,16 @@ class ConsoleDialogAdapter implements DialogAdapter {
 // Singleton
 // ============================================
 
-const _fallback: DialogAdapter = new ConsoleDialogAdapter();
-let _active: DialogAdapter | null = null;
+const _slot = createAdapterSingleton<DialogAdapter>('dialog', () => new ConsoleDialogAdapter());
 
 export function setDialogAdapter(adapter: DialogAdapter): void {
-  _active = adapter;
+  _slot.set(adapter);
 }
 
 export function useDialog(): DialogAdapter {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetDialogAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

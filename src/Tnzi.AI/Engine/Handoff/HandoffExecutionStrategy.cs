@@ -3,7 +3,7 @@
 namespace Tnzi.AI.Engine.Handoff;
 
 /// <summary>
-/// Handoff 执行策略 — 管理 Agent 间的对话转接循环
+/// Handoff 执行策略 - 管理 Agent 间的对话转接循环
 /// </summary>
 public class HandoffExecutionStrategy : IExecutionStrategy
 {
@@ -126,20 +126,20 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             {
                 if (chunk.Text == null && chunk.ReasoningText == null)
                 {
-                    // 还在工具调用阶段 — 缓冲（不发给用户）
+                    // 还在工具调用阶段 - 缓冲（不发给用户）
                     preTextBuffer.Add(chunk);
                     continue;
                 }
 
-                // 第一个文本/推理 chunk 到达 — 检查 handoff
+                // 第一个文本/推理 chunk 到达 - 检查 handoff
                 if (detectedHandoff != null)
                 {
-                    // handoff 已触发 — 中止当前流，转向目标 agent
+                    // handoff 已触发 - 中止当前流，转向目标 agent
                     handoffTriggered = true;
                     break;
                 }
 
-                // 无 handoff — 释放缓冲的工具调用 chunk，然后真正流式输出
+                // 无 handoff - 释放缓冲的工具调用 chunk，然后真正流式输出
                 if (preTextBuffer.Count > 0)
                 {
                     foreach (var buffered in preTextBuffer) yield return buffered;
@@ -157,12 +157,12 @@ public class HandoffExecutionStrategy : IExecutionStrategy
 
             if (!handoffTriggered)
             {
-                // 流正常结束，无 handoff — 释放可能剩余的缓冲（如纯工具调用无文本的情况）
+                // 流正常结束，无 handoff - 释放可能剩余的缓冲（如纯工具调用无文本的情况）
                 foreach (var buffered in preTextBuffer) yield return buffered;
                 yield break;
             }
 
-            // handoff 触发 — 验证目标并循环
+            // handoff 触发 - 验证目标并循环
             if (!effectiveTargets.TryGetValue(detectedHandoff!, out var targetAgentId))
             {
                 context.Logger.LogWarning("Handoff target '{Target}' not in allowed targets", detectedHandoff);
@@ -205,12 +205,12 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 ];
         }
 
-        // Max handoffs reached — yield error chunk
+        // Max handoffs reached - yield error chunk
         yield return new AgentStreamChunk { Text = "Max handoff limit reached", FinishReason = FinishReasons.MaxHandoffs };
     }
 
     /// <summary>
-    /// 构建有效的目标列表 — 基础 Targets + 自动注入来源 Agent
+    /// 构建有效的目标列表 - 基础 Targets + 自动注入来源 Agent
     /// </summary>
     private Dictionary<string, Guid> BuildEffectiveTargets(string? previousAgentName, Guid? previousAgentId)
     {

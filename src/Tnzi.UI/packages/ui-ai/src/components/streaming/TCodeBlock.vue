@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TCodeBlock — Code syntax highlighting with copy button
+ * TCodeBlock - Code syntax highlighting with copy button
  *
  * Uses shiki for async highlighting with dual light/dark theme support.
  * Falls back to plain <pre><code> while shiki loads.
@@ -46,14 +46,14 @@ async function highlight(): Promise<void> {
     highlightedHtml.value = html;
     isLoaded.value = true;
   } catch {
-    // shiki load failed — keep fallback
+    // shiki load failed - keep fallback
     isLoaded.value = false;
   }
 }
 
 function handleCopy(): void {
   navigator.clipboard.writeText(props.code).catch(() => {
-    // Clipboard API unavailable — silent fail
+    // Clipboard API unavailable - silent fail
   });
 
   isCopied.value = true;

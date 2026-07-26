@@ -72,10 +72,29 @@ describe('useVoiceInput', () => {
       const { isListening } = useVoiceInput();
       expect(isListening.value).toBe(false);
     });
-    // Note: testing the reactive state changes (onstart → true, onend → false)
-    // requires calling the registered handlers after Object.freeze, which causes
-    // "Cannot assign to read only property" errors. The correct behavior is
-    // verified by integration/E2E tests where Vue reactivity is fully initialized.
+
+    // Regression: the returned refs used to be wrapped in `Object.freeze()`,
+    // which made the underlying `_rawValue` non-writable, so the recogniser
+    // callbacks below threw instead of updating state. Voice input was fully
+    // dead in the browser while these assertions were commented out as an
+    // alleged test-environment limitation.
+    it('flips to true on onstart and back to false on onend', () => {
+      const { isListening, start } = useVoiceInput();
+      start();
+      handlers.onstart?.();
+      expect(isListening.value).toBe(true);
+      handlers.onend?.();
+      expect(isListening.value).toBe(false);
+    });
+
+    it('surfaces a denied-microphone message and stops listening', () => {
+      const { isListening, error, start } = useVoiceInput();
+      start();
+      handlers.onstart?.();
+      handlers.onerror?.({ error: 'not-allowed' });
+      expect(error.value).toMatch(/Microphone access denied/);
+      expect(isListening.value).toBe(false);
+    });
   });
 
   describe('lang option', () => {

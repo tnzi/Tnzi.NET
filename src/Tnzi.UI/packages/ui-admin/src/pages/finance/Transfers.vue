@@ -1,5 +1,6 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage :state="crud" :all-columns="columns"
+    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="transferFormSchema"
@@ -25,7 +26,7 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createFinanceOptionSources } from './options'
 import { tsToIsoDate } from './money'
-import { buildTransferColumns, transferFormSchema, type TransferRow } from './transfer-config'
+import { buildTransferSearchFields, buildTransferColumns, transferFormSchema, type TransferRow } from './transfer-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.transfers')
@@ -34,6 +35,9 @@ const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildTransferColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildTransferSearchFields(t)
 
 function normalizeCurrency(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().toUpperCase() : null

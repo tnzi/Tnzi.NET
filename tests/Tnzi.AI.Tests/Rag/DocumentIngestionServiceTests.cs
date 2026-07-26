@@ -4,7 +4,7 @@ using Pgvector;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// DocumentIngestionService 单元测试 — 验证文档摄取管道各阶段
+/// DocumentIngestionService 单元测试 - 验证文档摄取管道各阶段
 /// </summary>
 public class DocumentIngestionServiceTests
 {

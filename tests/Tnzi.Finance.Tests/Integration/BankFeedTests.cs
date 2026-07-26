@@ -504,6 +504,70 @@ public class BankFeedTests : FinanceIntegrationTestBase
         var reloaded = await ReloadTxnAsync(txn.Id);
         reloaded.CreatedDocType.ShouldBe("Expense");
         reloaded.CreatedDocId.ShouldBe(doc.Data.DocId);
+        // Draft only: no posting, no match, and the line is still For review.
+        doc.Data.Posted.ShouldBeFalse();
+        doc.Data.Matched.ShouldBeFalse();
+        reloaded.Status.ShouldBe(BankTransactionStatus.Pending);
+    }
+
+    [Fact]
+    public async Task CreateDocument_PostAndMatch_PostsAndClearsInOneStep()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,Office supplies,-120.00\n", SingleColumnMapping());
+        await CreateDraftReconAsync(bank, -120m, new DateTime(2026, 3, 31));
+        var txn = (await TxnsAsync(bank)).Single();
+
+        var doc = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(
+            s => s.CreateDocumentAsync(txn.Id, new CreateBankDocumentDto
+            {
+                DocType = BankFeedDocType.Expense,
+                CounterAccountId = expenseAccount,
+                PaymentMethod = "Check",
+                PostAndMatch = true
+            }));
+
+        doc.Succeeded.ShouldBeTrue(doc.Message);
+        doc.Data!.Posted.ShouldBeTrue();
+        doc.Data.Matched.ShouldBeTrue();
+        doc.Data.JournalEntryId.ShouldNotBeNull();
+
+        // The reconcile flow only works if one click actually clears the line;
+        // stopping at a draft would push the operator out to the expense page.
+        var reloaded = await ReloadTxnAsync(txn.Id);
+        reloaded.Status.ShouldBe(BankTransactionStatus.Matched);
+        reloaded.MatchedJournalLineId.ShouldNotBeNull();
+        reloaded.ReconciliationLineId.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task CreateDocument_PostAndMatch_NoDraftReconciliation_Rejects400_WithoutWriting()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,Office supplies,-120.00\n", SingleColumnMapping());
+        var txn = (await TxnsAsync(bank)).Single();
+
+        var doc = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(
+            s => s.CreateDocumentAsync(txn.Id, new CreateBankDocumentDto
+            {
+                DocType = BankFeedDocType.Expense,
+                CounterAccountId = expenseAccount,
+                PostAndMatch = true
+            }));
+
+        doc.Succeeded.ShouldBeFalse();
+        doc.Code.ShouldBe(400);
+
+        // The precondition is checked BEFORE anything is created, so a rejected
+        // call must not leave an orphan draft expense nobody intends to manage.
+        var reloaded = await ReloadTxnAsync(txn.Id);
+        reloaded.CreatedDocType.ShouldBeNull();
+        reloaded.CreatedDocId.ShouldBeNull();
+        reloaded.Status.ShouldBe(BankTransactionStatus.Pending);
     }
 
     // ---- 批次 ----
@@ -556,6 +620,141 @@ public class BankFeedTests : FinanceIntegrationTestBase
         var suggest = await SuggestAsync(eur.Id);
         suggest.Succeeded.ShouldBeFalse();
         suggest.Code.ShouldBe(400);
+    }
+
+    // ── 银行规则与匹配引擎的分工（P4-3）────────────────────────
+
+    private Task<Result<BankRuleDto>> CreateRuleAsync(CreateBankRuleDto input)
+        => InScopeAsync<IBankRuleService, Result<BankRuleDto>>(s => s.CreateAsync(input));
+
+    /// <summary>
+    /// ★规则只在匹配引擎找不到对手方时才参与。
+    /// </summary>
+    /// <remarks>
+    /// 账上已经有那笔钱了还按规则再记一笔，就是重复入账——这条边界是规则功能
+    /// 能不能被信任的前提。
+    /// </remarks>
+    [Fact]
+    public async Task Suggest_RuleStandsDown_WhenTheLedgerAlreadyHasTheCounterpart()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+
+        await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Coffee",
+            DocType = BankFeedDocType.Expense,
+            CounterAccountId = meals,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "coffee" }],
+        });
+
+        // 账上已有一笔完全对得上的支出
+        await SeedBankLineAsync(bank, -25m, DateTime.UtcNow.Date);
+        var csv = $"Date,Description,Amount\n{DateTime.UtcNow:yyyy-MM-dd},COFFEE SHOP,-25.00\n";
+        await ImportCsvAsync(bank, csv, SingleColumnMapping());
+
+        var suggest = await SuggestAsync(bank);
+
+        suggest.Succeeded.ShouldBeTrue(suggest.Message);
+        suggest.Data!.Suggested.ShouldBe(1);
+        suggest.Data.RuleSuggested.ShouldBe(0);
+
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.SuggestedJournalLineId.ShouldNotBeNull();
+        txn.SuggestedRuleId.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Suggest_RuleFillsTheGap_WhenTheLedgerHasNothing()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+
+        var rule = await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Coffee",
+            DocType = BankFeedDocType.Expense,
+            CounterAccountId = meals,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "coffee" }],
+        });
+
+        var csv = $"Date,Description,Amount\n{DateTime.UtcNow:yyyy-MM-dd},COFFEE SHOP,-25.00\n";
+        await ImportCsvAsync(bank, csv, SingleColumnMapping());
+
+        var suggest = await SuggestAsync(bank);
+
+        suggest.Data!.Suggested.ShouldBe(0);
+        suggest.Data.RuleSuggested.ShouldBe(1);
+
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.SuggestedRuleId.ShouldBe(rule.Data!.Id);
+        txn.Status.ShouldBe(BankTransactionStatus.Pending);
+    }
+
+    /// <summary>
+    /// ★AutoApply 走的是「新建并对账」同一条路径：自动入账与手工点一次的结果逐字相同。
+    /// </summary>
+    [Fact]
+    public async Task Suggest_AutoApplyRule_Creates_Posts_AndMatches()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+        await CreateDraftReconAsync(bank, -25m, DateTime.UtcNow.Date);
+
+        await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Coffee auto",
+            DocType = BankFeedDocType.Expense,
+            CounterAccountId = meals,
+            AutoApply = true,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "coffee" }],
+        });
+
+        var csv = $"Date,Description,Amount\n{DateTime.UtcNow:yyyy-MM-dd},COFFEE SHOP,-25.00\n";
+        await ImportCsvAsync(bank, csv, SingleColumnMapping());
+
+        var suggest = await SuggestAsync(bank);
+
+        suggest.Succeeded.ShouldBeTrue(suggest.Message);
+        suggest.Data!.AutoCategorized.ShouldBe(1);
+
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.Status.ShouldBe(BankTransactionStatus.Matched);
+        txn.CreatedDocType.ShouldNotBeNull();
+        txn.ReconciliationLineId.ShouldNotBeNull();
+        txn.MatchedJournalLineId.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// AutoApply 规则在没有 Draft 对账时退回普通建议，而不是自作主张地入账。
+    /// </summary>
+    [Fact]
+    public async Task Suggest_AutoApplyRule_FallsBackToASuggestion_WithoutADraftReconciliation()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+
+        await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Coffee auto",
+            DocType = BankFeedDocType.Expense,
+            CounterAccountId = meals,
+            AutoApply = true,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "coffee" }],
+        });
+
+        var csv = $"Date,Description,Amount\n{DateTime.UtcNow:yyyy-MM-dd},COFFEE SHOP,-25.00\n";
+        await ImportCsvAsync(bank, csv, SingleColumnMapping());
+
+        var suggest = await SuggestAsync(bank);
+
+        suggest.Data!.AutoCategorized.ShouldBe(0);
+        suggest.Data.RuleSuggested.ShouldBe(1);
+        (await TxnsAsync(bank)).Single().Status.ShouldBe(BankTransactionStatus.Pending);
     }
 }
 

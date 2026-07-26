@@ -8,7 +8,7 @@
  * Serialized as PascalCase member names by the backend's global
  * `JsonStringEnumConverter` (C# `AuditResultType`: Success=1 / Failed=2 /
  * Warning=3). The string-valued enum keeps the wire format and member names
- * in one place — comparisons and filter option values use `AuditResultType.*`
+ * in one place - comparisons and filter option values use `AuditResultType.*`
  * directly and match the response strings.
  */
 export enum AuditResultType {
@@ -37,7 +37,7 @@ export function getAuditResultTypeLabel(type: AuditResultType): string {
  * Entity change type (maps to backend Tnzi.Audit.Entities.EntityState).
  *
  * Serialized as PascalCase member names by the backend's global
- * `JsonStringEnumConverter` (same wire format as {@link AuditResultType}) —
+ * `JsonStringEnumConverter` (same wire format as {@link AuditResultType}) -
  * string-valued members keep comparisons and rendering aligned with the
  * response strings.
  */

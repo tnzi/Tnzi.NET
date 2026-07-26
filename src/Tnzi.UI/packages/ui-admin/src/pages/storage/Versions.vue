@@ -48,11 +48,11 @@ const crud = useCrudPage<FileVersionAuditDto>({
   columns: versionColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.versions.fetch(query),
-  // Versions are produced by the file lifecycle — read-only here; the only
+  // Versions are produced by the file lifecycle - read-only here; the only
   // admin operation is the per-row Restore action below.
 })
 
-// Restore lives in the per-row More menu — admins almost always restore a
+// Restore lives in the per-row More menu - admins almost always restore a
 // single version at a time. Disabled for rows that are already `isCurrent`
 // since restoring the current version is a no-op that emits a confusing
 // audit log entry.

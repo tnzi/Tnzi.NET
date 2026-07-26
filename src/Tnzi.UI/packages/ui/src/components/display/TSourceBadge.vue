@@ -19,7 +19,7 @@ import { NTag } from 'naive-ui'
 import TSvgIcon from './TSvgIcon.vue'
 
 /**
- * `TSourceBadge` — visual marker for entity-source provenance.
+ * `TSourceBadge` - visual marker for entity-source provenance.
  *
  * Used by dual-source modules (Skills, Template, Feature, Workspace
  * Agent/Persona, …) where a list row may originate from the database,
@@ -27,9 +27,9 @@ import TSvgIcon from './TSvgIcon.vue'
  * workspace, or appsettings configuration.
  *
  * The badge encodes the source in three layers:
- *   - colour family (NTag type) — semantic hint (db=info, file=warning…)
- *   - mdi icon — quick visual recognition
- *   - text label — human-readable, i18n-resolved
+ *   - colour family (NTag type) - semantic hint (db=info, file=warning…)
+ *   - mdi icon - quick visual recognition
+ *   - text label - human-readable, i18n-resolved
  *
  * Consumers pass either the canonical English source key (`'database' |
  * 'filesystem' | 'embedded' | 'code' | 'workspace' | 'config'`) or the
@@ -55,13 +55,13 @@ export type SourceKind =
 
 interface Props {
   /**
-   * Source key — accepts string (backend convention) or number (enum value
+   * Source key - accepts string (backend convention) or number (enum value
    * serialised as numeric, like ASP.NET Core's default System.Text.Json
    * config). The `numericMap` below pairs raw enum values with their
    * canonical kind so callers don't have to pre-normalise.
    */
   value: string | number | SourceKind | null | undefined
-  /** Custom label override (rare — usually let the badge derive it). */
+  /** Custom label override (rare - usually let the badge derive it). */
   label?: string
   /** Page-scoped translate helper. */
   translate?: (key: string) => string
@@ -69,7 +69,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
-// SkillSource enum (Tnzi.AI/Skills/Models/SkillDefinition.cs) — LEGACY numeric
+// SkillSource enum (Tnzi.AI/Skills/Models/SkillDefinition.cs) - LEGACY numeric
 // compatibility. With JsonStringEnumConverter installed the wire now carries the
 // member NAME string (handled by the switch below); this ordinal map only kicks
 // in for a raw `0..4` from an older payload so the badge keeps rendering.
@@ -82,14 +82,14 @@ const SKILL_SOURCE_NUMERIC: Record<number, SourceKind> = {
 }
 
 const normalized = computed<SourceKind>(() => {
-  // Legacy numeric path — interpret as SkillSource enum ordinal.
+  // Legacy numeric path - interpret as SkillSource enum ordinal.
   if (typeof props.value === 'number') {
     return SKILL_SOURCE_NUMERIC[props.value] ?? 'database'
   }
   // Primary path: the PascalCase member name string (JsonStringEnumConverter),
   // lower-cased + separator-stripped so "FileSystem" → "filesystem" etc.
   const raw = String(props.value ?? '').toLowerCase().replace(/[\s_-]/g, '')
-  // A bare numeric string (`"1"`) — legacy ordinal interpretation.
+  // A bare numeric string (`"1"`) - legacy ordinal interpretation.
   if (/^\d+$/.test(raw)) {
     return SKILL_SOURCE_NUMERIC[Number(raw)] ?? 'database'
   }

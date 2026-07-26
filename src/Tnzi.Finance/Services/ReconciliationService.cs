@@ -9,17 +9,29 @@ namespace Tnzi.Finance.Services;
 /// 完成条件：对账单期末余额 = 该科目全部已勾选行的累计净额（首次对账从零起算）。
 /// 已完成对账的差额展示被冻结为完成时刻的事实（差额 0），不随后续对账推进重算。
 /// 冲销对（原行 + 冲销行）净额为 0，可同时勾选互抵。首版限本位币科目。
-/// P3 银行流水导入落地后，匹配引擎的产出即自动生成勾选行——那些行由 <see cref="BankTransaction"/>
+/// P3 银行流水导入落地后，匹配引擎的产出即自动生成勾选行——那些行由导入的银行流水
 /// 持有（<c>MatchedJournalLineId</c>/<c>ReconciliationLineId</c> 回指），本服务不得单方面丢弃，
 /// 见 <see cref="SetLinesAsync"/>。
 /// </remarks>
 public class ReconciliationService : ApplicationService, IReconciliationService
 {
+    /// <summary>
+    /// 一次问持有者的最大行数。
+    /// </summary>
+    /// <remarks>
+    /// 契约把入参说成"有界"，而工作区的候选集其实不分页 —— 老账户上几万行是常态。
+    /// 1000 远低于 SQL Server 的 2100 参数上限，也让往返次数保持在个位数。
+    /// </remarks>
+    private const int HoldProbeBatchSize = 1000;
+
     private readonly IRepository<Reconciliation, Guid> _reconciliationRepository;
     private readonly IRepository<ReconciliationLine, Guid> _lineRepository;
     private readonly IReadOnlyRepository<JournalLine, Guid> _journalLineRepository;
     private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
-    private readonly IReadOnlyRepository<BankTransaction, Guid> _txnRepository;
+    /// <summary>
+    /// 账本之外持有勾选行的东西（银行流水等）。未注册即"无人持有"，回到引入契约前的行为。
+    /// </summary>
+    private readonly IEnumerable<IJournalLineHoldProvider> _holdProviders;
     private readonly FinanceDocumentHelper _helper;
     private readonly FinanceOptions _options;
 
@@ -29,7 +41,7 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         IRepository<ReconciliationLine, Guid> lineRepository,
         IReadOnlyRepository<JournalLine, Guid> journalLineRepository,
         IReadOnlyRepository<Account, Guid> accountRepository,
-        IReadOnlyRepository<BankTransaction, Guid> txnRepository,
+        IEnumerable<IJournalLineHoldProvider>? holdProviders,
         FinanceDocumentHelper helper,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
@@ -38,7 +50,7 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         _lineRepository = Check.NotNull(lineRepository);
         _journalLineRepository = Check.NotNull(journalLineRepository);
         _accountRepository = Check.NotNull(accountRepository);
-        _txnRepository = Check.NotNull(txnRepository);
+        _holdProviders = holdProviders ?? Enumerable.Empty<IJournalLineHoldProvider>();
         _helper = Check.NotNull(helper);
         _options = Check.NotNull(options).Value;
     }
@@ -226,11 +238,15 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         if (toRemove.Count > 0)
         {
             var removedJournalLineIds = toRemove.Select(l => l.JournalLineId).ToList();
-            var heldByStatement = await _txnRepository.AnyAsync(
-                t => t.Status == BankTransactionStatus.Matched &&
-                     t.MatchedJournalLineId != null &&
-                     removedJournalLineIds.Contains(t.MatchedJournalLineId.Value),
-                cancellationToken);
+            var heldByStatement = false;
+            foreach (var provider in _holdProviders)
+            {
+                if ((await provider.GetHoldsAsync(removedJournalLineIds, cancellationToken)).Count > 0)
+                {
+                    heldByStatement = true;
+                    break;
+                }
+            }
             if (heldByStatement)
             {
                 return Fail<ReconciliationWorksheetDto>(
@@ -403,7 +419,6 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         // 决不能物化进内存再回填 NOT IN 参数列表）；IsSelected 同查询投影，单次往返。
         // 外币口径：候选只取本币行（天然排除本位币重估/调整行），金额投影交易币口径
         var reconLines = _lineRepository.AsNoTracking();
-        var matchedTxns = _txnRepository.AsNoTracking().Where(t => t.Status == BankTransactionStatus.Matched);
         var candidates = _journalLineRepository.AsNoTracking()
             .Where(l => l.AccountId == reconciliation.AccountId && l.IsPosted &&
                         !reconLines.Any(rl => rl.JournalLineId == l.Id && rl.ReconciliationId != reconciliation.Id));
@@ -423,12 +438,36 @@ public class ReconciliationService : ApplicationService, IReconciliationService
                 Memo = l.Memo ?? l.JournalEntry.Memo,
                 Debit = foreign ? l.TxnDebit : l.Debit,
                 Credit = foreign ? l.TxnCredit : l.Credit,
-                IsSelected = reconLines.Any(rl => rl.JournalLineId == l.Id && rl.ReconciliationId == reconciliation.Id),
-                // 同查询的 EXISTS 反连接（同 IsSelected 先例，不物化进内存）：
-                // 该行是否被某笔已匹配的银行流水持有 → 呈现端禁用勾选框
-                IsStatementMatched = matchedTxns.Any(t => t.MatchedJournalLineId == l.Id)
+                IsSelected = reconLines.Any(rl => rl.JournalLineId == l.Id && rl.ReconciliationId == reconciliation.Id)
             })
             .ToListAsync(cancellationToken);
+
+        // 该行是否被账本之外的东西（已匹配的银行流水）持有 → 呈现端禁用勾选框。
+        // 从"同查询 EXISTS"改为"候选物化后再问一次"：持有者不在会计内核里，为它保留一个
+        // 可组合进表达式树的 IQueryable 就得把银行域焊死在内核上。入参是**已经在内存里**
+        // 的这一页候选（`lines` 刚 ToListAsync 出来），所以只是多一次有界往返，
+        // 不是把只增不减的持有者全集物化出来。
+        // ★分批问：候选集在一个经营多年的银行科目上可以是几万行（工作区目前不分页），
+        // 整批塞进 IN 列表会撞上 SQL Server 的 2100 参数上限，工作区就此打不开。
+        if (lines.Count > 0)
+        {
+            var heldIds = new HashSet<Guid>();
+            foreach (var chunk in lines.Select(l => l.JournalLineId).Chunk(HoldProbeBatchSize))
+            {
+                foreach (var provider in _holdProviders)
+                {
+                    var held = await provider.GetHoldsAsync(chunk, cancellationToken);
+                    foreach (var hold in held)
+                        heldIds.Add(hold.JournalLineId);
+                }
+            }
+
+            if (heldIds.Count > 0)
+            {
+                foreach (var line in lines.Where(l => heldIds.Contains(l.JournalLineId)))
+                    line.IsStatementMatched = true;
+            }
+        }
 
         decimal clearedBalance;
         decimal difference;

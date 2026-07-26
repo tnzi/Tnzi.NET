@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.Providers;
 
 /// <summary>
-/// Chat 消息处理器 — 处理特定 AI 提供商的消息格式差异。
+/// Chat 消息处理器 - 处理特定 AI 提供商的消息格式差异。
 /// </summary>
 /// <remarks>
 /// 不同 AI 提供商在消息格式上存在差异（如 DeepSeek 的 reasoning_content、

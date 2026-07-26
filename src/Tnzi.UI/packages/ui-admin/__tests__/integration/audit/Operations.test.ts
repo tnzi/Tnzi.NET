@@ -32,7 +32,7 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
   }),
   // The bridge re-exports `AuditResultType` / `EntityChangeType` so pages read
   // the enum values without reaching into `@tnzi/core/services/audit`. Both are
-  // PascalCase string enums (global JsonStringEnumConverter) — mirror that here.
+  // PascalCase string enums (global JsonStringEnumConverter) - mirror that here.
   AuditResultType: {
     Success: 'Success',
     Failed: 'Failed',

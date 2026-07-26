@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TLangSwitch` — minimal language switcher backed by an NPopselect dropdown.
+ * `TLangSwitch` - minimal language switcher backed by an NPopselect dropdown.
  *
  * Stays presentational: emits the new locale, lets the consumer wire it to
  * `vue-i18n` / their own store. Default options cover `en` and `zh-CN`,
@@ -9,7 +9,7 @@
  * The trigger is wrapped in a real `<span>` element: `TButtonIcon` renders
  * `NTooltip > NButton`, and NTooltip (a VBinder popover) has a non-element
  * fragment root. NPopselect attaches its follow-target via a runtime
- * directive on the trigger slot's root — on a fragment root the directive
+ * directive on the trigger slot's root - on a fragment root the directive
  * cannot bind ("Runtime directive used on component with non-element root
  * node"), the follower never gets a target rect, and the dropdown rendered
  * at the viewport origin (0,0). The span gives the directive a measurable
@@ -74,7 +74,7 @@ const popselectOptions = computed(() =>
     trigger="click"
     @update:value="onSelect"
   >
-    <!-- Single-element trigger root — see the component doc comment. -->
+    <!-- Single-element trigger root - see the component doc comment. -->
     <span class="t-lang-switch" v-bind="$attrs">
       <TButtonIcon icon="mdi:translate" :tooltip="tooltip" />
     </span>

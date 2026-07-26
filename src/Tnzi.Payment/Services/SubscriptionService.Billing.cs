@@ -302,6 +302,22 @@ public partial class SubscriptionService
             return;
         }
 
+        // 渠道不可用 / 不支持无人值守扣款（如 PayPal）时，ChargeOffSessionAsync 在建单前就返回失败，
+        // 不产生任何支付事件，状态机拿不到回流：订阅既不推进也不降级，会被每轮扫描无限重扫。
+        // 因此在此显式走失败分支，与"无已保存支付方式"同样降级 PastDue，交宽限期/重试上限收口。
+        var provider = _paymentProviderFactory.GetProvider(subscription.ChannelCode);
+        if (provider == null || !provider.SupportsOffSessionCharge)
+        {
+            await ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+            {
+                Purpose = purpose,
+                SubscriptionId = subscription.Id,
+                SubscriptionNo = subscription.SubscriptionNo,
+                FailReason = ErrorCodes.PaymentOffSessionNotSupported
+            }, cancellationToken);
+            return;
+        }
+
         var meta = new SubscriptionBillingMetadata
         {
             Purpose = purpose,

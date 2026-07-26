@@ -26,7 +26,7 @@ public partial class AIModule
         services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
         services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
 
-        // Workflow 子接口转发 — NoOpWorkflowService 已实现 IWorkflowService
+        // Workflow 子接口转发 - NoOpWorkflowService 已实现 IWorkflowService
         //（继承 IWorkflowExecutionControlService + IWorkflowExecutionQueryService），
         // 但 DI 不会自动转发子接口，需显式注册以消除 GetService<T>() null-check 脆弱性
         services.TryAddScoped<IWorkflowExecutionControlService>(sp =>
@@ -34,11 +34,11 @@ public partial class AIModule
         services.TryAddScoped<IWorkflowExecutionQueryService>(sp =>
             (IWorkflowExecutionQueryService)sp.GetRequiredService<IWorkflowService>());
 
-        // 其他 Category D NoOp 回退 — 已在核心被 GetService<T>() 消费
+        // 其他 Category D NoOp 回退 - 已在核心被 GetService<T>() 消费
         services.TryAddScoped<IWorkflowExecutionMailbox, NoOpWorkflowExecutionMailbox>();
         services.TryAddScoped<IAgentStreamForwarder, NoOpAgentStreamForwarder>();
 
-        // Category C NoOp 回退 — 接口在核心定义、实现在子模块，防止 DI 解析失败
+        // Category C NoOp 回退 - 接口在核心定义、实现在子模块，防止 DI 解析失败
         services.TryAddScoped<ISkillService, NoOpSkillService>();
         services.TryAddScoped<ISkillStore, NoOpSkillStore>();
         services.TryAddScoped<ISkillTemplateEngine, NoOpSkillTemplateEngine>();
@@ -47,7 +47,7 @@ public partial class AIModule
         services.TryAddScoped<ISkillRequirementsValidator, NoOpSkillRequirementsValidator>();
         services.TryAddScoped<IVectorStore, NoOpVectorStore>();
 
-        // RAG 文本检索回退 — 用户/子模块（Tnzi.AI.Rag）可注册真实 ITextSearchService 连接向量存储
+        // RAG 文本检索回退 - 用户/子模块（Tnzi.AI.Rag）可注册真实 ITextSearchService 连接向量存储
         services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
     }
 
@@ -113,11 +113,11 @@ public partial class AIModule
 
     // ───────────────────────── 引擎服务注册（Configure 阶段） ─────────────────────────
 
-    // Per-provider resilience pipelines — Polly keys its circuit state by HttpClient
+    // Per-provider resilience pipelines - Polly keys its circuit state by HttpClient
     // name, so giving each provider a unique name isolates their breakers. A 429 on
     // one provider cannot open circuits on the others.
     // Thinking injection / reasoning extraction run inside the OpenAI SDK pipeline
-    // (ThinkingRequestPolicy), not as DelegatingHandlers — the latter don't compose
+    // (ThinkingRequestPolicy), not as DelegatingHandlers - the latter don't compose
     // with HttpClientPipelineTransport.
     private static void ConfigureAiResilience(HttpStandardResilienceOptions options)
     {
@@ -141,7 +141,7 @@ public partial class AIModule
             var providerName = providerChild.Key;
             if (string.IsNullOrWhiteSpace(providerName)) continue;
 
-            // Skip providers explicitly disabled in config — no point wiring up a
+            // Skip providers explicitly disabled in config - no point wiring up a
             // circuit for a client that will never be resolved.
             if (providerChild.GetValue("Enabled", defaultValue: true) == false) continue;
 
@@ -149,13 +149,13 @@ public partial class AIModule
                 .AddStandardResilienceHandler(ConfigureAiResilience);
         }
 
-        // Fallback client — shared pipeline for providers added dynamically at runtime
+        // Fallback client - shared pipeline for providers added dynamically at runtime
         // (not listed in AI:Providers). Same-name circuit state is shared across them;
         // static configuration is the recommended production setup.
         services.AddHttpClient(ResilientHttpClientNames.Fallback)
             .AddStandardResilienceHandler(ConfigureAiResilience);
 
-        // A2A 客户端 — 禁用自动重定向以防止 SSRF 通过 302 Location 绕过 EgressGuard
+        // A2A 客户端 - 禁用自动重定向以防止 SSRF 通过 302 Location 绕过 EgressGuard
         services.AddHttpClient("Tnzi.AI.A2A")
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 
@@ -177,7 +177,7 @@ public partial class AIModule
         services.AddSingleton<IChatClientProvider, AnthropicChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
 
-        // Multi-model provider message processors — 扩展点，用于处理特定提供商的消息格式差异。
+        // Multi-model provider message processors - 扩展点，用于处理特定提供商的消息格式差异。
         // ThinkTagChatMessageProcessorBase 处理 <think> 标签（MiniMax/Kimi/GLM 共用），DeepSeek/Gemini 为预留直通。
         // 应用代码可通过 IEnumerable<IChatMessageProcessor> 注入并按 ProviderName 匹配使用。
         services.AddSingleton<IChatMessageProcessor, DeepSeekChatMessageProcessor>();
@@ -212,7 +212,7 @@ public partial class AIModule
         services.TryAddSingleton<IMcpPromptProvider, McpPromptProvider>();
 
         // MCP Client 管理面：外部 MCP Server 注册表 CRUD（运行时凭证经 IMcpServerCatalog 消费）。
-        // Data Protection — 模块内唯一注册点（幂等，内部 TryAdd，与应用注册共存）；
+        // Data Protection - 模块内唯一注册点（幂等，内部 TryAdd，与应用注册共存）；
         // 消费方：McpServerRegistryService/McpServerCatalog（MCP AuthToken）、ProviderService/ChatClientFactory（Provider ApiKey）。
         services.AddDataProtection();
         services.AddScoped<IMcpServerRegistryService, McpServerRegistryService>();
@@ -260,7 +260,7 @@ public partial class AIModule
         services.AddScoped<IQuotaService>(sp => sp.GetRequiredService<QuotaService>());
         services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
 
-        // Provider entity CRUD (Phase 5 backend prereq) — entity-driven provider management
+        // Provider entity CRUD (Phase 5 backend prereq) - entity-driven provider management
         // with encrypted credential storage. IDataProtectionProvider 由 RegisterToolAndAgentInfrastructure
         // 中的单次 AddDataProtection() 提供（本方法在其后执行，无需重复注册）。
         services.AddScoped<IProviderService, ProviderService>();
@@ -288,7 +288,7 @@ public partial class AIModule
 
     private static void RegisterBuiltInToolsAndGuardrails(IServiceCollection services)
     {
-        // [RequiresSkill] 兜底中间件 — 工具调用前检查 Skill 是否已加载
+        // [RequiresSkill] 兜底中间件 - 工具调用前检查 Skill 是否已加载
         services.AddScoped<IToolExecutionMiddleware, RequiresSkillToolMiddleware>();
 
         // 注册内置工具（默认提供，运行时根据配置决定是否使用）
@@ -369,7 +369,7 @@ public partial class AIModule
         services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
         services.AddScoped<IAgentRuntime, AgentRuntime>();
 
-        // Sub-agent cancellation registry — Singleton so the background Task.Run closure
+        // Sub-agent cancellation registry - Singleton so the background Task.Run closure
         // and the cancel signal path both see the same in-process registry.
         services.AddSingleton<ISubAgentRunCancellationRegistry, SubAgentRunCancellationRegistry>();
 
@@ -388,8 +388,7 @@ public partial class AIModule
         services.AddScoped<IEvaluationService, EvaluationService>();
         services.AddScoped<IEvaluationMetricsService, EvaluationMetricsService>();
 
-        // 注册 AgentPersona、UserProfile 和 AgentArtifact 服务
-        services.AddScoped<IAgentPersonaService, AgentPersonaService>();
+        // 注册 UserProfile 和 AgentArtifact 服务
         services.AddScoped<IUserProfileService, UserProfileService>();
         services.AddScoped<IAgentArtifactService, AgentArtifactService>();
         services.AddScoped<IAgentTaskService, AgentTaskService>();
@@ -404,9 +403,9 @@ public partial class AIModule
         services.TryAddScoped<AgentRunControlTools>();
     }
 
-    private static void RegisterUtilitiesWorkspaceAndEvents(ServiceConfigurationContext context, IServiceCollection services)
+    private static void RegisterUtilitiesWorkspaceAndEvents(IServiceCollection services)
     {
-        // IAiUtility — 轻量级系统级 AI 调用
+        // IAiUtility - 轻量级系统级 AI 调用
         services.TryAddScoped<IAiUtility, AiUtilityService>();
 
         // Workspace agent provider (file-based AGENT.md discovery)
@@ -421,10 +420,6 @@ public partial class AIModule
         // Thread title generation event handler
         services.AddEventHandler<ThreadFirstReplyCompletedEvent, ThreadTitleGenerationHandler>();
         services.AddEventHandler<ThreadDeletedEvent, ThreadCleanupHandler>();
-        // Persona cache invalidation — evicts ContextInjectionMiddleware's static cache
-        // when an admin edits or deletes an AgentPersona (single handler, two events).
-        services.AddEventHandler<AgentPersonaUpdatedEvent, AgentPersonaCacheInvalidationHandler>();
-        services.AddEventHandler<AgentPersonaDeletedEvent, AgentPersonaCacheInvalidationHandler>();
 
         // 嵌入式 AI 客户端（直接调用 IAgentRuntime，绕过 HTTP）
         services.TryAddScoped<ITnziAiClient, TnziAiClient>();
@@ -445,17 +440,17 @@ public partial class AIModule
         services.AddSingleton<IReadabilityExtractor, SmartReaderExtractor>();
 
         // Phase 6: 端口分配器（线程安全，socket 绑定验证）
-        services.AddTnziOptions<PortAllocatorOptions, PortAllocatorOptionsValidator>(context.Configuration, "AI:PortAllocator");
+        // Options 绑定在 PreConfigureServicesAsync 统一完成（框架约定），此处只注册服务。
         services.AddSingleton<IPortAllocator, PortAllocator>();
     }
 
     private static void RegisterSqlToolSuite(IServiceCollection services)
     {
-        // SQL tool suite — manual registration per framework rule #1.
+        // SQL tool suite - manual registration per framework rule #1.
         // Permission check defaults to DenyAll (fail-secure); applications opt into a permissive
         // implementation by replacing this registration with FrameworkPermissionSqlCheck or
         // their own IReadOnlySqlPermissionCheck. The DbConnection factory MUST be registered
-        // by the application — without it, IReadOnlySqlExecutor cannot be resolved.
+        // by the application - without it, IReadOnlySqlExecutor cannot be resolved.
         services.AddSingleton<ISqlValidator, RestrictiveSqlValidator>();
         services.AddSingleton<ISqlColumnInferrer, HeuristicSqlColumnInferrer>();
         services.AddSingleton<ISqlSchemaProvider, TSqlSchemaProvider>();

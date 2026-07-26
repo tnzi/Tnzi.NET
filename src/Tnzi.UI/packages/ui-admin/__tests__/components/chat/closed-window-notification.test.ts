@@ -85,7 +85,7 @@ const payload = (id: string): NewMessagePayload => ({
 })
 
 // ── Tests ──────────────────────────────────────────────────────────────────
-describe('TChatHost — closed window still notifies for the last active conversation', () => {
+describe('TChatHost - closed window still notifies for the last active conversation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     capturedOnNewMessage = undefined

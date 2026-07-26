@@ -2,7 +2,7 @@ namespace Tnzi.Settings;
 
 /// <summary>
 /// 配置中心单个字段定义。Key 必须是完整配置路径（如 "AI:Budget:Enabled"），
-/// 与 Setting 表的 Key 和 IConfiguration 键一致 — 这是值能经
+/// 与 Setting 表的 Key 和 IConfiguration 键一致 - 这是值能经
 /// SettingConfigurationProvider 流入 IOptionsMonitor 热生效的前提。
 /// </summary>
 [ExperimentalApi(Reason = "Settings center contract is new and may evolve")]

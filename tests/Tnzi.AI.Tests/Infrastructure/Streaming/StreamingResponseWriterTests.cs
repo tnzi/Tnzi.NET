@@ -7,7 +7,7 @@ using Xunit;
 namespace Tnzi.AI.Tests.Infrastructure.Streaming;
 
 /// <summary>
-/// F6: StreamingResponseWriter serializer is injectable — DefaultJsonOptions is
+/// F6: StreamingResponseWriter serializer is injectable - DefaultJsonOptions is
 /// public and WriteEventAsync accepts an optional JsonSerializerOptions override.
 /// </summary>
 public class StreamingResponseWriterTests

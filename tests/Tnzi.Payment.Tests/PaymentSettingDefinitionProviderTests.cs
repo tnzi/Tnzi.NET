@@ -3,7 +3,7 @@ using Tnzi.Payment.Options;
 namespace Tnzi.Payment.Tests;
 
 /// <summary>
-/// PaymentOptions 配置中心特性测试 — 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
+/// PaymentOptions 配置中心特性测试 - 验证 [RuntimeSettingGroup]/[RuntimeSetting] 特性派生的分组符合配置中心契约
 /// </summary>
 public class PaymentSettingDefinitionProviderTests
 {

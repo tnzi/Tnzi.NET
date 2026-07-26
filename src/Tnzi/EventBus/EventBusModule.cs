@@ -39,7 +39,7 @@ public class EventBusModule : TnziInfrastructureModule
         {
             // 使用 NullLogger，因为此时服务还未完全注册
             // 实际的注册信息会在运行时通过 LocalEventBus 的日志记录
-            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<EventBusModule>.Instance;
+            var logger = NullLogger<EventBusModule>.Instance;
             AutoRegisterEventHandlers(services, options, logger);
         }
 
@@ -289,41 +289,10 @@ public class EventBusModule : TnziInfrastructureModule
     }
 
     /// <summary>
-    /// 验证类型是否为有效的事件处理器
-    /// 注意：此方法主要用于外部调用，内部已优化为直接检查特性
-    /// </summary>
-    private bool IsValidEventHandlerType(Type type)
-    {
-        // 必须是类且非抽象
-        if (!type.IsClass || type.IsAbstract)
-            return false;
-
-        // 不能是泛型类型定义
-        if (type.IsGenericTypeDefinition)
-            return false;
-
-        // 不能有 IgnoreEventHandlerAttribute 特性
-        if (type.HasAttribute<IgnoreEventHandlerAttribute>())
-            return false;
-
-        // 必须实现 IEventHandler<TEvent> 接口
-        var eventHandlerInterface = type.GetInterfaces()
-            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
-
-        return eventHandlerInterface != null;
-    }
-
-    /// <summary>
-    /// 获取处理器生命周期
+    /// 获取处理器生命周期（当前统一取配置值，handlerType 保留给按类型定制的扩展点）
     /// </summary>
     private ServiceLifetime GetHandlerLifetime(Type handlerType, EventBusOptions options)
     {
-        // 注意：如果将来需要支持通过特性指定处理器生命周期，可以在这里检查
-        // 示例实现：
-        // var lifetimeAttribute = handlerType.GetAttribute<EventHandlerLifetimeAttribute>();
-        // if (lifetimeAttribute != null)
-        //     return lifetimeAttribute.Lifetime;
-
         return options.DefaultHandlerLifetime;
     }
 

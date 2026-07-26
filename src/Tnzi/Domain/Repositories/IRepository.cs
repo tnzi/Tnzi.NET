@@ -24,7 +24,7 @@ public interface IRepository<TEntity> : IReadOnlyRepository<TEntity>
     /// <summary>
     /// Flush pending changes for this repository's underlying DbContext.
     /// Useful when callers need a previously-staged Insert/Update to be visible to
-    /// subsequent queries within the same UnitOfWork transaction — by default the
+    /// subsequent queries within the same UnitOfWork transaction - by default the
     /// repository defers SaveChanges when a transaction is enabled, so writes only
     /// land at commit time. Default implementation is a no-op; EF Core repository overrides.
     /// </summary>

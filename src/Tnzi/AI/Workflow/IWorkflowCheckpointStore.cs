@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow;
 
 /// <summary>
-/// 工作流检查点存储抽象 — 持久化工作流执行状态，支持断点续执行
+/// 工作流检查点存储抽象 - 持久化工作流执行状态，支持断点续执行
 /// </summary>
 /// <remarks>
 /// 默认实现为 DatabaseWorkflowCheckpointStore（基于 IRepository）。

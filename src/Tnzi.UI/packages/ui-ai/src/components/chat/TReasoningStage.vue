@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * @experimental
- * TReasoningStage — Manus-style collapsible reasoning/stage block.
+ * TReasoningStage - Manus-style collapsible reasoning/stage block.
  *
  * Renders a card with a leading status circle (spinning loader when
  * running, filled check when done) + title row + collapsible body. Use
@@ -17,7 +17,7 @@ export type ReasoningStageStatus = 'running' | 'done' | 'error'
 
 withDefaults(
   defineProps<{
-    /** Current status — drives the status-circle icon + animation. */
+    /** Current status - drives the status-circle icon + animation. */
     status?: ReasoningStageStatus
     /** Title shown on the head row. Falls back to a status-derived label. */
     title?: string
@@ -97,8 +97,8 @@ withDefaults(
   font-size: 11px;
 }
 .t-reasoning-stage__status--error {
-  background: #dc2626;
-  color: #ffffff;
+  background: var(--tnzi-ai-danger);
+  color: var(--tnzi-ai-on-accent);
   font-size: 11px;
 }
 .t-reasoning-stage__title {

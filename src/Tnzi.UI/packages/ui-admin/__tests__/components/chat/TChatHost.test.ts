@@ -48,7 +48,7 @@ vi.mock('../../../src/headless/useBreakpoint', () => ({
 
 vi.mock('pinia-plugin-persistedstate', () => ({ default: vi.fn() }))
 
-// Client mock — toggled per test
+// Client mock - toggled per test
 let mockClient: object | undefined = {}
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: (required?: boolean) => {

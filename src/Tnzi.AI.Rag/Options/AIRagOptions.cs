@@ -163,7 +163,7 @@ public class ParentDocumentRetrievalOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 窗口大小 — 匹配块前后各扩展的块数（默认 2）
+    /// 窗口大小 - 匹配块前后各扩展的块数（默认 2）
     /// </summary>
     [RuntimeSetting(Label = "Parent Window Size", I18n = "admin.modules.system.settings.fields.ragParentWindowSize",
         Type = SettingFieldType.Int, Min = 1, Max = 10, Subsection = "Parent Retrieval",

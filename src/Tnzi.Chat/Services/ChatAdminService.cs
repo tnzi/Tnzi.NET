@@ -13,7 +13,7 @@ public class ChatAdminService : ApplicationService, IChatAdminService
     private readonly IRepository<UserPresence, Guid> _presenceRepository;
     private readonly IRepository<BroadcastLog, Guid> _broadcastLogRepository;
     private readonly IChatContactService _contactService;
-    private readonly IOptionsSnapshot<ChatOptions> _options;
+    private readonly IOptionsSnapshot<PresenceOptions> _presenceOptions;
     private readonly IConnectionManager? _connectionManager;
 
     public ChatAdminService(
@@ -24,7 +24,7 @@ public class ChatAdminService : ApplicationService, IChatAdminService
         IRepository<UserPresence, Guid> presenceRepository,
         IRepository<BroadcastLog, Guid> broadcastLogRepository,
         IChatContactService contactService,
-        IOptionsSnapshot<ChatOptions> options,
+        IOptionsSnapshot<PresenceOptions> presenceOptions,
         IConnectionManager? connectionManager = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
@@ -33,7 +33,7 @@ public class ChatAdminService : ApplicationService, IChatAdminService
         _presenceRepository = Check.NotNull(presenceRepository);
         _broadcastLogRepository = Check.NotNull(broadcastLogRepository);
         _contactService = Check.NotNull(contactService);
-        _options = Check.NotNull(options);
+        _presenceOptions = Check.NotNull(presenceOptions);
         _connectionManager = connectionManager;
     }
 
@@ -212,7 +212,8 @@ public class ChatAdminService : ApplicationService, IChatAdminService
             records = records.Where(r => r.Status == query.Status.Value).ToList();
 
         var tracking = _connectionManager != null;
-        var allowInvisible = _options.Value.AllowInvisible;
+        var allowInvisible = _presenceOptions.Value.AllowInvisible;
+        var autoAwayEnabled = _presenceOptions.Value.AutoAwayEnabled;
         var onlineIds = tracking
             ? (await _connectionManager!.GetAllOnlineUserIdsAsync()).ToHashSet()
             : new HashSet<Guid>();
@@ -224,7 +225,7 @@ public class ChatAdminService : ApplicationService, IChatAdminService
         foreach (var r in records)
         {
             var hasConn = onlineIds.Contains(r.UserId);
-            var effective = ComputeEffective(r.Status, hasConn, tracking, allowInvisible);
+            var effective = PresenceResolver.Resolve(r.Status, hasConn, tracking, allowInvisible, r.IsAutoAway, autoAwayEnabled);
             if (query.OnlineOnly && effective == UserPresenceStatus.Offline) continue;
 
             profiles.TryGetValue(r.UserId, out var p);
@@ -282,19 +283,6 @@ public class ChatAdminService : ApplicationService, IChatAdminService
 
         return Ok<IPagedList<BroadcastLogDto>>(
             new PagedList<BroadcastLogDto>(items, query.PageIndex, query.PageSize, total));
-    }
-
-    /// <summary>有效状态解析，与 <see cref="PresenceService.ResolveEffectiveAsync"/> 同语义。</summary>
-    private static UserPresenceStatus ComputeEffective(UserPresenceStatus intent, bool hasConnection, bool connectionTracking, bool allowInvisible)
-    {
-        // 部署禁用隐身时，历史隐身意图不再隐藏——按在线意图解析（仍受连接约束）。
-        if (!allowInvisible && intent == UserPresenceStatus.Invisible)
-            intent = UserPresenceStatus.Online;
-        if (intent == UserPresenceStatus.Invisible || intent == UserPresenceStatus.Offline)
-            return UserPresenceStatus.Offline;
-        if (!connectionTracking)
-            return intent; // manual-only (no SignalR) — show chosen status as-is
-        return hasConnection ? intent : UserPresenceStatus.Offline;
     }
 
     private async Task<List<AdminConversationListItemDto>> MapListAsync(List<Conversation> rows)

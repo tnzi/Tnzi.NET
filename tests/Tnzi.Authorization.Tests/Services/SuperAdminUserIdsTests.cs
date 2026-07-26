@@ -6,7 +6,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.Authorization.Tests.Services;
 
 /// <summary>
-/// Unit tests for <see cref="FunctionAuthorizationService.GetSuperAdminUserIdsAsync"/> —
+/// Unit tests for <see cref="FunctionAuthorizationService.GetSuperAdminUserIdsAsync"/> -
 /// the forward "list every super-admin user id" lookup used to strip super admins out
 /// of business-facing user listings (chat directory, group members, broadcast audience).
 /// Repositories are mocked via the <c>ToListAsync(predicate)</c> overload (in-memory

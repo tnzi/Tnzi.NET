@@ -10,6 +10,11 @@ import {
   CashFlowActivity,
   JournalEntryStatus,
   FinanceDocumentStatus,
+  FinanceOfferStatus,
+  BankRuleField,
+  BankRuleOperator,
+  BankRuleMatchMode,
+  BankRuleDirection,
   PaymentDirection,
   FinancePartyType,
   SettlementDocType,
@@ -57,7 +62,7 @@ export interface AccountTreeDto extends AccountDto {
 }
 
 export interface GetAccountBalancesDto {
-  /** Account ids (de-duplicated; max 500 per request — batch beyond that). */
+  /** Account ids (de-duplicated; max 500 per request - batch beyond that). */
   accountIds: string[];
   /** As-of date, inclusive. Omit for today (UTC). */
   asOf?: string | null;
@@ -71,7 +76,7 @@ export interface AccountBalanceDto {
   credit: number;
   /**
    * Signed balance (debit - credit). Not sign-normalised: liability/equity/income
-   * accounts are naturally negative — flip by rootType at the presentation layer
+   * accounts are naturally negative - flip by rootType at the presentation layer
    * if you want them positive.
    */
   balance: number;
@@ -147,9 +152,9 @@ export interface JournalEntryDto {
   exchangeRate: number;
   sourceType?: string | null;
   sourceId?: string | null;
-  /** Base-currency debit total. 0 while draft — use txnTotalDebit. */
+  /** Base-currency debit total. 0 while draft - use txnTotalDebit. */
   totalDebit: number;
-  /** Base-currency credit total. 0 while draft — use txnTotalCredit. */
+  /** Base-currency credit total. 0 while draft - use txnTotalCredit. */
   totalCredit: number;
   /**
    * Transaction-currency debit total; the only total a draft has.
@@ -354,6 +359,16 @@ export interface GeneralLedgerReportDto {
     pageIndex: number;
     pageSize: number;
   };
+  /**
+   * A keyword / source-type filter was applied.
+   *
+   * When true the backend zeroes `openingBalance`, `closingBalance` and every
+   * row's `runningBalance`: a running balance accumulates down an unbroken row
+   * chain, and filtering out the middle breaks it. The flag says "no answer",
+   * NOT "the balance is zero" - presentation MUST hide the balance columns
+   * rather than render the zeroes.
+   */
+  isFiltered?: boolean;
 }
 
 /** Indirect-method cash flow statement (net profit + balance-sheet movements by CashFlowActivity) */
@@ -1071,7 +1086,7 @@ export interface RevaluationPreviewDto {
 export interface BankAccountCapabilitiesDto {
   /**
    * Whether account numbers can be stored (`Finance:Encryption:EncryptionKey` is set).
-   * When false the backend rejects writes carrying an account number — disable the
+   * When false the backend rejects writes carrying an account number - disable the
    * field and explain, rather than failing after the user has typed it. Cheque
    * printing on pre-printed stock does not need the number; EFT does.
    */
@@ -1228,6 +1243,14 @@ export interface BankTransactionDto {
   suggestedJournalLineId?: string | null;
   matchConfidence?: number | null;
   matchRule?: string | null;
+  /** The bank rule that explains this line when the ledger has no counterpart. */
+  suggestedRuleId?: string | null;
+  suggestedRuleName?: string | null;
+  suggestedDocType?: BankFeedDocType | null;
+  suggestedCounterAccountId?: string | null;
+  suggestedCounterAccountName?: string | null;
+  suggestedPartyId?: string | null;
+  suggestedPaymentMethod?: string | null;
   balanceAfter?: number | null;
   createdDocType?: string | null;
   createdDocId?: string | null;
@@ -1311,11 +1334,25 @@ export interface CreateBankDocumentDto {
   /** Party (required for PaymentEntry). */
   partyId?: string | null;
   paymentMethod?: string | null;
+  /**
+   * One step: create the draft, post it, and confirm the match against the
+   * journal line the posting produced. Default `false` (draft only).
+   *
+   * Preconditions are identical to `confirm` (base-currency account + an open
+   * Draft reconciliation) and are checked BEFORE anything is written, so a
+   * rejected call leaves no orphan draft behind.
+   */
+  postAndMatch?: boolean;
 }
 
 export interface BankDocumentResultDto {
   docType: string;
   docId: string;
+  /** True when `postAndMatch` posted the document. */
+  posted?: boolean;
+  /** True when the bank line was confirmed against the posted journal line. */
+  matched?: boolean;
+  journalEntryId?: string | null;
 }
 
 /** Bank statement import batch. */
@@ -1597,4 +1634,587 @@ export interface BalanceSummaryVerifyDto {
   totalDifferences: number;
   /** Difference detail (first 100 only, guards against huge responses). */
   differences: BalanceSummaryDifferenceDto[];
+}
+
+/**
+ * Rolling closing date ("books are closed through this date").
+ *
+ * Orthogonal to fiscal-year close: a fiscal year locks a whole RANGE, this
+ * locks everything up to and including a date that the bookkeeper advances
+ * each month. Either lock rejects a posting with 409.
+ */
+export interface LedgerLockDto {
+  /** Inclusive. `null` = not closed. */
+  closingDate?: string | null;
+  /** Whether a password is required to change it. The hash never leaves the server. */
+  isPasswordProtected: boolean;
+  note?: string | null;
+  lastChangedTime?: string | null;
+  lastChangedBy?: string | null;
+}
+
+/** Set / advance / clear the closing date. */
+export interface SetLedgerLockDto {
+  /** `null` clears the lock. */
+  closingDate?: string | null;
+  /** Required (and must match) once a password is set, else 403. */
+  password?: string | null;
+  /** `null` = leave unchanged; `''` = clear; a value = set. */
+  newPassword?: string | null;
+  note?: string | null;
+}
+
+/**
+ * Party work-surface summary (customer or vendor).
+ *
+ * `openBalance` / `buckets` come from the SAME calculation the aging report
+ * uses, so the figure on a customer page is penny-for-penny the figure on the
+ * A/R aging report (and therefore ties out to the GL control account). Never
+ * re-derive it by summing a page of documents in the client: that only adds up
+ * the current page and produces a number that looks right and is not.
+ */
+export interface PartyLedgerSummaryDto {
+  partyId: string;
+  partyName: string;
+  partyType: FinancePartyType;
+  baseCurrency: string;
+  /** Positive = they owe us (customer) / we owe them (vendor). */
+  openBalance: number;
+  /** The past-due portion (total minus the current bucket). */
+  overdue: number;
+  buckets: AgingBucketsDto;
+  /** Sales (customer) or spend (vendor) posted in the period. */
+  periodTotal: number;
+  periodFrom: string;
+  periodTo: string;
+  openDocumentCount: number;
+  lastTransactionDate?: string | null;
+}
+
+/**
+ * One row of a party's transaction ledger, across document types.
+ *
+ * `amount` is SIGNED: positive increases what they owe (invoice / bill),
+ * negative reduces it (payment / credit memo). Read the sign rather than
+ * branching on `docType`.
+ */
+export interface PartyLedgerEntryDto {
+  /** Source token (see FINANCE_SOURCE_TYPES) - drives the drill-through target. */
+  docType: string;
+  docId: string;
+  number?: string | null;
+  docDate: string;
+  dueDate?: string | null;
+  currency: string;
+  amount: number;
+  /** Unsettled amount; only meaningful on invoices / bills, else 0. */
+  outstanding: number;
+  status: FinanceDocumentStatus;
+  /** Positive only while the document is still open and past its due date. */
+  overdueDays: number;
+}
+
+export interface PartyLedgerQueryDto extends PagedQueryDto {
+  from?: string;
+  to?: string;
+  /** Only documents that still have an unsettled balance. */
+  openOnly?: boolean;
+}
+
+/**
+ * What a caller supplies: the page it wants plus the filters. `skip` / `take`
+ * on the wire DTO are derived server-side, so requiring the UI to compute them
+ * is noise it would only get wrong.
+ */
+export type PartyLedgerQuery = Omit<PartyLedgerQueryDto, 'skip' | 'take'>;
+
+// ── Estimates and purchase orders (non-posting documents) ─────────────
+
+/** One line of an estimate / purchase order (the two share a line shape). */
+export interface OfferLineDto {
+  id: string;
+  lineNumber: number;
+  itemId?: string | null;
+  description?: string | null;
+  accountId?: string | null;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  taxCodeId?: string | null;
+}
+
+export interface CreateOfferLineDto {
+  itemId?: string | null;
+  description?: string | null;
+  accountId?: string | null;
+  quantity: number;
+  unitPrice: number;
+  taxCodeId?: string | null;
+}
+
+/**
+ * An estimate (US / QuickBooks) or quote (Xero / Commonwealth) - the same
+ * document. It never posts: there is no journal entry, no captured rate and no
+ * base-currency amount, because a promise is not a fact.
+ */
+export interface EstimateDto {
+  id: string;
+  number?: string | null;
+  status: FinanceOfferStatus;
+  customerId: string;
+  customerName?: string | null;
+  docDate: string;
+  /** Quote valid until; whether it has lapsed is read off the date, not a status. */
+  expiryDate?: string | null;
+  currency: string;
+  subTotal: number;
+  taxTotal: number;
+  total: number;
+  memo?: string | null;
+  /** Internal note; not part of what the customer receives. */
+  internalNote?: string | null;
+  /** Source token of what this became (see FINANCE_SOURCE_TYPES). */
+  convertedToDocType?: string | null;
+  convertedToDocId?: string | null;
+  creationTime: string;
+  lines: OfferLineDto[];
+}
+
+/** A purchase order - the mirror image of an estimate, aimed at a vendor. */
+export interface PurchaseOrderDto {
+  id: string;
+  number?: string | null;
+  status: FinanceOfferStatus;
+  vendorId: string;
+  vendorName?: string | null;
+  docDate: string;
+  expectedDate?: string | null;
+  currency: string;
+  subTotal: number;
+  taxTotal: number;
+  total: number;
+  memo?: string | null;
+  internalNote?: string | null;
+  shipTo?: string | null;
+  convertedToDocType?: string | null;
+  convertedToDocId?: string | null;
+  creationTime: string;
+  lines: OfferLineDto[];
+}
+
+export interface CreateEstimateDto {
+  customerId: string;
+  docDate: string;
+  expiryDate?: string | null;
+  currency?: string | null;
+  memo?: string | null;
+  internalNote?: string | null;
+  lines: CreateOfferLineDto[];
+}
+
+export interface CreatePurchaseOrderDto {
+  vendorId: string;
+  docDate: string;
+  expectedDate?: string | null;
+  currency?: string | null;
+  memo?: string | null;
+  internalNote?: string | null;
+  shipTo?: string | null;
+  lines: CreateOfferLineDto[];
+}
+
+/** Convert an estimate to an invoice / a purchase order to a bill. */
+export interface ConvertOfferDto {
+  /** Target document date; omitted = today. */
+  docDate?: string | null;
+  /** Target due date; omitted = derived from the party's payment terms. */
+  dueDate?: string | null;
+}
+
+export interface ConvertOfferResultDto {
+  sourceId: string;
+  sourceNumber?: string | null;
+  /** Source token of the created document. */
+  docType: string;
+  /** The created document is a DRAFT - posting it stays a human decision. */
+  docId: string;
+}
+
+export interface EstimateQueryDto extends PagedQueryDto {
+  keyword?: string;
+  status?: FinanceOfferStatus;
+  customerId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  /** Only documents still in play (draft / sent / accepted). */
+  openOnly?: boolean;
+}
+
+export interface PurchaseOrderQueryDto extends PagedQueryDto {
+  keyword?: string;
+  status?: FinanceOfferStatus;
+  vendorId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  openOnly?: boolean;
+}
+
+// ── Bank rules ────────────────────────────────────────────────────────
+
+export interface BankRuleConditionDto {
+  id: string;
+  lineNumber: number;
+  field: BankRuleField;
+  operator: BankRuleOperator;
+  value: string;
+}
+
+/**
+ * A bank rule answers the half of the question the match engine cannot: the
+ * ledger has no counterpart for this line, but we know what it is.
+ *
+ * Rules are ordered and the FIRST match wins (QuickBooks semantics) - results
+ * are never merged, because two rules naming different accounts would produce a
+ * number nobody can explain.
+ */
+export interface BankRuleDto {
+  id: string;
+  name: string;
+  priority: number;
+  isEnabled: boolean;
+  /** null = applies to every bank account. */
+  accountId?: string | null;
+  accountName?: string | null;
+  direction: BankRuleDirection;
+  matchMode: BankRuleMatchMode;
+  docType: BankFeedDocType;
+  counterAccountId?: string | null;
+  counterAccountName?: string | null;
+  partyId?: string | null;
+  paymentMethod?: string | null;
+  /** Books the document without asking. Per-rule, and off by default. */
+  autoApply: boolean;
+  creationTime: string;
+  conditions: BankRuleConditionDto[];
+}
+
+export interface CreateBankRuleConditionDto {
+  field: BankRuleField;
+  operator: BankRuleOperator;
+  value: string;
+}
+
+export interface CreateBankRuleDto {
+  name: string;
+  /** Omitted on create = appended to the end of the order. */
+  priority?: number | null;
+  isEnabled: boolean;
+  accountId?: string | null;
+  direction: BankRuleDirection;
+  matchMode: BankRuleMatchMode;
+  docType: BankFeedDocType;
+  counterAccountId?: string | null;
+  partyId?: string | null;
+  paymentMethod?: string | null;
+  autoApply: boolean;
+  conditions: CreateBankRuleConditionDto[];
+}
+
+export interface ReorderBankRulesDto {
+  ruleIds: string[];
+}
+
+export interface TestBankRuleDto {
+  accountId?: string | null;
+  sample?: number;
+}
+
+export interface BankRuleTestRowDto {
+  transactionId: string;
+  txnDate: string;
+  amount: number;
+  description?: string | null;
+  payee?: string | null;
+  /**
+   * Which rule actually takes this line. Different from the rule under test
+   * means a higher-priority rule got there first - the thing the operator needs
+   * to see BEFORE saving.
+   */
+  winningRuleId: string;
+  winningRuleName: string;
+}
+
+export interface BankRuleTestResultDto {
+  evaluated: number;
+  matched: number;
+  rows: BankRuleTestRowDto[];
+}
+
+export interface BankRuleQueryDto extends PagedQueryDto {
+  keyword?: string;
+  accountId?: string;
+  isEnabled?: boolean;
+}
+
+/**
+ * What a caller supplies (page + filters). `skip` / `take` are derived
+ * server-side; making the UI compute them is noise it would only get wrong.
+ */
+export type BankRuleQuery = Omit<BankRuleQueryDto, 'skip' | 'take'>;
+
+// ── Document attachments and discussion ───────────────────────────────
+
+/**
+ * A file attached to a finance document.
+ *
+ * Finance never touches Storage: the file is uploaded through the Storage API
+ * first, and only its id is linked here. `fileName` / `fileSize` are a snapshot
+ * taken at attach time so a list does not need a Storage round-trip per row.
+ */
+export interface DocumentAttachmentDto {
+  id: string;
+  sourceType: string;
+  sourceId: string;
+  fileId: string;
+  fileName: string;
+  contentType?: string | null;
+  fileSize: number;
+  caption?: string | null;
+  creatorId?: string | null;
+  creationTime: string;
+}
+
+export interface CreateDocumentAttachmentDto {
+  fileId: string;
+  fileName?: string | null;
+  contentType?: string | null;
+  fileSize: number;
+  caption?: string | null;
+}
+
+/** One internal comment on a document. Not part of what the party receives. */
+export interface DocumentCommentDto {
+  id: string;
+  sourceType: string;
+  sourceId: string;
+  body: string;
+  creatorId?: string | null;
+  creatorName?: string | null;
+  creationTime: string;
+  /** Decided server-side: author, or holder of finance.comment.delete. */
+  canDelete: boolean;
+}
+
+export interface CreateDocumentCommentDto {
+  body: string;
+}
+
+
+// ── Customer statements & dunning (P4-5) ─────────────────────
+
+/**
+ * Two statement shapes. Open Item lists what is still unpaid (what most North
+ * American businesses send); Activity lists everything that moved in a period
+ * with a running balance (what a bank statement looks like).
+ */
+export type StatementStyle = 'OpenItem' | 'Activity';
+
+/** How hard to chase. `None` means nothing is overdue enough to act on. */
+export type DunningLevel = 'None' | 'Reminder' | 'Overdue' | 'FinalNotice';
+
+export interface StatementLineDto {
+  docDate: string;
+  dueDate?: string | null;
+  docType: string;
+  docId: string;
+  number?: string | null;
+  charge: number;
+  payment: number;
+  outstanding: number;
+  overdueDays: number;
+  /** Open Item: the outstanding amount. Activity: the running balance. */
+  balance: number;
+}
+
+export interface CustomerStatementDto {
+  partyId: string;
+  partyName?: string | null;
+  partyType: FinancePartyType;
+  style: StatementStyle;
+  currency: string;
+  periodFrom: string;
+  periodTo: string;
+  openingBalance: number;
+  closingBalance: number;
+  overdue: number;
+  dunningLevel: DunningLevel;
+  buckets: AgingBucketsDto;
+  lines: StatementLineDto[];
+}
+
+export interface CustomerStatementQueryDto {
+  style?: StatementStyle;
+  from?: string;
+  to?: string;
+}
+
+/** One row of the collections worklist: who to chase, worst first. */
+export interface DunningCandidateDto {
+  partyId: string;
+  partyName?: string | null;
+  openBalance: number;
+  overdue: number;
+  oldestOverdueDays: number;
+  level: DunningLevel;
+  buckets: AgingBucketsDto;
+}
+
+// ── Tax returns (P4-7) ───────────────────────────────────────
+
+/** One line of a filing form. `isCalculated` lines are derived, not entered. */
+export interface TaxReturnLineDto {
+  /** Form line number, e.g. `101`. Wire name is `line` (not `code`). */
+  line: string;
+  label: string;
+  amount: number;
+  isCalculated: boolean;
+}
+
+export interface TaxReturnDto {
+  formCode: string;
+  formName: string;
+  country: string;
+  periodFrom: string;
+  periodTo: string;
+  currency: string;
+  netTax: number;
+  lines: TaxReturnLineDto[];
+}
+
+export interface TaxReturnFormDto {
+  country: string;
+  formCode: string;
+}
+
+// ── Recurring documents (P4-6) ───────────────────────────────
+
+export type RecurrenceFrequency = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
+export type RecurringDocKind = 'Invoice' | 'Bill' | 'Expense';
+export type RecurringStatus = 'Active' | 'Paused' | 'Ended';
+export type RecurringRunStatus = 'Generated' | 'Skipped' | 'Failed';
+
+export interface RecurringLineDto {
+  id: string;
+  lineNumber: number;
+  itemId?: string | null;
+  description?: string | null;
+  accountId?: string | null;
+  quantity: number;
+  unitPrice: number;
+  taxCodeId?: string | null;
+  amount: number;
+}
+
+export interface CreateRecurringLineDto {
+  itemId?: string | null;
+  description?: string | null;
+  accountId?: string | null;
+  quantity: number;
+  unitPrice: number;
+  taxCodeId?: string | null;
+}
+
+export interface RecurringDocumentDto {
+  id: string;
+  name: string;
+  kind: RecurringDocKind;
+  status: RecurringStatus;
+  partyId: string;
+  partyName?: string | null;
+  paidFromAccountId?: string | null;
+  currency?: string | null;
+  paymentMethod?: string | null;
+  memo?: string | null;
+  frequency: RecurrenceFrequency;
+  interval: number;
+  /** Month day (1-31, clamped to month end) or ISO weekday (1=Mon). */
+  anchorDay?: number | null;
+  startDate: string;
+  endDate?: string | null;
+  maxOccurrences?: number | null;
+  dueDays?: number | null;
+  /** null = follow the global default. */
+  autoPost?: boolean | null;
+  /** The global default already resolved in, for display. */
+  effectiveAutoPost: boolean;
+  nextRunDate: string;
+  lastRunDate?: string | null;
+  occurrenceCount: number;
+  estimatedTotal: number;
+  lines: RecurringLineDto[];
+  concurrencyStamp: string;
+}
+
+export interface CreateRecurringDocumentDto {
+  name: string;
+  kind: RecurringDocKind;
+  partyId: string;
+  paidFromAccountId?: string | null;
+  currency?: string | null;
+  paymentMethod?: string | null;
+  memo?: string | null;
+  frequency: RecurrenceFrequency;
+  interval: number;
+  anchorDay?: number | null;
+  startDate: string;
+  endDate?: string | null;
+  maxOccurrences?: number | null;
+  dueDays?: number | null;
+  autoPost?: boolean | null;
+  lines: CreateRecurringLineDto[];
+}
+
+export interface UpdateRecurringDocumentDto extends Omit<CreateRecurringDocumentDto, 'kind'> {
+  concurrencyStamp: string;
+}
+
+export interface RecurringDocumentQueryDto extends PagedQueryDto {
+  keyword?: string;
+  kind?: RecurringDocKind;
+  status?: RecurringStatus;
+  partyId?: string;
+  dueBefore?: string;
+}
+
+export interface RecurringRunDto {
+  id: string;
+  recurringDocumentId: string;
+  recurringDocumentName?: string | null;
+  periodDate: string;
+  status: RecurringRunStatus;
+  docType?: string | null;
+  docId?: string | null;
+  docNumber?: string | null;
+  posted: boolean;
+  failReason?: string | null;
+  creationTime: string;
+}
+
+export interface RecurringRunQueryDto extends PagedQueryDto {
+  recurringDocumentId?: string;
+  status?: RecurringRunStatus;
+  from?: string;
+  to?: string;
+}
+
+export interface RecurrencePreviewDto {
+  dates: string[];
+}
+
+export interface RecurringSweepResultDto {
+  templatesDue: number;
+  generated: number;
+  skipped: number;
+  failed: number;
+  runs: RecurringRunDto[];
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * `TWidgetIdentityStats` — active sessions + online users + total users.
+ * `TWidgetIdentityStats` - active sessions + online users + total users.
  *
  * Three values pulled from `identity-bridge`:
  *   - `sessions.statistics()` → active session count + online user count
@@ -10,6 +10,7 @@
  * back to em-dash on bridge errors so a missing endpoint doesn't tank
  * the entire workbench.
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
@@ -34,7 +35,7 @@ useWidgetData(async () => {
   const canSeeSessions =
     authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission('session.view')
 
-  // Parallel fetch — neither depends on the other.
+  // Parallel fetch - neither depends on the other.
   const [stats, users] = await Promise.allSettled([
     canSeeSessions ? bridge.sessions.statistics() : Promise.resolve(undefined),
     bridge.users.fetch({ pageIndex: 1, pageSize: 1, searchText: '', filters: {} }),
@@ -57,7 +58,7 @@ function t(key: string, fallback: string): string {
 }
 
 function fmt(n: number | null): string {
-  return n === null ? '—' : n.toLocaleString()
+  return n === null ? EMPTY_DASH : n.toLocaleString()
 }
 </script>
 

@@ -82,6 +82,9 @@ public class IdentityModule : TnziApplicationModule
 
         // 注册角色管理服务
         context.Services.AddScoped<IRoleService, RoleService>();
+        // 让不引用 Identity 的模块也能把 CreatorId 显示成名字（可选契约，
+        // 未加载 Identity 时根本不注册，消费方按缺失降级）。
+        context.Services.AddScoped<IUserDisplayNameProvider, UserDisplayNameProvider>();
 
         // 注册用户角色服务（用于授权模块）
         context.Services.AddScoped<IUserRoleService, UserRoleService>();
@@ -100,6 +103,12 @@ public class IdentityModule : TnziApplicationModule
 
         // 注册会话管理服务（根据配置选择实现）
         RegisterSessionService(context.Services, configuration, context.IsProduction());
+
+        // 注册登录会话协调器（多设备/单设备/限并发策略 + 令牌签发前同步建立会话）
+        context.Services.AddScoped<ILoginSessionCoordinator, LoginSessionCoordinator>();
+
+        // 注册会话维护后台服务（定期清理过期/失活会话，避免幽灵会话累积影响并发计数）
+        context.Services.AddHostedService<SessionMaintenanceBackgroundService>();
 
         // 注册登录安全服务
         context.Services.AddScoped<ILoginSecurityService, LoginSecurityService>();
@@ -182,6 +191,45 @@ public class IdentityModule : TnziApplicationModule
                         {
                             messageContext.Token = accessToken;
                         }
+                    }
+                };
+
+                // 会话强制校验：令牌携带 session_id 时，每请求校验会话仍有效（未撤销/未过期）。
+                // 这是"多设备登录/单设备/限并发"真正生效的关键 —— 会话被撤销后，被踢设备的
+                // 下一次请求即 401。无 session_id 的遗留令牌放行（向后兼容）；开关默认开，可经
+                // Identity:Session:EnforceSessionValidation 关闭退回旧行为。
+                var previousOnTokenValidated = jwtBearerOptions.Events.OnTokenValidated;
+                jwtBearerOptions.Events.OnTokenValidated = async tokenContext =>
+                {
+                    if (previousOnTokenValidated is not null)
+                    {
+                        await previousOnTokenValidated(tokenContext);
+                    }
+
+                    var services = tokenContext.HttpContext.RequestServices;
+                    var sessionOptions = services.GetService<IOptions<SessionOptions>>()?.Value;
+                    if (sessionOptions is null || !sessionOptions.EnforceSessionValidation)
+                    {
+                        return;
+                    }
+
+                    var sidClaim = tokenContext.Principal?.FindFirst(IdentityConstants.ClaimTypeNames.SessionId)?.Value;
+                    if (string.IsNullOrEmpty(sidClaim)
+                        || !Guid.TryParse(sidClaim, out var sessionId)
+                        || sessionId == Guid.Empty)
+                    {
+                        return;
+                    }
+
+                    var sessionService = services.GetService<ISessionService>();
+                    if (sessionService is null)
+                    {
+                        return;
+                    }
+
+                    if (!await sessionService.IsSessionValidAsync(sessionId))
+                    {
+                        tokenContext.Fail("Session has been revoked or expired");
                     }
                 };
             });

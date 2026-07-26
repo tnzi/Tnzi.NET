@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Dtos;
 
 /// <summary>
-/// Agent 记忆条目 DTO（列表项）— 管理端为某个 Agent 预置/管理的长期记忆。
+/// Agent 记忆条目 DTO（列表项）- 管理端为某个 Agent 预置/管理的长期记忆。
 /// </summary>
 public class AgentMemoryDto
 {

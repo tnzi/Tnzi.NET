@@ -41,7 +41,7 @@ public class HybridSearchOptions
     public double KeywordWeight { get; set; } = 0.3;
 
     /// <summary>
-    /// RRF 融合常数 K — 值越大，排名差异对得分的影响越小（默认 60）
+    /// RRF 融合常数 K - 值越大，排名差异对得分的影响越小（默认 60）
     /// </summary>
     [RuntimeSetting(Label = "Fusion Constant K", I18n = "admin.modules.system.settings.fields.ragHybridFusionConstantK",
         Type = SettingFieldType.Int, Min = 1, Max = 1000, Subsection = "Hybrid Search",

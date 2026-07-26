@@ -4,7 +4,7 @@ using Tnzi.AI.Memory;
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// Agent 记忆管理服务实现 — 直接操作 <see cref="MemoryEntry"/> 仓储，按结构化 <c>AgentId</c> 列过滤。
+/// Agent 记忆管理服务实现 - 直接操作 <see cref="MemoryEntry"/> 仓储，按结构化 <c>AgentId</c> 列过滤。
 /// </summary>
 public class AgentMemoryService : ApplicationService, IAgentMemoryService
 {

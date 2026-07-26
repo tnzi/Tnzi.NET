@@ -11,7 +11,7 @@
       </div>
       <div v-for="doc in openDocs" :key="doc.docId" class="fin-apply__row">
         <span class="fin-apply__cell" :data-label="td('apply.document')">{{ doc.number ?? doc.docId }}</span>
-        <span class="fin-apply__cell" :data-label="td('apply.dueDate')">{{ formatDateOnly(doc.dueDate, { utc: true, fallback: '—' }) }}</span>
+        <span class="fin-apply__cell" :data-label="td('apply.dueDate')">{{ fmtDate(doc.dueDate, { fallback: EMPTY_DASH }) }}</span>
         <span class="fin-apply__cell" :class="{ 'fin-apply__mismatch': !sameCurrency(doc) }" :data-label="td('apply.currency')">{{ doc.currency }}</span>
         <span class="fin-apply__cell fin-apply__num" :data-label="td('apply.outstanding')">{{ fmtAmount(doc.outstanding) }}</span>
         <!-- Different-currency documents can't be settled against this source. -->
@@ -41,13 +41,14 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, reactive, ref, watch } from 'vue'
 import { NButton, NInputNumber } from 'naive-ui'
-import { formatDateOnly } from '@tnzi/core'
+
 import { makePageTranslator } from '../../_shared/translate'
 import { useSafeMessage } from '../../_shared/safeMessage'
 import type { FinanceBridge, OpenDocumentDto, SettlementDocType, FinancePartyType } from '../../../services/bridges/finance-bridge'
-import { fmtAmount } from '../money'
+import { fmtAmount, fmtDate } from '../money'
 
 /** The source document (payment or credit memo) being allocated across open targets. */
 export interface SettlementApplySource {

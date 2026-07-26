@@ -21,12 +21,12 @@ describe('formatDateTime', () => {
   });
 
   it('honors a custom fallback for nullish input', () => {
-    expect(formatDateTime(null, { fallback: '—' })).toBe('—');
+    expect(formatDateTime(null, { fallback: '-' })).toBe('-');
   });
 
   it('returns the original string for an unparseable date (not "Invalid Date")', () => {
     expect(formatDateTime('not-a-date')).toBe('not-a-date');
-    expect(formatDateTime('not-a-date', { fallback: '—' })).toBe('not-a-date');
+    expect(formatDateTime('not-a-date', { fallback: '-' })).toBe('not-a-date');
   });
 });
 
@@ -54,7 +54,7 @@ describe('formatDateOnly', () => {
   });
 
   it('utc option keeps null/invalid semantics', () => {
-    expect(formatDateOnly(null, { utc: true, fallback: '—' })).toBe('—');
+    expect(formatDateOnly(null, { utc: true, fallback: '-' })).toBe('-');
     expect(formatDateOnly('not-a-date', { utc: true })).toBe('not-a-date');
   });
 });

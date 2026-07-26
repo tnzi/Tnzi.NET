@@ -1,11 +1,11 @@
 /**
- * Payment bridge — adapts the payment backend API to the shapes consumed by
+ * Payment bridge - adapts the payment backend API to the shapes consumed by
  * the TCrudPage-based payment pages.
  *
  * Every payment record surfaced here is an immutable financial ledger entry:
  * the admin pages are read-only lists plus lifecycle actions, never
  * create/update/delete. The contracts therefore expose ONLY `fetch` plus the
- * real lifecycle endpoints — there is no admin create/update/delete endpoint
+ * real lifecycle endpoints - there is no admin create/update/delete endpoint
  * for payments, subscriptions or refunds, so no stubbed CRUD methods are
  * carried.
  *
@@ -58,7 +58,7 @@ export interface PaymentSubscriptionContract {
   fetch(query: CrudPageQuery): Promise<CrudPageResult<SubscriptionDto>>
   /**
    * Cancel subscription at end of current billing period (immediate=false).
-   * There is NO admin subscription update endpoint — admins may only cancel.
+   * There is NO admin subscription update endpoint - admins may only cancel.
    */
   cancelAtPeriodEnd(id: string): Promise<void>
 }
@@ -79,7 +79,7 @@ export interface PaymentBridge {
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
-  Promise.reject(new Error(`payment-bridge: ${name} — no HttpClient / API provided`))
+  Promise.reject(new Error(`payment-bridge: ${name} - no HttpClient / API provided`))
 
 export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge {
   const paymentApi = deps.adminPaymentApi ?? (deps.client ? useAdminPaymentApi(deps.client) : null)

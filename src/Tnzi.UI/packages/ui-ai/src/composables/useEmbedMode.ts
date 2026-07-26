@@ -1,15 +1,17 @@
 /**
- * useEmbedMode — Embed mode control (floating/sidebar/inline)
+ * useEmbedMode - Embed mode control (floating/sidebar/inline)
  */
 
-import { ref, readonly, type Ref, type DeepReadonly } from 'vue';
+import { ref, readonly, type Ref } from 'vue';
 
 export type EmbedMode = 'floating' | 'sidebar' | 'inline';
 
 export interface UseEmbedModeReturn {
-  mode: DeepReadonly<Ref<EmbedMode>>;
+  mode: Readonly<Ref<EmbedMode>>;
+  /** Writable on purpose: embed widgets v-model this against a host-controlled
+   *  `open` prop. Use `open()` / `close()` / `toggle()` where you can. */
   isOpen: Ref<boolean>;
-  isMinimized: DeepReadonly<Ref<boolean>>;
+  isMinimized: Readonly<Ref<boolean>>;
   setMode: (mode: EmbedMode) => void;
   open: () => void;
   close: () => void;
@@ -54,7 +56,7 @@ export function useEmbedMode(initialMode: EmbedMode = 'floating'): UseEmbedModeR
   }
 
   return {
-    mode: readonly(mode) as DeepReadonly<Ref<EmbedMode>>,
+    mode: readonly(mode),
     isOpen,
     isMinimized: readonly(isMinimized),
     setMode,

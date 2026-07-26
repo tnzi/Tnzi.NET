@@ -10,7 +10,7 @@ namespace Tnzi.Authorization.Security;
 /// This work needs the schema to exist. It used to run in <c>AuthorizationModule</c>'s
 /// module-init hook, which executes BEFORE migrations, so on a brand-new empty database
 /// it failed silently and required a second boot to take effect. Registered as an
-/// <see cref="IPostMigrationStartupTask"/>, it now runs on the post-migration pass —
+/// <see cref="IPostMigrationStartupTask"/>, it now runs on the post-migration pass -
 /// every boot, independent of the seed gate (the catalogue sync is framework
 /// infrastructure, not demo data).
 /// </remarks>

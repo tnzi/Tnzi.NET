@@ -144,7 +144,7 @@ function remove(index: number) {
   align-items: center;
 }
 
-/* Desktop: transparent wrapper — the input becomes the grid cell directly, so
+/* Desktop: transparent wrapper - the input becomes the grid cell directly, so
    the original column sizing is untouched and the label stays hidden. */
 .pr-lines__cell {
   display: contents;

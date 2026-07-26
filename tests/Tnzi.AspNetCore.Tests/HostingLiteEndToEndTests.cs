@@ -458,7 +458,6 @@ internal static class HostingTestSetup
     {
         services.AddScoped(_ => Mock.Of<INotificationService>());
         services.AddScoped(_ => Mock.Of<IFileStorage>());
-        services.AddScoped(_ => Mock.Of<IRepository<Menu, Guid>>());
         services.AddScoped(_ => Mock.Of<IRepository<Setting, Guid>>());
         services.AddScoped(_ => Mock.Of<IRepository<AccessLog, Guid>>());
     }

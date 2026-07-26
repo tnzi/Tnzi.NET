@@ -19,7 +19,7 @@ export const chunkFormSchema: FormSchemaItem[] = [
   { key: 'md5Hash',          labelKey: 'form.md5Hash', label: 'MD5',             type: 'text' },
 ]
 
-// Advanced search — the backend GetChunks endpoint filters by UploadSessionId,
+// Advanced search - the backend GetChunks endpoint filters by UploadSessionId,
 // the single most useful lens for auditing a specific upload's chunk rows.
 export const chunkSearchFields: FormSchemaItem[] = [
   { key: 'uploadSessionId', labelKey: 'search.uploadSessionId', label: 'Upload Session', type: 'text' },

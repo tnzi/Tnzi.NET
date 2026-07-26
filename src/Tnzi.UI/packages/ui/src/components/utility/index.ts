@@ -1,5 +1,5 @@
 /**
- * Utility widgets — generic UI controls reusable beyond admin shells
+ * Utility widgets - generic UI controls reusable beyond admin shells
  * (theme/lang switchers, fullscreen toggle, reload button, sidebar togglers).
  *
  * Sunk from `@tnzi/ui-admin` in 0.2.71+ so site/chat/mobile can reuse them.

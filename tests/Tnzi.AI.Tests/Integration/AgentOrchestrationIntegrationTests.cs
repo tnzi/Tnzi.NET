@@ -1,14 +1,14 @@
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// Agent 编排策略集成测试 — 验证各执行策略通过 AgentRuntime 端到端运行
+/// Agent 编排策略集成测试 - 验证各执行策略通过 AgentRuntime 端到端运行
 /// </summary>
 public class AgentOrchestrationIntegrationTests
 {
     #region 1. SingleAgent Strategy
 
     /// <summary>
-    /// 单 Agent 策略 — 验证基本请求→响应流程，确认使用 SingleAgentStrategy
+    /// 单 Agent 策略 - 验证基本请求→响应流程，确认使用 SingleAgentStrategy
     /// </summary>
     public class SingleAgentStrategyTests : AiIntegrationTestBase
     {
@@ -72,7 +72,7 @@ public class AgentOrchestrationIntegrationTests
     #region 2. Router Strategy
 
     /// <summary>
-    /// Router 策略 — Router Agent 选择目标 Agent 并委托执行
+    /// Router 策略 - Router Agent 选择目标 Agent 并委托执行
     /// </summary>
     public class RouterStrategyTests : OrchestrationTestBase
     {
@@ -166,7 +166,7 @@ public class AgentOrchestrationIntegrationTests
     #region 3. AgentAsTools Strategy
 
     /// <summary>
-    /// AgentAsTools 策略 — 子 Agent 作为工具注入父 Agent
+    /// AgentAsTools 策略 - 子 Agent 作为工具注入父 Agent
     /// </summary>
     public class AgentAsToolsStrategyTests : OrchestrationTestBase
     {
@@ -232,7 +232,7 @@ public class AgentOrchestrationIntegrationTests
     #region 4. Handoff Strategy
 
     /// <summary>
-    /// Handoff 策略 — Agent A 转接给 Agent B，验证 handoff 路径
+    /// Handoff 策略 - Agent A 转接给 Agent B，验证 handoff 路径
     /// </summary>
     public class HandoffStrategyTests : OrchestrationTestBase
     {
@@ -325,7 +325,7 @@ public class AgentOrchestrationIntegrationTests
     #region 5. Strategy Resolution
 
     /// <summary>
-    /// ExecutionStrategyResolver — 验证枚举到策略类的正确映射
+    /// ExecutionStrategyResolver - 验证枚举到策略类的正确映射
     /// </summary>
     public class StrategyResolutionTests
     {
@@ -418,7 +418,7 @@ public class AgentOrchestrationIntegrationTests
     #region Base: 编排测试基类
 
     /// <summary>
-    /// 多 Agent 编排测试基类 — 提供可配置的 AgentResolver，
+    /// 多 Agent 编排测试基类 - 提供可配置的 AgentResolver，
     /// 支持在测试方法中设置编排 Agent 的 ExecutionMode 和 Configuration
     /// </summary>
     public abstract class OrchestrationTestBase : AiIntegrationTestBase
@@ -433,7 +433,7 @@ public class AgentOrchestrationIntegrationTests
         protected Guid OrchestratorAgentId => _orchestratorAgent?.Id ?? throw new InvalidOperationException("Call CreateOrchestratorAgentAsync first.");
 
         /// <summary>
-        /// 由子类实现 — 根据目标 Agent ID 构建 Configuration JSON
+        /// 由子类实现 - 根据目标 Agent ID 构建 Configuration JSON
         /// </summary>
         protected abstract string BuildConfiguration(Dictionary<string, Guid> agentIds);
 
@@ -466,7 +466,7 @@ public class AgentOrchestrationIntegrationTests
 
         protected override void ConfigureAdditionalServices(IServiceCollection services)
         {
-            // 覆盖 IAgentResolver — 根据 agentId 返回正确的 ExecutionMode + Configuration
+            // 覆盖 IAgentResolver - 根据 agentId 返回正确的 ExecutionMode + Configuration
             // 注意: 在构造期间注册的 mock，实际调用时读取运行时字段
             services.AddScoped<IAgentResolver>(sp =>
             {

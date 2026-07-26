@@ -1,12 +1,12 @@
 /**
- * Admin shell module-availability service — fetches which framework business
+ * Admin shell module-availability service - fetches which framework business
  * modules the backend host has actually loaded, from
  * `GET /admin/shell/modules`.
  *
  * This is the authoritative, permission-independent signal that powers
  * `defineAdminApp`'s default module gating: a top-level module route the
  * backend never loaded gets its menu hidden and its pages made unreachable, so
- * it can't surface a dead link that 404s on click — and because the gating is
+ * it can't surface a dead link that 404s on click - and because the gating is
  * orthogonal to the permission system, it holds for super-admins and
  * permission-exempt paths too.
  *
@@ -33,7 +33,7 @@ export interface AdminShellModules {
 }
 
 /**
- * Normalize a module name for comparison: lowercase, dots → dashes — so
+ * Normalize a module name for comparison: lowercase, dots → dashes - so
  * `"AI.Skills"`, `"ai.skills"` and `"ai-skills"` all compare equal. Matches the
  * normalization `defineAdminApp` uses for `hideModules` and the backend's short
  * names, so a route's `meta.moduleGate` lines up with the loaded-module signal.
@@ -47,7 +47,7 @@ export function normalizeModuleName(name: string): string {
  * loaded, normalized for matching against front-end top-level module route
  * names (see {@link normalizeModuleName}).
  *
- * Returns `null` instead of throwing when the endpoint is unavailable — an
+ * Returns `null` instead of throwing when the endpoint is unavailable - an
  * older backend without `GET /admin/shell/modules`, or a 401/403. Callers MUST
  * treat `null` as "signal unavailable → do NOT gate" (fail-open: show every
  * module), so the sidebar is never blanked by a missing/failed signal.

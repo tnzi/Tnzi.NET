@@ -1,11 +1,13 @@
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
-import { formatDateOnly } from '@tnzi/core'
+
 import { JournalEntryStatus } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtMoney } from './money'
+import { amountCell, fmtMoney, fmtDate } from './money'
 import { financeSourceTypeLabel } from './source-type'
+import TMoney from '../../components/finance/TMoney.vue'
 
 /** All-optional row shape (house pattern). */
 export interface JournalRow {
@@ -53,7 +55,7 @@ export function buildJournalEntryColumns(t: (key: string) => string): ColumnDef<
       title: 'columns.number',
       width: 130,
       primary: true,
-      render: (row) => row.number ?? '—',
+      render: (row) => row.number ?? EMPTY_DASH,
     },
     {
       key: 'status',
@@ -68,20 +70,20 @@ export function buildJournalEntryColumns(t: (key: string) => string): ColumnDef<
         })
       },
     },
-    { key: 'postingDate', title: 'columns.postingDate', width: 120, render: (row) => formatDateOnly(row.postingDate, { utc: true }) },
-    { key: 'memo', title: 'columns.memo', minWidth: 200, render: (row) => row.memo ?? '—' },
+    { key: 'postingDate', title: 'columns.postingDate', width: 120, render: (row) => fmtDate(row.postingDate) },
+    { key: 'memo', title: 'columns.memo', minWidth: 200, render: (row) => row.memo ?? EMPTY_DASH },
     { key: 'currency', title: 'columns.currency', width: 90, mobileHidden: true },
     {
       key: 'totalDebit',
       title: 'columns.totalDebit',
       width: 130,
-      render: (row) => amountCell(fmtMoney(entryTotal(row, 'debit'), undefined), true),
+      render: (row) => h(TMoney, { value: entryTotal(row, 'debit'), class: 'font-600' }),
     },
     {
       key: 'totalCredit',
       title: 'columns.totalCredit',
       width: 130,
-      render: (row) => amountCell(fmtMoney(entryTotal(row, 'credit'), undefined), true),
+      render: (row) => h(TMoney, { value: entryTotal(row, 'credit'), class: 'font-600' }),
     },
     {
       key: 'sourceType',

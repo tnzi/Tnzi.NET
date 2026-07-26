@@ -19,7 +19,7 @@ public static class ReviewLoopTemplate
 
         var builder = WorkflowBuilder.Create();
 
-        // 1. Worker 节点 — 初始处理
+        // 1. Worker 节点 - 初始处理
         builder.AddStep("worker", agentId: options.WorkerAgentId)
             .WithInstructions(options.WorkerInstructions ?? "Process the following input:\n{{input}}");
 
@@ -32,7 +32,7 @@ public static class ReviewLoopTemplate
                 .WithInstructions(options.ReviewInstructions
                     ?? "Review the worker output and decide whether it should be accepted or reworked.\n\nWorker output:\n{{worker}}");
 
-            // Rework 节点 — 使用原 Worker Agent 重新处理
+            // Rework 节点 - 使用原 Worker Agent 重新处理
             loopBuilder.AddStep("rework", agentId: options.WorkerAgentId)
                 .DependsOn("review")
                 .WithInstructions(options.ReworkInstructions
@@ -46,7 +46,7 @@ public static class ReviewLoopTemplate
             }, defaultTarget: "output");
         });
 
-        // 3. Output 节点 — 最终输出（透传审查通过的内容）
+        // 3. Output 节点 - 最终输出（透传审查通过的内容）
         builder.AddTransformStep("output")
             .DependsOn("review")
             .WithConfiguration("template", "{{worker}}");

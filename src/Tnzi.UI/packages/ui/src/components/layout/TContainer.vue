@@ -23,7 +23,7 @@ interface Props {
   /** If true, disables max-width entirely (full viewport width). */
   fluid?: boolean
   /**
-   * Padding shorthand. Defaults to '0 clamp(16px, 4vw, 32px)' — vertical 0, horizontal responsive.
+   * Padding shorthand. Defaults to '0 clamp(16px, 4vw, 32px)' - vertical 0, horizontal responsive.
    * Overridden by `paddingX` / `paddingY` when either is provided.
    */
   padding?: string
@@ -77,7 +77,7 @@ const containerStyle = computed<CSSProperties>(() => {
   return base
 })
 
-// Exposed for testing — avoids happy-dom CSS parser normalization
+// Exposed for testing - avoids happy-dom CSS parser normalization
 // (which drops clamp() and collapses 4-side padding into shorthand).
 defineExpose({ containerStyle })
 </script>

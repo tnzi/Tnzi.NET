@@ -7,7 +7,7 @@ namespace Tnzi.AI.Tests.Tools;
 /// </summary>
 public class WebSearchToolsTests
 {
-    #region SearchAsync — 无 Provider
+    #region SearchAsync - 无 Provider
 
     [Fact]
     public async Task Search_NoProvider_ReturnsError()
@@ -23,7 +23,7 @@ public class WebSearchToolsTests
 
     #endregion
 
-    #region SearchAsync — 空查询
+    #region SearchAsync - 空查询
 
     [Fact]
     public async Task Search_EmptyQuery_ReturnsError()
@@ -52,7 +52,7 @@ public class WebSearchToolsTests
 
     #endregion
 
-    #region SearchAsync — 正常搜索
+    #region SearchAsync - 正常搜索
 
     [Fact]
     public async Task Search_ValidQuery_ReturnsResults()
@@ -109,7 +109,7 @@ public class WebSearchToolsTests
 
     #endregion
 
-    #region SearchAsync — 异常处理
+    #region SearchAsync - 异常处理
 
     [Fact]
     public async Task Search_ProviderThrows_ReturnsError()

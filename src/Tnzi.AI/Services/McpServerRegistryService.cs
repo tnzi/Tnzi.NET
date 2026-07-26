@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// MCP Server 注册表服务实现 — 数据库驱动的 CRUD + 凭证加密 + 运行时联动
+/// MCP Server 注册表服务实现 - 数据库驱动的 CRUD + 凭证加密 + 运行时联动
 /// </summary>
 /// <remarks>
 /// AuthToken 加密策略：
@@ -17,12 +17,12 @@ namespace Tnzi.AI.Services;
 ///   30 秒 TTL 收敛）。
 ///
 /// 信任边界：
-///   注册表仅接受 HTTP 系 transport（sse / streamable-http / http）。stdio 注册被拒绝 —
+///   注册表仅接受 HTTP 系 transport（sse / streamable-http / http）。stdio 注册被拒绝 -
 ///   运行时录入本机启动命令等价于远程命令执行；stdio 服务器只能通过部署配置
 ///   （AI:Mcp options）声明。
 ///
 /// TestConnectionAsync 探针策略：
-///   真实连接探测 — 先做静态校验（IsEnabled / transport / URL / 凭证可解密），然后经
+///   真实连接探测 - 先做静态校验（IsEnabled / transport / URL / 凭证可解密），然后经
 ///   IMcpClientFactory 建立 MCP 会话并列出工具（短超时），返回成功/失败与延迟。
 /// </remarks>
 public class McpServerRegistryService : ApplicationService, IMcpServerRegistryService
@@ -358,7 +358,7 @@ public class McpServerRegistryService : ApplicationService, IMcpServerRegistrySe
                 return Fail<McpServerTestResultDto>("MCP server registration not found", 404, ErrorCodes.McpServerRegistrationNotFound);
             }
 
-            // 静态预检：禁用/transport/URL/凭证可解密 — 提前返回更精确的失败原因，避免无谓的网络探测
+            // 静态预检：禁用/transport/URL/凭证可解密 - 提前返回更精确的失败原因，避免无谓的网络探测
             if (!entity.IsEnabled)
             {
                 return TestFailure(sw, "MCP server registration is disabled");

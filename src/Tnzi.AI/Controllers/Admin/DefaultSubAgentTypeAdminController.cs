@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Controllers.Admin;
 
 /// <summary>
-/// 子 Agent 类型管理控制器 — 持久化自定义子 Agent 类型定义
+/// 子 Agent 类型管理控制器 - 持久化自定义子 Agent 类型定义
 /// </summary>
 [DefaultController]
 [Route("admin/ai/sub-agent-types")]
@@ -90,7 +90,10 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
             return ApiResult.Error("Sub-agent type not found.", 404);
 
         await Repository.DeleteAsync(entity, ct);
-        SubAgentRegistry.Unregister(entity.Name);
+        // 必须整表重载而非 Unregister(entity.Name)：注册表按名称（大小写不敏感）单键存放，
+        // 一条覆盖内置名（general-purpose/bash/researcher）的 DB 定义被删除时，
+        // Unregister 会连内置定义一起摘掉；重载则重新注册内置 + 剩余启用行。
+        await ReloadRegistryAsync(ct);
 
         return ApiResult.Ok();
     }

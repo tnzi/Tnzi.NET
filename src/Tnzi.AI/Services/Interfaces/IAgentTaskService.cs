@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// Agent 任务持久化服务接口 — 将 TodoTools 的瞬态任务同步到数据库
+/// Agent 任务持久化服务接口 - 将 TodoTools 的瞬态任务同步到数据库
 /// </summary>
 public interface IAgentTaskService
 {

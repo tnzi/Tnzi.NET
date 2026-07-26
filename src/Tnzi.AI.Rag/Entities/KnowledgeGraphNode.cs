@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Entities;
 
 /// <summary>
-/// 知识图谱节点 — 从文档中提取的实体（人物、组织、概念等）
+/// 知识图谱节点 - 从文档中提取的实体（人物、组织、概念等）
 /// </summary>
 public class KnowledgeGraphNode : CreationAuditedEntity<Guid>, IMultiTenant
 {

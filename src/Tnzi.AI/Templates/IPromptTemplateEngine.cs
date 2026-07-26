@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Templates;
 
 /// <summary>
-/// Prompt 模板引擎接口 — 对 Agent Instructions 进行变量替换
+/// Prompt 模板引擎接口 - 对 Agent Instructions 进行变量替换
 /// </summary>
 public interface IPromptTemplateEngine
 {

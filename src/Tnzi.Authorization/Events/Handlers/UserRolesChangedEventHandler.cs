@@ -10,7 +10,7 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// effective permission set (union of <c>RoleFunction</c> /
 /// <c>UserFunction</c>) keyed by user-id, default 30-minute TTL. When
 /// an admin revokes a role from a user, the TTL would otherwise let the
-/// user retain the revoked role's permissions for up to a full window —
+/// user retain the revoked role's permissions for up to a full window -
 /// a real permission-retention security gap. This handler closes that
 /// window by invalidating the user's cache entry the moment the role
 /// change commits.
@@ -18,7 +18,7 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// <para>
 /// <b>Why let exceptions propagate</b>: the event bus provides error isolation,
 /// retry, and dead-letter handling, so a transient cache-invalidation failure is
-/// retried instead of being silently swallowed — closing the permission-retention
+/// retried instead of being silently swallowed - closing the permission-retention
 /// window faster and more reliably. The bus keeps the failure off the main
 /// role-change request; the 30-minute TTL remains the ultimate backstop if all
 /// retries are exhausted.
@@ -42,7 +42,7 @@ public class UserRolesChangedEventHandler : IEventHandler<UserRolesChangedEvent>
     {
         if (_functionAuthCache == null)
         {
-            // No cache configured — nothing to do. This branch exists for
+            // No cache configured - nothing to do. This branch exists for
             // hosts that disabled the FunctionAuthCache registration.
             return;
         }

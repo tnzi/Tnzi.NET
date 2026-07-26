@@ -5,7 +5,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Tools.Sql;
 
 /// <summary>
-/// Adversarial test suite — covers the bypass payloads the previous regex-tokenizer validator
+/// Adversarial test suite - covers the bypass payloads the previous regex-tokenizer validator
 /// missed. Every payload here MUST be rejected by <see cref="RestrictiveSqlValidator"/>;
 /// any failure is a security regression.
 /// </summary>
@@ -76,7 +76,7 @@ public class AdversarialSqlValidatorTests
 
     // ─── Comment / literal embedded keywords (must NOT bypass) ────────────────
     // ScriptDom AST never sees text inside /* */ or 'literal' as keywords, so these are
-    // syntactically valid SELECTs and SHOULD pass — proving the parser is doing its job.
+    // syntactically valid SELECTs and SHOULD pass - proving the parser is doing its job.
 
     [Theory]
     [InlineData("SELECT /*INSERT*/ 1")]

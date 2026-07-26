@@ -10,7 +10,7 @@
     :color="system ? SYSTEM_BG : undefined"
   >
     <!-- A peer who lost `chat.use` gets a distinct "unavailable" marker (grey
-         block) instead of the normal presence dot — the conversation stays, but
+         block) instead of the normal presence dot - the conversation stays, but
          they can no longer take part. The disabled marker takes precedence. -->
     <template v-if="disabled || status != null" #badge>
       <span
@@ -28,7 +28,7 @@
 
 <script setup lang="ts">
 /**
- * `TChatAvatar` — chat-flavoured wrapper around the shared `@tnzi/ui` `TAvatar`.
+ * `TChatAvatar` - chat-flavoured wrapper around the shared `@tnzi/ui` `TAvatar`.
  *
  * Adds the two things chat needs on top of the generic primitive: a storage
  * file-id → preview-URL resolution, and the presence-dot / system-announcement
@@ -47,7 +47,7 @@ const props = withDefaults(
   defineProps<{
     name?: string | null
     fileId?: string | null
-    /** Seed for the deterministic colour — defaults to name (via TAvatar). */
+    /** Seed for the deterministic colour - defaults to name (via TAvatar). */
     seed?: string | null
     size?: number
     status?: UserPresenceStatus | null
@@ -55,7 +55,7 @@ const props = withDefaults(
      *  megaphone) so a System conversation is recognisable at a glance instead
      *  of a deterministic-colour letter avatar. */
     system?: boolean
-    /** Peer has lost `chat.use` — show a distinct "unavailable" marker instead
+    /** Peer has lost `chat.use` - show a distinct "unavailable" marker instead
      *  of the presence dot. */
     disabled?: boolean
   }>(),

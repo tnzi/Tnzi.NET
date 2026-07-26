@@ -2,7 +2,7 @@
  * Curated set of common emojis for the composer's emoji picker.
  *
  * Hand-picked (not a full Unicode table) so the popover stays a quick,
- * scannable grid — smileys, gestures, hearts and a few symbols cover the
+ * scannable grid - smileys, gestures, hearts and a few symbols cover the
  * overwhelming majority of everyday chat use. No external dependency: a flat
  * string array keeps the bundle tiny and avoids the Vite optimize-deps / pnpm
  * link friction that a third-party emoji library would introduce.
@@ -48,7 +48,7 @@ export function recordEmojiUse(emoji: string): void {
     usage[emoji] = (usage[emoji] ?? 0) + 1
     localStorage.setItem(USAGE_KEY, JSON.stringify(usage))
   } catch {
-    /* storage unavailable (private mode / quota) — recents just won't persist */
+    /* storage unavailable (private mode / quota) - recents just won't persist */
   }
 }
 

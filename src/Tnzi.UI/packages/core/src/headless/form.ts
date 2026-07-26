@@ -26,6 +26,17 @@ function safeClone<T>(value: T): T {
   }
 }
 
+/** Best-effort message for anything that can be thrown, not just `Error`. */
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string' && error) return error;
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message) return message;
+  }
+  return 'Submit failed';
+}
+
 // ============================================
 // Types
 // ============================================
@@ -203,9 +214,10 @@ export class FormController<T extends object> {
       await this._onSubmit(this.values);
       return true;
     } catch (error) {
-      if (error instanceof Error) {
-        this.errors.push({ field: '_form', message: error.message });
-      }
+      // Record every failure, not just `Error` instances: a thrown string or a
+      // rejected non-Error used to leave `errors` empty, so the form reported
+      // "failed" with nothing to show the user.
+      this.errors.push({ field: '_form', message: toErrorMessage(error) });
       return false;
     } finally {
       this.isSubmitting = false;

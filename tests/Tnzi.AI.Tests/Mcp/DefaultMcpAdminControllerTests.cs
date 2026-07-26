@@ -7,7 +7,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Mcp;
 
 /// <summary>
-/// DefaultMcpAdminController 单元测试 — status / tools / agents 查询 + 动态 expose / remove。
+/// DefaultMcpAdminController 单元测试 - status / tools / agents 查询 + 动态 expose / remove。
 /// 直接构造控制器，注入 IMcpServerHost / IOptions&lt;McpServerOptions&gt; 模拟。
 /// </summary>
 public class DefaultMcpAdminControllerTests

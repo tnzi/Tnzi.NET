@@ -1,12 +1,12 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// Prompt Caching 中间件 — 为支持缓存的提供商注入缓存控制标记
+/// Prompt Caching 中间件 - 为支持缓存的提供商注入缓存控制标记
 /// <para>
 /// Anthropic: 在 system message 上注入 cache_control: {"type": "ephemeral"} 断点。
 /// 启用 CacheStaticDynamicBoundary 后，注入两个断点：
-///   1. 静态内容（Agent Instructions）— 跨请求缓存命中率高
-///   2. 动态内容（Memory + Context + Skills 注入的最后一条系统消息）— 会话内缓存命中率高
+///   1. 静态内容（Agent Instructions）- 跨请求缓存命中率高
+///   2. 动态内容（Memory + Context + Skills 注入的最后一条系统消息）- 会话内缓存命中率高
 /// </para>
 /// <para>
 /// 启用 SnapshotToolSchemas 后，首次调用快照工具列表，后续复用以保持 prompt 稳定。
@@ -19,7 +19,7 @@ namespace Tnzi.AI.Middleware;
 public class PromptCachingMiddleware : IAiMiddleware
 {
     /// <summary>
-    /// 已知的动态内容 XML 标签前缀 — 由 ContextInjectionMiddleware 注入的系统消息
+    /// 已知的动态内容 XML 标签前缀 - 由 ContextInjectionMiddleware 注入的系统消息
     /// </summary>
     private static readonly string[] DynamicContentPrefixes =
     [
@@ -33,7 +33,7 @@ public class PromptCachingMiddleware : IAiMiddleware
     private readonly ILogger<PromptCachingMiddleware> _logger;
 
     /// <summary>
-    /// 工具 schema 快照缓存 — 首次调用时快照，后续复用以防止配置变更导致缓存失效
+    /// 工具 schema 快照缓存 - 首次调用时快照，后续复用以防止配置变更导致缓存失效
     /// </summary>
     private volatile IList<AITool>? _cachedToolSchemas;
     private readonly object _snapshotLock = new();
@@ -144,8 +144,8 @@ public class PromptCachingMiddleware : IAiMiddleware
 
     /// <summary>
     /// Static/Dynamic 双断点策略：
-    /// 第一断点 — 静态内容（Agent Instructions 系统消息），跨请求稳定
-    /// 第二断点 — 动态内容（最后一条上下文注入的系统消息），会话内稳定
+    /// 第一断点 - 静态内容（Agent Instructions 系统消息），跨请求稳定
+    /// 第二断点 - 动态内容（最后一条上下文注入的系统消息），会话内稳定
     /// </summary>
     private void ApplyStaticDynamicBreakpoints(AiMiddlewareContext context, PromptCachingOptions options)
     {

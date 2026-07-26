@@ -50,7 +50,7 @@ public class ProviderConfiguration : EntityTypeConfigurationBase<Provider, Guid>
 
         builder.HasIndex(e => e.ProviderType);
 
-        // 可见性查询索引 — 加速 Scope/TenantId 联合查询
+        // 可见性查询索引 - 加速 Scope/TenantId 联合查询
         builder.HasIndex(e => new { e.Scope, e.TenantId });
     }
 }

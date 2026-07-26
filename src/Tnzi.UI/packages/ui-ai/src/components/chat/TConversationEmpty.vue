@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TConversationEmpty — Empty chat state
+ * TConversationEmpty - Empty chat state
  *
  * Displayed when there are no messages in the conversation.
  * Shows a centered icon, title, description, and a slot for suggestions.

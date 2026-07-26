@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 工作流 Fluent Builder 接口 — 以代码方式定义 DAG 工作流
+/// 工作流 Fluent Builder 接口 - 以代码方式定义 DAG 工作流
 /// </summary>
 /// <remarks>
 /// 用法示例:

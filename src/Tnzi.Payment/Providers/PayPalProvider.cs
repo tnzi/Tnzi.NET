@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -227,7 +226,7 @@ public class PayPalProvider : IPaymentProvider
                 TryGetNestedString(resource, "amount", "value")
                 ?? TryGetNestedString(resource, "seller_receivable_breakdown", "gross_amount", "value");
 
-            decimal.TryParse(amountText, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var paidAmount);
+            decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var paidAmount);
 
             return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
             {

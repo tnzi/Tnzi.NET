@@ -3,7 +3,7 @@ namespace Tnzi.AI.Entities;
 /// <summary>
 /// Agent ↔ 技能授权 junction 实体。把一个 Agent 与一个技能（按 slug）关联起来，
 /// 取代 <see cref="Agent"/> 原先的 SkillSlugs JSON 列。FK 仅指向同程序集的 <see cref="Agent"/>。
-/// Agent-to-skill grant junction — associates an Agent with a skill (by slug),
+/// Agent-to-skill grant junction - associates an Agent with a skill (by slug),
 /// replacing <see cref="Agent"/>'s former SkillSlugs JSON column. FK targets the same-assembly
 /// <see cref="Agent"/> only; the skill itself is referenced by value.
 /// </summary>

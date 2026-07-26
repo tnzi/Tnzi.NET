@@ -41,7 +41,7 @@ const stubs = {
   },
   Checkbox: { name: 'Checkbox', template: '<input type="checkbox" />' },
   VueDraggable: { name: 'VueDraggable', template: '<div><slot /></div>' },
-  // Phase I.7.x — TCrudPage now wraps the page in NSpace + NCard +
+  // Phase I.7.x - TCrudPage now wraps the page in NSpace + NCard +
   // NCollapse. Stub these passthrough-style so child slot content
   // (search input, toolbar buttons, etc) keeps rendering for tests.
   Card: {
@@ -187,7 +187,7 @@ describe('TCrudPage', () => {
     const input = wrapper.find('.t-list-shell__search .n-input-stub')
     await input.setValue('query')
     expect(state.setSearch).not.toHaveBeenCalled()
-    // Find the primary Search button — it's the only n-button stub with
+    // Find the primary Search button - it's the only n-button stub with
     // text "Search" inside the search panel.
     const searchBtn = wrapper
       .findAll('.t-list-shell__search button')

@@ -4,7 +4,7 @@ import { HttpClient } from '../../http/http';
 import { AuthStateManager } from '../../state/auth';
 import type { StorageAdapter } from '../../adapters/storage';
 
-/** Minimal in-memory StorageAdapter (core tests run in the node env — no localStorage). */
+/** Minimal in-memory StorageAdapter (core tests run in the node env - no localStorage). */
 function memStorage(): StorageAdapter {
   const m = new Map<string, string>();
   return {
@@ -36,7 +36,7 @@ describe('createTnziClient', () => {
     http.setAccessToken('preset');
     expect(http.getAccessToken()).toBe('preset');
     // clearAuth() is synchronous and calls `this.deps.httpClient.setAccessToken(null)`
-    // — so this only nulls the client token if the manager was built with `http`.
+    // - so this only nulls the client token if the manager was built with `http`.
     auth.clearAuth();
     expect(http.getAccessToken()).toBeNull();
   });

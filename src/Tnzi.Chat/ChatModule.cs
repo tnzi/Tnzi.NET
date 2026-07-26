@@ -1,6 +1,6 @@
 namespace Tnzi.Chat;
 
-[DependsOn(typeof(EFCoreModule), typeof(IdentityModule))]
+[DependsOn(typeof(EFCoreModule), typeof(IdentityModule), typeof(IdentityPresenceModule))]
 [OptionalDependsOn(typeof(SignalRModule))]
 public class ChatModule : TnziApplicationModule
 {
@@ -25,7 +25,6 @@ public class ChatModule : TnziApplicationModule
         services.AddScoped<ChatAccessGuardFilter>();
         services.AddScoped<IChatConfigService, ChatConfigService>();
         services.AddScoped<IChatContactService, ChatContactService>();
-        services.AddScoped<IPresenceService, PresenceService>();
         services.AddScoped<IConversationService, ConversationService>();
         services.AddScoped<IGroupService, GroupService>();
         services.AddScoped<IBroadcastService, BroadcastService>();
@@ -34,8 +33,9 @@ public class ChatModule : TnziApplicationModule
         services.AddEventHandler<ConversationMessageSentEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationReadEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationChangedEvent, ChatSignalREventHandler>();
-        services.AddEventHandler<UserConnectedEvent, PresenceConnectionEventHandler>();
-        services.AddEventHandler<UserDisconnectedEvent, PresenceConnectionEventHandler>();
+        // Presence 现由 Tnzi.Identity.Presence 拥有并发布 UserPresenceChangedEvent；
+        // Chat 只订阅它，按会话联系人扇出 Chat.PresenceChanged（保留原有行为）。
+        services.AddEventHandler<UserPresenceChangedEvent, ChatPresenceRelayHandler>();
 
         // Wire realtime push only when SignalR is actually loaded (OptionalDependsOn → may be absent).
         var appDescriptor = services.FirstOrDefault(s => s.ServiceType == typeof(ITnziApplication));

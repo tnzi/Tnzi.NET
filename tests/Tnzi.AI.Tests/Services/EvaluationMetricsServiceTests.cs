@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// EvaluationMetricsService 单元测试 — 覆盖 trend / version comparison / batch / empty data
+/// EvaluationMetricsService 单元测试 - 覆盖 trend / version comparison / batch / empty data
 /// </summary>
 public class EvaluationMetricsServiceTests
 {

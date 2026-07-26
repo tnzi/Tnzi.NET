@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Tnzi.AI.Channels.Gateway.Models;
 
 /// <summary>
-/// WebSocket 协议消息 — Gateway 与客户端之间的通信载体
+/// WebSocket 协议消息 - Gateway 与客户端之间的通信载体
 /// </summary>
 public class GatewayMessage
 {

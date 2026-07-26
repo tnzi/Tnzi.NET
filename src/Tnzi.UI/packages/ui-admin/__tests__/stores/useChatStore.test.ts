@@ -131,7 +131,7 @@ describe('useChatStore', () => {
   })
 })
 
-describe('useChatStore — new actions (U6)', () => {
+describe('useChatStore - new actions (U6)', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   function makeBridgeU6() {
@@ -275,7 +275,7 @@ describe('useChatStore — new actions (U6)', () => {
   })
 })
 
-describe('useChatStore — presence + sorting (U7)', () => {
+describe('useChatStore - presence + sorting (U7)', () => {
   beforeEach(() => setActivePinia(createPinia()))
 
   function makePresenceBridge() {
@@ -323,7 +323,7 @@ describe('useChatStore — presence + sorting (U7)', () => {
     await store.fetchConversations()
 
     const sorted = store.sortedConversations
-    expect(sorted[0].id).toBe('d3')  // Carol — isSticky = true
+    expect(sorted[0].id).toBe('d3')  // Carol - isSticky = true
     // Among non-sticky: d2 (Jan 3) should precede d1 (Jan 1)
     expect(sorted[1].id).toBe('d2')
     expect(sorted[2].id).toBe('d1')
@@ -348,6 +348,6 @@ describe('useChatStore — presence + sorting (U7)', () => {
     const sorted = store.sortedConversations
     expect(sorted[0].id).toBe('s2')  // sticky, newer
     expect(sorted[1].id).toBe('s1')  // sticky, older
-    expect(sorted[2].id).toBe('n1')  // non-sticky (but newest overall — still last)
+    expect(sorted[2].id).toBe('n1')  // non-sticky (but newest overall - still last)
   })
 })

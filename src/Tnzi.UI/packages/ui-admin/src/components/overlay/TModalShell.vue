@@ -1,15 +1,21 @@
 <template>
-  <NModal
-    :show="show"
-    preset="card"
-    :size="size"
-    :mask-closable="maskClosable"
-    :auto-focus="autoFocus"
-    :title="title"
-    :class="{ 't-modal-shell--fullscreen': isFullscreen }"
-    :style="modalStyle"
-    @update:show="(v: boolean) => emit('update:show', v)"
-  >
+  <!-- Reset the naive theme to the GLOBAL mode. NModal teleports to <body> but
+       naive forwards the content area's inner "Card / List" theme through
+       provide/inject across the Teleport, so without this an overlay opened
+       from a dark-card page would render dark under global light mode. `abstract`
+       = renderless (no wrapper DOM to break layout). See useOverlayTheme. -->
+  <NConfigProvider abstract :theme="overlayTheme" :theme-overrides="overlayOverrides">
+    <NModal
+      :show="show"
+      preset="card"
+      :size="size"
+      :mask-closable="maskClosable"
+      :auto-focus="autoFocus"
+      :title="title"
+      :class="{ 't-modal-shell--fullscreen': isFullscreen }"
+      :style="modalStyle"
+      @update:show="(v: boolean) => emit('update:show', v)"
+    >
     <!-- Rich header (entity name + status tag / subtitle): a `#header` slot
          overrides the plain `title` prop for callers that need more than a
          string. Omit it and the `title` prop drives the header as before. -->
@@ -21,7 +27,7 @@
          header (~56px) + footer (~64px) + outer modal padding (~80px). Short
          content keeps its natural height (native overflow only kicks in past
          max-height). Plain `overflow:auto` (not NScrollbar) so the global
-         polish.css macOS-style scrollbar applies — NScrollbar renders an
+         polish.css macOS-style scrollbar applies - NScrollbar renders an
          overlay thumb that floats over (and occludes) the rightmost widgets. -->
     <div
       class="t-modal-shell__scroll"
@@ -39,13 +45,15 @@
         <slot name="footer" />
       </div>
     </template>
-  </NModal>
+    </NModal>
+  </NConfigProvider>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NModal, NSpin } from 'naive-ui'
+import { NConfigProvider, NModal, NSpin } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { useOverlayTheme, useOverlayThemeOverrides } from '../../headless/useOverlayTheme'
 
 interface Props {
   /** Open state (controlled). */
@@ -55,7 +63,7 @@ interface Props {
   width?: number
   /**
    * Card padding scale (forwarded to naive's card preset). Default `small`
-   * (12/16/12px) — the admin-compact chrome. naive's own default is `medium`
+   * (12/16/12px) - the admin-compact chrome. naive's own default is `medium`
    * (19/24/20px), which reads as too roomy for dense admin dialogs. Bump to
    * `medium`/`large` for content-heavy modals.
    */
@@ -90,6 +98,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const bp = useBreakpoint()
+const overlayTheme = useOverlayTheme()
+const overlayOverrides = useOverlayThemeOverrides()
 
 // Suppress naive's default first-focusable auto-focus on phones: it would grab
 // the first input/search box on open and pop the soft keyboard, covering half
@@ -143,7 +153,7 @@ const contentMaxHeight = computed(() =>
 }
 /* Phone: stack the action buttons full-width (thumb-friendly). `column` keeps
    DOM order (Cancel above, primary below at thumb reach). naive buttons are
-   inline-flex so `align-items: stretch` alone won't widen them — set an explicit
+   inline-flex so `align-items: stretch` alone won't widen them - set an explicit
    full width. `:deep` because the buttons are the consumer's, not this scope. */
 @media (max-width: 767px) {
   .t-modal-shell__footer {

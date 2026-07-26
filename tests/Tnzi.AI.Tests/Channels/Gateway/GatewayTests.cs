@@ -104,7 +104,7 @@ public class GatewayTests
     [Fact]
     public async Task ProcessAsync_NoDefaultAgent_ReturnsError()
     {
-        // Arrange — DefaultAgentId = null → binder returns Guid.Empty
+        // Arrange - DefaultAgentId = null → binder returns Guid.Empty
         var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
         {
             DefaultAgentId = null
@@ -203,7 +203,7 @@ public class GatewayTests
     [Fact]
     public async Task ProcessStreamingAsync_CoalescesRapidChunks_WhenThrottled()
     {
-        // Arrange — high throttle so every non-final delta after the first coalesces
+        // Arrange - high throttle so every non-final delta after the first coalesces
         var (gateway, runtime, _) = CreateGateway(streamingThrottleMs: 10_000);
         runtime
             .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
@@ -220,7 +220,7 @@ public class GatewayTests
             emitted.Add(chunk);
         }
 
-        // Assert — no text lost, but far fewer emissions than the 4 input chunks
+        // Assert - no text lost, but far fewer emissions than the 4 input chunks
         string.Concat(emitted.Select(c => c.TextDelta)).ShouldBe("abcd");
         emitted.Count.ShouldBe(2);              // first "a" immediate + coalesced final "bcd"
         emitted[0].TextDelta.ShouldBe("a");     // fast first paint
@@ -232,7 +232,7 @@ public class GatewayTests
     [Fact]
     public async Task ProcessStreamingAsync_PassesThroughEveryChunk_WhenThrottleDisabled()
     {
-        // Arrange — throttle 0 = disabled → original per-chunk passthrough semantics
+        // Arrange - throttle 0 = disabled → original per-chunk passthrough semantics
         var (gateway, runtime, _) = CreateGateway(streamingThrottleMs: 0);
         runtime
             .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
@@ -248,7 +248,7 @@ public class GatewayTests
             emitted.Add(chunk);
         }
 
-        // Assert — one emission per input chunk, text intact, final preserved
+        // Assert - one emission per input chunk, text intact, final preserved
         emitted.Count.ShouldBe(3);
         emitted.Select(c => c.TextDelta).ShouldBe(["a", "b", "c"]);
         emitted[^1].IsFinal.ShouldBeTrue();

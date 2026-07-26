@@ -3,7 +3,7 @@
  *
  * Consumers import the descriptor types, the shell helpers (`useWidget` /
  * `useWidgetData`), and the bundled built-in widgets. Build their own
- * widgets by following the same pattern — any Vue component referenced
+ * widgets by following the same pattern - any Vue component referenced
  * from a `WidgetDef.component` plugs in.
  */
 

@@ -4,7 +4,7 @@ using Npgsql;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// B15: 多租户原生 SQL 隔离 — 验证 TenantId 谓词仅在存在非空租户上下文时追加，
+/// B15: 多租户原生 SQL 隔离 - 验证 TenantId 谓词仅在存在非空租户上下文时追加，
 /// 单租户 / host（tenantId 为 null）时不追加（保持现有行为，避免 column "TenantId" does not exist）。
 /// </summary>
 public class RagTenantSqlFilterTests

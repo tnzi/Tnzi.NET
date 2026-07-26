@@ -187,6 +187,55 @@ public class RegistrationServiceTests
     }
 
     [Fact]
+    public async Task SendQuickRegisterCodeAsync_WhenCaptchaEnabledAndInvalid_ReturnsFailureWithoutSending()
+    {
+        // Arrange - register captcha on; the send-code step must gate on it.
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Registration = new RegistrationOptions { EnableQuickRegisterEmail = true },
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true },
+            Otp = new OtpOptions()
+        });
+        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "wrong", "register")).ReturnsAsync(false);
+
+        var input = new SendQuickRegisterCodeDto { Email = "test@example.com", CaptchaId = "cid", CaptchaCode = "wrong" };
+
+        // Act
+        var result = await _registrationService.SendQuickRegisterCodeAsync(input);
+
+        // Assert - rejected with the dedicated code; the OTP is never sent (no SMS/email cost).
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SendQuickRegisterCodeAsync_WhenCaptchaEnabledAndValid_SendsCode()
+    {
+        // Arrange
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Registration = new RegistrationOptions { EnableQuickRegisterEmail = true },
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true },
+            Otp = new OtpOptions()
+        });
+        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "register")).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, null))
+            .ReturnsAsync(Result.Success());
+
+        var input = new SendQuickRegisterCodeDto { Email = "test@example.com", CaptchaId = "cid", CaptchaCode = "good" };
+
+        // Act
+        var result = await _registrationService.SendQuickRegisterCodeAsync(input);
+
+        // Assert - captcha passes → the OTP send proceeds.
+        Assert.True(result.Succeeded);
+        _twoFactorServiceMock.Verify(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, null), Times.Once);
+    }
+
+    [Fact]
     public async Task QuickRegisterAsync_WithValidCode_ReturnsResult()
     {
         // Arrange

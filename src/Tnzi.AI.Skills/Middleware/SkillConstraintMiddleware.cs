@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Skills.Middleware;
 
 /// <summary>
-/// 技能约束中间件 — 在上下文注入后、用量日志前执行约束过滤
+/// 技能约束中间件 - 在上下文注入后、用量日志前执行约束过滤
 /// </summary>
 public class SkillConstraintMiddleware : IAiMiddleware
 {
@@ -72,11 +72,11 @@ public class SkillConstraintMiddleware : IAiMiddleware
         // whitelisting skills permit survive.
         //
         // A skill with NO AllowedTools imposes no individual-tool restriction and must
-        // NOT collapse the intersection to empty — so only skills that actually declare
+        // NOT collapse the intersection to empty - so only skills that actually declare
         // a non-empty AllowedTools participate in the intersection (`accumulatedAllowedTools`
         // stays null until the first whitelisting skill is seen).
         //
-        // DeniedTools remains a UNION (any skill's deny blocks the tool) — deny always wins.
+        // DeniedTools remains a UNION (any skill's deny blocks the tool) - deny always wins.
         HashSet<string>? accumulatedAllowedTools = null;
         var accumulatedDeniedTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 

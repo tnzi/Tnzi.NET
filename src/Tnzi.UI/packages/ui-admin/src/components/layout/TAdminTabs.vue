@@ -2,7 +2,11 @@
   <div
     ref="rootRef"
     class="t-admin-tabs"
-    :class="{ 't-admin-tabs--fixed': fixed }"
+    :class="{
+      't-admin-tabs--fixed': fixed,
+      't-admin-tabs--inverted': surface === 'dark',
+      't-admin-tabs--surface-light': surface === 'light',
+    }"
     :data-style="themeStore.tabStyle"
   >
     <div ref="listRef" class="t-admin-tabs__list">
@@ -189,6 +193,9 @@ interface Props {
   showFullscreen?: boolean
   fixed?: boolean
   translate?: (key: string) => string
+  /** Surface tone when the tab bar carries a custom background color.
+   *  `'dark'` → light foreground, `'light'` → dark foreground (dark-mode only). */
+  surface?: 'dark' | 'light'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -198,6 +205,7 @@ const props = withDefaults(defineProps<Props>(), {
   showFullscreen: true,
   fixed: false,
   translate: undefined,
+  surface: undefined,
 })
 
 const emit = defineEmits<{
@@ -264,16 +272,16 @@ function onMouseDown(tab: AdminTab, event: MouseEvent): void {
   }
 }
 
-// Reveal the active tab in the bar — but ONLY when it's actually clipped or
+// Reveal the active tab in the bar - but ONLY when it's actually clipped or
 // off-screen, exactly like Chrome's tab strip.
 //
 // A fully-visible tab is left precisely where it is, so clicking a tab never
 // yanks it out from under the pointer. (The old implementation used
 // `scrollIntoView({ inline: 'center' })`, which re-centred the tab on EVERY
-// activation — every click jumped the whole strip, which felt jarring.)
+// activation - every click jumped the whole strip, which felt jarring.)
 //
 // Only the tab bar's own horizontal scroll (`listRef`, the `overflow-x:auto`
-// container) is touched — never the page — and the distance is the minimum
+// container) is touched - never the page - and the distance is the minimum
 // needed to bring the clipped edge into view, plus a small margin so the
 // revealed tab isn't flush against the edge. This single handler covers both
 // cases the user described: a direct click on an already-visible tab does
@@ -300,13 +308,13 @@ function scrollActiveTabIntoView(id: string): void {
   // default off); otherwise snap instantly.
   const behavior: ScrollBehavior = themeStore.tabScrollAnimation ? 'smooth' : 'auto'
   if (elRect.left < listRect.left) {
-    // Clipped on the left — scroll left to reveal the tab's leading edge.
+    // Clipped on the left - scroll left to reveal the tab's leading edge.
     list.scrollBy({ left: elRect.left - listRect.left - margin, behavior })
   } else if (elRect.right > listRect.right) {
-    // Clipped on the right — scroll right to reveal the tab's trailing edge.
+    // Clipped on the right - scroll right to reveal the tab's trailing edge.
     list.scrollBy({ left: elRect.right - listRect.right + margin, behavior })
   }
-  // else: fully visible — leave it exactly where it is (no movement).
+  // else: fully visible - leave it exactly where it is (no movement).
 }
 
 watch(
@@ -339,7 +347,7 @@ const contextOptions = computed(() => {
   const target = contextTarget.value
   const isPinned = target ? tabStore.isTabPinned(target.id) : false
   const isHome = target ? target.id === tabStore.homeTab?.id : false
-  // Phase G — 6 menu items with iconify icons, mirroring soybean's
+  // Phase G - 6 menu items with iconify icons, mirroring soybean's
   // global-tab/context-menu.vue. The pin/unpin item swaps based on
   // current pin state; close items are disabled for the home tab
   // and reused for pinned tabs (they self-skip via tabStore guards).
@@ -474,18 +482,36 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
      configured height. Without it, the parent column-flex (`.t-admin-
      shell__main`) shrinks the bar to the content's preferred min-
      height (~34px) when the page area is empty (e.g. workbench
-     stub) — chrome SVG arcs get cropped and the bar looks like
+     stub) - chrome SVG arcs get cropped and the bar looks like
      button style. soybean's AdminLayout puts flex-shrink:0 on the
      same three rails (header/tab/footer). */
   flex-shrink: 0;
   background-color: var(--tnzi-admin-tab-bg, var(--tnzi-container-bg));
-  border-bottom: 1px solid var(--tnzi-border);
-  /* Phase H1 D7: soybean's tab bar has a subtle bottom shadow that
-     separates it from the content. Earlier audit annotation claimed
-     "soybean parity: no box-shadow" — that was wrong. Re-instated. */
+  /* Separation matches the header bar: a single soft bottom shadow, NO hard
+     1px border line. (The header's own border sits hidden under this bar, so
+     dropping the line here makes both bars read the same soft-edged way.) A
+     custom / inverted tab surface re-adds a border below, since this light
+     shadow is invisible on a colored bar. */
   box-shadow: 0 1px 2px 0 rgb(0 21 41 / 0.05);
   padding: 0 8px;
   z-index: var(--tnzi-admin-z-tabs, 70);
+}
+/* Adaptive surface - a custom tab-bar background flips its foreground token
+   set (tab titles, icons, close buttons) so the bar stays legible. */
+.t-admin-tabs--inverted {
+  --tnzi-base-text: var(--tnzi-admin-tab-fg, var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92)));
+  --tnzi-base-text-muted: var(--tnzi-admin-inverted-text-muted, rgba(255, 255, 255, 0.6));
+  --tnzi-border: var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+  color: var(--tnzi-base-text);
+  /* Re-add a border on a colored bar (the light shadow is invisible there). */
+  border-bottom: 1px solid var(--tnzi-admin-inverted-border, rgba(255, 255, 255, 0.12));
+}
+.t-admin-tabs--surface-light {
+  --tnzi-base-text: var(--tnzi-admin-tab-fg, var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88)));
+  --tnzi-base-text-muted: var(--tnzi-admin-surface-light-text-muted, rgba(0, 0, 0, 0.5));
+  --tnzi-border: var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
+  color: var(--tnzi-base-text);
+  border-bottom: 1px solid var(--tnzi-admin-surface-light-border, rgba(0, 0, 0, 0.1));
 }
 .t-admin-tabs--fixed {
   position: sticky;
@@ -510,7 +536,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
      chrome/slider tabs against the bar's bottom edge. Previously the
      parent `align-items: center` left the list at intrinsic height
      (~tab content = 33px), so flex-end had no vertical room to work
-     in — tabs floated in the middle of the bar. soybean's `bsWrapper`
+     in - tabs floated in the middle of the bar. soybean's `bsWrapper`
      uses `h-full` for the same reason (`global-tab/index.vue:189`). */
   height: 100%;
   align-self: stretch;
@@ -530,7 +556,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
      (tab body sits flush against the bar's bottom edge so the SVG arc
      reads naturally) and `items-center` for button (chip floats mid-
      bar). Without this differentiation, chrome tabs floated centered
-     and looked detached from the bar — the user-reported "tab style
+     and looked detached from the bar - the user-reported "tab style
      not matching" core issue. */
   align-items: center;
 }
@@ -547,7 +573,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
   user-select: none;
   white-space: nowrap;
   /* Phase G follow-up #3: soybean's chrome/button/slider tab CSS module
-     doesn't set a colour on the inactive tab — it inherits the layout-
+     doesn't set a colour on the inactive tab - it inherits the layout-
      tab's base text colour (~rgb(31,31,31) in light mode), which reads
      ~3x stronger than `--tnzi-base-text-muted` (~rgb(75,85,99)) and
      was the user-reported "tab style not matching". Drop muted; use
@@ -567,7 +593,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
    arcs interlock; active tab z:10 + hover z:9 keep the right tab
    above. The SVG fill is driven by `.t-admin-tabs__chrome-bg`'s own
    `color` property (consumed via `fill="currentColor"` in
-   TChromeTabBg) — independent of the tab's text color so we can keep
+   TChromeTabBg) - independent of the tab's text color so we can keep
    title/close text legible. */
 .t-admin-tabs[data-style='chrome'] .t-admin-tabs__draggable {
   gap: 0;
@@ -577,7 +603,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
   margin-right: -18px;
   padding: 6px 24px;
   gap: 16px;
-  /* Inactive color is inherited from `.t-admin-tabs__tab` (base-text) —
+  /* Inactive color is inherited from `.t-admin-tabs__tab` (base-text) -
      soybean doesn't override here. Hover/active flip to primary below. */
 }
 .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab:hover {
@@ -590,7 +616,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 }
 /* The SVG arc background. Default transparent; hover gets a soft grey
    (matches soybean #dee1e6); active gets primary tinted to white at 10%
-   — using an opaque mixed colour (not `rgba primary / 0.10`) so the
+ - using an opaque mixed colour (not `rgba primary / 0.10`) so the
    bg colour doesn't shift when the underlying tab-bar colour differs
    between light/dark themes. Dark mode mixes against `#1f1f1f` instead
    of `#ffffff` so the arc still reads as a tinted-but-darker chip. */
@@ -607,7 +633,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 /* Light + dark rules are BOTH wrapped in `:global(...)` so neither picks
    up Vue's `[data-v-xxx]` scope hash. If only the dark variants are
    global, the light rule's scope hash gives it +1 attribute selector
-   over the dark rule and wins the cascade tie — leaving the active arc
+   over the dark rule and wins the cascade tie - leaving the active arc
    stuck on the light-mix colour in dark mode. The `.t-admin-tabs__chrome-bg`
    class is unique to this component, so removing scope isolation here
    doesn't risk collision. */
@@ -618,7 +644,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 :global(.t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab--active:hover .t-admin-tabs__chrome-bg) {
   color: color-mix(in srgb, var(--tnzi-primary, #646cff) 10%, #ffffff 90%);
 }
-/* Dark variants — flip the mix base so the arc background reads as a
+/* Dark variants - flip the mix base so the arc background reads as a
    darker tinted chip instead of a bright washed-out tile. soybean's
    `.chrome-tab_dark` uses #18181c for hover and primary@30% for active. */
 :global(.dark .t-admin-tabs[data-style='chrome'] .t-admin-tabs__tab:hover .t-admin-tabs__chrome-bg) {
@@ -706,8 +732,8 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
   border-bottom-color: var(--tnzi-primary, #646cff);
 }
 
-/* Close button — circular 16x16 SVG-rendered close. soybean's
-   `.svg-close` doesn't set its own colour either — it inherits from
+/* Close button - circular 16x16 SVG-rendered close. soybean's
+   `.svg-close` doesn't set its own colour either - it inherits from
    the tab outer (`currentColor` in the SVG path).
    On touch devices the hit area grows to 24×24 (still rendering the
    16×16 SVG) so a thumb can reliably hit the target without enlarging
@@ -740,7 +766,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
 }
 
 .t-admin-tabs__title {
-  /* Title text — colour is set per-style above. Cap at 220px on
+  /* Title text - colour is set per-style above. Cap at 220px on
      desktop / 140px on phones so an over-long route name (e.g.
      "NotificationTemplate 模板管理详情") doesn't single-handedly fill
      the tab bar. The title still grows up to the cap so short labels
@@ -783,7 +809,7 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
   background-color: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.06);
   color: var(--tnzi-primary, #646cff);
 }
-/* Phase H3 D4: generic action button (fullscreen) — same chrome as
+/* Phase H3 D4: generic action button (fullscreen) - same chrome as
    reload but no spin animation. */
 .t-admin-tabs__action {
   width: 28px;

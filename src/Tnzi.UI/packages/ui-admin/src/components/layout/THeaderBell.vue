@@ -1,6 +1,6 @@
 <template>
   <!--
-    Header notification bell — an unread `NBadge` over a bell trigger opening an
+    Header notification bell - an unread `NBadge` over a bell trigger opening an
     `NPopover` dropdown: a titled panel, one `#item` scoped-slot row per entry, a
     load-more button, and an empty state. The reusable primitive apps otherwise
     reverse-engineer (the old pattern Teleported into the header's internal
@@ -49,7 +49,7 @@ import { TSvgIcon } from '@tnzi/ui'
 
 const props = withDefaults(
   defineProps<{
-    /** Unread count — drives the badge (hidden at 0, capped at 99). */
+    /** Unread count - drives the badge (hidden at 0, capped at 99). */
     unreadCount?: number
     items: T[]
     itemKey?: (item: T, index: number) => string | number

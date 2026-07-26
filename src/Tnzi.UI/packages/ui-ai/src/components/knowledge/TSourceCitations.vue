@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TSourceCitations — Citation source badge list (collapsible)
+ * TSourceCitations - Citation source badge list (collapsible)
  */
 
 import { ref } from 'vue';

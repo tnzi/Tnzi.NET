@@ -2,7 +2,7 @@
 namespace Tnzi.AI.Engine.Strategies;
 
 /// <summary>
-/// 执行策略解析器 — 根据 AgentExecutionMode 枚举和配置 JSON 决定使用哪种执行策略
+/// 执行策略解析器 - 根据 AgentExecutionMode 枚举和配置 JSON 决定使用哪种执行策略
 /// </summary>
 public static class ExecutionStrategyResolver
 {

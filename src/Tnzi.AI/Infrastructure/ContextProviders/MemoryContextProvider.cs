@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Infrastructure.ContextProviders;
 
 /// <summary>
-/// 记忆上下文提供器 — 从 IMemoryStore 读取记忆并注入为 System 消息，
+/// 记忆上下文提供器 - 从 IMemoryStore 读取记忆并注入为 System 消息，
 /// 在对话完成后可选自动沉淀记忆
 /// </summary>
 public sealed class MemoryContextProvider : IContextProvider
@@ -28,7 +28,7 @@ public sealed class MemoryContextProvider : IContextProvider
     /// 初始化（含 MemoryScope + 可选自动沉淀 + 可选 Agent-bound 范围）
     /// </summary>
     /// <param name="agentBoundScope">
-    /// 可选的 Agent-bound 记忆范围 — 绑定到当前 Agent（通过结构化 AgentId 列检索），
+    /// 可选的 Agent-bound 记忆范围 - 绑定到当前 Agent（通过结构化 AgentId 列检索），
     /// 与当前用户无关，确保 headless 运行也能加载。为只读注入，不参与自动沉淀。
     /// </param>
     public MemoryContextProvider(
@@ -133,7 +133,7 @@ public sealed class MemoryContextProvider : IContextProvider
         {
             // 搜索无结果时注入索引（让 Agent 知道有哪些记忆可用）
             _logger.LogDebug("Retrieval mode: no search results, injecting index only ({Count} entries)", entryCount);
-            return $"[Memory index ({entryCount} entries — use search_memory for full content)]\n{index}";
+            return $"[Memory index ({entryCount} entries - use search_memory for full content)]\n{index}";
         }
 
         // 4. 组合：索引 + 相关记忆全文
@@ -161,13 +161,13 @@ public sealed class MemoryContextProvider : IContextProvider
 
         var category = string.IsNullOrWhiteSpace(entry.Category) ? "general" : entry.Category;
         var daysAgo = (int)(DateTime.UtcNow - entry.CreationTime).TotalDays;
-        var importance = entry.Importance.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+        var importance = entry.Importance.ToString("F1", CultureInfo.InvariantCulture);
 
         var formatted = $"[{category}, {daysAgo} days ago, importance: {importance}] {entry.Content}";
 
         if (daysAgo > 0)
         {
-            formatted += $" (Note: this memory is {daysAgo} days old — verify against current state before relying on it)";
+            formatted += $" (Note: this memory is {daysAgo} days old - verify against current state before relying on it)";
         }
 
         return formatted;
@@ -190,13 +190,16 @@ public sealed class MemoryContextProvider : IContextProvider
 
     private async Task<List<ScopedMemorySegment>> LoadMemorySegmentsAsync(CancellationToken ct)
     {
-        // 并行读取四段记忆（本地、Agent-bound、项目快照、共享）
-        var localTask = _memoryStore.ReadAsync(_scope, ct);
+        // 四段记忆（本地、Agent-bound、项目快照、共享）必须顺序读取：
+        // IMemoryStore 的缺省实现 DatabaseMemoryStore 走 EF 仓储，同一个 scoped DbContext
+        // 不允许并发查询（会抛 "A second operation was started on this context"），
+        // 而 GetContextAsync 的 catch 会把它当成"加载失败"静默吞掉 → 记忆永不注入。
+        var localMemory = await _memoryStore.ReadAsync(_scope, ct);
 
         // Agent-bound：绑定到当前 Agent 的记忆（结构化 AgentId 列检索），headless-safe。
-        var agentBoundTask = _agentBoundScope != null
-            ? _memoryStore.ReadAsync(_agentBoundScope, ct)
-            : Task.FromResult<string?>(null);
+        var agentBoundMemory = _agentBoundScope != null
+            ? await _memoryStore.ReadAsync(_agentBoundScope, ct)
+            : null;
 
         var projectScope = MemoryScopeResolver.ResolveProjectSnapshotScope(
             _memoryOptions?.EnableProjectSnapshot == true,
@@ -207,40 +210,34 @@ public sealed class MemoryContextProvider : IContextProvider
         var shouldLoadShared = !string.IsNullOrWhiteSpace(sharedScope)
             && !string.Equals(sharedScope, projectScope, StringComparison.OrdinalIgnoreCase);
 
-        var projectTask = !string.IsNullOrWhiteSpace(projectScope)
-            ? _memoryStore.ReadAsync(projectScope, ct)
-            : Task.FromResult<string?>(null);
+        var projectMemory = !string.IsNullOrWhiteSpace(projectScope)
+            ? await _memoryStore.ReadAsync(projectScope, ct)
+            : null;
 
-        var sharedTask = shouldLoadShared
-            ? _memoryStore.ReadAsync(sharedScope!, ct)
-            : Task.FromResult<string?>(null);
-
-        await Task.WhenAll(localTask, agentBoundTask, projectTask, sharedTask);
+        var sharedMemory = shouldLoadShared
+            ? await _memoryStore.ReadAsync(sharedScope!, ct)
+            : null;
 
         var segments = new List<ScopedMemorySegment>(4);
 
-        var localMemory = localTask.Result;
         if (!string.IsNullOrWhiteSpace(localMemory))
         {
             segments.Add(new ScopedMemorySegment("Local Memory", _scope.ToScopeKey(), _scope, localMemory));
             _logger.LogDebug("Loaded local memory for scope {Scope}, length: {Length}", _scope.Name, localMemory.Length);
         }
 
-        var agentBoundMemory = agentBoundTask.Result;
         if (!string.IsNullOrWhiteSpace(agentBoundMemory))
         {
             segments.Add(new ScopedMemorySegment("Agent Memory", _agentBoundScope!.ToScopeKey(), _agentBoundScope, agentBoundMemory));
             _logger.LogDebug("Loaded agent-bound memory for scope {Scope}, length: {Length}", _agentBoundScope.ToScopeKey(), agentBoundMemory.Length);
         }
 
-        var projectMemory = projectTask.Result;
         if (!string.IsNullOrWhiteSpace(projectMemory))
         {
             segments.Add(new ScopedMemorySegment("Project Snapshot", projectScope!, null, projectMemory));
             _logger.LogDebug("Loaded project snapshot memory for scope {Scope}, length: {Length}", projectScope, projectMemory.Length);
         }
 
-        var sharedMemory = sharedTask.Result;
         if (!string.IsNullOrWhiteSpace(sharedMemory))
         {
             segments.Add(new ScopedMemorySegment("Shared Memory", sharedScope!, null, sharedMemory));
@@ -378,7 +375,7 @@ public sealed class MemoryContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// 自动记忆沉淀 — 从对话中提取持久记忆并追加
+    /// 自动记忆沉淀 - 从对话中提取持久记忆并追加
     /// </summary>
     private async Task AutoPersistAsync(List<ChatMessage> messages, CancellationToken ct)
     {
@@ -402,7 +399,7 @@ public sealed class MemoryContextProvider : IContextProvider
         try
         {
             // Auxiliary sub-run: uses IChatClientFactory.GetChatClient() which returns the default
-            // provider/model. This is intentional — AutoPersist is a lightweight utility call that
+            // provider/model. This is intentional - AutoPersist is a lightweight utility call that
             // does not need the parent agent's model. Prompt cache sharing is achieved through
             // IChatClientFactory reuse (same provider pipeline and connection pooling).
             var chatClient = _chatClientFactory!.GetChatClient();
@@ -446,7 +443,7 @@ public sealed class MemoryContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// 增量持久化 — 逐条与已有记忆比对，决定 ADD/UPDATE/DELETE/NOOP
+    /// 增量持久化 - 逐条与已有记忆比对，决定 ADD/UPDATE/DELETE/NOOP
     /// </summary>
     private async Task IncrementalPersistAsync(string extractedMemories, CancellationToken ct)
     {
@@ -522,8 +519,8 @@ public sealed class MemoryContextProvider : IContextProvider
         {
             var category = match.Groups[1].Success ? match.Groups[1].Value : null;
             var importance = match.Groups[2].Success && double.TryParse(match.Groups[2].Value,
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var imp) ? imp : 0.5;
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture, out var imp) ? imp : 0.5;
             var content = match.Groups[3].Value;
             return (content, category, Math.Clamp(importance, 0, 1));
         }
@@ -531,7 +528,7 @@ public sealed class MemoryContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// 尝试合并去重 — 当条目数超过阈值时触发
+    /// 尝试合并去重 - 当条目数超过阈值时触发
     /// </summary>
     private async Task TryConsolidateAsync(IChatClient chatClient, CancellationToken ct)
     {

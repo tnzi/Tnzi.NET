@@ -1,6 +1,6 @@
 <template>
   <!--
-    Promotions — promotion/coupon CRUD wired to /admin/promotions via the
+    Promotions - promotion/coupon CRUD wired to /admin/promotions via the
     standard useCrudPage + TCrudPage pattern. Create/edit render through
     TFormSchemaRenderer (promotion-config `promotionFormSchema`); the datetime
     fields use a `promoDate` field renderer (ISO string ⇄ picker timestamp).
@@ -113,7 +113,7 @@ const crud = useCrudPage<PromotionDto>({
   updateData: (id, data) => bridge.update(String(id), data),
 })
 
-// Custom create trigger — seed the required enum defaults so the create form
+// Custom create trigger - seed the required enum defaults so the create form
 // opens with a valid Type / DiscountType selection (TCrudPage's default
 // openCreate would open an empty `{}` and the required enum selects can't
 // self-default).

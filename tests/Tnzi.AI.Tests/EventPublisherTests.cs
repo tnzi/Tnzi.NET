@@ -141,7 +141,7 @@ public class EventPublisherTests
 
         var publisher = new EventPublisher(null, scopeFactory.Object, Mock.Of<ILogger<EventPublisher>>());
 
-        // Should not throw — the scoped work error is caught inside HandleNewThreadTitleAsync
+        // Should not throw - the scoped work error is caught inside HandleNewThreadTitleAsync
         await publisher.HandleNewThreadTitleAsync(
             new AgentRunRequest { ThreadId = Guid.NewGuid(), UserMessage = "hi" },
             new AgentRunResult { Response = "hi back" });

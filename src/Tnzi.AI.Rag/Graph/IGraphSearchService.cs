@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Rag.Graph;
 
 /// <summary>
-/// 知识图谱搜索服务 — 基于实体名称/类型的图谱检索，支持关系扩展
+/// 知识图谱搜索服务 - 基于实体名称/类型的图谱检索，支持关系扩展
 /// </summary>
 public interface IGraphSearchService
 {

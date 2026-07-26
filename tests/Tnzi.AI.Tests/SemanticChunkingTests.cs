@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// SemanticChunkingStrategy 单元测试 — 验证基于嵌入相似度的语义分块
+/// SemanticChunkingStrategy 单元测试 - 验证基于嵌入相似度的语义分块
 /// </summary>
 public class SemanticChunkingStrategyTests
 {

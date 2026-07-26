@@ -133,7 +133,7 @@ public class SuggestionServiceTests
 
         var service = CreateService();
 
-        // Act — request only 2
+        // Act - request only 2
         var suggestions = await service.GenerateAsync(Guid.NewGuid(), count: 2);
 
         // Assert
@@ -193,7 +193,7 @@ public class SuggestionServiceTests
         // Act
         await service.GenerateAsync(Guid.NewGuid());
 
-        // Assert — verify the model was passed through
+        // Assert - verify the model was passed through
         _aiUtility.Verify(u => u.ExecuteAsync(
             It.IsAny<string>(), It.IsAny<string>(),
             It.Is<AiUtilityCallOptions?>(o => o != null && o.Model == "gpt-4o-mini"),
@@ -203,7 +203,7 @@ public class SuggestionServiceTests
     [Fact]
     public async Task GenerateAsync_LoadsHistoryThroughScopeResolvedService()
     {
-        // Arrange — register the thread service ONLY in a scope, never as a constructor field, so
+        // Arrange - register the thread service ONLY in a scope, never as a constructor field, so
         // a successful load proves SuggestionService resolves it from an isolated DI scope.
         var threadId = Guid.NewGuid();
         _threadService.Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -224,7 +224,7 @@ public class SuggestionServiceTests
     [Fact]
     public async Task GenerateAsync_HistoryLoadThrowsConcurrency_ReturnsEmpty()
     {
-        // Arrange — the exact exception class the fix targets must be swallowed, not propagated.
+        // Arrange - the exact exception class the fix targets must be swallowed, not propagated.
         _threadService.Setup(s => s.GetMessageHistoryAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("A second operation was started on this context instance"));
 

@@ -1,5 +1,6 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage :state="crud" :all-columns="columns"
+    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="reconciliationFormSchema"
@@ -46,9 +47,10 @@
 </template>
 
 <script setup lang="ts">
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, ref, watch } from 'vue'
 import { NButton, type DataTableColumns } from 'naive-ui'
-import { formatDateOnly } from '@tnzi/core'
+
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -69,8 +71,9 @@ import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safeMessage'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount, tsToIsoDate } from './money'
-import { buildReconciliationColumns, reconciliationFormSchema, type ReconciliationRow } from './reconciliation-config'
+import { fmtAmount, tsToIsoDate, fmtDate } from './money'
+import { moneyPairColumns } from '../../components/finance'
+import { buildReconciliationSearchFields, buildReconciliationColumns, reconciliationFormSchema, type ReconciliationRow } from './reconciliation-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.reconciliations')
@@ -79,6 +82,9 @@ const { can } = usePermissionGuard()
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildReconciliationColumns(t)
+
+// 真实筛选（标准 1）：只声明后端 QueryDto 真的支持的字段。
+const searchFields = buildReconciliationSearchFields(t)
 
 function toPayload(d: Record<string, unknown>) {
   return {
@@ -105,14 +111,19 @@ const crud = useCrudPage<ReconciliationRow>({
 
 const title = 'tnzi.admin.modules.finance.reconciliations.title'
 
+// Funds accounts only, not every leaf. `CreateDraftAsync` resolves the account
+// through `GetFundsAccountAsync`, so anything else comes back a 400 - offering
+// the full leaf list let the form present choices the server always rejects.
+// This is also what makes the worksheet's money-in / money-out headings sound:
+// a reconciliation is pinned to one funds account by construction.
 const fieldRenderers = {
-  'finance-account': selectRenderer(() => sources.leafAccountOptions.value, { placeholder: t('form.accountPlaceholder'), clearable: false }),
+  'finance-account': selectRenderer(() => sources.fundsAccountOptions.value, { placeholder: t('form.accountPlaceholder'), clearable: false }),
 }
 
 watch(
   () => crud.formModal.visible.value,
   (open) => {
-    if (open) void sources.ensureLeafAccounts()
+    if (open) void sources.ensureFundsAccounts()
   },
   { immediate: true },
 )
@@ -165,7 +176,7 @@ watch(
   },
 )
 
-/** Lines an imported bank transaction is holding — the server refuses to drop them. */
+/** Lines an imported bank transaction is holding - the server refuses to drop them. */
 const statementMatchedIds = computed(
   () => new Set((worksheet.value?.lines ?? []).filter((l) => l.isStatementMatched).map((l) => l.journalLineId)),
 )
@@ -180,8 +191,8 @@ function onChecked(keys: Array<string | number>) {
 
 const lineColumns: DataTableColumns<ReconciliationCandidateLineDto> = [
   { type: 'selection', disabled: (r) => r.isStatementMatched },
-  { key: 'postingDate', title: t('worksheet.date'), width: 110, render: (r) => formatDateOnly(r.postingDate, { utc: true }) },
-  { key: 'entryNumber', title: t('worksheet.entry'), width: 120, render: (r) => r.entryNumber ?? '—' },
+  { key: 'postingDate', title: t('worksheet.date'), width: 110, render: (r) => fmtDate(r.postingDate) },
+  { key: 'entryNumber', title: t('worksheet.entry'), width: 120, render: (r) => r.entryNumber ?? EMPTY_DASH },
   {
     key: 'memo',
     title: t('worksheet.memo'),
@@ -189,13 +200,22 @@ const lineColumns: DataTableColumns<ReconciliationCandidateLineDto> = [
     render: (r) =>
       r.isStatementMatched
         ? h('div', { class: 'fin-recon__memo' }, [
-            h('span', r.memo ?? '—'),
+            h('span', r.memo ?? EMPTY_DASH),
             h(TStatusBadge, { value: 'statement', type: 'info', label: t('worksheet.statementMatched') }),
           ])
-        : (r.memo ?? '—'),
+        : (r.memo ?? EMPTY_DASH),
   },
-  { key: 'debit', title: t('worksheet.debit'), width: 110, render: (r) => amountCell(r.debit > 0 ? fmtAmount(r.debit) : '—') },
-  { key: 'credit', title: t('worksheet.credit'), width: 110, render: (r) => amountCell(r.credit > 0 ? fmtAmount(r.credit) : '—') },
+  // Every candidate row is a posted line of the ONE funds account being
+  // reconciled (the backend resolves it through `GetFundsAccountAsync` and
+  // rejects lines from any other account), so there is no second account in
+  // this view and no debit/credit totals row - it reads as money in / out.
+  ...moneyPairColumns<ReconciliationCandidateLineDto>({
+    presentation: 'flow',
+    translate: t,
+    width: 110,
+    debit: (r) => r.debit,
+    credit: (r) => r.credit,
+  }),
 ]
 
 async function saveLines() {

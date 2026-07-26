@@ -327,7 +327,7 @@ public class SubAgentExecutionServiceTests
     }
 
     // ------------------------------------------------------------------
-    // FIX 3: RootRunId propagation — 3-level chain shares one root
+    // FIX 3: RootRunId propagation - 3-level chain shares one root
     // ------------------------------------------------------------------
 
     /// <summary>
@@ -339,8 +339,8 @@ public class SubAgentExecutionServiceTests
     public async Task SpawnAsync_ThreeLevelChain_ChildInheritsGrandparentAsRoot()
     {
         var agentId = Guid.NewGuid();
-        var rootRunId = Guid.NewGuid();    // A — the true root
-        var parentRunId = Guid.NewGuid();  // B — the immediate parent
+        var rootRunId = Guid.NewGuid();    // A - the true root
+        var parentRunId = Guid.NewGuid();  // B - the immediate parent
         Guid? capturedRootRunId = null;
 
         var resolver = new Mock<IAgentResolver>();
@@ -409,7 +409,7 @@ public class SubAgentExecutionServiceTests
     }
 
     // ------------------------------------------------------------------
-    // B12: CTS lifecycle — register on spawn, dispose on finish
+    // B12: CTS lifecycle - register on spawn, dispose on finish
     // ------------------------------------------------------------------
 
     [Fact]

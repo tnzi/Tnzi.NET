@@ -6,13 +6,12 @@ using System.Text;
 namespace Tnzi.AI.Channels.Adapters.Discord;
 
 /// <summary>
-/// Discord 频道适配器 — 通过 HTTP REST API 收发消息，支持 Webhook/Gateway 事件接收。
+/// Discord 频道适配器 - 通过 HTTP REST API 收发消息，支持 Webhook/Gateway 事件接收。
 /// </summary>
 /// <remarks>
 /// 使用纯 HTTP API 调用（无 Discord.NET SDK 依赖）：
-/// - POST /channels/{id}/messages: 发送消息
-/// - 文件上传: multipart/form-data
-/// - 事件接收通过 Webhook/Gateway 由 Controller 调用 HandleEventAsync
+/// - POST /channels/{id}/messages: 发送消息（纯文本；文件附件管线已于 2026-06-20 移除）
+/// - 事件接收通过 Webhook/Gateway 由 Controller 调用 ProcessWebhookAsync
 /// </remarks>
 public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
@@ -109,7 +108,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     /// <summary>
     /// 处理 Discord Gateway/Webhook 事件（由 ASP.NET Controller 调用）。
-    /// 不含签名验证的兼容重载 — 仅在未配置 PublicKey 时安全。
+    /// 不含签名验证的兼容重载 - 仅在未配置 PublicKey 时安全。
     /// </summary>
     public Task HandleEventAsync(string eventJson, CancellationToken ct = default)
     {
@@ -210,7 +209,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         }
         else
         {
-            // 未配置 PublicKey 无法验签 — 拒绝（外部回调必须可验证）。
+            // 未配置 PublicKey 无法验签 - 拒绝（外部回调必须可验证）。
             _logger.LogWarning("Discord PublicKey is not configured; rejecting unverifiable webhook");
             return WebhookProcessResult.Rejected("Discord PublicKey not configured");
         }
@@ -242,8 +241,11 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             using var doc = JsonDocument.Parse(eventJson);
             var root = doc.RootElement;
 
-            // Discord Interactions 验证 ping（type=1）
-            if (root.TryGetProperty("type", out var typeEl) && typeEl.GetInt32() == 1)
+            // Discord Interactions 验证 ping（type=1）。ValueKind 必须先判定：Gateway 载荷里
+            // type 可能是非数字（甚至字符串），裸 GetInt32() 会抛异常并被外层 catch 静默吞掉。
+            if (root.TryGetProperty("type", out var typeEl)
+                && typeEl.ValueKind == JsonValueKind.Number
+                && typeEl.GetInt32() == 1)
                 return; // Controller 层处理 ping 响应
 
             // Gateway 事件格式: { "t": "MESSAGE_CREATE", "d": { ... } }
@@ -348,7 +350,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             };
         }
 
-        // Set Authorization per-request — the named HttpClient is pooled and its
+        // Set Authorization per-request - the named HttpClient is pooled and its
         // DefaultRequestHeaders must not be mutated across concurrent sends.
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/channels/{channelId}/messages")
         {

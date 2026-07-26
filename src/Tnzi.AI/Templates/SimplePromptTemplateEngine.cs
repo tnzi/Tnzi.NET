@@ -1,17 +1,17 @@
 namespace Tnzi.AI.Templates;
 
 /// <summary>
-/// 简单 Prompt 模板引擎 — 支持 {{variable}} 变量替换
+/// 简单 Prompt 模板引擎 - 支持 {{variable}} 变量替换
 /// </summary>
 /// <remarks>
 /// <para>
 /// 内置变量：
-/// - {{date}} — 当前 UTC 日期（yyyy-MM-dd）
-/// - {{time}} — 当前 UTC 时间（HH:mm:ss）
-/// - {{datetime}} — 当前 UTC 日期时间（yyyy-MM-dd HH:mm:ss）
-/// - {{user.name}} — 当前用户名（需注入 ICurrentUser）
-/// - {{user.id}} — 当前用户 ID
-/// - {{agent.name}} — Agent 名称（通过自定义变量传入）
+/// - {{date}} - 当前 UTC 日期（yyyy-MM-dd）
+/// - {{time}} - 当前 UTC 时间（HH:mm:ss）
+/// - {{datetime}} - 当前 UTC 日期时间（yyyy-MM-dd HH:mm:ss）
+/// - {{user.name}} - 当前用户名（需注入 ICurrentUser）
+/// - {{user.id}} - 当前用户 ID
+/// - {{agent.name}} - Agent 名称（通过自定义变量传入）
 /// </para>
 /// <para>
 /// 未匹配的变量保留原始占位符不替换，避免运行时异常。

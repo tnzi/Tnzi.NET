@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine.Nodes;
 
 /// <summary>
-/// 并行节点 — 将输入复制给 N 个子 Agent 并行执行，合并输出
+/// 并行节点 - 将输入复制给 N 个子 Agent 并行执行，合并输出
 /// </summary>
 /// <remarks>
 /// 配置项：

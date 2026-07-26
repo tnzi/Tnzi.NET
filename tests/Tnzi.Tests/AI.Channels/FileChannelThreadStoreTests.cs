@@ -43,11 +43,11 @@ public class FileChannelThreadStoreTests : IDisposable
         var threadId = Guid.NewGuid();
         await _store.SetThreadIdAsync("telegram", "group1", threadId, topicId: "topic42");
 
-        // Without topicId — should not find
+        // Without topicId - should not find
         var withoutTopic = await _store.GetThreadIdAsync("telegram", "group1");
         Assert.Null(withoutTopic);
 
-        // With topicId — should find
+        // With topicId - should find
         var withTopic = await _store.GetThreadIdAsync("telegram", "group1", topicId: "topic42");
         Assert.Equal(threadId, withTopic);
     }

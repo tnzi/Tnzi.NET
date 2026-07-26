@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { HttpClient } from '../../http/http';
 import {
-  useAdminPersonaApi,
   useAdminSkillCategoryApi,
   useAdminMcpToolAnalyticsApi,
   useArtifactApi,
@@ -9,7 +8,7 @@ import {
 } from '../../services/ai/api';
 
 // ---------------------------------------------------------------------------
-// Mock HttpClient — intercept all HTTP methods
+// Mock HttpClient - intercept all HTTP methods
 // ---------------------------------------------------------------------------
 
 function createMockClient() {
@@ -54,53 +53,6 @@ describe('AI API Wrappers', () => {
 
   beforeEach(() => {
     client = createMockClient();
-  });
-
-  // ==========================================
-  // useAdminPersonaApi
-  // ==========================================
-
-  describe('useAdminPersonaApi', () => {
-    it('should call POST /admin/ai/personas/query for getList', async () => {
-      const api = useAdminPersonaApi(client);
-      await api.getList({ pageIndex: 1, pageSize: 10 });
-      expect(client.post).toHaveBeenCalledWith(
-        '/admin/ai/personas/query',
-        { pageIndex: 1, pageSize: 10 },
-      );
-    });
-
-    it('should call GET /admin/ai/personas/{id} for getById', async () => {
-      const api = useAdminPersonaApi(client);
-      await api.getById('abc-123');
-      expect(client.get).toHaveBeenCalledWith('/admin/ai/personas/abc-123');
-    });
-
-    it('should call GET /admin/ai/personas/by-slug/{slug} for getBySlug', async () => {
-      const api = useAdminPersonaApi(client);
-      await api.getBySlug('friendly-helper');
-      expect(client.get).toHaveBeenCalledWith('/admin/ai/personas/by-slug/friendly-helper');
-    });
-
-    it('should call POST /admin/ai/personas for create', async () => {
-      const api = useAdminPersonaApi(client);
-      const input = { name: 'Test', slug: 'test', content: 'Hello' };
-      await api.create(input);
-      expect(client.post).toHaveBeenCalledWith('/admin/ai/personas', input);
-    });
-
-    it('should call PUT /admin/ai/personas/{id} for update', async () => {
-      const api = useAdminPersonaApi(client);
-      const input = { name: 'Updated' };
-      await api.update('abc-123', input);
-      expect(client.put).toHaveBeenCalledWith('/admin/ai/personas/abc-123', input);
-    });
-
-    it('should call DELETE /admin/ai/personas/{id} for delete', async () => {
-      const api = useAdminPersonaApi(client);
-      await api.delete('abc-123');
-      expect(client.delete).toHaveBeenCalledWith('/admin/ai/personas/abc-123');
-    });
   });
 
   // ==========================================

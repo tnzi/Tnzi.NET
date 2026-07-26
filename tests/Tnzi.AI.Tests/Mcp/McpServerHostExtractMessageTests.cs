@@ -131,7 +131,7 @@ public class McpServerHostExtractMessageTests
             "ExtractMessage",
             BindingFlags.NonPublic | BindingFlags.Static);
 
-        method.ShouldNotBeNull("McpServerHost.ExtractMessage was renamed or removed — update these tests.");
+        method.ShouldNotBeNull("McpServerHost.ExtractMessage was renamed or removed - update these tests.");
         return (string)method!.Invoke(null, [arguments])!;
     }
 }

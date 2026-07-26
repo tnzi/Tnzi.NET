@@ -1,9 +1,9 @@
 /**
- * Identity bridge — full PoC (Phase 2b Task 2.28).
+ * Identity bridge - full PoC (Phase 2b Task 2.28).
  *
  * Wires ui-admin CRUD page contracts to @tnzi/core identity admin APIs.
  * The real `@tnzi/core` identity module exports factory functions that take
- * an HttpClient and return an API object — NOT singleton services. This bridge
+ * an HttpClient and return an API object - NOT singleton services. This bridge
  * accepts either a client (and builds the APIs internally) or pre-built API
  * objects (so tests can inject mocks without an HttpClient).
  */
@@ -15,6 +15,9 @@ import {
   useAdminOrganizationApi,
   useAdminSessionApi,
   useProfileApi,
+  useAuthApi,
+  oauthLoginUrl,
+  type AuthConfigDto,
   type UserListItemDto,
   type CreateUserDto,
   type UpdateUserDto,
@@ -52,6 +55,7 @@ import {
   type EnableTwoFactorDto,
   type EnableTotpDto,
   type TotpSetupDto,
+  type TwoFactorType,
 } from '@tnzi/core/services/identity'
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
@@ -72,6 +76,7 @@ export interface IdentityBridgeDeps {
   organizationApi?: ReturnType<typeof useAdminOrganizationApi>
   sessionApi?: ReturnType<typeof useAdminSessionApi>
   profileApi?: ReturnType<typeof useProfileApi>
+  authApi?: ReturnType<typeof useAuthApi>
 }
 
 // Re-export core's OrganizationDto for bridge consumers.
@@ -91,6 +96,12 @@ export interface SessionDto {
 
 export interface IdentityBridge {
   users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> & {
+    /**
+     * Full record for ONE user (`GET /admin/users/{id}`). The list projection
+     * (`UserListItemDto`) omits the profile fields the user detail page shows,
+     * so the page hydrates from here rather than from the loaded page of rows.
+     */
+    getById(id: string): Promise<UserDto>
     /** Enable a user account (sets isEnabled=true). */
     enable(id: string): Promise<void>
     /** Disable a user account (sets isEnabled=false). Optional reason recorded in audit log. */
@@ -102,7 +113,7 @@ export interface IdentityBridge {
     /** Admin-side password reset. The user must change it on next login. */
     resetPassword(id: string, newPassword: string): Promise<void>
     /**
-     * Replace the user's role set. `roleIds` is the canonical target list —
+     * Replace the user's role set. `roleIds` is the canonical target list -
      * the bridge computes (add, remove) deltas against the user's current
      * roles and issues two REST calls so the caller doesn't have to.
      *
@@ -115,7 +126,7 @@ export interface IdentityBridge {
       roleIds: string[],
       currentRoleIds?: string[],
     ): Promise<void>
-    /** Direct admin endpoints — `setRoles` is usually preferred. */
+    /** Direct admin endpoints - `setRoles` is usually preferred. */
     assignRoles(userId: string, roleIds: string[]): Promise<void>
     removeRoles(userId: string, roleIds: string[]): Promise<void>
     /** Move user under a given organization. */
@@ -124,7 +135,7 @@ export interface IdentityBridge {
     removeFromOrganization(userId: string): Promise<void>
   }
   roles: BridgeCrudContract<RoleDto, CreateRoleDto, UpdateRoleDto> & {
-    /** Get all roles (no paging) — used to populate the role-assignment
+    /** Get all roles (no paging) - used to populate the role-assignment
      *  picker in Users and the role list in RoleFunction. */
     getAll(): Promise<RoleDto[]>
     /** Get a role's detail DTO (includes `userCount`). */
@@ -139,7 +150,7 @@ export interface IdentityBridge {
   }
   tenants: BridgeCrudContract<TenantDto, CreateTenantDto, UpdateTenantDto>
   /**
-   * Organizations are a hierarchical tree, not a paged list — the surface is
+   * Organizations are a hierarchical tree, not a paged list - the surface is
    * tree-shaped (getTree/move/getChildren) rather than BridgeCrudContract.
    * Wires the full DefaultOrganizationAdminController endpoint set.
    */
@@ -166,7 +177,7 @@ export interface IdentityBridge {
   sessions: {
     /**
      * Global paged session list (GET /admin/sessions). `userId` is an
-     * optional filter — omitted returns sessions across ALL users (sorted by
+     * optional filter - omitted returns sessions across ALL users (sorted by
      * last activity desc) with `userName` populated on every item.
      */
     list(params?: {
@@ -196,10 +207,26 @@ export interface IdentityBridge {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>>
   }
   /**
+   * Public auth config (`GET /auth/config`, anonymous). Tells the User Center
+   * which self-service affordances the backend deployment actually supports -
+   * e.g. hide "change phone" when no SMS channel is enabled, hide "change email"
+   * when no email channel is enabled, and drive the OAuth account-linking list.
+   * Returns `null` on failure so consumers can fail-open (assume all enabled).
+   */
+  getAuthConfig(): Promise<AuthConfigDto | null>
+  /**
+   * Deployment-prefix-aware URL for starting an OAuth flow with a given
+   * provider (`GET /auth/oauth/{provider}/login`). When the user is already
+   * authenticated, hitting this endpoint links the provider to their account -
+   * so the User Center's "link a new account" affordance navigates here.
+   * Returns '' when no client is wired.
+   */
+  oauthLoginUrl(provider: string, returnUrl?: string): string
+  /**
    * Current-user self-service section ("me"). Wires the
    * `DefaultUserProfileController` endpoints (`/users/profile/*`) used by
    * the personal-center page. Distinct from `users.*` (admin operating on
-   * any user) — every method here operates on the caller, no userId arg.
+   * any user) - every method here operates on the caller, no userId arg.
    */
   me: {
     /** Basic profile (username/email/phone/roles/lastLoginTime/…). */
@@ -239,14 +266,22 @@ export interface IdentityBridge {
     // -- 2FA + TOTP --
     /** Enable a 2FA provider (email/sms). Returns generated code or void depending on provider. */
     enableTwoFactor(data: EnableTwoFactorDto): Promise<string>
-    /** Disable 2FA globally (regardless of provider). */
+    /** Disable 2FA globally, destructively (resets the TOTP key + clears all methods). */
     disableTwoFactor(): Promise<void>
+    /** Suspend 2FA (master off) while KEEPING the configured methods for later resume. */
+    suspendTwoFactor(): Promise<void>
+    /** Resume a suspended 2FA (master on) - previously configured methods take effect again. */
+    resumeTwoFactor(): Promise<void>
     /** Generate a TOTP shared key + provisioning URI for QR rendering. */
     getTotpSetup(): Promise<TotpSetupDto>
     /** Enable TOTP after the user enters the verification code from their authenticator app. */
     enableTotp(data: EnableTotpDto): Promise<void>
     /** Disable TOTP only (leaves other 2FA providers untouched). */
     disableTotp(): Promise<void>
+    /** Disable a single 2FA method (SMS / email / TOTP); other methods stay on. */
+    disableTwoFactorMethod(type: TwoFactorType): Promise<void>
+    /** Set the preferred 2FA method (must be an enabled method; shown first at login). */
+    setPreferredTwoFactor(type: TwoFactorType): Promise<void>
   }
 }
 
@@ -256,7 +291,7 @@ export interface IdentityBridge {
  * string values) into real booleans. The backend query DTOs type these as
  * `bool?`; a JSON string in the POST body fails model binding with a 400.
  * Empty string / null / undefined are dropped so an unset select means "no
- * filter" rather than sending a blank value. Returns a shallow copy — the
+ * filter" rather than sending a blank value. Returns a shallow copy - the
  * incoming query object is never mutated.
  */
 function coerceBoolFilters(q: CrudPageQuery, keys: string[]): CrudPageQuery {
@@ -294,7 +329,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const tenantApi = deps.tenantApi ?? (deps.client ? useAdminTenantApi(deps.client) : null)
   const loginLogApi =
     deps.loginLogApi ?? (deps.client ? useAdminLoginLogApi(deps.client) : null)
-  // organizationApi + sessionApi are optional — they back the
+  // organizationApi + sessionApi are optional - they back the
   // organizations / sessions sub-contracts only. If neither a client
   // nor an explicit mock is supplied, the sub-contract methods reject
   // with a clear error, leaving the rest of the bridge usable. This
@@ -304,10 +339,15 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const sessionApi =
     deps.sessionApi ?? (deps.client ? useAdminSessionApi(deps.client) : null)
   // Self-service profile API for the personal-center page. Optional like
-  // organizationApi/sessionApi — if neither a client nor a mock is wired,
+  // organizationApi/sessionApi - if neither a client nor a mock is wired,
   // the `me.*` methods fall back to rejecting promises with a helpful error.
   const profileApi =
     deps.profileApi ?? (deps.client ? useProfileApi(deps.client) : null)
+  // authApi backs the anonymous `getAuthConfig()` capability probe. Optional
+  // like the others - degrades to a null-returning no-op (fail-open) when
+  // neither a client nor a mock is supplied.
+  const authApi =
+    deps.authApi ?? (deps.client ? useAuthApi(deps.client) : null)
 
   if (!userApi || !roleApi || !tenantApi || !loginLogApi) {
     throw new Error(
@@ -328,6 +368,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           ),
         ),
       ),
+    getById: async (id) => unwrap(await userApi.getById(id)) as UserDto,
     create: async (data) => unwrap(await userApi.create(data)) as UserListItemDto,
     update: async (id, data) => unwrap(await userApi.update(id, data)) as UserListItemDto,
     delete: async (ids) => {
@@ -416,7 +457,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     create: async (data) => unwrap(await tenantApi.create(data)) as TenantDto,
     update: async (id, data) => unwrap(await tenantApi.update(id, data)) as TenantDto,
     delete: async (ids) => {
-      // Tenant admin API has no batch delete — loop sequentially.
+      // Tenant admin API has no batch delete - loop sequentially.
       for (const id of ids) {
         ensureOk(await tenantApi.delete(id))
       }
@@ -564,12 +605,24 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         disableTwoFactor: async () => {
           ensureOk(await profileApi.disableTwoFactor())
         },
+        suspendTwoFactor: async () => {
+          ensureOk(await profileApi.suspendTwoFactor())
+        },
+        resumeTwoFactor: async () => {
+          ensureOk(await profileApi.resumeTwoFactor())
+        },
         getTotpSetup: async () => unwrap(await profileApi.getTotpSetup()) as TotpSetupDto,
         enableTotp: async (data) => {
           ensureOk(await profileApi.enableTotp(data))
         },
         disableTotp: async () => {
           ensureOk(await profileApi.disableTotp())
+        },
+        disableTwoFactorMethod: async (type) => {
+          ensureOk(await profileApi.disableTwoFactorMethod({ type }))
+        },
+        setPreferredTwoFactor: async (type) => {
+          ensureOk(await profileApi.setPreferredTwoFactor({ type }))
         },
       }
     : {
@@ -594,10 +647,38 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         confirmChangePhone: () => missing('me.confirmChangePhone'),
         enableTwoFactor: () => missing('me.enableTwoFactor'),
         disableTwoFactor: () => missing('me.disableTwoFactor'),
+        suspendTwoFactor: () => missing('me.suspendTwoFactor'),
+        resumeTwoFactor: () => missing('me.resumeTwoFactor'),
         getTotpSetup: () => missing('me.getTotpSetup'),
         enableTotp: () => missing('me.enableTotp'),
         disableTotp: () => missing('me.disableTotp'),
+        disableTwoFactorMethod: () => missing('me.disableTwoFactorMethod'),
+        setPreferredTwoFactor: () => missing('me.setPreferredTwoFactor'),
       }
 
-  return { users, roles, tenants, organizations, sessions, loginLogs, me }
+  const getAuthConfig = async (): Promise<AuthConfigDto | null> => {
+    if (!authApi) return null
+    try {
+      return unwrap<AuthConfigDto>(await authApi.getConfig())
+    } catch {
+      // Fail-open: a missing/failed capability probe must never break the page -
+      // the caller treats null as "assume everything is available".
+      return null
+    }
+  }
+
+  const buildOauthLoginUrl = (provider: string, returnUrl?: string): string =>
+    deps.client ? oauthLoginUrl(deps.client, provider, returnUrl) : ''
+
+  return {
+    users,
+    roles,
+    tenants,
+    organizations,
+    sessions,
+    loginLogs,
+    me,
+    getAuthConfig,
+    oauthLoginUrl: buildOauthLoginUrl,
+  }
 }

@@ -62,7 +62,7 @@ public static class ChildCollectionSync
         var softDeleted = 0;
         var revived = 0;
 
-        // Pass 1: walk existing children — keep (revive if it was soft-deleted),
+        // Pass 1: walk existing children - keep (revive if it was soft-deleted),
         // soft-delete, or hard-remove. Snapshot first so we can mutate the collection.
         foreach (var existing in children.ToList())
         {

@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services.Interfaces;
 
 /// <summary>
-/// 使用量分析服务接口 — 提供聚合查询和统计
+/// 使用量分析服务接口 - 提供聚合查询和统计
 /// </summary>
 public interface IUsageAnalyticsService
 {

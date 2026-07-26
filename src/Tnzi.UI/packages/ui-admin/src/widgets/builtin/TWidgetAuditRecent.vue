@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * `TWidgetAuditRecent` — most recent audit log entries.
+ * `TWidgetAuditRecent` - most recent audit log entries.
  *
  * Lists the N most recent operations (default 8). Each row shows the
  * actor, action and a relative time stamp. Pull from
  * `audit-bridge.logs.fetch` with a small page size and rely on the
  * backend default sort (creation desc).
  */
+import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { NTag } from 'naive-ui'
 import { TRelativeTime } from '@tnzi/ui'
@@ -49,7 +50,7 @@ useWidgetData(async () => {
     return {
       id: String(r.id ?? ''),
       user: String(r.userName ?? r.userId ?? translatePageKey('', 'admin.modules.audit.logs.anonymous') ?? 'anonymous'),
-      action: String(r.functionName ?? r.action ?? '—'),
+      action: String(r.functionName ?? r.action ?? EMPTY_DASH),
       resultType: r.resultType as number | string | undefined,
       time: (r.startTime ?? r.creationTime) as string | undefined,
     }

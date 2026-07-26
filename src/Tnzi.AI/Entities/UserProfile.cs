@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Entities;
 
 /// <summary>
-/// 用户 AI 档案实体 — 用于个性化上下文注入
+/// 用户 AI 档案实体 - 用于个性化上下文注入
 /// </summary>
 public class UserProfile : AuditedEntity<Guid>, IMultiTenant
 {

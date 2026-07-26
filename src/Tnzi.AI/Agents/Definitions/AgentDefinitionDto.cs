@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Agents.Definitions;
 
 /// <summary>
-/// YAML Agent 定义 DTO — 映射 YAML 文件结构
+/// YAML Agent 定义 DTO - 映射 YAML 文件结构
 /// </summary>
 public class AgentDefinitionDto
 {

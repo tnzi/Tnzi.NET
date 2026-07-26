@@ -3,8 +3,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Bank Feed workspace — read-only transaction list driven by an account
- * picker + status filter, with match / exclude / create-document actions.
+ * Bank Feed page = statement ingestion + the reconcile workspace.
+ *
+ * The page owns the account picker, the import/pull/suggest actions and the
+ * draft-reconciliation gate; the per-line review flow lives in
+ * `TReconcileWorkspace` and has its own test.
  */
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
@@ -25,7 +28,8 @@ const fetchTxns = vi.fn(async () => ({
   pageSize: 20,
 }))
 
-const confirm = vi.fn(async () => ({ id: 'x1', status: 'Matched' }))
+const fetchReconciliations = vi.fn(async () => ({ items: [] as unknown[], totalCount: 0, pageIndex: 1, pageSize: 1 }))
+const createReconciliation = vi.fn(async () => ({ id: 'r1' }))
 
 const bankFeedSection = {
   transactions: fetchTxns,
@@ -33,11 +37,11 @@ const bankFeedSection = {
   pull: vi.fn(async () => ({ batchId: 'bt2', importedCount: 0, skippedCount: 0 })),
   suggest: vi.fn(async () => ({ evaluated: 2, suggested: 1, autoConfirmed: 0 })),
   candidates: vi.fn(async () => []),
-  confirm,
+  confirm: vi.fn(async () => ({ id: 'x1', status: 'Matched' })),
   unmatch: vi.fn(),
   exclude: vi.fn(),
   restore: vi.fn(),
-  createDocument: vi.fn(async () => ({ docType: 'Expense', docId: 'd1' })),
+  createDocument: vi.fn(async () => ({ docType: 'Expense', docId: 'd1', posted: true, matched: true })),
   batches: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 })),
   deleteBatch: vi.fn(),
 }
@@ -48,13 +52,14 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
     BankTransactionStatus: original.BankTransactionStatus,
     BankTransactionSource: original.BankTransactionSource,
     BankFeedDocType: original.BankFeedDocType,
+    ReconciliationStatus: original.ReconciliationStatus,
     CashFlowActivity: original.CashFlowActivity,
     PAYMENT_METHODS: original.PAYMENT_METHODS,
     createFinanceBridge: () => ({
       accounts: { tree: vi.fn(async () => []) },
       customers: { fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 200 })) },
       vendors: { fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 200 })) },
-      reconciliations: { create: vi.fn() },
+      reconciliations: { fetch: fetchReconciliations, create: createReconciliation },
       bankFeed: bankFeedSection,
     }),
   }
@@ -66,6 +71,12 @@ const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
   DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
   Pagination: { name: 'Pagination', template: '<div />' },
+  Progress: { name: 'Progress', template: '<div />' },
+  Alert: { name: 'Alert', template: '<div class="n-alert-stub"><slot /></div>' },
+  Spin: { name: 'Spin', template: '<div><slot /></div>' },
+  Tabs: { name: 'Tabs', template: '<div><slot /></div>' },
+  Tab: { name: 'Tab', template: '<div><slot /></div>' },
+  Tag: { name: 'Tag', template: '<span><slot /></span>' },
   Button: { name: 'Button', template: '<button @click="$emit(\'click\')"><slot /></button>' },
   Modal: { name: 'Modal', props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
   Drawer: { name: 'Drawer', props: ['show'], template: '<div v-if="show"><slot /></div>' },
@@ -79,19 +90,22 @@ const stubs = {
 
 interface BankFeedVm {
   accountId: string | null
-  rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean }>
+  hasDraft: boolean
+  createDraftReconciliation: () => Promise<void>
 }
 
 describe('Finance BankFeed page', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     fetchTxns.mockClear()
+    fetchReconciliations.mockClear()
+    createReconciliation.mockClear()
   })
 
   it('waits for an account before fetching, then loads transactions', async () => {
     const wrapper = mount(Page, { global: { stubs } })
     await flushPromises()
-    // autoLoad is false — no account selected yet.
+    // No account selected yet - the workspace is not even mounted.
     expect(fetchTxns.mock.calls.length).toBe(0)
 
     const vm = wrapper.vm as unknown as BankFeedVm
@@ -100,20 +114,45 @@ describe('Finance BankFeed page', () => {
     expect(fetchTxns.mock.calls.length).toBeGreaterThan(0)
   })
 
-  it('gates confirm on a pending row carrying a suggestion', async () => {
+  it('probes for an open reconciliation and reports when there is none', async () => {
     const wrapper = mount(Page, { global: { stubs } })
     await flushPromises()
 
     const vm = wrapper.vm as unknown as BankFeedVm
-    const byKey = Object.fromEntries(vm.rowActions.map((a) => [a.key, a]))
-    const suggested = { id: 'x1', status: 'Pending', suggestedJournalLineId: 'l1' }
-    const plain = { id: 'x2', status: 'Pending' }
-    const matched = { id: 'x3', status: 'Matched' }
+    vm.accountId = 'a1'
+    await flushPromises()
 
-    expect(byKey.confirm!.show!(suggested)).toBe(true)
-    expect(byKey.confirm!.show!(plain)).toBe(false)
-    expect(byKey.exclude!.show!(plain)).toBe(true)
-    expect(byKey.unmatch!.show!(matched)).toBe(true)
-    expect(byKey.unmatch!.show!(suggested)).toBe(false)
+    expect(fetchReconciliations).toHaveBeenCalled()
+    // The mocked probe returns an empty page, so the banner precondition holds.
+    expect(vm.hasDraft).toBe(false)
+  })
+
+  it('starts a draft reconciliation from the workspace banner', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as BankFeedVm
+    vm.accountId = 'a1'
+    await flushPromises()
+
+    await vm.createDraftReconciliation()
+    expect(createReconciliation).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: 'a1', statementEndingBalance: 0 }),
+    )
+    expect(vm.hasDraft).toBe(true)
+  })
+
+  it('fails OPEN when the reconciliation probe errors', async () => {
+    fetchReconciliations.mockRejectedValueOnce(new Error('boom'))
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as BankFeedVm
+    vm.accountId = 'a1'
+    await flushPromises()
+
+    // A failed probe must not tell the operator to create a reconciliation
+    // that may already exist; the backend 400 is the real gate.
+    expect(vm.hasDraft).toBe(true)
   })
 })

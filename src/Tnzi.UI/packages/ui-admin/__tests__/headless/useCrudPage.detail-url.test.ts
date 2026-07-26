@@ -58,7 +58,7 @@ async function harness(
   return { crud: () => crud, router }
 }
 
-describe('useCrudPage — detail overlay ⇄ URL query', () => {
+describe('useCrudPage - detail overlay ⇄ URL query', () => {
   it('writes ?detail=edit:<id> when an edit overlay opens, and clears it on close', async () => {
     const { crud, router } = await harness()
     crud().openEdit(ROWS[1])

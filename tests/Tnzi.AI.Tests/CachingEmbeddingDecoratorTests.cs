@@ -4,7 +4,7 @@ using Tnzi.Caching;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
-/// CachingEmbeddingDecorator 单元测试 — 验证 Embedding 缓存命中和未命中行为
+/// CachingEmbeddingDecorator 单元测试 - 验证 Embedding 缓存命中和未命中行为
 /// </summary>
 public class CachingEmbeddingDecoratorTests
 {
@@ -153,7 +153,7 @@ public class CachingEmbeddingDecoratorTests
     [Fact]
     public void DI_Registration_ResolvesDecoratorWithKeyedInner()
     {
-        // Arrange — simulate AIRagModule's keyed service registration
+        // Arrange - simulate AIRagModule's keyed service registration
         var innerMock = new Mock<IEmbeddingService>();
         var services = new ServiceCollection();
 
@@ -180,7 +180,7 @@ public class CachingEmbeddingDecoratorTests
     [Fact]
     public async Task DI_Registration_DecoratorDelegatesToKeyedInner()
     {
-        // Arrange — full DI wiring with mock inner
+        // Arrange - full DI wiring with mock inner
         var innerMock = new Mock<IEmbeddingService>();
         var embedding = new float[] { 0.1f, 0.2f };
         innerMock.Setup(s => s.GenerateEmbeddingAsync("hello", null, It.IsAny<CancellationToken>()))
@@ -208,7 +208,7 @@ public class CachingEmbeddingDecoratorTests
         // Act
         var result = await resolved.GenerateEmbeddingAsync("hello");
 
-        // Assert — decorator delegates to keyed inner, caches the result
+        // Assert - decorator delegates to keyed inner, caches the result
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe(embedding);
         innerMock.Verify(s => s.GenerateEmbeddingAsync("hello", null, It.IsAny<CancellationToken>()), Times.Once);
@@ -228,7 +228,7 @@ public class CachingEmbeddingDecoratorTests
             o.EmbeddingCache = new EmbeddingCacheOptions { Enabled = true, TtlHours = 24 };
         });
 
-        // Only register keyed — no unkeyed fallback
+        // Only register keyed - no unkeyed fallback
         services.AddKeyedScoped<IEmbeddingService>(CachingEmbeddingDecorator.InnerServiceKey, (_, _) => innerMock.Object);
         // Register decorator as the unkeyed IEmbeddingService
         services.AddScoped<IEmbeddingService, CachingEmbeddingDecorator>();

@@ -5,6 +5,8 @@
  * Provides framework-agnostic state management interface definitions.
  */
 
+import { createAdapterSingleton } from '../singleton';
+
 // ============================================
 // Type Definitions
 // ============================================
@@ -182,17 +184,16 @@ export function createStoreAdapter(): StoreFactory {
 // Singleton
 // ============================================
 
-const _fallback: StoreFactory = createStoreAdapter();
-let _active: StoreFactory | null = null;
+const _slot = createAdapterSingleton<StoreFactory>('store', createStoreAdapter);
 
 export function setStoreAdapter(factory: StoreFactory): void {
-  _active = factory;
+  _slot.set(factory);
 }
 
 export function useStore(): StoreFactory {
-  return _active ?? _fallback;
+  return _slot.use();
 }
 
 export function resetStoreAdapter(): void {
-  _active = null;
+  _slot.reset();
 }

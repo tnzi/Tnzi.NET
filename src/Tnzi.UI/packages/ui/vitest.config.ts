@@ -20,7 +20,7 @@ export default defineConfig({
       { find: '@tnzi/core/http/http', replacement: resolve(__dirname, '../core/src/http/http.ts') },
       { find: '@tnzi/core/state', replacement: resolve(__dirname, '../core/src/state/index.ts') },
       { find: '@tnzi/core/services/identity', replacement: resolve(__dirname, '../core/src/services/identity/index.ts') },
-      // General alias last — only matches exact '@tnzi/core' import
+      // General alias last - only matches exact '@tnzi/core' import
       { find: '@tnzi/core', replacement: resolve(__dirname, '../core/src/index.ts') },
     ],
   },
@@ -32,7 +32,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: ['src/**/*.{ts,vue}'],
       exclude: [
-        // Barrel files (pure re-exports only — stores/*/index.ts carry real code, NOT excluded)
+        // Barrel files (pure re-exports only - stores/*/index.ts carry real code, NOT excluded)
         'src/index.ts',
         'src/adapters/index.ts',
         'src/adapters/*/index.ts',

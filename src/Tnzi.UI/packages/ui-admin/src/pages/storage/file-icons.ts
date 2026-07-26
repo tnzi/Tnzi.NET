@@ -11,7 +11,7 @@ export interface FileGlyph {
   color: string
 }
 
-/** Folder tile glyph — Finder-style warm yellow. */
+/** Folder tile glyph - Finder-style warm yellow. */
 export const FOLDER_GLYPH: FileGlyph = { icon: 'mdi:folder', color: '#f6c244' }
 
 const BY_PREFIX: Array<[string, FileGlyph]> = [

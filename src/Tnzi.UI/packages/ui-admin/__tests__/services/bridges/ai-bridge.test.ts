@@ -166,7 +166,7 @@ function mockKnowledgeBaseApi() {
 
 function mockMcpApi() {
   return {
-    // Legacy hosting endpoints — still on the factory but no longer used by the bridge
+    // Legacy hosting endpoints - still on the factory but no longer used by the bridge
     getStatus: vi.fn(async () => ({
       enabled: true,
       transport: 'http',
@@ -215,17 +215,6 @@ function mockQuotaApi() {
   }
 }
 
-function mockPersonaApi() {
-  return {
-    getList: vi.fn(async () => pagedList([{ id: 'p1', name: 'Persona' }])),
-    getById: vi.fn(),
-    getBySlug: vi.fn(),
-    create: vi.fn(async (d: unknown) => ({ ...(d as object), id: 'p-new' })),
-    update: vi.fn(async (id: string, d: unknown) => ({ id, ...(d as object) })),
-    delete: vi.fn(async () => undefined),
-  }
-}
-
 function mockEvaluationApi() {
   return {
     getById: vi.fn(),
@@ -248,7 +237,6 @@ function makeBridge() {
     knowledgeBaseApi: mockKnowledgeBaseApi() as never,
     mcpApi: mockMcpApi() as never,
     quotaApi: mockQuotaApi() as never,
-    personaApi: mockPersonaApi() as never,
     evaluationApi: mockEvaluationApi() as never,
   })
 }
@@ -278,7 +266,6 @@ describe('ai-bridge', () => {
       'knowledge',
       'mcpServers',
       'quota',
-      'personas',
       'evaluations',
     ] as const
     for (const key of keys) expect(bridge).toHaveProperty(key)
@@ -620,19 +607,6 @@ describe('ai-bridge', () => {
     expect(quotaApi.setQuota).toHaveBeenCalled()
     await bridge.quota.update('u1', { dailyTokenLimit: 800 } as never)
     expect(quotaApi.setQuota).toHaveBeenCalledTimes(2)
-  })
-
-  it('personas.fetch delegates to personaApi.getList', async () => {
-    const personaApi = mockPersonaApi()
-    const bridge = createAiBridge({ personaApi: personaApi as never, client: {} as never })
-    const result = await bridge.personas.fetch({
-      pageIndex: 1,
-      pageSize: 20,
-      searchText: '',
-      filters: {},
-    })
-    expect(personaApi.getList).toHaveBeenCalled()
-    expect(result.items).toHaveLength(1)
   })
 
   it('evaluations.fetch / delete / create / runBatch delegate; run(id) rejects with descriptive error', async () => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TKnowledgePanel — Knowledge base selection panel
+ * TKnowledgePanel - Knowledge base selection panel
  */
 
 import { NCard, NScrollbar } from 'naive-ui';

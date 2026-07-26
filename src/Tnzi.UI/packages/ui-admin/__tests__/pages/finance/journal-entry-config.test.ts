@@ -4,7 +4,7 @@ import { entryTotal, type JournalRow } from '../../../src/pages/finance/journal-
 
 /**
  * The entry list shows one amount per side. Which field carries it depends on status, because
- * the backend fills two different fields for two different reasons — see JournalEntryDto.
+ * the backend fills two different fields for two different reasons - see JournalEntryDto.
  */
 describe('journal entry list totals', () => {
   const draft: JournalRow = {
@@ -28,7 +28,7 @@ describe('journal entry list totals', () => {
   }
 
   it('shows a draft its transaction-currency total, not the base-currency zero', () => {
-    // The defect this guards: reading totalDebit rendered $0.00 for every draft in the list —
+    // The defect this guards: reading totalDebit rendered $0.00 for every draft in the list -
     // hiding the one thing a reader opens a draft to check, which is whether it balances.
     expect(entryTotal(draft, 'debit')).toBe(100)
     expect(entryTotal(draft, 'credit')).toBe(100)

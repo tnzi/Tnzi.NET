@@ -34,4 +34,31 @@ public interface ILedgerPostingService
     /// 按来源单据查询凭证（用于业务单据反查/防重复过账）
     /// </summary>
     Task<Result<List<JournalEntryDto>>> GetBySourceAsync(string sourceType, string sourceId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 这张凭证现在能否冲销，不能的话卡在哪。<b>只读</b>，不产生任何写入。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 供呈现端在渲染时就决定按钮是禁用还是可点，并把原因显示出来——而不是让操作员点下去才吃一个 409。
+    /// 判定口径与 <see cref="ReverseAsync"/> 实际执行的校验<b>同源</b>（期间封账 / 已完成对账 / 已匹配银行流水
+    /// 三项共用冲销漏斗内的同一段守卫），避免两处规则漂移。
+    /// </para>
+    /// <para>
+    /// 冲销日期按<b>原凭证记账日</b>判定——那是 <see cref="ReverseAsync"/> 不指定日期时的默认，
+    /// 也是全部单据 <c>VoidAsync</c> 的实际取值。调用方若打算冲销到另一个日期，期间封账的结论可能不同。
+    /// </para>
+    /// <para>
+    /// 判定失败（凭证不存在等）返回失败 <see cref="Result{T}"/>；判定成功但不可冲销时返回<b>成功</b>
+    /// 且 <see cref="ReversibilityDto.CanReverse"/> 为 false——"查得到、答案是不行"不是错误。
+    /// </para>
+    /// <para>
+    /// 默认实现返回 501：本方法晚于接口首版加入，自定义实现者不重写也不会编译失败，
+    /// 但不应被误认为"可以冲销"（安全判定绝不 fail-open）。
+    /// </para>
+    /// </remarks>
+    /// <param name="journalEntryId">要判定的凭证ID</param>
+    Task<Result<ReversibilityDto>> GetReversibilityAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<ReversibilityDto>.Failure(
+            "This ILedgerPostingService implementation does not support reversibility checks.", 501));
 }

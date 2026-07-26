@@ -105,7 +105,7 @@ public class SendMessageDto
 
 public class StartDirectDto
 {
-    // Guid is a value type; = null! does not compile — drop the initializer
+    // Guid is a value type; = null! does not compile - drop the initializer
     public Guid UserId { get; set; }
 }
 
@@ -169,17 +169,7 @@ public class ChatContactDto
     public string? AvatarFileId { get; set; }
 }
 
-public class UserPresenceDto
-{
-    public Guid UserId { get; set; }
-    public UserPresenceStatus Status { get; set; }
-    public DateTime? LastSeenAt { get; set; }
-}
-
-public class SetPresenceDto
-{
-    public UserPresenceStatus Status { get; set; }
-}
+// UserPresenceDto / SetPresenceDto 已迁至 Tnzi.Identity.Presence.Dtos（presence 独立模块）。
 
 public class ChatContactProfileDto
 {
@@ -189,13 +179,13 @@ public class ChatContactProfileDto
     public UserPresenceStatus Status { get; set; }
     public DateTime? LastSeenAt { get; set; }
 
-    /// <summary>Contact email — shown on the profile card when available.</summary>
+    /// <summary>Contact email - shown on the profile card when available.</summary>
     public string? Email { get; set; }
 
-    /// <summary>Contact phone number — shown on the profile card when available.</summary>
+    /// <summary>Contact phone number - shown on the profile card when available.</summary>
     public string? Phone { get; set; }
 
-    /// <summary>Short personal signature / bio — shown on the profile card when available.</summary>
+    /// <summary>Short personal signature / bio - shown on the profile card when available.</summary>
     public string? Bio { get; set; }
 }
 

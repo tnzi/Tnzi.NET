@@ -1,12 +1,17 @@
 namespace Tnzi.AI.Tools;
 
 /// <summary>
-/// Todo 任务追踪工具 — AI Agent 用于在 Plan Mode 下追踪任务进度
+/// Todo 任务追踪工具 - AI Agent 用于在 Plan Mode 下追踪任务进度
 /// </summary>
 [AIToolGroup("todo")]
 public class TodoTools
 {
-    private static readonly SemaphoreSlim _persistLock = new(1, 1);
+    /// <summary>
+    /// 持久化互斥：按实例（TodoTools 注册为 Scoped ⇒ 每请求一个）而非进程全局。
+    /// 之前是 static，配合下面的 <c>Wait(0)</c> 让并发请求互相"抢锁失败"，
+    /// 落败的那次 write_todos 直接跳过持久化 ⇒ 别的 run 的 todo 静默丢库。
+    /// </summary>
+    private readonly SemaphoreSlim _persistLock = new(1, 1);
     private readonly IAgentExecutionContextAccessor _contextAccessor;
     private readonly IServiceScopeFactory? _scopeFactory;
 

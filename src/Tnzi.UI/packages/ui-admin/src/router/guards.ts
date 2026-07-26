@@ -33,7 +33,7 @@ export interface PermissionGuardOptions {
 }
 
 /**
- * Auth guard — redirects unauthenticated users to the login page.
+ * Auth guard - redirects unauthenticated users to the login page.
  * Routes may opt out by setting `meta.requiresAuth = false`.
  */
 export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard {
@@ -42,11 +42,11 @@ export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard
       return next()
     }
     // When a session resolver is injected it is the SINGLE source of truth and
-    // runs on every guarded navigation — it checks the live client token first
+    // runs on every guarded navigation - it checks the live client token first
     // (consumer `auth.restore` rehydrates the core session, then loadPermissions
     // sets `isLogin`). This is deliberately NOT short-circuited by the store's
     // `isLogin`: that flag is persisted, so after a cold reload it can read
-    // `true` while the core session isn't restored yet — trusting it would wave
+    // `true` while the core session isn't restored yet - trusting it would wave
     // the user onto a page whose every request then 401s. The resolver keys off
     // the token instead, so a stale persisted flag can't leak through. It stays
     // cheap when already signed in (token present → no backend call).
@@ -116,7 +116,7 @@ export interface ModuleGuardOptions {
 }
 
 /**
- * Module-availability guard — bounces navigation into a framework module the
+ * Module-availability guard - bounces navigation into a framework module the
  * backend host didn't load to the `forbidden` route, so a deep link / bookmark
  * / persisted tab / `router.push({ name })` into an unloaded module (Finance /
  * Payment / AI …) degrades gracefully to /403 instead of mounting a page whose
@@ -124,7 +124,7 @@ export interface ModuleGuardOptions {
  *
  * Reads `useAdminRouteStore.unavailableRouteNames`, which is empty when the
  * loaded-module signal is unavailable (fail-open) and ORTHOGONAL to permissions
- * — so this holds for super users too, unlike the permission guard. A route for
+ * - so this holds for super users too, unlike the permission guard. A route for
  * a loaded module is never in the set, so deep links / direct URLs / name
  * references to loaded modules keep working untouched.
  */

@@ -48,10 +48,13 @@ public class FeatureChecker : IFeatureChecker
             isEnabled = !string.IsNullOrWhiteSpace(value);
         }
 
-        // Fire-and-forget usage recording (errors are silently caught in RecordUsageAsync)
+        // 用量记录必须在当前调用链内 await：IFeatureUsageService 是 Scoped，用的是本请求的
+        // DbContext。丢进 Task.Run 会让后台线程与请求线程并发使用同一个 DbContext
+        //（非线程安全，可能连带把请求自身的操作打断），且请求结束后 scope 已释放 ——
+        // 记录静默失败。RecordUsageAsync 内部自行吞掉并记录异常，await 它不会影响调用方。
         if (_featureUsageService != null)
         {
-            _ = Task.Run(() => _featureUsageService.RecordUsageAsync(featureName, isEnabled, "FeatureChecker"));
+            await _featureUsageService.RecordUsageAsync(featureName, isEnabled, "FeatureChecker");
         }
 
         return isEnabled;
