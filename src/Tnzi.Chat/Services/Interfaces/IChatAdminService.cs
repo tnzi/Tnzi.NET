@@ -1,6 +1,6 @@
 using Tnzi.Data;
 
-namespace Tnzi.Chat.Services.Interfaces;
+namespace Tnzi.Chat.Services;
 
 /// <summary>
 /// 系统级管理员的 Chat 维护服务：跨用户的全局会话/消息/在线状态查询与治理。

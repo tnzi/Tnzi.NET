@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 薪资公式求值器（NCalc 的安全封装；country pack 计算钩子可复用）

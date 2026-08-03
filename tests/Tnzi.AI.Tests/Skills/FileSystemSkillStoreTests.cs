@@ -1,7 +1,3 @@
-using Tnzi.AI.Infrastructure.ContextProviders;
-using Tnzi.AI.Skills;
-using Tnzi.AI.Skills.Models;
-using Microsoft.Extensions.Hosting;
 
 namespace Tnzi.AI.Tests.Skills;
 
@@ -654,7 +650,8 @@ public class FileSystemSkillStoreTests : IDisposable
                     Paths = paths ?? [],
                     AllowList = allowList ?? [],
                     DenyList = denyList ?? [],
-                    DataPath = dataPath,
+                    // 传 null 表示"不覆盖"：沿用 SkillsOptions 的默认值 "App_Data/AI"
+                    DataPath = dataPath ?? new SkillsOptions().DataPath,
                     RequireChecksEnabled = requireChecksEnabled,
                     LoadBuiltIn = false,
                     PluginPaths = pluginPaths ?? [],

@@ -1,4 +1,3 @@
-using Tnzi.Options;
 
 namespace Tnzi.AI.Tools.Sql;
 

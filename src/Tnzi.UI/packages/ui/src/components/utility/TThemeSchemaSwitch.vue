@@ -8,9 +8,16 @@
  * live in headers, settings panels, login pages, etc.
  */
 import { computed, ref, watch } from 'vue'
+import type { ThemeMode } from '@tnzi/core/types'
+import { applyThemeModeToDocument } from '../../theme/document'
 import TButtonIcon from '../display/TButtonIcon.vue'
 
-export type ThemeSchema = 'light' | 'dark' | 'auto'
+/**
+ * Alias of core's {@link ThemeMode}. This component used to declare its own
+ * `'light' | 'dark' | 'auto'` union, which is how the ecosystem ended up with
+ * five hand-written copies of the same three values.
+ */
+export type ThemeSchema = ThemeMode
 
 interface Props {
   /** Controlled value. When omitted, the component manages state internally. */
@@ -62,21 +69,11 @@ function cycle(): void {
   emit('update:value', next)
 }
 
-function resolveDark(s: ThemeSchema): boolean {
-  if (s === 'dark') return true
-  if (s === 'light') return false
-  return (
-    typeof window !== 'undefined' &&
-    window.matchMedia &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  )
-}
-
 watch(
   current,
   (s) => {
-    if (!props.applyDocumentClass || typeof document === 'undefined') return
-    document.documentElement.classList.toggle('dark', resolveDark(s))
+    if (!props.applyDocumentClass) return
+    applyThemeModeToDocument(s)
   },
   { immediate: true },
 )

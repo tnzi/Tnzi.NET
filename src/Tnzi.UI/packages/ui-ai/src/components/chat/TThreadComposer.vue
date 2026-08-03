@@ -22,12 +22,12 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { formatFileSize } from '@tnzi/core'
-import { useAiI18n, formatAiMessage } from '../../locale/index'
-import { useVoiceInput } from '../../composables/useVoiceInput'
-import { useComposerAttachments } from '../../composables/useComposerAttachments'
-import type { RejectedAttachment } from '../../composables/useComposerAttachments'
-import { useAutoGrowTextarea } from '../../composables/useAutoGrowTextarea'
-import { fileIconForName } from '../../lib/fileIcon'
+import { useAiI18n, formatAiMessage } from '../../i18n/index'
+import { useVoiceInput } from '../../headless/useVoiceInput'
+import { useComposerAttachments } from '../../headless/useComposerAttachments'
+import type { RejectedAttachment } from '../../headless/useComposerAttachments'
+import { useAutoGrowTextarea } from '../../headless/useAutoGrowTextarea'
+import { fileIconForName } from '../../utils/file-icon'
 import type { ComposerAction } from './composer-types'
 import { DEFAULT_COMPOSER_ACCEPT } from './composer-types'
 
@@ -191,6 +191,23 @@ function onFileChange(e: Event): void {
     target.value = ''
   }
 }
+
+/**
+ * Focus the textarea, caret at the end.
+ *
+ * The caret placement is the point. Suggestion prompts are deliberately
+ * half-written ("Help me plan my day around ") so the user continues the
+ * sentence; dropping the caret at position 0 - or leaving focus on the chip -
+ * makes them click into the box and press End before they can type.
+ */
+function focus(): void {
+  const el = textareaRef.value
+  if (!el) return
+  el.focus()
+  el.setSelectionRange(el.value.length, el.value.length)
+}
+
+defineExpose({ focus })
 </script>
 
 <template>
@@ -327,14 +344,34 @@ function onFileChange(e: Event): void {
         @change="onFileChange"
       />
     </div>
+
+    <!-- Fine print (model disclaimer, token count). Inside the sticky wrapper
+         on purpose: a disclaimer that scrolls away with the messages is not a
+         disclaimer. It also inherits the wrapper's fade, so messages dissolve
+         behind it the same way they do behind the box. -->
+    <div v-if="$slots.footer" class="t-thread-composer__foot" :style="boxStyle">
+      <slot name="footer" />
+    </div>
   </div>
 </template>
 
 <style scoped>
+/* Column, not row: the box and the optional footer stack. `align-items:center`
+   keeps a max-width'd box centred exactly as `justify-content:center` did when
+   the box was the only child. */
 .t-thread-composer-wrap {
   padding-top: 24px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+}
+.t-thread-composer__foot {
+  width: 100%;
+  padding: 8px 4px 10px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text-tertiary, #9a9a9a);
 }
 /* Sticky variant: pinned to the bottom of a scrolling thread, with a fade so
    messages dissolve into the canvas behind it. The landing hero opts out
@@ -348,6 +385,12 @@ function onFileChange(e: Event): void {
     transparent 0%,
     var(--tnzi-ai-bg, #f8f8f7) 24px
   );
+  /* The wrapper owns the gap below itself, because `bottom: 0` pins it to the
+     scroller's PADDING box, not its visible edge. With the padding on the
+     scroller instead, messages scrolled through that strip and showed under
+     the composer (measured: a 24px uncovered band). Scrollers hosting a
+     sticky composer must therefore set `padding-bottom: 0`. */
+  padding-bottom: 24px;
 }
 .t-thread-composer {
   width: 100%;

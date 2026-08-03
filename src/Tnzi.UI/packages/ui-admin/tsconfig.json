@@ -23,7 +23,6 @@
     "src/locales/**/*",
     "src/styles/**/*",
     "src/index.ts",
-    "src/shims-ui-ai.d.ts",
     "src/env.d.ts",
     "src/pages/index.ts",
     "src/pages/identity/UserManagement.vue",

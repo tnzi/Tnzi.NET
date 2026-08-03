@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 采购订单服务（**不过账单据**：草稿 → 发出 → 供应商确认/拒绝 → 转账单）

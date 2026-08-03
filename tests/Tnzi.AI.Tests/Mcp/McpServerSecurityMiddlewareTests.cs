@@ -4,7 +4,6 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Server;
-using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Mcp;
 

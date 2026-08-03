@@ -5,6 +5,11 @@
  *
  * Registers all T* components globally, configures message/dialog adapters,
  * and sets up theme/locale support for Naive UI.
+ *
+ * i18n note: the message catalogue is `@tnzi/core/adapters/i18n` (namespaces
+ * `common` / `auth` / `crud` / `table` / `form` / `upload` / `date`), provided
+ * here via `provideI18n`. This package does NOT ship a `tnzi.ui.*` bundle of
+ * its own - one existed, was read by nothing, and was removed on 2026-08-01.
  */
 
 import type { App, Plugin } from 'vue';
@@ -30,7 +35,7 @@ import { registerAllComponents } from './components/register';
 
 // Theme context (Phase 1.28)
 import { defaultThemeSettings, mergeThemeSettings } from './theme/settings';
-import { createThemeContext, THEME_CONTEXT_KEY } from './composables/theme/useTheme';
+import { createThemeContext, THEME_CONTEXT_KEY } from './headless/theme/useTheme';
 import type { ThemeSettings } from './theme/types';
 
 // ============================================

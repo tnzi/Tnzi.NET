@@ -5,13 +5,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
 
-import TWidgetCard from '../../src/widgets/shell/TWidgetCard.vue'
+import TWidgetCard from '../../src/components/widgets/TWidgetCard.vue'
 import TWorkbenchLayout from '../../src/components/pages/TWorkbenchLayout.vue'
-import TWidgetQuickActions from '../../src/widgets/builtin/TWidgetQuickActions.vue'
-import TWidgetList from '../../src/widgets/builtin/TWidgetList.vue'
+import TWidgetQuickActions from '../../src/components/widgets/TWidgetQuickActions.vue'
+import TWidgetList from '../../src/components/widgets/TWidgetList.vue'
 import TKpiCard from '../../src/components/data/TKpiCard.vue'
-import { useWidget } from '../../src/widgets/shell/useWidget'
-import { useWidgetData } from '../../src/widgets/shell/useWidgetData'
+import { useWidget } from '@tnzi/ui'
+import { useWidgetData } from '../../src/headless/useWidgetData'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import {
@@ -19,8 +19,8 @@ import {
   defaultQuickActions,
   defaultTimelineItems,
   defaultWorkbenchWidgets,
-} from '../../src/widgets/presets'
-import type { WidgetDef } from '../../src/widgets/types'
+} from '../../src/components/widgets/presets'
+import type { WidgetDef } from '@tnzi/ui'
 
 function themeProvide() {
   const ctx = createThemeContext(mergeThemeSettings({}))

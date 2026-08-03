@@ -109,7 +109,9 @@ public class InputGuardrailEffectiveUserMessageTests
         string? capturedEffective = null;
 
         // next delegate captures EffectiveUserMessage at the point the core would run
-        async IAsyncEnumerable<AgentStreamChunk> Next(AiMiddlewareContext ctx, CancellationToken _)
+        async IAsyncEnumerable<AgentStreamChunk> Next(
+            AiMiddlewareContext ctx,
+            [EnumeratorCancellation] CancellationToken _)
         {
             capturedEffective = ctx.EffectiveUserMessage;
             yield return new AgentStreamChunk { Text = "streaming-ok" };
@@ -140,7 +142,9 @@ public class InputGuardrailEffectiveUserMessageTests
 
         string? capturedEffective = "sentinel";
 
-        async IAsyncEnumerable<AgentStreamChunk> Next(AiMiddlewareContext ctx, CancellationToken _)
+        async IAsyncEnumerable<AgentStreamChunk> Next(
+            AiMiddlewareContext ctx,
+            [EnumeratorCancellation] CancellationToken _)
         {
             capturedEffective = ctx.EffectiveUserMessage;
             yield return new AgentStreamChunk { Text = "ok" };

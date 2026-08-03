@@ -1,5 +1,4 @@
 using Mapster;
-using Tnzi.Chat.Dtos;
 using Tnzi.Mapping;
 
 namespace Tnzi.Chat.Mappings;

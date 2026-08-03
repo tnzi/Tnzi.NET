@@ -41,7 +41,7 @@ public interface ITwoFactorService
     /// <summary>
     /// 暂停 2FA(总开关关闭):登录不再要求二次验证,但**保留**每种方式的启用 flag、
     /// TOTP authenticator key 与首选方式。再次 <see cref="ResumeTwoFactorAsync"/> 即
-    /// 恢复原配置,无需重新设置。<see cref="Entities.User.TwoFactorEnabled"/> 置 false,
+    /// 恢复原配置,无需重新设置。<c>User.TwoFactorEnabled</c> 置 false,
     /// per-method flag 不动。
     /// </summary>
     /// <param name="userId">用户ID</param>
@@ -49,7 +49,7 @@ public interface ITwoFactorService
 
     /// <summary>
     /// 恢复被 <see cref="SuspendTwoFactorAsync"/> 暂停的 2FA(总开关重新开启)。要求
-    /// 至少已配置一种方式;把 <see cref="Entities.User.TwoFactorEnabled"/> 置回 true,
+    /// 至少已配置一种方式;把 <c>User.TwoFactorEnabled</c> 置回 true,
     /// 原有 flag/key/首选立即重新生效。
     /// </summary>
     /// <param name="userId">用户ID</param>

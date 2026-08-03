@@ -13,6 +13,7 @@ import type {
   ConnectionState,
 } from './types/app';
 import type { ThemeMode } from '../types/theme';
+import { THEME_MODES, normalizeThemeMode } from '../types/theme';
 import type { Locale } from '../adapters/i18n/types';
 import type { StateDeps } from './types/deps';
 import { generateId } from '../utils/id';
@@ -106,7 +107,7 @@ export class AppStateManager {
   get isDarkMode(): boolean {
     return (
       this.theme === 'dark' ||
-      (this.theme === 'system' && (this.deps.theme?.getResolvedTheme() === 'dark'))
+      (this.theme === 'auto' && (this.deps.theme?.getResolvedTheme() === 'dark'))
     );
   }
 
@@ -166,10 +167,9 @@ export class AppStateManager {
   }
 
   toggleTheme(): void {
-    const themes: ThemeMode[] = ['light', 'dark', 'system'];
-    const currentIndex = themes.indexOf(this.theme);
-    const nextIndex = (currentIndex + 1) % themes.length;
-    this.setTheme(themes[nextIndex]!);
+    const currentIndex = THEME_MODES.indexOf(this.theme);
+    const nextIndex = (currentIndex + 1) % THEME_MODES.length;
+    this.setTheme(THEME_MODES[nextIndex]!);
   }
 
   setLanguage(language: Locale): void {
@@ -362,11 +362,16 @@ export class AppStateManager {
   // ============================================
 
   loadPersistedState(): void {
-    const theme = this.deps.storage.get<ThemeMode>(STORAGE_KEY_THEME);
+    const storedTheme = this.deps.storage.get<unknown>(STORAGE_KEY_THEME);
     const language = this.deps.storage.get<Locale>(STORAGE_KEY_LANGUAGE);
     const sidebarCollapsed = this.deps.storage.get<boolean>(STORAGE_KEY_SIDEBAR);
 
-    if (theme) {
+    // Storage is untrusted: it may hold the legacy 'system' spelling written by
+    // an older build, or junk from a hand-edited devtools session. Coercing here
+    // (rather than casting) keeps `theme` inside its declared union - an
+    // out-of-union value would make `isDarkMode` silently answer "light" forever.
+    if (storedTheme != null) {
+      const theme = normalizeThemeMode(storedTheme, this.theme);
       this.theme = theme;
       this.deps.theme?.applyTheme(theme);
     }

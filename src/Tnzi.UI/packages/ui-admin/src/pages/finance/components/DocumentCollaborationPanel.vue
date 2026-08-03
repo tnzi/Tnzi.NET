@@ -8,7 +8,6 @@
       :upload="upload"
       :attach="attach"
       :remove="removeAttachment"
-      :download-url="downloadUrl"
       :translate="t"
       @changed="loadAttachments"
     />
@@ -114,10 +113,6 @@ async function postComment(body: string) {
 
 async function removeComment(item: { id: string }) {
   await finance.collaboration.deleteComment(item.id)
-}
-
-function downloadUrl(fileId: string): string {
-  return storage.files.downloadUrl(fileId)
 }
 
 watch(

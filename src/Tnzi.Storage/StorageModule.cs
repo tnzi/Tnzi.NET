@@ -64,6 +64,22 @@ public class StorageModule : TnziApplicationModule
         // "归属 + 权限码 + 显式公开" 策略。
         services.TryAddScoped<IFileAccessAuthorizer, FileAccessAuthorizer>();
 
+        // 访问令牌签名器(单例:密钥构造时解析一次)。让私密文件能被 <img src> 渲染 ——
+        // 浏览器发起的资源请求带不了 Authorization 头。
+        services.TryAddSingleton<IFileUrlSigner, FileUrlSigner>();
+
+        // 请求作用域的授予表:分享链接校验通过后把结论放进这里,授权器据此放行。
+        // 判定因此仍然全在服务层,而不是散到控制器上。
+        services.TryAddScoped<IFileAccessGrantContext, FileAccessGrantContext>();
+
+        // 判定要读当前请求的查询参数(`?sig=`),故需要 HttpContext。
+        // 幂等:AspNetCore 模块通常已注册。
+        services.AddHttpContextAccessor();
+
+        // [FileField(Public = true)] 字段清单（反射结果缓存，故为单例）。
+        // 供历史数据回填用：字段声明只对之后写入的引用生效。
+        services.TryAddSingleton<IPublicFileFieldResolver, PublicFileFieldResolver>();
+
         // 注册文件存储服务
         services.AddScoped<IFileStorageService, FileStorageService>();
 

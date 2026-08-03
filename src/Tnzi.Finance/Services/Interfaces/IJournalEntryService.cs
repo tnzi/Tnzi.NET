@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 会计凭证服务（草稿工作流 + 过账 + 冲销）

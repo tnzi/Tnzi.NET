@@ -269,7 +269,10 @@ public sealed class PayslipCalculator
                 }
 
                 amount = Math.Round(amount, decimals, MidpointRounding.AwayFromZero);
-                if (amount < 0)
+                // 备注项参与不了任何合计，所以负数在它身上产生不了荒谬的净额，
+                // 而具名中间量（抵免、冲回）本来就是带符号的。其余三类仍必须为正：
+                // 一个负的扣减项就是一次没人申报的加薪。
+                if (amount < 0 && component.Type != SalaryComponentType.Informational)
                 {
                     error = $"Component '{component.Code}' produced a negative amount ({amount}).";
                     break;
@@ -402,11 +405,41 @@ public sealed class PayslipCalculator
                     || r.Status == PayRunStatus.Paid
                     || r.Source == PayRunSource.OpeningBalance)
                 && r.PayDate >= windowStart && r.PayDate <= payDate
-            group line by new { slip.EmployeeId, line.ComponentCode } into g
-            select new { g.Key.EmployeeId, g.Key.ComponentCode, Total = g.Sum(x => x.Amount) })
+            group line by new { slip.EmployeeId, line.ComponentCode, line.ComponentType } into g
+            select new { g.Key.EmployeeId, g.Key.ComponentCode, g.Key.ComponentType, Total = g.Sum(x => x.Amount) })
             .ToListAsync(cancellationToken);
 
-        return rows.ToDictionary(x => (x.EmployeeId, x.ComponentCode), x => x.Total);
+        var map = new Dictionary<(Guid, string), decimal>();
+        foreach (var row in rows)
+        {
+            var key = (row.EmployeeId, row.ComponentCode);
+            map[key] = map.GetValueOrDefault(key) + row.Total;
+
+            // 按类型的聚合键与逐组件累计**同一次查询**得出：Ytd('#GROSS') 之类的上限基数
+            // 不该是第二次往返，也不该由调用方在公式里把收入项逐个列全（漏一个就静默少扣）。
+            var aggregate = row.ComponentType switch
+            {
+                SalaryComponentType.Earning => PayrollYtdAggregates.Gross,
+                SalaryComponentType.Deduction => PayrollYtdAggregates.Deductions,
+                SalaryComponentType.EmployerContribution => PayrollYtdAggregates.EmployerCost,
+                // Informational 不进任何合计——这正是它的定义。
+                _ => null
+            };
+            if (aggregate == null)
+                continue;
+
+            var aggKey = (row.EmployeeId, aggregate);
+            map[aggKey] = map.GetValueOrDefault(aggKey) + row.Total;
+
+            if (row.ComponentType is SalaryComponentType.Earning or SalaryComponentType.Deduction)
+            {
+                var netKey = (row.EmployeeId, PayrollYtdAggregates.Net);
+                var signed = row.ComponentType == SalaryComponentType.Earning ? row.Total : -row.Total;
+                map[netKey] = map.GetValueOrDefault(netKey) + signed;
+            }
+        }
+
+        return map;
     }
 
     private async Task<DateTime> ResolveYtdWindowStartAsync(DateTime payDate, CancellationToken cancellationToken)

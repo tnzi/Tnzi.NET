@@ -17,7 +17,6 @@ export default defineConfig({
         // 适配器
         "adapters/index": "src/adapters/index.ts",
         "adapters/i18n/index": "src/adapters/i18n/index.ts",
-        "adapters/icons/index": "src/adapters/icons/index.ts",
         "adapters/storage/index": "src/adapters/storage.ts",
         "adapters/theme/index": "src/adapters/theme/index.ts",
         "adapters/router/index": "src/adapters/router/index.ts",
@@ -27,9 +26,6 @@ export default defineConfig({
 
         // 无头交互控制器 ( 新增)
         "headless/index": "src/headless/index.ts",
-
-        // Composable 工厂函数
-        "composables/index": "src/composables/index.ts",
 
         // 业务服务
         "services/ai/index": "src/services/ai/index.ts",

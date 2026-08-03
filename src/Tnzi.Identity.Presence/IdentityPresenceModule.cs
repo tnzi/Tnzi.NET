@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Presence;
+﻿namespace Tnzi.Identity.Presence;
 
 /// <summary>
 /// 用户在线状态（presence）扩展子模块 —— 独立机制：手动状态意图、连接派生的在线解析、
@@ -54,7 +54,7 @@ public class IdentityPresenceModule : TnziApplicationModule
         var tnziApp = context.ServiceProvider.GetService<ITnziApplication>();
         if (tnziApp != null && tnziApp.IsModuleLoaded<SignalRModule>())
         {
-            webApp.MapHub<PresenceHub>("/hubs/presence");
+            webApp.MapTnziHub<PresenceHub>("presence", "/hubs/presence");
         }
 
         return Task.CompletedTask;

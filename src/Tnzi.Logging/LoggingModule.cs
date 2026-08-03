@@ -14,6 +14,17 @@ public class LoggingModule : TnziInfrastructureModule
     public override int LoadOrder => 0;
 
     /// <summary>
+    /// 默认的来源级别覆盖(消费方可用 <c>Logging:MinimumLevelOverrides</c> 整体替换)。
+    ///
+    /// 与 ASP.NET Core 模板 <c>Logging:LogLevel</c> 一贯写的东西一致 —— 此前 Serilog
+    /// 走扁平 MinimumLevel,那份配置对它完全无效。
+    /// </summary>
+    private static readonly Dictionary<string, LogEventLevel> DefaultMinimumLevelOverrides = new()
+    {
+        ["Microsoft.AspNetCore"] = LogEventLevel.Warning,
+    };
+
+    /// <summary>
     /// 预配置服务
     /// </summary>
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
@@ -43,6 +54,15 @@ public class LoggingModule : TnziInfrastructureModule
             .MinimumLevel.Is(options.MinimumLevel)
             .Enrich.FromLogContext()
             .Enrich.WithProperty("Application", "Tnzi");
+
+        // 按来源前缀压级。默认把 Microsoft.AspNetCore 压到 Warning:它的 Hosting 诊断
+        // 会在 Information 级回显**完整 URL**,而查询串里偶尔就是凭据(SignalR 的
+        // access_token、文件签名令牌 sig、分享链接口令 password)——框架自己的请求日志
+        // 已经把它们脱敏,这一条却在旁边把原文又写了一遍。
+        foreach (var (source, level) in options.MinimumLevelOverrides ?? DefaultMinimumLevelOverrides)
+        {
+            loggerConfig.MinimumLevel.Override(source, level);
+        }
 
         // 控制台输出
         if (options.EnableConsole)

@@ -293,6 +293,40 @@ public static class IndexFilterFactory
     }
 
     /// <summary>
+    /// 获取 "columnName IS NULL" 的过滤 SQL。
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <see cref="GetColumnNotNull(string)"/> 配对使用，把「可空列参与的唯一约束」拆成两条索引：
+    /// 一条管有值的行，一条管 NULL 的那一支。
+    ///
+    /// 原因是 <b>各家数据库对唯一索引里的 NULL 判定不同</b>：PostgreSQL / SQLite 认为
+    /// NULL 互不相等（同一组值可以插进任意多行），SQL Server 认为 NULL 彼此相等（只许一行）。
+    /// 于是「(A, B, 可空C) 唯一」这条约束在不同 provider 上表达的是两件事，而
+    /// <b>"在另一个库上跑得好好的"正是这类缺陷最擅长的伪装</b>。
+    ///
+    /// 只有当 NULL 表示「一个共有的状态」（尚未指定 / 全部 / 全局）时才需要这样拆；
+    /// 若 NULL 只是"这条记录碰巧没填"，多行 NULL 本来就合法，不该纳入唯一约束。
+    /// </remarks>
+    /// <param name="columnName">列名</param>
+    /// <param name="provider">数据库提供者类型</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNull(string columnName, DatabaseProvider provider)
+    {
+        return $"{QuoteIdentifier(columnName, provider)} IS NULL";
+    }
+
+    /// <summary>
+    /// 获取 "columnName IS NULL" 的过滤 SQL（自动检测数据库提供者）
+    /// </summary>
+    /// <param name="columnName">列名</param>
+    /// <returns>HasFilter 可用的 SQL 字符串</returns>
+    public static string GetColumnNull(string columnName)
+    {
+        var provider = EntityConfigurationContext.GetCurrentDatabaseProviderOrDefault();
+        return GetColumnNull(columnName, provider);
+    }
+
+    /// <summary>
     /// 获取 "columnName IS NOT NULL AND IsDeleted = false" 的过滤 SQL，
     /// 用于可空列的唯一索引同时排除软删除行
     /// </summary>

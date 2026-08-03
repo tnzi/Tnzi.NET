@@ -1,124 +1,46 @@
 // Public component surface for `@tnzi/ui-admin/components`.
+//
+// Convention: every folder that owns a public surface has its own `index.ts`,
+// and this file re-exports it wholesale. Do NOT hand-pick individual
+// components out of a folder that has a barrel - that is exactly how
+// `TItemCard` / `TEntityCard` / the whole `forms/` folder ended up documented
+// as importable from the package root while being unreachable in `dist`.
+// A component is public iff it is listed in its folder's barrel.
+//
+// Folders without a barrel below (chat, settings internals, utility, ...) are
+// shell internals assembled by `defineAdminApp`; the handful of them that are
+// public are listed explicitly at the bottom of this file.
 export * from './crud'
-// Overlay chrome primitives (shared NModal / NDrawer shells).
+export * from './data'
+export * from './detail'
+export * from './display'
+export * from './forms'
+export * from './layout'
 export * from './overlay'
+// Finance presentation primitives - accounting-convention money/date display,
+// the shared reporting-period control, document-status vocabulary, the
+// chart-of-accounts / party pickers and the Xero-style reconcile workspace.
+// Public so consumer finance screens inherit the conventions instead of
+// re-deriving them (see the finance UX plan under docs/superpowers/specs/).
+export * from './finance'
+
+// --- Folders without a barrel: individually-public components ---------------
+
 export { default as TAdminLoginCard } from './auth/TAdminLoginCard.vue'
 export type { DemoAccount, LoginPayload } from './auth/TAdminLoginCard.vue'
+
 export { default as TIconPicker } from './inputs/TIconPicker.vue'
 export { default as TJsonEditor } from './inputs/TJsonEditor.vue'
 
-// Display primitives - TStatusBadge implementation was sunk to @tnzi/ui in
-// 0.2.x; the local SFC is now a thin wrapper that injects admin i18n via
-// translatePageKey. The other 8 are re-exported directly from @tnzi/ui.
-export { default as TStatusBadge } from './display/TStatusBadge.vue'
-export {
-  TRelativeTime,
-  TCountTo,
-  TSvgIcon,
-  TButtonIcon,
-  TSourceBadge,
-  TStatToCards,
-  TWaveBg,
-  TSkeleton,
-} from '@tnzi/ui'
-export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
-
-// Layout primitives
-export { default as TPageHeader } from './layout/TPageHeader.vue'
-export type { BackTarget } from './layout/backTarget'
-export { default as TContentPage } from './layout/TContentPage.vue'
-// Batteries-included container for tabbed content pages - declare `:sections`,
-// drop each tab's content in a same-named slot; NTabs chrome, `t-table-tabs`
-// surface, per-pane wrapper, `?section=` deep-linking and card-in-a-card
-// flattening are all owned internally (no boilerplate at the call site).
-export { default as TTabsPage } from './layout/TTabsPage.vue'
-export type { TabSection } from './layout/TTabsPage.vue'
-// Master-detail layout primitive - list/tree pane + detail pane with a
-// built-in responsive grid + fill-height chain + mobile stacking. Replaces the
-// hand-rolled `grid Npx 1fr` + @media 767 master-detail CSS in the built-in
-// Organizations / Permissions / RoleFunctions pages.
-export { default as TMasterDetailLayout } from './layout/TMasterDetailLayout.vue'
-export { default as TDarkModeContainer } from './layout/TDarkModeContainer.vue'
-// Header notification bell - unread badge + popover list + load-more + empty.
-// Mount via `defineAdminApp({ login: { headerNotification } })`.
-export { default as THeaderBell } from './layout/THeaderBell.vue'
-
-// Data primitives - responsive table (auto card-stacking on phones) and the
-// card-list primitive underneath it. Public per the content-page standard
-// (docs/coding-standards/ui-content-page.md §5.5): consumers replacing a raw
-// NDataTable are told to import TResponsiveTable from the package root.
-export { default as TResponsiveTable } from './data/TResponsiveTable.vue'
-export type { TResponsiveTableProps, TResponsivePagination, TResponsiveSummaryRow } from './data/TResponsiveTable.vue'
-// Financial-report table - money/total columns + auto totals row + drill-down.
-export { default as TReportTable } from './data/TReportTable.vue'
-export type { ReportColumn } from './data/TReportTable.vue'
-export { default as TDataCardList } from './data/TDataCardList.vue'
-export type { CardColumn } from './data/TDataCardList.vue'
-// KPI primitives - unified KPI card + responsive KPI strip (one per page,
-// rendered between the page header and the list/content per the content-page
-// standard). TEmpty is the unified empty-state visual used by the card
-// renderers and available to bespoke pages.
-// TKpiCard was renamed from TStatCard in the 2026-06 audit to avoid colliding
-// with @tnzi/ui's globally-registered <TStatCard>; a deprecated TStatCard
-// alias is kept for back-compat.
-export { default as TKpiCard } from './data/TKpiCard.vue'
-export type { TKpiCardProps, TKpiCardTone } from './data/TKpiCard.vue'
-/** @deprecated use TKpiCard. */
-export { default as TStatCard } from './data/TKpiCard.vue'
-/** @deprecated use TKpiCardProps / TKpiCardTone. */
-export type { TKpiCardProps as TStatCardProps, TKpiCardTone as TStatCardTone } from './data/TKpiCard.vue'
-export { default as TKpiRow } from './data/TKpiRow.vue'
-export { default as TEmpty } from './data/TEmpty.vue'
-// Record collaboration primitives: entity-agnostic on purpose, so any module
-// (or a consuming app's own records) reuses them instead of re-deriving.
-export { default as TAttachmentPanel } from './data/TAttachmentPanel.vue'
-export type { AttachmentItem } from './data/TAttachmentPanel.vue'
-export { default as TCommentThread } from './data/TCommentThread.vue'
-export type { CommentItem } from './data/TCommentThread.vue'
-export type { TEmptyProps, TEmptySize } from './data/TEmpty.vue'
-
-// Detail primitives - 3-mode (modal/drawer/page) detail host + skeleton +
-// per-section container. TDetailSection is the standard chrome for ONE section
-// inside a TDetailLayout side/tabs panel (fixed header bar + scrolling body +
-// optional savebar); exported so consumer detail pages compose it instead of
-// copying it (the built-in module detail pages use it internally).
-export { default as TDetailLayout } from './detail/TDetailLayout.vue'
-export { default as TDetailHost } from './detail/TDetailHost.vue'
-export type { TDetailHostProps } from './detail/TDetailHost.vue'
-export { default as TDetailSection } from './detail/TDetailSection.vue'
-// Record identity band (face + name + status + identifying facts + actions) -
-// the top of a detail panel or view drawer, so the reader knows WHAT they are
-// looking at before reading any field.
-export { default as TRecordHeader } from './detail/TRecordHeader.vue'
-export type { RecordBadge, RecordFact } from './detail/TRecordHeader.vue'
-
 // Settings center - schema-driven module settings page (side-nav shell) +
-// the per-group auto-rendered form panel it composes.
+// the per-group auto-rendered form panel it composes. (TSettingsField is the
+// panel's internal field renderer and stays private.)
 export { default as TSettingsPage } from './settings/TSettingsPage.vue'
 export { default as TSettingsGroupPanel } from './settings/TSettingsGroupPanel.vue'
-export { default as TAdminRouterView } from './layout/TAdminRouterView.vue'
-// 0.2.72+ (A1): one-shot wrapper that mounts the 5-provider naive-ui stack
-// (Config / LoadingBar / Message / Notification / Dialog) and pipes the
-// admin theme context through. Consumer App.vue becomes 3 lines.
-export { default as TAdminAppRoot } from './layout/TAdminAppRoot.vue'
-// Phase I.7.7: header companion components - auto-derived breadcrumb +
-// user-avatar dropdown.
-export { default as TAdminAutoBreadcrumb } from './layout/TAdminAutoBreadcrumb.vue'
-export { default as TAdminUserAvatar } from './layout/TAdminUserAvatar.vue'
 
 // Utility components - 6 sunk to @tnzi/ui in 0.2.71+ (generic UI patterns
 // reusable beyond admin shells), re-exported here for backward compat.
 // TSystemLogo stays in ui-admin (admin-specific brand surface).
-export {
-  TThemeSchemaSwitch,
-  TLangSwitch,
-  TFullScreen,
-  TReloadButton,
-  TPinToggler,
-  TMenuToggler,
-  type ThemeSchema,
-  type LangOption,
-} from '@tnzi/ui'
 export { default as TSystemLogo } from './utility/TSystemLogo.vue'
 export type { TSystemLogoLayout } from './utility/TSystemLogo.vue'
 
@@ -126,7 +48,7 @@ export type { TSystemLogoLayout } from './utility/TSystemLogo.vue'
 export { default as TLoginPage } from './pages/TLoginPage.vue'
 // Phase I.7.1: `TLoginPageVariant` (centered/split) was removed - TLoginPage
 // is now a router-param driven shell with the single soybean layout.
-// Login context types live in `../pages/login/useLoginContext`.
+// Login context types live in `../headless/useLoginContext` (root barrel).
 export { default as TExceptionPage } from './pages/TExceptionPage.vue'
 export { default as TDashboardPage } from './pages/TDashboardPage.vue'
 export type { KpiCard, KpiCardGradient, ChartSeriesPoint } from './pages/TDashboardPage.vue'
@@ -144,9 +66,27 @@ export type { TimelineItem, TimelineTone } from './dashboard/TProjectTimeline.vu
 // to the shell (mounted by `defineAdminApp({ chat })`).
 export { default as TPresenceDot } from './chat/TPresenceDot.vue'
 
-// Finance presentation primitives - accounting-convention money/date display,
-// the shared reporting-period control, document-status vocabulary, the
-// chart-of-accounts / party pickers and the Xero-style reconcile workspace.
-// Public so consumer finance screens inherit the conventions instead of
-// re-deriving them (see the finance UX plan under docs/superpowers/specs/).
-export * from './finance'
+// --- Re-exports from @tnzi/ui ----------------------------------------------
+// Generic primitives that used to live here and were sunk into @tnzi/ui;
+// re-exported so existing `@tnzi/ui-admin` imports keep resolving.
+export {
+  TRelativeTime,
+  TCountTo,
+  TSvgIcon,
+  TButtonIcon,
+  TSourceBadge,
+  TStatToCards,
+  TWaveBg,
+  TSkeleton,
+} from '@tnzi/ui'
+export type { SourceKind, StatCard, StatusType } from '@tnzi/ui'
+export {
+  TThemeSchemaSwitch,
+  TLangSwitch,
+  TFullScreen,
+  TReloadButton,
+  TPinToggler,
+  TMenuToggler,
+  type ThemeSchema,
+  type LangOption,
+} from '@tnzi/ui'

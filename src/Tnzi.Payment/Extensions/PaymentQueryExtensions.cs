@@ -29,6 +29,9 @@ public static class PaymentQueryExtensions
         if (query.ChannelCode != null)
             queryable = queryable.Where(p => p.ChannelCode == query.ChannelCode);
 
+        if (query.UserId.HasValue)
+            queryable = queryable.Where(p => p.UserId == query.UserId.Value);
+
         if (query.StartTime.HasValue)
             queryable = queryable.Where(p => p.CreationTime >= query.StartTime.Value);
 

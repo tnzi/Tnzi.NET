@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, hasInjectionContext, inject, ref, watch } from 'vue'
 import { THEME_CONTEXT_KEY } from '@tnzi/ui'
+import type { ThemeMode } from '@tnzi/core/types'
 import { surfaceTone, isDarkSurface, type SurfaceTone } from '../theme/surfaceTone'
 import 'pinia-plugin-persistedstate'
 
@@ -62,7 +63,7 @@ export type TabStyle = 'chrome' | 'button' | 'slider'
  * context on hydration. `null` = "user never chose" → the app default from
  * `createTnziUi()` / `createTnziUiAdmin()` wins.
  */
-export type AdminThemeSchema = 'light' | 'dark' | 'auto'
+export type AdminThemeSchema = ThemeMode
 
 export interface WatermarkSettings {
   enabled: boolean

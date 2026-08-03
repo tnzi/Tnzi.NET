@@ -12,7 +12,7 @@ namespace Tnzi.Finance.Services.Internal;
 /// 不变量：Posted 行永不改删（修正 = 冲销）→ 汇总只正向累加，永不需要负增量；冲销凭证的
 /// 借贷互换行被当作普通正向增量累加，毛额累加而净额天然归零（与 TB 的 PeriodDebit/Credit 语义一致）。
 ///
-/// 每桶：<see cref="IRepository{TEntity,TKey}.EnsureTransactionStartedAsync"/>（防御幂等，事务内裸 SQL 前置）
+/// 每桶：<c>IRepository.EnsureTransactionStartedAsync</c>（防御幂等，事务内裸 SQL 前置）
 /// → <c>ExecuteUpdateAsync</c> 原子累加；命中 0 行则 <c>InsertAsync + SaveChanges</c>，唯一索引冲突
 /// （并发首插）撤销 Added 实体 + 重试一次累加（照 <see cref="DocumentNumberService"/> 首插竞态兜底）。
 ///

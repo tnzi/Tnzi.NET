@@ -283,7 +283,7 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
         var result = await userFunctions.SetUserDeniedFunctionsAsync(TargetUserId, [diagnostics.Id]);
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(403);
-        result.Message.ShouldContain("deny");
+        result.Message!.ShouldContain("deny");
         DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId).ShouldBe(0);
     }
 
@@ -355,6 +355,161 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
 
     #endregion
 
+    #region 有界写入（切片）
+
+    [Fact]
+    public async Task Scoped_set_leaves_grants_outside_the_scope_untouched()
+    {
+        var (userView, roleView, diagnostics) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        // 目标用户有两条直授:userView 落在消费方的切片内,diagnostics 在切片外
+        // (例如超管从框架自己的授权页单独授出的)。
+        (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id, diagnostics.Id])).Succeeded.ShouldBeTrue();
+
+        var scope = new[] { userView.Id, roleView.Id };
+        (await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, scope, [roleView.Id])).Succeeded.ShouldBeTrue();
+
+        var ids = (await userFunctions.GetUserFunctionIdsAsync(TargetUserId)).Data!.ToList();
+        ids.ShouldContain(roleView.Id);          // 切片内的新集写入
+        ids.ShouldNotContain(userView.Id);       // 切片内的旧集被覆盖
+        ids.ShouldContain(diagnostics.Id);       // 切片外原样保留 ← 本方法存在的理由
+
+        // 对照:同样的入参走整集覆盖,切片外的 diagnostics 会被静默删除。
+        (await userFunctions.SetUserFunctionsAsync(TargetUserId, [roleView.Id])).Succeeded.ShouldBeTrue();
+        (await userFunctions.GetUserFunctionIdsAsync(TargetUserId)).Data!.ShouldNotContain(diagnostics.Id);
+    }
+
+    [Fact]
+    public async Task Scoped_set_overwrites_in_scope_allow_and_flips_in_scope_deny()
+    {
+        var (userView, roleView, _) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id])).Succeeded.ShouldBeTrue();
+        await SeedUserFunctionRowAsync(TargetUserId, roleView.Id, isGranted: false);
+
+        // 切片内语义与 SetUserFunctionsAsync 一致:旧 allow 删除,命中的 deny 翻转为 allow。
+        var scope = new[] { userView.Id, roleView.Id };
+        (await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, scope, [roleView.Id])).Succeeded.ShouldBeTrue();
+
+        var rows = DbContext.UserFunctions.Where(uf => uf.UserId == TargetUserId).ToList();
+        rows.ShouldHaveSingleItem();
+        rows[0].FunctionId.ShouldBe(roleView.Id);
+        rows[0].IsGranted.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Scoped_set_preserves_in_scope_deny_rows_it_is_not_granting()
+    {
+        var (userView, roleView, _) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        // roleView 的 deny 行落在切片内但不在新 allow 集里 → 不翻转、不删除
+        // (与整集版 Set_overwrites_allow_rows_and_preserves_unrelated_deny_rows 同规)。
+        await SeedUserFunctionRowAsync(TargetUserId, roleView.Id, isGranted: false);
+
+        var scope = new[] { userView.Id, roleView.Id };
+        (await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, scope, [userView.Id])).Succeeded.ShouldBeTrue();
+
+        var rows = DbContext.UserFunctions.Where(uf => uf.UserId == TargetUserId).ToList();
+        rows.Count.ShouldBe(2);
+        rows.ShouldContain(uf => uf.FunctionId == userView.Id && uf.IsGranted);
+        rows.ShouldContain(uf => uf.FunctionId == roleView.Id && !uf.IsGranted);
+    }
+
+    [Fact]
+    public async Task Scoped_set_denied_leaves_deny_rows_outside_the_scope_untouched()
+    {
+        var (userView, roleView, diagnostics) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        await SeedUserFunctionRowAsync(TargetUserId, userView.Id, isGranted: false);
+        await SeedUserFunctionRowAsync(TargetUserId, diagnostics.Id, isGranted: false);
+
+        var scope = new[] { userView.Id, roleView.Id };
+        (await userFunctions.SetUserDeniedFunctionsInScopeAsync(TargetUserId, scope, [roleView.Id])).Succeeded.ShouldBeTrue();
+
+        var denied = (await userFunctions.GetUserDeniedFunctionIdsAsync(TargetUserId)).Data!.ToList();
+        denied.ShouldContain(roleView.Id);
+        denied.ShouldNotContain(userView.Id);
+        denied.ShouldContain(diagnostics.Id);    // 切片外的 deny 行原样保留
+    }
+
+    [Fact]
+    public async Task Scoped_set_rejects_ids_outside_the_declared_scope()
+    {
+        var (userView, roleView, diagnostics) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id])).Succeeded.ShouldBeTrue();
+
+        // 边界由框架强制:越界的 id 直接 400,一行都不写。
+        var scope = new[] { roleView.Id };
+        var granted = await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, scope, [roleView.Id, diagnostics.Id]);
+        granted.Succeeded.ShouldBeFalse();
+        granted.Code.ShouldBe(400);
+        granted.Message!.ShouldContain(diagnostics.Id.ToString());
+
+        var denied = await userFunctions.SetUserDeniedFunctionsInScopeAsync(TargetUserId, scope, [diagnostics.Id]);
+        denied.Succeeded.ShouldBeFalse();
+        denied.Code.ShouldBe(400);
+
+        // 越界请求整体不落地,原有直授不受影响。
+        var ids = (await userFunctions.GetUserFunctionIdsAsync(TargetUserId)).Data!.ToList();
+        ids.ShouldBe(new[] { userView.Id });
+    }
+
+    [Fact]
+    public async Task Scoped_set_still_enforces_the_delegation_guard()
+    {
+        var (userView, _, diagnostics) = await SeedCatalogueAsync();
+        await MakeGrantorRegularWithAsync(userView);
+        var (userFunctions, _) = GetServices();
+
+        // 切片不是绕过护栏的口子:授权者仍只能授出/拒绝自己持有的码。
+        var scope = new[] { diagnostics.Id };
+        (await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, scope, [diagnostics.Id])).Code.ShouldBe(403);
+        (await userFunctions.SetUserDeniedFunctionsInScopeAsync(TargetUserId, scope, [diagnostics.Id])).Code.ShouldBe(403);
+        DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Scoped_set_with_an_empty_set_clears_only_the_scope()
+    {
+        var (userView, _, diagnostics) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id, diagnostics.Id])).Succeeded.ShouldBeTrue();
+
+        // 空集 = 清空切片内的直授,而不是 ClearUserFunctionsAsync 的清空全部。
+        (await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, [userView.Id], [])).Succeeded.ShouldBeTrue();
+
+        var ids = (await userFunctions.GetUserFunctionIdsAsync(TargetUserId)).Data!.ToList();
+        ids.ShouldBe(new[] { diagnostics.Id });
+    }
+
+    [Fact]
+    public async Task Scoped_set_rejects_functions_that_do_not_exist()
+    {
+        var (userView, _, _) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        var ghost = Guid.NewGuid();
+        var result = await userFunctions.SetUserFunctionsInScopeAsync(TargetUserId, [userView.Id, ghost], [ghost]);
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
+    }
+
+    #endregion
+
     #region 委托护栏
 
     [Fact]
@@ -367,7 +522,7 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
         var result = await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [diagnostics.Id]);
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(403);
-        result.Message.ShouldContain("system.diagnostics.view");
+        result.Message!.ShouldContain("system.diagnostics.view");
         DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId).ShouldBe(0);
     }
 
@@ -395,7 +550,7 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
         var result = await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id]);
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(403);
-        result.Message.ShouldContain("super administrator");
+        result.Message!.ShouldContain("super administrator");
     }
 
     [Fact]

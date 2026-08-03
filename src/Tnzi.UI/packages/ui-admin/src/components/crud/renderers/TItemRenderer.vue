@@ -31,8 +31,8 @@
           :index="index"
           :selected="showSelection && isSelected(item)"
           :selectable="showSelection"
-          :toggleSelect="() => toggle(item)"
-          :rowActions="props.rowActions"
+          :toggle-select="() => toggle(item)"
+          :row-actions="props.rowActions"
         />
       </template>
     </div>
@@ -56,9 +56,9 @@
  */
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import TEmpty from '../../data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
-import type { RowAction } from '../../../headless/rowActions'
+import type { RowAction } from '../../../headless/row-actions'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
 
 export interface TItemRendererProps<T, TId extends string | number = string | number> {

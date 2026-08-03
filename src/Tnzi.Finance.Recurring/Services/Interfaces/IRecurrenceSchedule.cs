@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Recurring.Services.Interfaces;
+namespace Tnzi.Finance.Recurring.Services;
 
 /// <summary>
 /// 排期计算：给定周期与锚点，下一次落在哪天

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 目录项服务

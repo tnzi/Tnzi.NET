@@ -60,6 +60,12 @@ public class FileRecordDto
     public bool IsTemporary { get; set; }
 
     /// <summary>
+    /// 是否公开可读。true 时任何人(含未认证请求)都能通过 download / preview / thumbnail
+    /// 端点取到该文件，用于头像、站点素材这类有意公开的资源。
+    /// </summary>
+    public bool IsPublic { get; set; }
+
+    /// <summary>
     /// 自定义标签（逗号分隔的单一字符串，null / 空表示无标签）
     /// </summary>
     public string? Tags { get; set; }

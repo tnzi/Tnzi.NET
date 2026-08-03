@@ -91,7 +91,7 @@ public interface IAuditOperationService
     Task<Result<List<AuditTrendPointDto>>> GetAuditTrendAsync(
         DateTime startDate,
         DateTime endDate,
-        AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily,
+        TrendInterval groupBy = TrendInterval.Daily,
         CancellationToken cancellationToken = default)
         => Task.FromResult(Result.Failure<List<AuditTrendPointDto>>("GetAuditTrendAsync not implemented", 501));
 

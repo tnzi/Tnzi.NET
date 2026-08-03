@@ -10,8 +10,20 @@ public class PaymentOptionsValidator : OptionsValidatorBase<PaymentOptions>
         if (string.IsNullOrWhiteSpace(options.DefaultCurrency))
             errors.Add("DefaultCurrency is required.");
 
+        if (string.IsNullOrWhiteSpace(options.DefaultChannelCode))
+            errors.Add("DefaultChannelCode is required.");
+
         if (options.AutoCloseExpireMinutes <= 0)
             errors.Add("AutoCloseExpireMinutes must be greater than 0.");
+
+        if (options.BackgroundTaskIntervalMinutes <= 0)
+            errors.Add("BackgroundTaskIntervalMinutes must be greater than 0.");
+
+        if (options.BillingLockMinutes <= 0)
+            errors.Add("BillingLockMinutes must be greater than 0.");
+
+        if (options.RefundReconcileLookbackDays <= 0)
+            errors.Add("RefundReconcileLookbackDays must be greater than 0.");
 
         if (options.MaxRefundAmountPerDay < 0)
             errors.Add("MaxRefundAmountPerDay cannot be negative.");
@@ -32,18 +44,18 @@ public class PaymentOptionsValidator : OptionsValidatorBase<PaymentOptions>
         if (options.Subscription.DefaultTrialDays < 0)
             errors.Add("Subscription:DefaultTrialDays cannot be negative.");
 
+        if (options.Subscription.MaxPauseDays < 0)
+            errors.Add("Subscription:MaxPauseDays cannot be negative.");
+
         // 验证发票配置
         if (options.Invoice.Enabled && string.IsNullOrWhiteSpace(options.Invoice.DefaultTemplate))
             errors.Add("Invoice:DefaultTemplate is required when invoice is enabled.");
 
-        // 验证税务配置
-        if (options.Tax.Enabled && options.Tax.DefaultTaxRate < 0)
-            errors.Add("Tax:DefaultTaxRate cannot be negative when tax is enabled.");
+        // 验证税务配置（税率是百分数，超过 100 几乎必然是把 0-1 的小数写成了百分比或反之）
+        if (options.Tax.Enabled && (options.Tax.DefaultTaxRate < 0 || options.Tax.DefaultTaxRate > 100))
+            errors.Add("Tax:DefaultTaxRate must be between 0 and 100 (percentage) when tax is enabled.");
 
         // 验证促销配置
-        if (options.Promotion.DefaultFirstSubscriptionDiscount < 0 || options.Promotion.DefaultFirstSubscriptionDiscount > 1)
-            errors.Add("Promotion:DefaultFirstSubscriptionDiscount must be between 0 and 1.");
-
         if (options.Promotion.MaxCouponUsagePerUser <= 0)
             errors.Add("Promotion:MaxCouponUsagePerUser must be greater than 0.");
     }
@@ -103,5 +115,16 @@ public class PayPalOptionsValidator : OptionsValidatorBase<PayPalOptions>
 
         if (string.IsNullOrWhiteSpace(options.Currency))
             errors.Add("PayPal:Currency is required when PayPal is enabled.");
+
+        if (!options.EnableVault)
+            return;
+
+        // 绑定 PayPal 账户必须把付款人送到 PayPal 授权再跳回来。没有回跳地址这条链路根本走不完，
+        // 而失败点在"用户已经在 PayPal 点了同意之后"——那时才发现配置缺失代价最大。
+        if (string.IsNullOrWhiteSpace(options.VaultReturnUrl) && string.IsNullOrWhiteSpace(options.ReturnUrl))
+            errors.Add("PayPal:VaultReturnUrl (or PayPal:ReturnUrl) is required when PayPal:EnableVault is true.");
+
+        if (string.IsNullOrWhiteSpace(options.VaultUsagePattern))
+            errors.Add("PayPal:VaultUsagePattern is required when PayPal:EnableVault is true.");
     }
 }

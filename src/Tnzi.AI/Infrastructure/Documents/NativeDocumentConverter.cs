@@ -133,7 +133,7 @@ public class NativeDocumentConverter : IDocumentConverter
         }
 
         var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable;
-        var sheets = workbookPart.Workbook.Sheets?.Elements<Sheet>() ?? [];
+        var sheets = workbookPart.Workbook?.Sheets?.Elements<Sheet>() ?? [];
 
         foreach (var sheet in sheets)
         {
@@ -143,7 +143,7 @@ public class NativeDocumentConverter : IDocumentConverter
             if (sheetId == null) continue;
 
             var worksheetPart = (WorksheetPart)workbookPart.GetPartById(sheetId);
-            var sheetData = worksheetPart.Worksheet.GetFirstChild<SheetData>();
+            var sheetData = worksheetPart.Worksheet?.GetFirstChild<SheetData>();
             if (sheetData == null) continue;
 
             var sheetName = sheet.Name?.Value ?? "Sheet";

@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 public interface IWorkflowDelegator
 {

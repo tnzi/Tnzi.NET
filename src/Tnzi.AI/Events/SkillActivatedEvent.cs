@@ -26,7 +26,13 @@ public class SkillActivatedEvent : EventBase
     /// Used by the event handler to narrow the activation-count increment to the exact row
     /// and prevent cross-tenant stat bleed.
     /// </summary>
-    public Guid? TenantId { get; set; }
+    /// <remarks>
+    /// Deliberately NOT named <c>TenantId</c>: <see cref="EventBase.TenantId"/> is the ambient
+    /// publishing tenant captured by the bus (used to restore tenant context in background handlers),
+    /// which is a different value with a different purpose. Shadowing it would make the value read
+    /// depend on the static type of the reference.
+    /// </remarks>
+    public Guid? SkillTenantId { get; set; }
 
     /// <summary>
     /// Owner user ID of the resolved skill row (non-null for User-scoped DB skills).

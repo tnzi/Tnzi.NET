@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 采购账单服务（单据范式：草稿工作流 + 过账 + 作废）

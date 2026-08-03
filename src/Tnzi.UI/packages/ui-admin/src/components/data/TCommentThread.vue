@@ -16,7 +16,7 @@
           <div class="t-thread__meta">
             <span class="t-thread__author">{{ item.creatorName ?? label('someone') }}</span>
             <TRelativeTime :value="item.creationTime" class="t-thread__time" />
-            <NPopconfirm v-if="item.canDelete && canDelete" @positive-click="remove(item)">
+            <NPopconfirm v-if="item.canDelete && canDelete" @positive-click="deleteComment(item)">
               <template #trigger>
                 <NButton quaternary circle size="tiny" class="t-thread__delete" :aria-label="label('delete')">
                   <TSvgIcon icon="mdi:close" :size="13" />
@@ -46,7 +46,7 @@
       />
       <div class="t-thread__composer-actions">
         <span class="t-thread__hint">{{ label('submitHint') }}</span>
-        <NButton size="small" type="primary" :loading="busy" :disabled="!draft.trim()" @click="post">
+        <NButton size="small" type="primary" :loading="busy" :disabled="!draft.trim()" @click="submitComment">
           {{ label('post') }}
         </NButton>
       </div>
@@ -68,7 +68,7 @@
 import { ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NPopconfirm } from 'naive-ui'
 import { TSvgIcon, TAvatar, TRelativeTime } from '@tnzi/ui'
-import TEmpty from './TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 
 export interface CommentItem {
   id: string
@@ -122,11 +122,11 @@ watch(() => props.items, () => { error.value = null })
 function onKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     event.preventDefault()
-    void post()
+    void submitComment()
   }
 }
 
-async function post() {
+async function submitComment() {
   const body = draft.value.trim()
   if (!body || !props.post) return
   busy.value = true
@@ -144,7 +144,7 @@ async function post() {
   }
 }
 
-async function remove(item: CommentItem) {
+async function deleteComment(item: CommentItem) {
   if (!props.remove) return
   try {
     await props.remove(item)

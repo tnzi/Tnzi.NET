@@ -93,6 +93,38 @@ public class DefaultUserFunctionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 在给定切片内设置用户的直接授权（只覆盖切片内，切片外的直授行原样保留）
+    /// </summary>
+    /// <remarks>
+    /// 供只掌握功能目录一个子集的消费方保存"权限子矩阵"——用 <c>set</c> 保存子集
+    /// 会静默删光子集之外的直授行，本端点把边界交给服务端强制。
+    /// </remarks>
+    /// <param name="userId">用户ID</param>
+    /// <param name="request">设置请求（切片 + 切片内的新 allow 集）</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("user/{userId:guid}/set-in-scope")]
+    [ApiAuthorize(PermissionName = "authorization.userFunction.assign")]
+    public virtual async Task<ApiResult> SetUserFunctionsInScope(Guid userId, [FromBody] SetUserFunctionsInScopeRequest request)
+    {
+        var result = await UserFunctionService.SetUserFunctionsInScopeAsync(userId, request.ScopeFunctionIds, request.FunctionIds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 在给定切片内设置用户的否定权限集（只覆盖切片内，切片外的 deny 行原样保留）
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="request">设置请求（切片 + 切片内的新 deny 集）</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("user/{userId:guid}/set-denied-in-scope")]
+    [ApiAuthorize(PermissionName = "authorization.userFunction.assign")]
+    public virtual async Task<ApiResult> SetUserDeniedFunctionsInScope(Guid userId, [FromBody] SetUserFunctionsInScopeRequest request)
+    {
+        var result = await UserFunctionService.SetUserDeniedFunctionsInScopeAsync(userId, request.ScopeFunctionIds, request.FunctionIds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 清空用户的所有直接授权
     /// </summary>
     /// <param name="userId">用户ID</param>

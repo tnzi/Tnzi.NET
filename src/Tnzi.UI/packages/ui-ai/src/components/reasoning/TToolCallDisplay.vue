@@ -8,7 +8,7 @@
 
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import type { ToolCallInfo } from '@/composables/useChat';
+import type { ToolCallInfo } from '../../headless/useChat';
 import TStreamLoader from '../streaming/TStreamLoader.vue';
 
 const props = defineProps<{

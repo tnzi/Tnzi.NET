@@ -300,9 +300,9 @@ activity timeline + tips, 12 tiles total).
 | `@tnzi/ui-admin` | `defineAdminApp`, `createTnziUiAdmin`, `useAdminClient`, `vPermission`, `installDirectives`, `fetchAdminManifest`, `TAdminAppRoot` |
 | `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`), display + utility re-exports from `@tnzi/ui` |
 | `@tnzi/ui-admin/headless` | `useCrudPage`, `useFormRules`, `useNaiveForm`, `useAdminModuleManifest`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, ... |
-| `@tnzi/ui-admin/stores` | `useAdminThemeStore`, `useAdminAuthStore`, `useAdminAppStore`, `useAdminRouteStore`, `useAdminTabStore`, `useAdminPermissionStore` |
+| `@tnzi/ui-admin/stores` | `useAdminThemeStore`, `useAdminAuthStore`, `useAdminAppStore`, `useAdminRouteStore`, `useAdminTabStore`, `useAdminBreadcrumbStore` |
 | `@tnzi/ui-admin/router` | `defaultAdminRoutes` (filtered/overridable via `defineAdminApp`) |
-| `@tnzi/ui-admin/pages` | All 59 preset pages (also referenced by `defaultAdminRoutes`) |
+| `@tnzi/ui-admin/pages` | 预置页面（`defaultAdminRoutes` 当前挂 102 个懒加载路由组件；以 `src/router/routes.ts` 为准，不在本表维护计数） |
 | `@tnzi/ui-admin/widgets` | `WidgetDef`, `TWorkbenchLayout`, `TWidgetCard`, `useWidget`, `useWidgetData`, 14 built-in widgets, `defaultWorkbenchWidgets()` |
 
 ## Preset pages
@@ -373,10 +373,12 @@ Super-admins (`isSuperUser: true` in the auth store) bypass every check.
 ```vue
 <script setup lang="ts">
 import { TCrudPage } from '@tnzi/ui-admin/components'
-import { useCrudPage } from '@tnzi/ui-admin/headless'
-import { createIdentityBridge } from '@tnzi/ui-admin/services/bridges'
+import { useCrudPage, defineCrudBridge } from '@tnzi/ui-admin/headless'
+import { useAdminClient } from '@tnzi/ui-admin'
 
-const bridge = createIdentityBridge({ client: useAdminClient() })
+// 内置 bridge（identity/storage/finance/… ）是包内部实现，不在公开面上。
+// 消费方用 defineCrudBridge 定义自己的资源 bridge：
+const bridge = defineCrudBridge({ client: useAdminClient(), basePath: '/admin/users' })
 const crud = useCrudPage<UserDto>({
   pageId: 'identity.users',
   columns,
@@ -562,8 +564,8 @@ before `app.mount(...)`.
 ## Testing
 
 ```bash
-pnpm test              # vitest run — 690+ tests
-pnpm test:coverage     # vitest --coverage (80/70/60 lines/branches/fns)
+pnpm test              # vitest run（当前 2000 个用例 / 259 个文件）
+pnpm test:coverage     # vitest --coverage（阈值是棘轮，见 vitest.config.ts 的注释）
 pnpm typecheck         # vue-tsc --noEmit --skipLibCheck
 ```
 

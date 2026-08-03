@@ -14,11 +14,11 @@
 import { computed } from 'vue'
 import TWorkbenchLayout from '../../components/pages/TWorkbenchLayout.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
-import { useAdminDashboardConfig } from '../../plugin/dashboardConfig'
+import { useAdminDashboardConfig } from '../../plugin/dashboard-config'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
-import { defaultWorkbenchWidgets } from '../../widgets/presets'
-import type { WidgetDef } from '../../widgets/types'
+import { defaultWorkbenchWidgets } from '../../components/widgets/presets'
+import type { WidgetDef } from '@tnzi/ui'
 
 const config = useAdminDashboardConfig()
 const authStore = useAdminAuthStore()

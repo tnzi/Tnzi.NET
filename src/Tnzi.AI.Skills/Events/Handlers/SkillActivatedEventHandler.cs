@@ -26,7 +26,7 @@ public class SkillActivatedEventHandler : IEventHandler<SkillActivatedEvent>
         // Narrow predicate to the exact resolved row using all identity fields.
         // This prevents cross-tenant and cross-user activation-count bleed when
         // multiple tenants/users share the same slug.
-        var scopedTenantId = @event.TenantId;
+        var scopedTenantId = @event.SkillTenantId;
         var scopedOwnerUserId = @event.OwnerUserId;
 
         var updated = await _repository

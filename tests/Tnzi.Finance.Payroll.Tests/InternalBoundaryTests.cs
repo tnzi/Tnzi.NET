@@ -1,5 +1,4 @@
 using System.Reflection;
-using Tnzi.TestBase;
 
 namespace Tnzi.Finance.Payroll.Tests;
 

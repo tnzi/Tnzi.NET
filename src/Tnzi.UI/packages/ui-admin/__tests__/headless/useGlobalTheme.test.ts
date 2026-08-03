@@ -4,7 +4,7 @@ import { createThemeContext, mergeThemeSettings, type ThemeContext } from '@tnzi
 import { useGlobalTheme } from '../../src/headless/useGlobalTheme'
 import { applyThemeSnapshot, buildThemeSnapshot } from '../../src/theme/snapshot'
 import { useAdminThemeStore } from '../../src/stores/useAdminThemeStore'
-import { BUILTIN_APPEARANCE_PRESETS } from '../../src/theme/appearancePresets'
+import { BUILTIN_APPEARANCE_PRESETS } from '../../src/theme/appearance-presets'
 import type { AdminGlobalThemeDto } from '@tnzi/core/services/system'
 
 function createCtx(): ThemeContext {

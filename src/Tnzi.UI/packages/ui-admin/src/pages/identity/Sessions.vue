@@ -99,6 +99,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@tnzi/core'
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, ref, onMounted } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
@@ -107,11 +108,11 @@ import {
   NCheckbox, NPopconfirm, NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import { type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/row-actions'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
@@ -255,14 +256,13 @@ async function handleCleanExpired(): Promise<void> {
   }
 }
 
-function formatTime(v: string | Date | null | undefined): string {
-  if (!v) return EMPTY_DASH
-  try {
-    return new Date(v).toLocaleString()
-  } catch {
-    return String(v)
-  }
-}
+// Routed through @tnzi/core rather than a local toLocaleString: one
+// implementation means one rendering of a timestamp across the whole admin.
+// It also handles the case the try/catch here was reaching for - building a
+// Date from unparseable input yields an Invalid Date, it does not throw, so
+// that catch block never ran and the cell rendered the text "Invalid Date".
+const formatTime = (v: string | Date | null | undefined): string =>
+  formatDateTime(v, { fallback: EMPTY_DASH })
 
 const columns = computed<DataTableColumns<UserSessionRow>>(() => [
   { key: 'id', title: t('columns.sessionId'), minWidth: 150, ellipsis: { tooltip: true } },

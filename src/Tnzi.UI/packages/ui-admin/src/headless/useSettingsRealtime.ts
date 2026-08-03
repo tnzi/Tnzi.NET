@@ -16,8 +16,12 @@ export interface SettingsChangeSignal {
 export const lastSettingsChange = ref<SettingsChangeSignal | null>(null)
 
 export interface UseSettingsRealtimeOptions {
-  /** Hub URL override (e.g. '/api/hubs/settings' under a sub-path). Default '/hubs/settings'. */
-  hubUrl?: string
+  /**
+   * Hub URL. A getter is evaluated at `start()` time, so a URL that only
+   * becomes known after the backend shell signal lands can still be used.
+   * Falls back to '/hubs/settings'.
+   */
+  hubUrl?: string | (() => string | undefined)
   /** Returns the freshest JWT (read on each (re)connect). */
   getToken: () => string
   /**
@@ -35,10 +39,15 @@ export interface UseSettingsRealtimeOptions {
  * changed key, the client decides what to re-fetch.
  */
 export function useSettingsRealtime(opts: UseSettingsRealtimeOptions) {
-  const signal = createSettingsRealtimeClient({
-    url: opts.hubUrl ?? '/hubs/settings',
-    accessTokenFactory: () => opts.getToken(),
-  })
+  // Built on first start(), not at setup: the URL may come from the backend
+  // shell signal, which lands after this composable is created. Building eagerly
+  // would freeze whatever placeholder was known at setup time.
+  let signal: ReturnType<typeof createSettingsRealtimeClient> | null = null
+
+  function resolveUrl(): string {
+    const configured = typeof opts.hubUrl === 'function' ? opts.hubUrl() : opts.hubUrl
+    return configured ?? '/hubs/settings'
+  }
 
   const onChanged = (raw: unknown) => {
     const payload = raw as SettingsChangedPayload
@@ -47,12 +56,21 @@ export function useSettingsRealtime(opts: UseSettingsRealtimeOptions) {
   }
 
   async function start() {
+    signal ??= createSettingsRealtimeClient({
+      url: resolveUrl(),
+      accessTokenFactory: () => opts.getToken(),
+    })
     signal.on('Settings.Changed', onChanged)
     await signal.start()
   }
   async function stop() {
+    if (!signal) return
     signal.off('Settings.Changed', onChanged)
     await signal.stop()
   }
-  return { start, stop, client: signal }
+  /** The underlying hub client, or `null` until the first `start()`. */
+  function client() {
+    return signal
+  }
+  return { start, stop, client }
 }

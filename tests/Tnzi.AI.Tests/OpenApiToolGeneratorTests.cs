@@ -1,4 +1,3 @@
-using Tnzi.AI.Infrastructure.Tools;
 
 namespace Tnzi.AI.Tests;
 

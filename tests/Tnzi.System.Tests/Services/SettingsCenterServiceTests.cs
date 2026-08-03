@@ -239,7 +239,7 @@ public class SettingsCenterServiceTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("B must be >= A");
+        result.Message!.ShouldContain("B must be >= A");
         _settingServiceMock.Verify(s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
     }
 

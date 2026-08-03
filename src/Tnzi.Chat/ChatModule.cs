@@ -1,4 +1,4 @@
-namespace Tnzi.Chat;
+﻿namespace Tnzi.Chat;
 
 [DependsOn(typeof(EFCoreModule), typeof(IdentityModule), typeof(IdentityPresenceModule))]
 [OptionalDependsOn(typeof(SignalRModule))]
@@ -30,6 +30,11 @@ public class ChatModule : TnziApplicationModule
         services.AddScoped<IBroadcastService, BroadcastService>();
         services.AddScoped<IChatAdminService, ChatAdminService>();
 
+        // 让会话成员读得到会话里的文件。Storage 自己只认识"创建者 / storage.file.view",
+        // 接收方两样都不是 —— 没有这条,同一张图在发的人那里能看、在收的人那里 404。
+        // Storage 未加载时该注册无害:没有人会去解析它。
+        services.AddScoped<IFileReferenceAccessResolver, ChatFileReferenceAccessResolver>();
+
         services.AddEventHandler<ConversationMessageSentEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationReadEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationChangedEvent, ChatSignalREventHandler>();
@@ -59,7 +64,7 @@ public class ChatModule : TnziApplicationModule
         var tnziApp = context.ServiceProvider.GetService<ITnziApplication>();
         if (tnziApp != null && tnziApp.IsModuleLoaded<SignalRModule>())
         {
-            webApp.MapHub<ChatHub>("/hubs/chat");
+            webApp.MapTnziHub<ChatHub>("chat", "/hubs/chat");
         }
 
         return Task.CompletedTask;

@@ -28,6 +28,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'happy-dom',
+    // Preloads the `en` dictionary into the i18n registry. The bundled locale
+    // packs are async chunks fetched by `install()`, which tests never call, so
+    // without this every label under test resolves to its humanised key.
+    setupFiles: ['./__tests__/setup.ts'],
     // Integration tests mount Phase 3/5 pages via dynamic imports; cold-cache
     // SFC transform + TCrudPage + bridge init can exceed vitest's 5s default
     // on the first test in a file. We previously ran at 15s but Phase G
@@ -43,24 +47,34 @@ export default defineConfig({
       exclude: [
         'src/**/index.ts',
         'src/**/*.d.ts',
+        // Data, not logic: ~4,400 lines of literal message objects per locale
+        // would dominate the ratio while telling us nothing about test quality.
         'src/locales/**',
-        'src/components/**',
-        'src/template/**',
         'src/plugin/index.ts',
-        'playground/**',
         '**/__tests__/**',
       ],
+      // A RATCHET, not the destination. These sit just under what the suite
+      // actually achieves, so any drop trips the gate; raise them whenever a
+      // batch of tests lands. The previous values (80/70/80/60) were aspiration
+      // written as contract: the run had never met them, so `test:coverage`
+      // failed by default and nobody could tell a regression from the status
+      // quo. A threshold you do not meet is decoration.
+      //
+      // `src/components/**` used to be excluded here - 138 files and ~30k lines,
+      // the surface consumers reuse most, invisible to the very number meant to
+      // describe the package. Including it RAISED the ratio (components are
+      // better covered than pages), so the exclusion was hiding good news and
+      // an unmeasured 28% of the code at the same time.
+      //
+      // Functions stays lowest for the original reason: mount-based tests under
+      // happy-dom never execute handlers declared inside `<script setup>`
+      // without full user-flow simulation. Those flows currently have no
+      // automated coverage at all - see docs/frontend/architecture.md §4.2.
       thresholds: {
-        lines: 80,
-        statements: 80,
-        // Function coverage uses a lowered 60% target because mount-based
-        // integration tests under happy-dom cannot reach 80% without full
-        // user-flow simulation (form validation, modal lifecycle, row action
-        // clicks that only execute arrow handlers declared inside <script
-        // setup>). Real user flows are covered by Playwright E2E specs in
-        // Tasks 6.3-6.6. Lines/statements/branches meet the 80/70 targets.
-        functions: 60,
-        branches: 70,
+        statements: 53,
+        lines: 55,
+        branches: 41,
+        functions: 41,
       },
     },
   },

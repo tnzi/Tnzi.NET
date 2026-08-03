@@ -2,7 +2,7 @@
  * `useBreakpoint` - responsive breakpoint helper.
  *
  * **Sunk to `@tnzi/ui` in 0.2.71+** - this module now re-exports the
- * implementation from `@tnzi/ui/composables/theme` so site/chat/mobile can
+ * implementation from `@tnzi/ui/headless/theme` so site/chat/mobile can
  * use the same helper without depending on ui-admin.
  *
  * The shape returned matches the original ui-admin `useBreakpoint()` exactly,

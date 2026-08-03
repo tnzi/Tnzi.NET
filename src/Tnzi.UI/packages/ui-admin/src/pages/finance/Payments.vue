@@ -87,7 +87,7 @@ import { useCrudPage } from '../../headless/useCrudPage'
 import { useDocumentBatch } from './useDocumentBatch'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   FinanceDocumentStatus,
@@ -101,7 +101,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer, type FormSchemaItem } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
 import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'

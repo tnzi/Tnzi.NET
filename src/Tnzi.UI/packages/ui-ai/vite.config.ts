@@ -33,23 +33,34 @@ export default defineConfig({
       entry: {
         index: resolve(__dirname, 'src/index.ts'),
         components: resolve(__dirname, 'src/components/index.ts'),
-        composables: resolve(__dirname, 'src/composables/index.ts'),
-        chat: resolve(__dirname, 'src/chat/index.ts'),
+        // Pre-auth surface. Its own entry so a consumer can load the sign-in
+        // page without pulling `TChatApp` and the conversation tree with it.
+        auth: resolve(__dirname, 'src/auth/index.ts'),
+        // DTO -> view-model mapping. Its own entry so a consumer can map
+        // without importing any component.
+        adapters: resolve(__dirname, 'src/adapters/index.ts'),
+        // Application assembly. Separate entry because it is the only one that
+        // needs vue-router.
+        plugin: resolve(__dirname, 'src/plugin/index.ts'),
+        headless: resolve(__dirname, 'src/headless/index.ts'),
+        // Drop-in chat product shell. Its own entry so a chat consumer does not
+        // pay for the workflow / knowledge / skill domains in ./components.
+        chat: resolve(__dirname, 'src/chat-app.ts'),
         embed: resolve(__dirname, 'src/embed/index.ts'),
-        locale: resolve(__dirname, 'src/locale/index.ts'),
-        shell: resolve(__dirname, 'src/shell/index.ts'),
+        i18n: resolve(__dirname, 'src/i18n/index.ts'),
+        locales: resolve(__dirname, 'src/locales/index.ts'),
         utils: resolve(__dirname, 'src/utils/index.ts'),
         // Everything that touches @vue-flow/core. A dedicated entry keeps the
         // heavy dep reachable only through `@tnzi/ui-ai/workflow`.
         workflow: resolve(__dirname, 'src/workflow/index.ts'),
-        // Declaring `themes` as a top-level entry forces rollup to
-        // preserve the named re-exports in `themes/index.ts`
+        // Declaring `theme` as a top-level entry forces rollup to
+        // preserve the named re-exports in `theme/index.ts`
         // (applyAiTheme / lightTokens / darkTokens / AiThemeTokens).
         // Otherwise tree-shake strips the `export { … } from
         // './tokens'` line and leaves only the locally-defined
         // applyTheme / resetTheme. Consumers can import the barrel
-        // via the `./themes/*` subpath declared in package.json.
-        themes: resolve(__dirname, 'src/themes/index.ts'),
+        // via the `./theme/*` subpath declared in package.json.
+        theme: resolve(__dirname, 'src/theme/index.ts'),
       },
       name: 'TnziAi',
       formats: ['es'],

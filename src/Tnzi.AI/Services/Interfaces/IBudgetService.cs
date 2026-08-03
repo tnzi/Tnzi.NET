@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// USD 成本预算管理服务。

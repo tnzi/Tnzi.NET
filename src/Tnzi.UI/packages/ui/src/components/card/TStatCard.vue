@@ -46,6 +46,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NStatistic, NSkeleton, NNumberAnimation } from 'naive-ui'
+import type { ColorRole } from '../../theme/types'
+
+/**
+ * Legacy colour names accepted by the `color` prop before it moved to semantic
+ * roles. Kept so `color="blue"` keeps compiling and rendering; it now resolves
+ * to a themed token instead of a frozen hex.
+ *
+ * `purple` had no semantic counterpart and maps to `primary` - the accent the
+ * app actually chose.
+ */
+const LEGACY_COLOR_ROLES = {
+  blue: 'info',
+  green: 'success',
+  orange: 'warning',
+  red: 'error',
+  purple: 'primary',
+} as const satisfies Record<string, ColorRole>
+
+type LegacyColor = keyof typeof LEGACY_COLOR_ROLES
 
 interface Props {
   title: string
@@ -54,7 +73,16 @@ interface Props {
   prefix?: string
   trend?: number
   size?: 'small' | 'medium' | 'large'
-  color?: 'blue' | 'green' | 'orange' | 'red' | 'purple'
+  /**
+   * Accent colour for the left border, as a semantic theme role.
+   *
+   * This used to be a fixed palette (`blue` / `green` / …) hard-coded to the
+   * Naive UI default hexes - four of the five were byte-identical to the theme
+   * system's own defaults, so a consumer who changed their palette got a card
+   * that silently stayed on the old colours. Roles follow the live theme.
+   * The old names still work, mapped onto the nearest role.
+   */
+  color?: ColorRole | LegacyColor
   loading?: boolean
 }
 
@@ -63,25 +91,28 @@ const props = withDefaults(defineProps<Props>(), {
   prefix: undefined,
   trend: undefined,
   size: 'medium',
-  color: 'blue',
+  color: 'info',
   loading: false,
 })
 
-const colorMap: Record<string, string> = {
-  blue: '#2080f0',
-  green: '#18a058',
-  orange: '#f0a020',
-  red: '#d03050',
-  purple: '#7b61ff',
-}
+const resolvedRole = computed<ColorRole>(
+  () => LEGACY_COLOR_ROLES[props.color as LegacyColor] ?? (props.color as ColorRole),
+)
 
-const borderColorValue = computed(() => colorMap[props.color] ?? colorMap.blue)
+/**
+ * Reads the palette off CSS custom properties rather than `usePalette()` so the
+ * card still renders standalone (no theme context injected) - it just inherits
+ * whatever `:root` provides, with the token's own fallback.
+ */
+const borderColorValue = computed(() => `var(--tnzi-${resolvedRole.value}-500)`)
 </script>
 
 <style scoped>
-/* CSS variable border - cannot be expressed as utility */
+/* CSS variable border - cannot be expressed as utility.
+   The fallback is the info token, not a literal hex: if the theme vars are not
+   injected yet the border should still track the theme once they land. */
 .t-stat-card {
-  border-left: 3px solid var(--t-stat-border-color, #2080f0);
+  border-left: 3px solid var(--t-stat-border-color, var(--tnzi-info-500));
 }
 
 /* :deep() for Naive UI internal statistic value sizing */

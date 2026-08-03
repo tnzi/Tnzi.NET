@@ -31,14 +31,17 @@ import {
   type UpdateFileFolderDto,
   type FileStorageStatisticsDto,
   type FileShareSummaryDto,
+  type FileSharePreviewDto,
   type ActiveSharesQueryDto,
   type FileIntegrityResultDto,
   type BatchIntegrityResultDto,
   type FileReferenceDto,
   type UserStorageUsageDto,
+  type FileUrlKind,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { getFileUrlResolver } from '../file-url-resolver'
 
 type HttpClient = Parameters<typeof useAdminFileApi>[0]
 
@@ -59,10 +62,27 @@ export interface ChunkUploader {
 }
 
 export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> {
-  /** Returns a direct download URL for a file. Works offline (no async needed). */
+  /**
+   * Direct download URL, unsigned. Only works for PUBLIC files - a browser
+   * request carries no Authorization header. Use `signedUrl` for anything else.
+   */
   downloadUrl(id: string): string
-  /** Synchronously build the inline (anonymous) preview URL for a stored file id. */
+  /**
+   * Inline preview URL, unsigned. Only works for PUBLIC files (avatars, site
+   * assets). Use `signedUrl` for anything else.
+   */
   previewUrl(id: string): string
+  /**
+   * URL that renders a PRIVATE file in an `<img>` / `<a download>`: it carries
+   * a short-lived signed token because those requests cannot send a bearer
+   * token. Resolves to `null` when the caller may not read the file.
+   *
+   * Batched and cached across call sites, so a list of N files costs one round
+   * trip rather than N.
+   */
+  signedUrl(id: string, kind?: FileUrlKind): Promise<string | null>
+  /** Signed URLs for many files at once. Unreadable ids are absent from the map. */
+  signedUrls(ids: string[], kind?: FileUrlKind): Promise<Map<string, string>>
   /** Single-shot upload for small files (e.g. avatars); pre-unwraps the envelope. */
   upload(file: File): Promise<FileRecordDto>
   /** Move a batch of files to a target folder (null = root / unfiled). */
@@ -124,6 +144,15 @@ export interface StorageBridge {
    * Wired to /admin/files/shares/* and /admin/files/{id}/shares.
    */
   shares: StorageSharesContract
+  /**
+   * The RECIPIENT side of a share link - anonymous, no admin shell, no session.
+   * Distinct from `shares` above, which is the owner listing/revoking links.
+   *
+   * Lives on the bridge (rather than the page calling `useStorageApi` directly)
+   * so `pages/share/SharePage.vue` keeps the page → bridge → core layering every
+   * other page follows, and so its tests can `vi.mock` this module.
+   */
+  publicShare: StoragePublicShareContract
   /** File-integrity verification - single + batch. */
   integrity: {
     verifyOne(fileId: string): Promise<FileIntegrityResultDto>
@@ -138,6 +167,20 @@ export interface StorageBridge {
   metadata: {
     get(fileId: string): Promise<Record<string, string>>
     set(fileId: string, metadata: Record<string, string>): Promise<FileRecordDto>
+  }
+  /**
+   * Public-read visibility. Public files are readable by anyone including
+   * unauthenticated callers, which is what an `<img src>` needs - right for
+   * avatars and site assets, wrong for contracts, cheques and HR documents.
+   */
+  visibility: {
+    set(fileId: string, isPublic: boolean): Promise<FileRecordDto>
+    /**
+     * Backfill from the backend's `[FileField(Public = true)]` declarations;
+     * resolves to the number of files changed. One-shot repair for avatars
+     * stored before those declarations existed. Never makes a file private.
+     */
+    syncFromDeclarations(): Promise<number>
   }
   /** File-reference queries - by file or by owning entity. */
   references: {
@@ -169,6 +212,35 @@ export interface StorageSharesContract {
   fetch(query: CrudPageQuery): Promise<CrudPageResult<FileShareSummaryDto>>
   byFile(fileId: string): Promise<FileShareSummaryDto[]>
   batchRevoke(shareIds: string[]): Promise<number>
+}
+
+/**
+ * Anonymous share-link surface used by the recipient page (`/share/:token`).
+ *
+ * All three are unauthenticated by design: the recipient is a client, auditor
+ * or vendor with no account.
+ */
+export interface StoragePublicShareContract {
+  /**
+   * What the link points at, WITHOUT consuming an access.
+   *
+   * Resolves to `null` for every unusable link - revoked, expired, exhausted or
+   * never existed. The page shows one message for all of them: distinguishing
+   * them would turn this into a probe, and the recipient can do nothing
+   * different about any of them anyway.
+   */
+  preview(token: string): Promise<FileSharePreviewDto | null>
+  /**
+   * Check the link password without consuming an access. `false` for a wrong
+   * password; never throws for the ordinary wrong-password case.
+   */
+  verifyPassword(token: string, password?: string): Promise<boolean>
+  /**
+   * Anonymous download URL - goes straight into `window.location` / `<a href>`.
+   * Reading it as a Blob instead would break large files, resumable transfers
+   * and the browser's own download manager.
+   */
+  downloadUrl(token: string, password?: string): string
 }
 
 /**
@@ -234,6 +306,8 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         delete: noOp as never,
         downloadUrl: () => '',
         previewUrl: () => '',
+        signedUrl: async () => null,
+        signedUrls: async () => new Map<string, string>(),
         upload: noOp as never,
         moveTo: noOp as never,
         initUpload: noOp as never,
@@ -252,15 +326,29 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       versions: { fetch: stub as never, restore: stub as never },
       statistics: { get: noOp as never },
       shares: { fetch: stub as never, byFile: noOp as never, batchRevoke: noOp as never },
+      publicShare: {
+        preview: async () => null,
+        verifyPassword: async () => false,
+        downloadUrl: () => '',
+      },
       integrity: { verifyOne: noOp as never, batchVerify: noOp as never },
       tags: { set: noOp as never, byTag: stub as never },
       metadata: { get: noOp as never, set: noOp as never },
+      visibility: { set: noOp as never, syncFromDeclarations: noOp as never },
       references: { byFile: noOp as never, byEntity: noOp as never },
       userUsage: { forUser: noOp as never, topUsers: noOp as never },
       cleanup: { temporaryFiles: noOp as never, trigger: noOp as never },
       preview: { canPreview: noOp as never, url: noOp as never },
     }
   }
+
+  /** Unsigned URL for the requested read endpoint. */
+  const plainUrl = (id: string, kind: FileUrlKind = 'preview'): string =>
+    kind === 'download'
+      ? storageApi.getDownloadUrl(id)
+      : kind === 'thumbnail'
+        ? storageApi.getThumbnailUrl(id)
+        : storageApi.getPreviewUrl(id)
 
   const missing = <T>(label: string): Promise<T> =>
     Promise.reject(
@@ -301,8 +389,26 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     // previewUrl - no hardcoded `/api` that breaks under a sub-app mount.
     downloadUrl: (id: string): string => storageApi.getDownloadUrl(id),
 
-    // Synchronous anonymous preview URL (no request) - used for avatar rendering.
+    // Synchronous anonymous preview URL (no request) - correct for PUBLIC files
+    // only (avatars, site assets). Private files need `signedUrl`.
     previewUrl: (id: string): string => storageApi.getPreviewUrl(id),
+
+    // Signed URLs for private files. The resolver is shared per client (see
+    // services/fileUrlResolver) so the token cache survives this bridge, which
+    // is recreated on every page mount.
+    //
+    // Without a client there is nothing to mint against - that only happens on
+    // the api-injection path used by unit tests, where the plain URL is what
+    // those fixtures already assert on.
+    signedUrl: (id: string, kind?: FileUrlKind): Promise<string | null> =>
+      deps.client
+        ? getFileUrlResolver(deps.client).resolve(id, kind)
+        : Promise.resolve(plainUrl(id, kind)),
+
+    signedUrls: (ids: string[], kind?: FileUrlKind): Promise<Map<string, string>> =>
+      deps.client
+        ? getFileUrlResolver(deps.client).resolveMany(ids, kind)
+        : Promise.resolve(new Map(ids.filter(Boolean).map((id) => [id, plainUrl(id, kind)]))),
 
     // Single-shot upload (avatars etc.); pre-unwraps the ApiResult envelope so
     // callers get the stored FileRecordDto directly (the endpoint returns the record;
@@ -493,6 +599,26 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
   }
 
+  // ---- publicShare (recipient side of a share link, anonymous) ----
+  const publicShare: StoragePublicShareContract = {
+    preview: async (token: string): Promise<FileSharePreviewDto | null> => {
+      try {
+        const res = await storageApi.getSharePreview(token)
+        return res.succeeded ? (res.data ?? null) : null
+      } catch {
+        // A network failure and "this link is gone" are the same event to the
+        // recipient: either way there is nothing they can do here.
+        return null
+      }
+    },
+    verifyPassword: async (token: string, password?: string): Promise<boolean> => {
+      const res = await storageApi.verifyShareAccess(token, password)
+      return res.succeeded && res.data === true
+    },
+    downloadUrl: (token: string, password?: string): string =>
+      storageApi.getShareDownloadUrl(token, password || undefined),
+  }
+
   // ---- integrity ----
   const integrity: StorageBridge['integrity'] = {
     verifyOne: async (fileId: string): Promise<FileIntegrityResultDto> =>
@@ -529,6 +655,14 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
     set: async (fileId: string, meta: Record<string, string>): Promise<FileRecordDto> =>
       unwrap<FileRecordDto>(await fileApi.setMetadata(fileId, meta)),
+  }
+
+  // ---- visibility (public read) ----
+  const visibility: StorageBridge['visibility'] = {
+    set: async (fileId: string, isPublic: boolean): Promise<FileRecordDto> =>
+      unwrap<FileRecordDto>(await fileApi.setFileVisibility(fileId, { isPublic })),
+    syncFromDeclarations: async (): Promise<number> =>
+      unwrap<number>(await fileApi.syncPublicFlags()),
   }
 
   // ---- references ----
@@ -587,9 +721,11 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     versions,
     statistics,
     shares,
+    publicShare,
     integrity,
     tags,
     metadata,
+    visibility,
     references,
     userUsage,
     cleanup,

@@ -20,12 +20,20 @@ export enum SalaryComponentType {
   Deduction = 'Deduction',
   /** Employer contribution: Dr expense + Cr liability (both sides); does not touch net. */
   EmployerContribution = 'EmployerContribution',
+  /**
+   * Informational: prints on the payslip and can be referenced by later formulas,
+   * but moves NO total (gross / deductions / employer cost / net) and posts nothing.
+   * For memo lines (unpaid leave, leave balance) and named intermediates
+   * (provincial tax before surtax). The only type allowed to be negative.
+   */
+  Informational = 'Informational',
 }
 
 export const SALARY_COMPONENT_TYPE_LABELS: Record<SalaryComponentType, string> = {
   [SalaryComponentType.Earning]: 'Earning',
   [SalaryComponentType.Deduction]: 'Deduction',
   [SalaryComponentType.EmployerContribution]: 'Employer Contribution',
+  [SalaryComponentType.Informational]: 'Informational',
 }
 
 /** Pay frequency (periods per year: 12 / 24 / 26 / 52). */

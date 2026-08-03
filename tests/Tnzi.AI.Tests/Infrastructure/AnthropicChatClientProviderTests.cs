@@ -1,5 +1,3 @@
-using Moq;
-using Tnzi.AI.Infrastructure.Providers;
 
 namespace Tnzi.AI.Tests.Infrastructure;
 

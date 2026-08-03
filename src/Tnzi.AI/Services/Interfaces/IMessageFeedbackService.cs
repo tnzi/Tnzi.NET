@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 消息级反馈服务 - 管理 ThreadMessage 上的 👍/👎 反馈

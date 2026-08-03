@@ -10,7 +10,7 @@ namespace Tnzi.Finance.Metadata;
 /// 回退显示 <c>Detail</c> 即可。
 /// </para>
 /// <para>
-/// 判定这些代码的唯一实现是 <see cref="Services.Interfaces.ILedgerPostingService.GetReversibilityAsync"/>，
+/// 判定这些代码的唯一实现是 <see cref="Services.ILedgerPostingService.GetReversibilityAsync"/>，
 /// 它与冲销漏斗 <c>LedgerPostingEngine.BuildReversalAsync</c> 共用同一段守卫
 /// （<c>ReversalGuard</c>），因此"查询说能冲、真冲吃 409"不会发生。
 /// </para>

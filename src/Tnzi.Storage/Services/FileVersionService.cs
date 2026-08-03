@@ -25,31 +25,31 @@ public class FileVersionService : ApplicationService, IFileVersionService
     }
 
     /// <summary>
-    /// 载入文件记录并校验访问权限。不通过一律以 404 返回,不泄露该 id 上是否有文件。
+    /// 载入文件记录并校验访问权限。不存在与不允许都返回 null,调用方一律以 404 回应,
+    /// 不泄露该 id 上是否有文件。
     /// </summary>
-    private async Task<(FileRecord? Record, Result<T>? Denied)> LoadAuthorizedAsync<T>(
-        Guid fileId,
-        bool forWrite,
-        CancellationToken cancellationToken)
+    private async Task<FileRecord?> LoadAuthorizedAsync(Guid fileId, bool forWrite, CancellationToken cancellationToken)
     {
         var fileRecord = await _fileRepository.GetAsync(fileId, cancellationToken);
         if (fileRecord == null)
-            return (null, Fail<T>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND));
+            return null;
 
         var allowed = forWrite
             ? await _accessAuthorizer.CanWriteAsync(fileRecord, cancellationToken)
             : await _accessAuthorizer.CanReadAsync(fileRecord, cancellationToken);
 
-        return allowed
-            ? (fileRecord, null)
-            : (null, Fail<T>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND));
+        return allowed ? fileRecord : null;
     }
+
+    private Result<T> FileNotFound<T>() => Fail<T>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+    private Result FileNotFound() => Fail("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
     public async Task<Result<FileVersion>> CreateVersionAsync(Guid fileId, Stream stream, string? description = null, CancellationToken cancellationToken = default)
     {
-        var (fileRecord, denied) = await LoadAuthorizedAsync<FileVersion>(fileId, forWrite: true, cancellationToken);
-        if (denied != null)
-            return denied;
+        var fileRecord = await LoadAuthorizedAsync(fileId, forWrite: true, cancellationToken);
+        if (fileRecord == null)
+            return FileNotFound<FileVersion>();
 
         // 获取当前最大版本号
         var maxVersion = await _versionRepository.AsQueryable()
@@ -90,10 +90,12 @@ public class FileVersionService : ApplicationService, IFileVersionService
         }
 
         // 计算新版本的MD5
-        var md5Hash = await Md5Helper.CalculateAsync(stream);
+        var md5Hash = await HashHelper.GetMd5Async(stream);
         stream.Position = 0;
 
-        // 上传新版本文件
+        // 上传新版本文件。长度必须在把流交给 provider **之前**取：上传之后这个流是否还可读
+        // 由 provider 决定（见 IFileStorage.UploadAsync 的流所有权约定）。
+        var size = stream.Length;
         var versionFileName = $"{fileRecord.FileName}.v{newVersion}";
         var filePath = await _storage.UploadAsync(versionFileName, stream, fileRecord.ContentType);
 
@@ -103,7 +105,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
             FileId = fileId,
             Version = newVersion,
             Path = filePath,
-            Size = stream.Length,
+            Size = size,
             Md5Hash = md5Hash,
             Description = description,
             IsCurrent = true
@@ -113,7 +115,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
         // 更新文件记录的路径和大小
         fileRecord.Path = filePath;
-        fileRecord.Size = stream.Length;
+        fileRecord.Size = size;
         fileRecord.Md5Hash = md5Hash;
         await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
 
@@ -123,9 +125,8 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
     public async Task<Result<IEnumerable<FileVersion>>> GetVersionsAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
-        var (_, denied) = await LoadAuthorizedAsync<IEnumerable<FileVersion>>(fileId, forWrite: false, cancellationToken);
-        if (denied != null)
-            return denied;
+        if (await LoadAuthorizedAsync(fileId, forWrite: false, cancellationToken) == null)
+            return FileNotFound<IEnumerable<FileVersion>>();
 
         var versions = await _versionRepository.AsQueryable()
             .Where(v => v.FileId == fileId)
@@ -137,9 +138,9 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
     public async Task<Result<FileRecord>> RestoreVersionAsync(Guid fileId, int version, CancellationToken cancellationToken = default)
     {
-        var (fileRecord, denied) = await LoadAuthorizedAsync<FileRecord>(fileId, forWrite: true, cancellationToken);
-        if (denied != null)
-            return denied;
+        var fileRecord = await LoadAuthorizedAsync(fileId, forWrite: true, cancellationToken);
+        if (fileRecord == null)
+            return FileNotFound<FileRecord>();
 
         var targetVersion = await _versionRepository.AsQueryable()
             .Where(v => v.FileId == fileId && v.Version == version)
@@ -175,9 +176,8 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
     public async Task<Result<Stream>> GetVersionContentAsync(Guid fileId, int version, CancellationToken cancellationToken = default)
     {
-        var (_, denied) = await LoadAuthorizedAsync<Stream>(fileId, forWrite: false, cancellationToken);
-        if (denied != null)
-            return denied;
+        if (await LoadAuthorizedAsync(fileId, forWrite: false, cancellationToken) == null)
+            return FileNotFound<Stream>();
 
         var targetVersion = await _versionRepository.AsQueryable()
             .Where(v => v.FileId == fileId && v.Version == version)
@@ -195,9 +195,8 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
     public async Task<Result> DeleteVersionAsync(Guid fileId, int version, CancellationToken cancellationToken = default)
     {
-        var (_, denied) = await LoadAuthorizedAsync<object>(fileId, forWrite: true, cancellationToken);
-        if (denied != null)
-            return denied;
+        if (await LoadAuthorizedAsync(fileId, forWrite: true, cancellationToken) == null)
+            return FileNotFound();
 
         // 用 tracking 查询，确保 DeleteAsync 操作的是已被上下文跟踪的实例，避免身份映射冲突
         var targetVersion = await _versionRepository.AsQueryable(withTracking: true)

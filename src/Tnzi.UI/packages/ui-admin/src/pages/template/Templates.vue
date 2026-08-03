@@ -63,10 +63,14 @@
   <!-- Preview overlay - rendered template HTML, deep-linkable via ?preview=view:<id> -->
   <TDetailHost :state="previewDetail" :title="t('previewTitle')" :width="640" :footer="false" :translate="t">
     <template #default>
-      <div
+      <!-- Sandboxed: the rendered template is author-controlled markup, and
+           `v-html` would run it at the admin's origin in an authenticated
+           session. See THtmlPreview. -->
+      <THtmlPreview
         v-if="previewContent"
-        class="t-template-preview__content"
-        v-html="previewContent"
+        :html="previewContent"
+        :height="'60vh'"
+        :title="t('previewTitle')"
       />
       <p v-else class="t-template-preview__empty">{{ t('admin.common.noPreview') }}</p>
     </template>
@@ -80,10 +84,11 @@ import TCardPage from '../../components/crud/TCardPage.vue'
 import TEntityCard from '../../components/data/TEntityCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import THtmlPreview from '../../components/display/THtmlPreview.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { createTemplateBridge } from '../../services/bridges/template-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'

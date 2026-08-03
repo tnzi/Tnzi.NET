@@ -15,6 +15,7 @@ internal sealed class MockDockerHandler : HttpMessageHandler
     private string _execStderr = "";
     private int _execExitCode;
     private bool _execFlowConfigured;
+    private bool _execHangsAfterOutput;
 
     public void SetupResponse(string pathContains, HttpStatusCode statusCode, string body,
         HttpMethod? method = null)
@@ -38,6 +39,17 @@ internal sealed class MockDockerHandler : HttpMessageHandler
         _execStderr = stderr ?? "";
     }
 
+    /// <summary>
+    /// Configure the exec flow to emit the given output and then never end the stream,
+    /// simulating a command that prints diagnostics and then hangs until the client
+    /// gives up. Used to prove the timeout path keeps output collected so far.
+    /// </summary>
+    public void SetupExecFlowThenHang(string stdout, string? stderr = null)
+    {
+        SetupExecFlow(exitCode: 0, stdout: stdout, stderr: stderr);
+        _execHangsAfterOutput = true;
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
@@ -59,7 +71,9 @@ internal sealed class MockDockerHandler : HttpMessageHandler
                 var content = BuildMultiplexedOutput(_execStdout, _execStderr);
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new ByteArrayContent(content)
+                    Content = _execHangsAfterOutput
+                        ? new StreamContent(new HangingStream(content))
+                        : new ByteArrayContent(content)
                 };
             }
 
@@ -126,6 +140,46 @@ internal sealed class MockDockerHandler : HttpMessageHandler
         }
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Replays a fixed prefix and then blocks forever, modelling a Docker exec stream
+    /// whose command produced output and then stopped making progress.
+    /// </summary>
+    private sealed class HangingStream(byte[] prefix) : Stream
+    {
+        private int _position;
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position < prefix.Length)
+            {
+                var count = Math.Min(buffer.Length, prefix.Length - _position);
+                prefix.AsMemory(_position, count).CopyTo(buffer);
+                _position += count;
+                return count;
+            }
+
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => _position;
+            set => throw new NotSupportedException();
+        }
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     public record RequestRecord(HttpMethod Method, string Url, string? Body);

@@ -28,7 +28,6 @@ import {
   type TemplateInfoDto,
   type TemplateEntityDto,
   type LayoutInfoDto,
-  type LayoutEntityDto,
   type TemplateQueryDto,
   type LayoutQueryDto,
 } from '@tnzi/core/services/template'

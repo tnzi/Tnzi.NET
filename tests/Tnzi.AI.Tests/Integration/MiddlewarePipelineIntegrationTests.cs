@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Integration;
 

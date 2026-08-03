@@ -1,7 +1,4 @@
-using Mapster;
-using MapsterMapper;
 using Microsoft.Data.Sqlite;
-using Tnzi.Mapster;
 
 namespace Tnzi.AI.Tests;
 
@@ -65,7 +62,7 @@ public class AgentResourceGrantWiringTests : IDisposable
             new EFCoreRepository<AgentGrantWiringDbContext, AgentSkillGrant, Guid>(_context),
             new EFCoreRepository<AgentGrantWiringDbContext, AgentKnowledgeGrant, Guid>(_context));
 
-        _agentService = new AgentService(agentRepo, versionRepo, Mock.Of<IAgentRuntime>(), _grantService, _serviceProvider);
+        _agentService = new AgentService(agentRepo, versionRepo, TestDispatchFacade.Wrap(Mock.Of<IAgentRuntime>()), _grantService, _serviceProvider);
 
         // resolver wiring - factory returns a stub executor and captures the toolGroups argument
         _versionRouter.Setup(v => v.RouteAsync(It.IsAny<Agent>(), It.IsAny<CancellationToken>()))

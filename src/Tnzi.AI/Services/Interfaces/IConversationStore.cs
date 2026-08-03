@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 对话存储抽象 - 解耦对话持久化方式

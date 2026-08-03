@@ -1,4 +1,3 @@
-using Tnzi.AI.WebSearch;
 
 namespace Tnzi.AI.Tests.Tools;
 

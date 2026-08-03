@@ -1,5 +1,4 @@
 using Tnzi.Chat.Options;
-using Tnzi.Domain.Repositories;
 
 namespace Tnzi.Chat.Tests.Services;
 

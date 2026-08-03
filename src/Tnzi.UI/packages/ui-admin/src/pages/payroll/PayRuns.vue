@@ -135,7 +135,7 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/row-actions'
 import {
   createPayrollBridge,
   PayRunStatus,
@@ -147,7 +147,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createPayrollOptionSources } from './options'
 import { enumKey } from './setup-config'
 import { amountCell, fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../finance/money'

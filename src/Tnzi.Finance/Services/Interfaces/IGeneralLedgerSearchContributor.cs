@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 给总账明细的关键字搜索**贡献额外的来源单据命中**。
@@ -21,6 +21,7 @@ public interface IGeneralLedgerSearchContributor
     /// 按关键字返回命中的 <c>(SourceType, SourceId)</c> 组合。
     /// </summary>
     /// <param name="keyword">已转小写的搜索词</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<IReadOnlyList<GeneralLedgerSourceMatch>> MatchAsync(string keyword, CancellationToken cancellationToken = default);
 }
 

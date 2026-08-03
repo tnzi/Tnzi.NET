@@ -5,8 +5,8 @@
 
 import { NInput, NCard, NBadge, NScrollbar } from 'naive-ui';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
-import { useLocalSearch } from '@/composables/useLocalSearch';
+import { useAiI18n } from '../../i18n/index';
+import { useLocalSearch } from '../../headless/useLocalSearch';
 const t = useAiI18n();
 
 export interface AgentOption {

@@ -122,14 +122,14 @@ import { TOverlayTheme } from '../../components/overlay'
 import { TSvgIcon } from '@tnzi/ui'
 import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import {
   createAuthorizationBridge,
   type ModuleCascadePreview,
 } from '../../services/bridges/authorization-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FunctionModuleDto } from '@tnzi/core/services/authorization'
 import { functionModuleFormSchema, type FunctionModuleRow } from './function-module-config'

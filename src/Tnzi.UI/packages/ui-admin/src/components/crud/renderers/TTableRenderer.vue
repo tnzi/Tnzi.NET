@@ -63,6 +63,7 @@
     :row-props="dataTableRowProps"
     remote
     @update:checked-row-keys="onUpdateCheckedRowKeys"
+    @update:sorter="onUpdateSorter"
   >
     <!-- Unified empty visual (TEmpty) instead of Naive's default NEmpty.
          A first-load empty list on a creatable page also offers a small
@@ -89,9 +90,9 @@ import { computed, h, useSlots } from 'vue'
 import { NButton, NDataTable } from 'naive-ui'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import TDataCardList, { type CardColumn } from '../../data/TDataCardList.vue'
-import TEmpty from '../../data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TRowActions from '../TRowActions.vue'
-import { estimateRowActionsWidth, type RowAction } from '../../../headless/rowActions'
+import { estimateRowActionsWidth, type RowAction } from '../../../headless/row-actions'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 
@@ -282,6 +283,15 @@ const dataTableColumns = computed(() => {
       fixed: c.fixed,
       ...(c.align ? { align: c.align } : {}),
       ...(c.ellipsis !== undefined ? { ellipsis: c.ellipsis } : {}),
+      // `sorter: true` = "the server sorts this", so naive renders the header
+      // control but does not reorder locally. `sortOrder` makes it CONTROLLED:
+      // the arrow is derived from the query, so it always agrees with what was
+      // actually requested - a programmatic `setSort`/`resetQuery` moves the
+      // arrow too, instead of leaving naive's internal state pointing at a
+      // column the rows are no longer sorted by.
+      // (Sort is NOT persisted to the URL - like `searchText` and `filters` it
+      // resets on reload. That is a separate decision from being controlled.)
+      ...(c.sortable ? { sorter: true, sortOrder: sortOrderFor(c.key) } : {}),
       ...(c.render ? { render: (row: unknown) => c.render!(row as Record<string, unknown>) } : {}),
     })
   }
@@ -344,6 +354,41 @@ const serialStart = computed(() => {
   const q = props.state.query.value
   return (q.pageIndex - 1) * q.pageSize + 1
 })
+
+// ---------------------------------------------------------------------------
+// Server-side sorting
+//
+// Opt-in per column via `ColumnDef.sortable` - see the warning on that field:
+// backends sort by a whitelist and silently ignore anything else, so an
+// always-on sort header would quietly reorder rows by the wrong thing.
+// ---------------------------------------------------------------------------
+
+/** Query direction → naive's header arrow state for `key`. */
+function sortOrderFor(key: string): 'ascend' | 'descend' | false {
+  const q = props.state.query.value
+  if (q.sortField !== key || !q.sortOrder) return false
+  return q.sortOrder === 'desc' ? 'descend' : 'ascend'
+}
+
+/**
+ * Naive emits `{ columnKey, order }` where `order` is `'ascend' | 'descend' |
+ * false`, and `false` means the third click cleared the sort. Multi-sort is
+ * not enabled here, but the payload can still be an array, so take the first.
+ */
+function onUpdateSorter(
+  sorter: { columnKey?: string | number; order?: 'ascend' | 'descend' | false } | Array<unknown> | null,
+): void {
+  const active = (Array.isArray(sorter) ? sorter[0] : sorter) as
+    | { columnKey?: string | number; order?: 'ascend' | 'descend' | false }
+    | null
+    | undefined
+
+  if (!active || !active.order || active.columnKey === undefined) {
+    props.state.setSort(undefined, null)
+    return
+  }
+  props.state.setSort(String(active.columnKey), active.order === 'descend' ? 'desc' : 'asc')
+}
 
 const checkedRowKeys = computed<(string | number)[]>(
   () => props.state.batchActions.selectedIds.value as (string | number)[],

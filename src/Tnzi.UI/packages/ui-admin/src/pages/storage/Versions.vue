@@ -27,13 +27,13 @@
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/row-actions'
 import { createStorageBridge, type FileVersionAuditDto } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { versionColumns, versionFormSchema, versionSearchFields } from './version-config'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 
 const title = 'title'
 // Wired to /admin/storage/audit/versions (Plan E, 2026-04-14). Restore reuses

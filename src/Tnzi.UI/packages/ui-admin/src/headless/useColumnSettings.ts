@@ -30,6 +30,25 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
    */
   ellipsis?: boolean | { tooltip?: boolean }
   /**
+   * Let the reader sort by this column. **Server-side** - the click sends
+   * `sortField`/`sortOrder` with the next fetch; nothing is sorted locally
+   * (only the current page is in the browser, so a client-side sort would
+   * reorder one page and read as sorting the whole list).
+   *
+   * ⚠️ **Off by default, and must be declared per column against what the
+   * backend actually supports.** Module services sort by a WHITELIST of
+   * field names and silently fall back to their own default ordering for
+   * anything else (e.g. `UserService` handles only `username` / `email` /
+   * `creationtime`, everything else drops to `CreationTime desc`). A header
+   * that reorders the rows by something other than what was clicked is worse
+   * than a header that does not sort at all - the reader has no way to tell
+   * it was ignored.
+   *
+   * The `key` is what goes over the wire, so it must match the name the
+   * service compares (comparison is case-insensitive on the backend).
+   */
+  sortable?: boolean
+  /**
    * Custom cell renderer. Receives the row object and returns a string or VNode.
    * Use for status badges, relative timestamps, action buttons, links, etc.
    *

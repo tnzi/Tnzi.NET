@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 发薪批次服务（草稿 CRUD + 计算 → 过账 → 付款 → 作废全周期 + 外部摄取）

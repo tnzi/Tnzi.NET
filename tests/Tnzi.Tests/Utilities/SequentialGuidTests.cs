@@ -419,7 +419,7 @@ public class SequentialGuidTests
 
     /// <summary>
     /// 比较两个字节数组（大端序）
-    /// 返回: -1 如果 a < b, 0 如果 a == b, 1 如果 a > b
+    /// 返回: -1 如果 a &lt; b, 0 如果 a == b, 1 如果 a &gt; b
     /// </summary>
     private static int CompareByteArrays(byte[] a, byte[] b)
     {

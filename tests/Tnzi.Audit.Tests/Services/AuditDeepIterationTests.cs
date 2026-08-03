@@ -81,7 +81,7 @@ public class AuditDeepIterationTests
 
         // Act
         var result = await _service.GetAuditTrendAsync(
-            new DateTime(2026, 1, 1), new DateTime(2026, 3, 1), AuditTrendGroupBy.Monthly);
+            new DateTime(2026, 1, 1), new DateTime(2026, 3, 1), TrendInterval.Monthly);
 
         // Assert
         result.Succeeded.ShouldBeTrue();
@@ -392,12 +392,12 @@ public class AuditDeepIterationTests
     }
 
     [Fact]
-    public void AuditTrendGroupBy_Should_Have_Three_Values()
+    public void TrendInterval_Should_Have_Three_Values()
     {
-        Enum.GetValues<AuditTrendGroupBy>().Length.ShouldBe(3);
-        Enum.IsDefined(AuditTrendGroupBy.Daily).ShouldBeTrue();
-        Enum.IsDefined(AuditTrendGroupBy.Weekly).ShouldBeTrue();
-        Enum.IsDefined(AuditTrendGroupBy.Monthly).ShouldBeTrue();
+        Enum.GetValues<TrendInterval>().Length.ShouldBe(3);
+        Enum.IsDefined(TrendInterval.Daily).ShouldBeTrue();
+        Enum.IsDefined(TrendInterval.Weekly).ShouldBeTrue();
+        Enum.IsDefined(TrendInterval.Monthly).ShouldBeTrue();
     }
 
     #endregion

@@ -19,7 +19,6 @@
       "types": "./dist/stores/index.d.ts",
       "import": "./dist/stores/index.js"
     },
-    "./primitive/*": null,
     "./adapters": {
       "types": "./dist/adapters/index.d.ts",
       "import": "./dist/adapters/index.js"
@@ -32,11 +31,6 @@
       "types": "./dist/headless/index.d.ts",
       "import": "./dist/headless/index.js"
     },
-    "./composables": {
-      "types": "./dist/composables/index.d.ts",
-      "import": "./dist/composables/index.js"
-    },
-    "./hooks/*": null,
     "./style.css": {
       "import": "./dist/style.css"
     }
@@ -54,6 +48,7 @@
     "dev": "vite build --watch",
     "typecheck": "vue-tsc --noEmit --skipLibCheck",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "clean": "rimraf dist",

@@ -216,7 +216,7 @@ public class ChartOfAccountsTests : FinanceIntegrationTestBase
             s => s.UpdateAsync(undeposited!.Id, UpdateOf(undeposited, role: null, isActive: true)));
         cleared.Succeeded.ShouldBeTrue(cleared.Message);
 
-        var result = await InScopeAsync<IChartOfAccountsService, Result>(s => s.DeleteAsync(undeposited.Id));
+        var result = await InScopeAsync<IChartOfAccountsService, Result>(s => s.DeleteAsync(undeposited!.Id));
         result.Succeeded.ShouldBeTrue(result.Message);
     }
 
@@ -240,9 +240,9 @@ public class ChartOfAccountsTests : FinanceIntegrationTestBase
         asOfToday.Succeeded.ShouldBeTrue(asOfToday.Message);
         // as-of 当日只含 100：未来那 40 不进 —— 与同日资产负债表恒等（口径 PostingDate < 次日）
         asOfToday.Data!.Single(b => b.AccountId == ar).Balance.ShouldBe(100m);
-        asOfToday.Data.Single(b => b.AccountId == ar).Debit.ShouldBe(100m);
+        asOfToday.Data!.Single(b => b.AccountId == ar).Debit.ShouldBe(100m);
         // 有符号余额不做正负归一化：收入在贷方 → 负
-        asOfToday.Data.Single(b => b.AccountId == revenue).Balance.ShouldBe(-100m);
+        asOfToday.Data!.Single(b => b.AccountId == revenue).Balance.ShouldBe(-100m);
 
         // 基准日推过去之后两笔都进
         var asOfLater = await InScopeAsync<IChartOfAccountsService, Result<List<AccountBalanceDto>>>(

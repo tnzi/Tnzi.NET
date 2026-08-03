@@ -5,7 +5,7 @@ namespace Tnzi.AI.Workflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 当工作流步骤设置了 <see cref="Tnzi.AI.Dtos.WorkflowStepDto.RequiresApproval"/> = true 时，
+/// 当工作流步骤设置了 <c>WorkflowStepDto.RequiresApproval</c> = true 时，
 /// 步骤完成后工作流将暂停并调用此处理器，等待人工审批结果。
 /// </para>
 /// <para>

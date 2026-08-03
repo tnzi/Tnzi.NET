@@ -18,6 +18,8 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(FeatureModule))]
 [OptionalDependsOn(typeof(StorageModule))]
 [OptionalDependsOn(typeof(TemplateModule))]
+[OptionalDependsOn(typeof(DocumentsModule))]
+[OptionalDependsOn(typeof(SigningModule))]
 [OptionalDependsOn(typeof(NotificationModule))]
 [OptionalDependsOn(typeof(AIModule))]
 [OptionalDependsOn(typeof(AISkillsModule))]
@@ -39,6 +41,7 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(AIRagModule))]
 [OptionalDependsOn(typeof(AISandboxModule))]
 [OptionalDependsOn(typeof(AIChannelsModule))]
+[OptionalDependsOn(typeof(AICliModule))]
 public abstract class HostingModule : TnziApplicationModule
 {
     // 注意：

@@ -87,23 +87,22 @@ import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import TEmpty from '../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TFormSchemaRenderer, { selectRenderer, type FieldRenderer } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { makePageTranslator } from '../_shared/translate'
 import { useAdminClient } from '../../plugin/client'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { fmtDate } from './money'
-import { formatMoney } from '../../utils/finance-format'
+
 import { createFinanceOptionSources } from './options'
 import RecurringLinesEditor from './components/RecurringLinesEditor'
 import { buildRecurringColumns, recurringFormSchema, type RecurringRow } from './recurring-config'
 import {
   createFinanceBridge,
-  type RecurringDocumentDto,
   type RecurringRunDto,
 } from '../../services/bridges/finance-bridge'
 

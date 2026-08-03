@@ -319,4 +319,34 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
         var result = await FileStorageService.GetMetadataAsync(id);
         return result.ToApiResult();
     }
+
+    // File visibility
+
+    /// <summary>
+    /// Set whether a file is publicly readable.
+    /// Public means readable by anyone (including unauthenticated callers) - use it
+    /// for avatars and site assets, never for contracts, cheques or HR documents.
+    /// </summary>
+    [HttpPut("{id:guid}/visibility")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
+    public virtual async Task<ApiResult<FileRecordDto>> SetVisibility(Guid id, [FromBody] SetFileVisibilityRequest request)
+    {
+        var result = await FileStorageService.SetFileVisibilityAsync(id, request.IsPublic);
+        // 控制器边界：投影为安全 DTO，绝不把内部字段（Path 等）泄漏进 API 契约。
+        return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
+    }
+
+    /// <summary>
+    /// Backfill the public flag from `[FileField(Public = true)]` declarations:
+    /// every file referenced by a field declared public becomes publicly readable.
+    /// Returns the number of files changed. Idempotent, and it never turns a file
+    /// back into a private one.
+    /// </summary>
+    [HttpPost("sync-public-flags")]
+    [ApiAuthorize(PermissionName = "storage.file.update")]
+    public virtual async Task<ApiResult<int>> SyncPublicFlags()
+    {
+        var result = await FileStorageService.SyncPublicFlagsFromReferencesAsync();
+        return result.ToApiResult();
+    }
 }

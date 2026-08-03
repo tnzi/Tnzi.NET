@@ -90,7 +90,7 @@ public class DefaultAccessLogAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpGet("statistics/trend")]
     public virtual async Task<ApiResult<AccessLogTrendDto>> GetAccessLogTrend(
-        [FromQuery] AccessLogTrendInterval interval = AccessLogTrendInterval.Daily,
+        [FromQuery] TrendInterval interval = TrendInterval.Daily,
         [FromQuery] DateTime? startDate = null,
         [FromQuery] DateTime? endDate = null)
     {

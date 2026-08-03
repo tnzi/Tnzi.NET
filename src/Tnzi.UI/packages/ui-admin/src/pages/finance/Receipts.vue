@@ -1,6 +1,12 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns"
-    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage
+    :state="crud"
+    :all-columns="columns"
+    :search-fields="searchFields"
+    :title="title"
+    :row-actions="rowActions"
+    :translate="t"
+  >
     <template #primary>
       <NButton v-if="canCreate" size="small" type="primary" :loading="uploading" @click="triggerUpload">
         <template #icon><TSvgIcon icon="mdi:upload-outline" :size="16" /></template>
@@ -105,8 +111,9 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { useFileUrl } from '../../headless/useFileUrl'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import { deleteAction, type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   ReceiptStatus,
@@ -117,7 +124,7 @@ import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
 import { tsToIsoDate } from './money'
 import { buildReceiptSearchFields, buildReceiptColumns, receiptExtractionFormSchema, RECEIPT_STATUS_META, type ReceiptRow } from './receipt-config'
@@ -189,8 +196,14 @@ const detail = useDetail<ReceiptDto>({ mode: 'drawer', url: 'detail', loadData: 
 
 const editModel = reactive<Record<string, unknown>>({})
 const isConverted = computed(() => detail.data.value?.status === ReceiptStatus.Converted)
-const previewSrc = computed(() => (detail.data.value ? storage.files.previewUrl(detail.data.value.fileId) : ''))
-const downloadHref = computed(() => (detail.data.value ? storage.files.downloadUrl(detail.data.value.fileId) : '#'))
+// Receipt images are private: the person auditing a receipt is rarely the one
+// who photographed it, and an <img> / <a download> sends no Authorization
+// header. Both URLs therefore carry a short-lived signed token.
+const receiptFileId = computed(() => detail.data.value?.fileId ?? null)
+const { url: signedPreview } = useFileUrl(receiptFileId)
+const { url: signedDownload } = useFileUrl(receiptFileId, { kind: 'download' })
+const previewSrc = computed(() => signedPreview.value ?? '')
+const downloadHref = computed(() => signedDownload.value ?? '#')
 
 watch(
   () => detail.data.value?.id,

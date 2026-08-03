@@ -31,6 +31,8 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
     : ApplicationService, ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>
     where TEntity : class, IEntity<TKey>
     where TKey : notnull
+    where TCreateDto : notnull
+    where TUpdateDto : notnull
 {
     private const string EntityNotFoundMessage = "The requested resource was not found.";
 

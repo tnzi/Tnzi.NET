@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 银行 feed 提供者契约（框架不内置实现；应用按 <see cref="Key"/> 注册后可拉取流水）

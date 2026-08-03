@@ -71,7 +71,7 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
             // 应用布局（如有）
             if (!string.IsNullOrWhiteSpace(effectiveLayoutName) && _layoutStoreService != null)
             {
-                content = await ApplyLayoutByNameAsync(content, effectiveLayoutName, template.Module, model, cancellationToken);
+                content = await ApplyLayoutByNameAsync(content, effectiveLayoutName, template.Module, template.Category, model, cancellationToken);
             }
 
             return Ok(new RenderedTemplate
@@ -146,15 +146,28 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
     /// <summary>
     /// 根据布局名称从存储加载布局并应用
     /// </summary>
-    private async Task<string> ApplyLayoutByNameAsync(string content, string layoutName, string module, object? model, CancellationToken cancellationToken)
+    private async Task<string> ApplyLayoutByNameAsync(string content, string layoutName, string module, string? category, object? model, CancellationToken cancellationToken)
     {
         if (_layoutStoreService == null)
             return content;
 
-        var layoutResult = await _layoutStoreService.GetLayoutAsync(layoutName, module, null, cancellationToken);
+        // 先按模板自身的分类查找。文件系统布局按分类分目录存放
+        // （Templates/Layouts/{category}/_{name}.cshtml，框架内置的邮件布局即
+        // Layouts/Email/_DefaultEmail.cshtml），此前这里固定传 null，拼出的路径是
+        // Layouts/_DefaultEmail.cshtml —— 内置布局永远命中不了，所有走内置模板的邮件
+        // 都丢掉了布局外壳（页眉/页脚），只发出内容片段。
+        var layoutResult = await _layoutStoreService.GetLayoutAsync(layoutName, module, category, cancellationToken);
+
+        // 回退到不带分类的查找：数据库里的布局行分类可能为空，或布局直接放在
+        // Layouts/ 根下，两种组织方式都要能用。
+        if ((!layoutResult.Succeeded || layoutResult.Data == null) && !string.IsNullOrWhiteSpace(category))
+        {
+            layoutResult = await _layoutStoreService.GetLayoutAsync(layoutName, module, null, cancellationToken);
+        }
+
         if (!layoutResult.Succeeded || layoutResult.Data == null)
         {
-            Logger.LogWarning("Layout '{LayoutName}' not found in module '{Module}', skipping layout application", layoutName, module);
+            Logger.LogWarning("Layout '{LayoutName}' not found in module '{Module}' (category: {Category}), skipping layout application", layoutName, module, category);
             return content;
         }
 

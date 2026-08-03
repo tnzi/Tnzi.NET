@@ -1,5 +1,3 @@
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Dtos;
 
 /// <summary>

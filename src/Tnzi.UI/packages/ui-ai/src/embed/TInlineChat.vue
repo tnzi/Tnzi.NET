@@ -3,8 +3,8 @@
  * TInlineChat - Simple wrapper that fills parent container with TChatBox
  */
 
-import TChatBox from '@/components/chat/TChatBox.vue';
-import type { ChatMessage } from '@/composables/useChat';
+import TChatBox from '../components/chat/TChatBox.vue';
+import type { ChatMessage } from '../headless/useChat';
 
 defineProps<{
   messages: readonly ChatMessage[];

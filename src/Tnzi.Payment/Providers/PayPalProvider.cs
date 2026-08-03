@@ -1,15 +1,11 @@
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text;
 
 namespace Tnzi.Payment.Providers;
 
 /// <summary>
-/// PayPal支付渠道实现
+/// PayPal支付渠道实现。
+/// 自动续费所需的账户保存与商户发起扣款在 <c>PayPalProvider.Vault.cs</c>。
 /// </summary>
-public class PayPalProvider : IPaymentProvider
+public partial class PayPalProvider : IPaymentProvider
 {
     private readonly IOptions<PayPalOptions> _options;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -60,7 +56,8 @@ public class PayPalProvider : IPaymentProvider
                         amount = new
                         {
                             currency_code = input.Currency,
-                            value = input.Amount.ToString("F2")
+                            value = input.Amount.ToString(
+                                $"F{CurrencyInfo.GetDecimalPlaces(input.Currency)}", CultureInfo.InvariantCulture)
                         }
                     }
                 },
@@ -74,7 +71,14 @@ public class PayPalProvider : IPaymentProvider
                 }
             };
 
-            var response = await client.PostAsJsonAsync("/v2/checkout/orders", orderRequest);
+            // PayPal-Request-Id 是 PayPal 的幂等键：网络超时重试不会重复建单
+            using var orderMessage = new HttpRequestMessage(HttpMethod.Post, "/v2/checkout/orders")
+            {
+                Content = JsonContent.Create(orderRequest)
+            };
+            orderMessage.Headers.Add("PayPal-Request-Id", $"order:{input.TradeNo}");
+
+            var response = await client.SendAsync(orderMessage);
             var content = await response.Content.ReadFromJsonAsync<PayPalOrderResponse>();
 
             if (content == null || string.IsNullOrEmpty(content.Id))
@@ -152,30 +156,49 @@ public class PayPalProvider : IPaymentProvider
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
+            var decimals = CurrencyInfo.GetDecimalPlaces(input.Currency);
             var refundRequest = new
             {
                 amount = new
                 {
-                    currency_code = _options.Value.Currency,
-                    value = input.RefundAmount.ToString("F2")
+                    // 币种以本次退款的币种为准，而不是渠道全局默认币种（多币种下会串币）
+                    currency_code = input.Currency,
+                    value = input.RefundAmount.ToString($"F{decimals}", CultureInfo.InvariantCulture)
                 },
                 note_to_payer = input.Reason
             };
 
+            // PayPal-Request-Id 是 PayPal 的幂等键：重试同一退款流水不会退两次
             var captureId = input.ExternalTradeNo ?? input.TradeNo;
-            var response = await client.PostAsJsonAsync($"/v2/payments/captures/{captureId}/refunds", refundRequest);
+            using var refundMessage = new HttpRequestMessage(HttpMethod.Post, $"/v2/payments/captures/{captureId}/refunds")
+            {
+                Content = JsonContent.Create(refundRequest)
+            };
+            refundMessage.Headers.Add("PayPal-Request-Id", $"re:{input.RefundNo}");
+
+            var response = await client.SendAsync(refundMessage);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("PayPal refund rejected. RefundNo: {RefundNo}, Status: {Status}, Body: {Body}",
+                    input.RefundNo, response.StatusCode, errorBody);
+                return Result.Failure<PaymentProviderRefundResult>(ErrorCodes.PayPalRefundFailed, 400);
+            }
+
             var content = await response.Content.ReadFromJsonAsync<PayPalRefundResponse>();
 
-            _logger.LogInformation("PayPal refund created. RefundNo: {RefundNo}, Amount: {Amount}",
-                input.RefundNo, input.RefundAmount);
+            _logger.LogInformation("PayPal refund created. RefundNo: {RefundNo}, Amount: {Amount}, Status: {Status}",
+                input.RefundNo, input.RefundAmount, content?.Status);
 
             return Result.Success(new PaymentProviderRefundResult
             {
                 RefundNo = input.RefundNo,
                 ExternalRefundNo = content?.Id,
                 RefundAmount = input.RefundAmount,
-                Status = response.IsSuccessStatusCode ? RefundStatus.Succeeded : RefundStatus.Refunding,
-                CompletedTime = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+                Status = MapPayPalRefundStatus(content?.Status),
+                CompletedTime = string.Equals(content?.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase)
+                    ? DateTime.UtcNow
+                    : null
             });
         }
         catch (Exception ex)
@@ -185,19 +208,46 @@ public class PayPalProvider : IPaymentProvider
         }
     }
 
-    public Task<Result<PaymentProviderRefundQueryResult>> QueryRefundAsync(string refundNo)
+    public async Task<Result<PaymentProviderRefundQueryResult>> QueryRefundAsync(string externalRefundNo)
     {
-        // PayPal 退款查询需要 capture ID
-        return Task.FromResult(Result.Success(new PaymentProviderRefundQueryResult
+        if (string.IsNullOrWhiteSpace(externalRefundNo))
+            return Result.Failure<PaymentProviderRefundQueryResult>("PayPal refund id is required.", 400);
+
+        try
         {
-            RefundNo = refundNo,
-            Status = RefundStatus.Succeeded
-        }));
+            var client = CreateHttpClient();
+            var accessToken = await GetAccessTokenAsync(client);
+            if (accessToken == null)
+                return Result.Failure<PaymentProviderRefundQueryResult>("Failed to get PayPal access token.");
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await client.GetAsync($"/v2/payments/refunds/{externalRefundNo}");
+            if (!response.IsSuccessStatusCode)
+                return Result.Failure<PaymentProviderRefundQueryResult>(ErrorCodes.PayPalRefundFailed, 400);
+
+            var content = await response.Content.ReadFromJsonAsync<PayPalRefundResponse>();
+
+            return Result.Success(new PaymentProviderRefundQueryResult
+            {
+                RefundNo = externalRefundNo,
+                ExternalRefundNo = content?.Id,
+                Status = MapPayPalRefundStatus(content?.Status),
+                CompletedTime = string.Equals(content?.Status, "COMPLETED", StringComparison.OrdinalIgnoreCase)
+                    ? DateTime.UtcNow
+                    : null
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PayPal refund query failed. ExternalRefundNo: {ExternalRefundNo}", externalRefundNo);
+            return Result.Failure<PaymentProviderRefundQueryResult>(ErrorCodes.PayPalRefundFailed, 400);
+        }
     }
 
     public Task<Result<PaymentProviderCallbackResult>> HandleCallbackAsync(IDictionary<string, string> parameters)
     {
-        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+        if (!parameters.TryGetValue(PaymentConstants.CallbackRawBodyKey, out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
             return Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentInvalidSignature, 400));
 
         try
@@ -207,16 +257,58 @@ public class PayPalProvider : IPaymentProvider
             var eventType = root.TryGetProperty("event_type", out var eventTypeElement)
                 ? eventTypeElement.GetString()
                 : null;
+            var eventId = root.TryGetProperty("id", out var eventIdElement)
+                ? eventIdElement.GetString()
+                : null;
 
             var resource = root.TryGetProperty("resource", out var resourceElement)
                 ? resourceElement
                 : default;
+
+            // 付款人在 PayPal 撤销了对本商户的授权（或商户后台删了这个凭据）。
+            // 不处理的话，本地会一直拿着一个已经作废的凭据，直到下次续费扣款失败才发现。
+            if (string.Equals(eventType, "VAULT.PAYMENT-TOKEN.DELETED", StringComparison.OrdinalIgnoreCase))
+            {
+                var revokedToken = TryGetNestedString(resource, "id");
+                _logger.LogInformation("PayPal vault token {Token} was deleted at the channel.", revokedToken);
+
+                return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+                {
+                    EventId = eventId,
+                    Kind = PaymentCallbackKind.PaymentMethodRevoked,
+                    PaymentMethodToken = revokedToken,
+                    IsHandled = !string.IsNullOrWhiteSpace(revokedToken)
+                }));
+            }
+
+            var status = MapPayPalEventStatus(eventType);
+
+            // 与支付状态无关的事件（如 BILLING.*、CUSTOMER.*）不该被当成失败，
+            // 否则 PayPal 会持续重投直至端点被判定不可用
+            if (status == null)
+            {
+                return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+                {
+                    EventId = eventId,
+                    IsHandled = false
+                }));
+            }
 
             var tradeNo =
                 TryGetNestedString(resource, "purchase_units", 0, "reference_id")
                 ?? TryGetNestedString(resource, "custom_id")
                 ?? TryGetNestedString(resource, "invoice_id")
                 ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(tradeNo))
+            {
+                _logger.LogWarning("PayPal callback event {EventId} ({EventType}) has no trade reference; ignored.", eventId, eventType);
+                return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+                {
+                    EventId = eventId,
+                    IsHandled = false
+                }));
+            }
 
             var externalTradeNo =
                 TryGetNestedString(resource, "id")
@@ -232,9 +324,10 @@ public class PayPalProvider : IPaymentProvider
             {
                 TradeNo = tradeNo,
                 ExternalTradeNo = externalTradeNo,
-                Status = MapPayPalEventStatus(eventType),
+                Status = status.Value,
                 PaidAmount = paidAmount,
-                FailReason = eventType
+                FailReason = status == PaymentStatus.Failed ? eventType : null,
+                EventId = eventId
             }));
         }
         catch (JsonException ex)
@@ -249,14 +342,14 @@ public class PayPalProvider : IPaymentProvider
         if (string.IsNullOrWhiteSpace(_options.Value.WebhookId))
             return false;
 
-        if (!parameters.TryGetValue("__raw_body", out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
+        if (!parameters.TryGetValue(PaymentConstants.CallbackRawBodyKey, out var rawBody) || string.IsNullOrWhiteSpace(rawBody))
             return false;
 
-        if (!parameters.TryGetValue("__paypal_transmission_id", out var transmissionId)
-            || !parameters.TryGetValue("__paypal_transmission_time", out var transmissionTime)
-            || !parameters.TryGetValue("__paypal_transmission_sig", out var transmissionSig)
-            || !parameters.TryGetValue("__paypal_cert_url", out var certUrl)
-            || !parameters.TryGetValue("__paypal_auth_algo", out var authAlgo))
+        if (!parameters.TryGetValue(PaymentConstants.CallbackPayPalTransmissionIdKey, out var transmissionId)
+            || !parameters.TryGetValue(PaymentConstants.CallbackPayPalTransmissionTimeKey, out var transmissionTime)
+            || !parameters.TryGetValue(PaymentConstants.CallbackPayPalTransmissionSigKey, out var transmissionSig)
+            || !parameters.TryGetValue(PaymentConstants.CallbackPayPalCertUrlKey, out var certUrl)
+            || !parameters.TryGetValue(PaymentConstants.CallbackPayPalAuthAlgoKey, out var authAlgo))
         {
             return false;
         }
@@ -306,13 +399,6 @@ public class PayPalProvider : IPaymentProvider
             TradeNo = tradeNo,
             OrderId = tradeNo
         }));
-    }
-
-    public Task<Result> UpdatePaymentMethodAsync(string subscriptionNo, string paymentMethodId)
-    {
-        // PayPal 不支持通过 API 直接更新订阅支付方式，需用户在 PayPal 端操作
-        _logger.LogWarning("PayPal does not support updating subscription payment method via API. SubscriptionNo: {SubscriptionNo}", subscriptionNo);
-        return Task.FromResult(Result.Failure("PayPal does not support updating subscription payment method via API. The subscriber must update their payment method directly on PayPal.", 501));
     }
 
     private HttpClient CreateHttpClient()
@@ -369,13 +455,33 @@ public class PayPalProvider : IPaymentProvider
         }
     }
 
-    private static PaymentStatus MapPayPalEventStatus(string? eventType)
+    /// <summary>
+    /// PayPal 事件类型映射为支付状态；返回 null 表示该事件与支付状态无关，应被忽略而非当作失败。
+    /// </summary>
+    private static PaymentStatus? MapPayPalEventStatus(string? eventType)
     {
         return eventType switch
         {
             "PAYMENT.CAPTURE.COMPLETED" or "CHECKOUT.ORDER.COMPLETED" => PaymentStatus.Succeeded,
-            "PAYMENT.CAPTURE.DENIED" or "PAYMENT.CAPTURE.REFUNDED" or "CHECKOUT.ORDER.VOIDED" => PaymentStatus.Failed,
-            _ => PaymentStatus.Processing
+            "PAYMENT.CAPTURE.DENIED" or "CHECKOUT.ORDER.VOIDED" => PaymentStatus.Failed,
+            "PAYMENT.CAPTURE.PENDING" or "CHECKOUT.ORDER.APPROVED" => PaymentStatus.Processing,
+            // 退款类事件由退款对账链路负责（见 IRefundService.ReconcilePendingRefundsAsync），
+            // 不能在这里当成"支付失败"，否则会把一笔已成功的支付错误改写
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// PayPal 退款状态映射。PENDING 落 Refunding：PayPal 退款可能需要数日才终结。
+    /// </summary>
+    private static RefundStatus MapPayPalRefundStatus(string? status)
+    {
+        return status?.ToUpperInvariant() switch
+        {
+            "COMPLETED" => RefundStatus.Succeeded,
+            "FAILED" => RefundStatus.Failed,
+            "CANCELLED" => RefundStatus.Cancelled,
+            _ => RefundStatus.Refunding
         };
     }
 

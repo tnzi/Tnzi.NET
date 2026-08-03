@@ -9,7 +9,7 @@
 import { NButton } from 'naive-ui';
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
+import { useAiI18n } from '../../i18n/index';
 import { formatFileSize } from '@tnzi/core';
 const props = withDefaults(defineProps<{
   modelValue: string;

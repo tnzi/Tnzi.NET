@@ -116,6 +116,12 @@ export const useAdminAuthStore = defineStore('admin-auth', () => {
 }, {
   persist: {
     key: 'tnzi-admin-auth',
-    pick: ['token', 'refreshToken', 'userInfo', 'isSuperUser'],
+    // `refreshToken` is deliberately NOT persisted. The core `AuthStateManager`
+    // owns the credential pair and already persists it under its own key; the
+    // copy here is a UI gate only (it drives `isLogin`, nothing reads
+    // `refreshToken` outside this store). Persisting it a second time meant a
+    // stale refresh credential sat in localStorage indefinitely - silent
+    // rotation on the core side never updates this mirror.
+    pick: ['token', 'userInfo', 'isSuperUser'],
   },
 })

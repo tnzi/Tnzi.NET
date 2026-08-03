@@ -1,6 +1,5 @@
 using System.Reflection;
 using Tnzi.AI.Tools.Attributes;
-using Tnzi.AI.WebSearch;
 using BuiltInMemoryTools = Tnzi.AI.Tools.BuiltIn.MemoryTools;
 
 namespace Tnzi.AI.Tests.Tools;

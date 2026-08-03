@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 后续建议生成服务接口

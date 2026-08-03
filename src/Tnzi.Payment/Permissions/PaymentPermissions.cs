@@ -22,7 +22,9 @@ public class PaymentPermissions : IPermissionDefinitionProvider
         // Orders are created by the payment flow; admin writes are lifecycle
         // transitions (close/sync) = update.
         context.AddCrudPermissions("payment.order", "Orders", parentName: "payment", actions: CrudActions.View | CrudActions.Update);
-        context.AddCrudPermissions("payment.refund", "Refunds", parentName: "payment", actions: CrudActions.View | CrudActions.Update);
+        // Refunds gained a create action: support agents raise refunds on behalf
+        // of customers, which is a distinct capability from approving one.
+        context.AddCrudPermissions("payment.refund", "Refunds", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
         context.AddCrudPermissions("payment.subscription", "Payment Subscriptions", parentName: "payment");
         context.AddCrudPermissions("payment.invoice", "Invoices", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
         context.AddCrudPermissions("payment.promotion", "Promotions", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);

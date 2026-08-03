@@ -1,7 +1,5 @@
-using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using Tnzi.AI.Channels.Abstractions;
 using Tnzi.AI.Channels.Adapters.Dingtalk;
 using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Adapters.Feishu;
@@ -289,7 +287,7 @@ public class WebhookSignatureTests
         var result = await adapter.ProcessWebhookAsync(body, new Dictionary<string, string>());
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
-        result.ChallengeResponse.ShouldContain("lark-challenge");
+        result.ChallengeResponse!.ShouldContain("lark-challenge");
     }
 
     [Fact]
@@ -376,7 +374,7 @@ public class WebhookSignatureTests
         var result = await adapter.ProcessWebhookAsync(body, headers);
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
-        result.ChallengeResponse.ShouldContain("\"type\":1");
+        result.ChallengeResponse!.ShouldContain("\"type\":1");
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Recurring.Services.Interfaces;
+namespace Tnzi.Finance.Recurring.Services;
 
 /// <summary>
 /// 到期生成
@@ -13,6 +13,7 @@ public interface IRecurringGeneratorService
     /// 语义上分叉，而那种分叉只会在月底被发现。
     /// </remarks>
     /// <param name="asOf">扫描基准日（null = 今天）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<RecurringSweepResultDto>> RunDueAsync(DateTime? asOf = null, CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 银行规则管理（CRUD + 排序 + 试跑）

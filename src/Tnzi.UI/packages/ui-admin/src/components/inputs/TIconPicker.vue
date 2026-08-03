@@ -11,13 +11,13 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NInput, NPopover, NEmpty } from 'naive-ui'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 const t = (key: string, fallback: string) =>
   translatePageKey('', key) || fallback
 
 interface Props {
-  value: string
+  value?: string
   /** Override the default icon list. */
   icons?: string[]
   /** Append to the default icon list. */

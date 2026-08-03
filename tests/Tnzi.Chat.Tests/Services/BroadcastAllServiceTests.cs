@@ -1,7 +1,5 @@
 using System.Linq.Expressions;
 using Microsoft.Extensions.Options;
-using Moq;
-using Tnzi.Domain.Repositories;
 using Tnzi.Identity.Entities;
 using Tnzi.MultiTenancy;
 

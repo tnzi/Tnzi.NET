@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 国家/地区薪酬包契约（法定组件模板 + 税级表结构的幂等播种入口）

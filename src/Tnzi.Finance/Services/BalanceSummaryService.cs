@@ -21,6 +21,10 @@ public class BalanceSummaryService : ApplicationService, IBalanceSummaryService
     private readonly IRepository<DocumentSequence, Guid> _sequenceRepository;
     private readonly ICurrentTenant? _currentTenant;
 
+    /// <param name="serviceProvider">服务提供者（基类延迟解析用）</param>
+    /// <param name="lineRepository">凭证行只读仓储</param>
+    /// <param name="bucketRepository">科目期间余额桶仓储</param>
+    /// <param name="sequenceRepository">文档序列仓储（重算游标）</param>
     /// <param name="currentTenant">
     /// 多租户未启用时可能未注册，故为可选构造注入（与 <see cref="BalanceSummaryMaintainer"/> 同源解析租户）。
     /// </param>

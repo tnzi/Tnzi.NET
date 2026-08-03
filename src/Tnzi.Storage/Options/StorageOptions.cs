@@ -42,6 +42,35 @@ public class StorageOptions
     public bool AllowAnonymousRead { get; set; } = false;
 
     /// <summary>
+    /// 获取或设置 文件访问令牌的签名密钥。
+    ///
+    /// 浏览器发起的资源请求（<c>&lt;img src&gt;</c> / <c>&lt;a download&gt;</c> / <c>&lt;iframe&gt;</c>）
+    /// 带不了 Authorization 头,所以私密文件靠**短时签名令牌**渲染:调用方先经
+    /// <c>GET /files/{id}/access-token</c> 换一个只对这一个文件、这一小段时间有效的令牌,
+    /// 再把它拼进 URL。签发时会走完整的读权限判定,消费时只验签名与过期。
+    ///
+    /// 留空时依次回退:<c>Identity:Jwt:SecretKey</c> → 进程内随机密钥(并记 Warning)。
+    /// **多实例部署必须显式配置**,否则各实例签发的令牌互不认账。
+    /// 刻意不是 <c>[RuntimeSetting]</c>:密钥属于部署机密,不该经管理端下发或回显。
+    /// </summary>
+    public string? UrlSigningKey { get; set; }
+
+    /// <summary>
+    /// 获取或设置 文件访问令牌的有效期(秒),默认 600(10 分钟)。
+    ///
+    /// 这既是**默认值也是上限**:调用方可以要更短的,不能要更长的 —— 否则
+    /// `?expiresInSeconds=999999999` 就能把几分钟的凭据变成几十年的。
+    ///
+    /// 取值是在"够用"和"泄漏窗口"之间取舍:令牌一旦拼进 URL 就会进浏览器历史、
+    /// referrer 与访问日志,而且签发之后即便用户失去权限,令牌仍有效到过期。
+    /// 够长到一页图片加载完、够短到分享出去的链接很快失效。
+    /// </summary>
+    [RuntimeSetting(Label = "Signed URL Lifetime (seconds)", I18n = "admin.modules.system.settings.fields.storageSignedUrlTtlSeconds",
+        Type = SettingFieldType.Int, Min = 30, Max = 86400, Subsection = "Files",
+        Description = "How long a file access token stays valid, and the ceiling a caller may request. Tokens are appended to file URLs so private files can render in an <img> tag, which cannot send an Authorization header. Shorter is safer.")]
+    public int SignedUrlTtlSeconds { get; set; } = 600;
+
+    /// <summary>
     /// 获取或设置 是否启用文件引用
     /// </summary>
     [RuntimeSetting(Label = "Enable File Reference Tracking", I18n = "admin.modules.system.settings.fields.storageEnableFileReference",
@@ -108,6 +137,87 @@ public class StorageOptions
     /// 获取或设置 清理机制配置
     /// </summary>
     public CleanupOptions Cleanup { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 对外分享链接配置
+    /// </summary>
+    public ShareOptions Share { get; set; } = new();
+}
+
+/// <summary>
+/// 对外分享链接（<c>FileShare</c>）策略。
+///
+/// 分享链接是这套系统里**唯一**一条不经身份认证就能取到数据的路，所以策略集中在这里，
+/// 由管理员统一定，而不是让每个创建链接的人自己拿主意。取值取向对齐业界主流做法
+/// （Nextcloud 的 enforce-password / enforce-expiration，Dropbox 与 Google Drive 的
+/// 可选口令 + 可选有效期）：**默认可用、口令可选，但管理员能一键收紧**。
+/// </summary>
+[ConfigSection("Storage:Share")]
+[RuntimeSettingGroup(Key = "storage-share", Module = "Storage", DisplayName = "Share Links",
+    I18nKey = "admin.modules.system.settings.groups.storageShare",
+    Icon = "mdi:link-variant", Order = 320)]
+public class ShareOptions
+{
+    /// <summary>
+    /// 获取或设置 分享链接能否被**未登录**访客打开，默认 true。
+    ///
+    /// 这正是「对外分享」的全部意义：收件人是客户 / 审计师 / 供应商，他们没有账号。
+    /// 关掉之后链接只对已登录用户有效，等于退化成"内部传阅链接"。
+    ///
+    /// 之所以默认开着而不是关着：创建一条分享链接本身已经要求对该文件有**变更**权限
+    /// （`storage.file.update`），也就是说链接是某个有权的人**特意**造出来的；
+    /// 再加一道默认关闭的开关，只会让这个功能默认是坏的。
+    /// </summary>
+    [RuntimeSetting(Label = "Allow Anonymous Share Links", I18n = "admin.modules.system.settings.fields.storageShareAllowAnonymous",
+        Type = SettingFieldType.Boolean,
+        Description = "Let people without an account open a share link. Turn this off to make share links usable only by signed-in users.")]
+    public bool AllowAnonymous { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 是否强制每条分享链接都设口令，默认 false。
+    ///
+    /// 对齐 Nextcloud 的 enforce-password：默认让用户自己选（多数分享并不敏感，
+    /// 强制口令会把人逼回"直接用邮件发附件"），但处理合同 / HR 文件的部署可以一键收紧。
+    /// </summary>
+    [RuntimeSetting(Label = "Require Password on Share Links", I18n = "admin.modules.system.settings.fields.storageShareRequirePassword",
+        Type = SettingFieldType.Boolean,
+        Description = "Force every new share link to carry a password. Existing links are unaffected.")]
+    public bool RequirePassword { get; set; } = false;
+
+    /// <summary>
+    /// 获取或设置 未指定有效期时的默认天数，默认 7。设为 0 表示默认永不过期。
+    ///
+    /// 默认给一个有限期限是刻意的：**永不过期的链接没有人会记得回来撤销**，
+    /// 它会一直躺在某封邮件里。7 天是业界常见取值（WeTransfer 等同款）。
+    /// </summary>
+    [RuntimeSetting(Label = "Default Share Lifetime (days)", I18n = "admin.modules.system.settings.fields.storageShareDefaultExpiryDays",
+        Type = SettingFieldType.Int, Min = 0, Max = 3650,
+        Description = "Applied when the creator does not pick an expiry. 0 means no expiry by default.")]
+    public int DefaultExpiryDays { get; set; } = 7;
+
+    /// <summary>
+    /// 获取或设置 有效期上限（天），默认 30。设为 0 表示不限。
+    ///
+    /// 与 <see cref="DefaultExpiryDays"/> 分开是因为两者回答的是不同问题：一个是
+    /// "没人选时给多久"，一个是"最多允许多久"。超出上限的请求被**收窄到上限**而不是拒绝
+    /// ——创建分享的人多半只是随手选了个远日期，为此报错只会让他重试一遍。
+    /// </summary>
+    [RuntimeSetting(Label = "Maximum Share Lifetime (days)", I18n = "admin.modules.system.settings.fields.storageShareMaxExpiryDays",
+        Type = SettingFieldType.Int, Min = 0, Max = 3650,
+        Description = "Hard ceiling on how far out a share link may expire. Longer requests are clamped down to it. 0 means no ceiling.")]
+    public int MaxExpiryDays { get; set; } = 30;
+
+    /// <summary>
+    /// 获取或设置 口令连续输错多少次后自动停用该链接，默认 10。设为 0 表示不限。
+    ///
+    /// 令牌本身是 256 位随机数，猜不到；但**口令**可以在线爆破，所以这条是必需的。
+    /// 停用而不是"锁 N 分钟"：分享链接是一次性的对外物件，被人在爆破就说明它已经泄漏了，
+    /// 让创建者重新发一条比让它自动解锁更合理。
+    /// </summary>
+    [RuntimeSetting(Label = "Max Failed Password Attempts", I18n = "admin.modules.system.settings.fields.storageShareMaxFailedAttempts",
+        Type = SettingFieldType.Int, Min = 0, Max = 1000,
+        Description = "Disable a share link after this many consecutive wrong passwords. The token is unguessable, but its password is not. 0 disables the check.")]
+    public int MaxFailedPasswordAttempts { get; set; } = 10;
 }
 
 /// <summary>
@@ -310,6 +420,23 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
         if (options.ThumbnailSize.Width <= 0 || options.ThumbnailSize.Height <= 0)
             errors.Add("ThumbnailSize width and height must be greater than 0.");
+
+        if (options.SignedUrlTtlSeconds < 30 || options.SignedUrlTtlSeconds > 86400)
+            errors.Add("SignedUrlTtlSeconds must be between 30 and 86400.");
+
+        if (options.Share.DefaultExpiryDays < 0)
+            errors.Add("Share.DefaultExpiryDays cannot be negative.");
+
+        if (options.Share.MaxExpiryDays < 0)
+            errors.Add("Share.MaxExpiryDays cannot be negative.");
+
+        // 默认值超过上限是个自相矛盾的配置：每条新链接一创建就会被收窄，
+        // 管理员却以为自己设的是默认值。宁可启动时说清楚。
+        if (options.Share.MaxExpiryDays > 0 && options.Share.DefaultExpiryDays > options.Share.MaxExpiryDays)
+            errors.Add("Share.DefaultExpiryDays cannot exceed Share.MaxExpiryDays.");
+
+        if (options.Share.MaxFailedPasswordAttempts < 0)
+            errors.Add("Share.MaxFailedPasswordAttempts cannot be negative.");
 
         // 验证S3配置（如果Provider为S3）
         if (options.Provider.Equals("S3", StringComparison.OrdinalIgnoreCase))

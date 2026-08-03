@@ -6,8 +6,7 @@
  */
 
 import { Icon } from '@iconify/vue';
-import { formatFileSize } from '@tnzi/core';
-import type { MessageAttachment } from '@/composables/useChat';
+import type { MessageAttachment } from '../../headless/useChat';
 
 defineProps<{
   attachments: MessageAttachment[];

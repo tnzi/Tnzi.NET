@@ -72,36 +72,18 @@ export {
 } from './pagination';
 
 // Theme Types
-export type {
-  ThemeMode,
-  ColorFormat,
-  RgbColor,
-  HslColor,
-  ThemeColors,
-  ThemeConfig,
-} from './theme';
+//
+// Only the mode lives here. The colour model (`ThemeColors`, palettes, CSS
+// vars) belongs to `@tnzi/ui`'s theme subsystem: core used to export its own
+// 12-field `ThemeColors` plus `ThemeConfig` / `RgbColor` / `HslColor` /
+// `ColorFormat` / light+dark colour tables, none of which had a single
+// consumer, and whose `ThemeColors` collided by name with @tnzi/ui's real
+// (5-role) one while being structurally incompatible with it.
+export type { ThemeMode } from './theme';
 
-export {
-  lightThemeColors,
-  darkThemeColors,
-  defaultThemeConfig,
-} from './theme';
-
-// Async State Types
-export type {
-  AsyncStatus,
-  AsyncState,
-} from './async';
-
-export {
-  initialAsyncState,
-  loadingAsyncState,
-  successAsyncState,
-  errorAsyncState,
-} from './async';
+export { normalizeThemeMode, THEME_MODES } from './theme';
 
 // Re-export moved types for backward compatibility
 export type { PaginationState } from '../headless/pagination';
 export { initialPaginationState } from '../headless/pagination';
-export type { FormFieldState, FormState } from '../headless/form';
 export type { NotificationState, ModalState } from '../state/types/app';

@@ -1,11 +1,17 @@
-import { describe, it, expect } from 'vitest'
-import type { Component } from 'vue'
+import { describe, it, expect, vi } from 'vitest'
+import { defineComponent, h, type Component } from 'vue'
+import { mount } from '@vue/test-utils'
 import {
   resolveUserCenterSections,
   type UserCenterBuiltInDef,
-} from '../../../src/pages/account/resolveSections'
-import { deriveCapabilities } from '../../../src/pages/account/userCenterContext'
-import type { AdminUserCenterConfig } from '../../../src/plugin/userCenterConfig'
+} from '../../../src/pages/account/resolve-sections'
+import { deriveCapabilities } from '../../../src/pages/account/user-center-context'
+import {
+  createUserCenterProfileExtraRegistry,
+  provideUserCenterProfileExtra,
+  useUserCenterProfileExtra,
+} from '../../../src/pages/account/useUserCenterProfileExtra'
+import type { AdminUserCenterConfig } from '../../../src/plugin/user-center-config'
 import type { AuthConfigDto } from '@tnzi/core/services/identity'
 
 // Placeholder component objects - the resolver only threads them through.
@@ -114,6 +120,75 @@ describe('resolveUserCenterSections', () => {
   it('reorders built-ins via sectionOrder', () => {
     const out = resolve({ sectionOrder: { danger: 5 } })
     expect(out[0]?.key).toBe('danger')
+  })
+})
+
+describe('useUserCenterProfileExtra', () => {
+  const registry = () => createUserCenterProfileExtraRegistry()
+
+  /** Host = the Profile section's role (owns + provides the registry). */
+  function mountHost(reg: ReturnType<typeof createUserCenterProfileExtraRegistry>, block: Component) {
+    return mount(
+      defineComponent({
+        setup() {
+          provideUserCenterProfileExtra(reg)
+          return () => h(block)
+        },
+      }),
+    )
+  }
+
+  it('registers the handler so the host can drive it', () => {
+    const reg = registry()
+    const handler = { save: vi.fn(async () => undefined) }
+    mountHost(
+      reg,
+      defineComponent({
+        setup() {
+          useUserCenterProfileExtra(handler)
+          return () => h('div')
+        },
+      }),
+    )
+    expect(reg.handler.value).toBe(handler)
+  })
+
+  it('unregisters when the block unmounts (a stale handler would save a dead form)', () => {
+    const reg = registry()
+    const wrapper = mountHost(
+      reg,
+      defineComponent({
+        setup() {
+          useUserCenterProfileExtra({ save: vi.fn(async () => undefined) })
+          return () => h('div')
+        },
+      }),
+    )
+    expect(reg.handler.value).not.toBeNull()
+    wrapper.unmount()
+    expect(reg.handler.value).toBeNull()
+  })
+
+  it('throws outside the Profile extension slot rather than silently not saving', () => {
+    const Orphan = defineComponent({
+      setup() {
+        useUserCenterProfileExtra({ save: vi.fn(async () => undefined) })
+        return () => h('div')
+      },
+    })
+    expect(() => mount(Orphan)).toThrow(/useUserCenterProfileExtra/)
+  })
+
+  it('a later registration wins and its unregister does not clear the newer slot', () => {
+    const reg = registry()
+    const first = { save: vi.fn(async () => undefined) }
+    const second = { save: vi.fn(async () => undefined) }
+    const dropFirst = reg.register(first)
+    reg.register(second)
+    expect(reg.handler.value).toBe(second)
+    // The first block unmounting must not orphan the live handler.
+    dropFirst()
+    expect(reg.handler.value).toBe(second)
   })
 })
 

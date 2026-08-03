@@ -13,5 +13,6 @@ export * from './url';
 export * from './timing';
 export * from './device-parser';
 export * from './download';
+export * from './print';
 export { generateId, generateUuid } from './id';
 export { deepEqual } from './deep-equal';

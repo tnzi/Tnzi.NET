@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { en } from '../locales/en'
-import { zhCn } from '../locales/zh-cn'
-import { DEFAULT_ROUTE_ICONS } from '../router/routeIcons'
-import { humanise } from '../pages/_shared/translate'
+import { getLocaleMessages } from '../i18n/messages'
+import { DEFAULT_ROUTE_ICONS } from '../router/route-icons'
+import { humanise } from '../i18n/translate'
 import { useAdminAppStore } from './useAdminAppStore'
 import { useAdminAuthStore } from './useAdminAuthStore'
-import { normalizeModuleName } from '../services/admin-shell-modules'
+import { normalizeModuleName, type AdminShellRealtime } from '../services/admin-shell-modules'
 
 /**
  * Resolve a dotted i18n key against the bundled admin locale pack.
@@ -50,7 +49,7 @@ function resolveI18nKey(
     const hit = lookupMessage(overrides, normalized)
     if (hit !== undefined) return hit
   }
-  const messages = (locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
+  const messages = getLocaleMessages(locale) ?? {}
   const hit = lookupMessage(messages, normalized)
   if (hit !== undefined) return hit
   // Phase I.7.10: missing-key fallback - humanise the last segment so
@@ -157,6 +156,19 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    * while the signal is in flight.
    */
   const moduleSignalPending = ref(false)
+
+  /**
+   * Which realtime (SignalR) hubs the backend actually mapped, from the same
+   * `GET /admin/shell/modules` signal. `null` = not reported (older backend or
+   * failed request) -> fail-open, behave as before.
+   *
+   * Deliberately NOT derivable from {@link availableModules}: a hub is mapped
+   * by its owning business module only when `SignalRModule` - a framework
+   * module, absent from that list by design - is loaded too. Reading "System is
+   * loaded" as "the settings hub exists" is exactly the mismatch that made the
+   * shell retry a hub that was never mapped.
+   */
+  const realtime = ref<AdminShellRealtime | null>(null)
 
   /**
    * Route names hidden from the menu at RUNTIME, contributed by features that
@@ -465,6 +477,11 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    * it `true` when it starts the availability probe and `false` once the probe
    * settles (fetched, failed, or timed out) - see {@link moduleSignalPending}.
    */
+  /** Set the realtime capability half of the shell signal (`null` = unknown). */
+  function setRealtime(value: AdminShellRealtime | null): void {
+    realtime.value = value
+  }
+
   function setModuleSignalPending(pending: boolean): void {
     moduleSignalPending.value = pending
   }
@@ -487,6 +504,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     constantRoutes.value = []
     authRoutes.value = []
     availableModules.value = null
+    realtime.value = null
     moduleSignalPending.value = false
     runtimeHiddenOwners.clear()
     runtimeHiddenRouteNames.value = new Set()
@@ -500,6 +518,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     allRoutes,
     routesLoaded,
     availableModules,
+    realtime,
     moduleSignalPending,
     menus,
     deniedRouteNames,
@@ -509,6 +528,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     setConstantRoutes,
     setAuthRoutes,
     setAvailableModules,
+    setRealtime,
     setModuleSignalPending,
     setRuntimeHiddenRoutes,
     resetRouteCache,

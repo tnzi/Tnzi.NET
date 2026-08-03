@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Tnzi.EFCore;
 using Tnzi.Finance.Entities.Configs;
 using Tnzi.Finance.Payroll.Entities.Configs;
 using Tnzi.Security.Claims;

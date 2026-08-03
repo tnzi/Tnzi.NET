@@ -38,7 +38,7 @@ import {
   BUILTIN_APPEARANCE_PRESETS,
   applyAppearancePreset,
   type AdminThemePreset,
-} from '../../theme/appearancePresets'
+} from '../../theme/appearance-presets'
 import { isDarkSurface } from '../../theme/surfaceTone'
 import type { GlobalThemeController } from '../../headless/useGlobalTheme'
 import { useBreakpoint } from '../../headless/useBreakpoint'
@@ -163,18 +163,6 @@ const drawerWidth = computed<number | string>(() => {
 // can't resolve it and `repeat(var(--x), 1fr)` collapses to a single column.
 // Scoped data-v selectors DO follow teleported nodes, so a media query works.
 
-// Phase C: layout modes that host the menu in the header. The shell forces
-// headerVisible=true in these modes; mirror that here so the drawer's
-// "Show header" toggle disables itself with the correct state instead of
-// silently no-op-ing.
-const HEADER_HOSTED_MODES: AdminLayoutMode[] = [
-  'horizontal',
-  'top-hybrid-header-first',
-]
-const headerVisibilityForcedOn = computed(() =>
-  HEADER_HOSTED_MODES.includes(themeStore.layoutMode),
-)
-
 // I.7.10 - 5-tab → 4-tab consolidation: watermark settings merged into the
 // `general` tab (matches soybean's drawer layout).
 const activeTab = ref<'appearance' | 'layout' | 'general' | 'preset'>('appearance')
@@ -229,7 +217,7 @@ const appearanceLooks = computed(() =>
 )
 
 function appearancePresetLabel(preset: AdminThemePreset): string {
-  return preset.label ?? translate(`admin.theme.preset.looks.${preset.name}`)
+  return preset.label ?? tr(`admin.theme.preset.looks.${preset.name}`)
 }
 function applyLook(preset: AdminThemePreset): void {
   // The "default" look IS the factory default - mirror the drawer's
@@ -274,7 +262,7 @@ function isLookActive(preset: AdminThemePreset): boolean {
   )
 }
 
-function translate(key: string): string {
+function tr(key: string): string {
   return props.translate ? props.translate(key) : key
 }
 
@@ -407,9 +395,9 @@ function buildSnapshot(): AdminThemeSnapshot {
 async function onCopy(): Promise<void> {
   const ok = await copySnapshotToClipboard(buildSnapshot())
   if (ok) {
-    message.success(translate('admin.theme.preset.clipboardOk'))
+    message.success(tr('admin.theme.preset.clipboardOk'))
   } else {
-    message.warning(translate('admin.theme.preset.clipboardFail'))
+    message.warning(tr('admin.theme.preset.clipboardFail'))
   }
 }
 
@@ -426,14 +414,14 @@ function onImport(): void {
     const text = err instanceof Error ? err.message : ''
     message.error(
       text.includes('snapshot')
-        ? translate('admin.theme.preset.invalidSnapshot')
-        : translate('admin.theme.preset.invalidJson'),
+        ? tr('admin.theme.preset.invalidSnapshot')
+        : tr('admin.theme.preset.invalidJson'),
     )
     return
   }
   applySnapshot(snapshot)
   importBuffer.value = ''
-  message.success(translate('admin.theme.preset.apply'))
+  message.success(tr('admin.theme.preset.apply'))
 }
 
 /**
@@ -456,7 +444,7 @@ function onChooseFile(): void {
       importBuffer.value = text
     }
     reader.onerror = () => {
-      message.error(translate('admin.theme.preset.invalidJson'))
+      message.error(tr('admin.theme.preset.invalidJson'))
     }
     reader.readAsText(file)
   }
@@ -477,9 +465,9 @@ async function onSaveGlobal(): Promise<void> {
   if (!props.globalTheme) return
   const ok = await props.globalTheme.save()
   if (ok) {
-    message.success(translate('admin.theme.global.saved'))
+    message.success(tr('admin.theme.global.saved'))
   } else {
-    message.error(translate('admin.theme.global.saveFailed'))
+    message.error(tr('admin.theme.global.saveFailed'))
   }
 }
 
@@ -494,11 +482,11 @@ async function resetAll(): Promise<void> {
   if (globalEnabled.value && props.globalTheme) {
     const ok = await props.globalTheme.save()
     if (!ok) {
-      message.error(translate('admin.theme.global.resetFailed'))
+      message.error(tr('admin.theme.global.resetFailed'))
       return
     }
   }
-  message.success(translate('admin.theme.reset'))
+  message.success(tr('admin.theme.reset'))
 }
 
 function close(): void {
@@ -521,7 +509,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
          browser-default scrollbar for Naive UI's NScrollbar (thin grey,
          hidden until hover). Matches soybean's drawer presentation. -->
     <NDrawerContent
-      :title="mode === 'presets' ? translate('admin.theme.userPreset.title') : translate('admin.theme.title')"
+      :title="mode === 'presets' ? tr('admin.theme.userPreset.title') : tr('admin.theme.title')"
       closable
       :native-scrollbar="false"
     >
@@ -530,8 +518,8 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
            (same convention as the User Center section hints). -->
       <template v-if="mode === 'presets'" #header>
         <span class="t-theme-drawer__title-row">
-          {{ translate('admin.theme.userPreset.title') }}
-          <THint type="help" :content="translate('admin.theme.userPreset.hint')" />
+          {{ tr('admin.theme.userPreset.title') }}
+          <THint type="help" :content="tr('admin.theme.userPreset.hint')" />
         </span>
       </template>
       <!-- ── Presets-only variant: what non-privileged users get. Their only
@@ -616,13 +604,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         <!-- Personal accessibility filters - a PER-USER preference every user
              controls for themselves (persisted locally, never part of the super
              admin's global theme). Non-privileged users get them here too. -->
-        <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.accessibility') }}</NDivider>
+        <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.appearance.accessibility') }}</NDivider>
         <section class="t-theme-drawer__row">
-          <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.grayscale') }}</span>
+          <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.grayscale') }}</span>
           <NSwitch :value="themeStore.grayscale" @update:value="themeStore.setGrayscale" />
         </section>
         <section class="t-theme-drawer__row">
-          <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.colourWeakness') }}</span>
+          <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.colourWeakness') }}</span>
           <NSwitch :value="themeStore.colourWeakness" @update:value="themeStore.setColourWeakness" />
         </section>
       </template>
@@ -631,12 +619,12 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         <!-- ── Tab 1: Appearance - 3 NDivider groups (Scheme/Color/Radius) ── -->
         <NTabPane
           name="appearance"
-          :tab="translate('admin.theme.tabs.appearance')"
+          :tab="tr('admin.theme.tabs.appearance')"
         >
           <!-- Group 1: Theme scheme - icon-only segmented tabs, horizontally
                centered. Mirrors soybean's theme-schema.vue (NTabs type=segment
                + SvgIcon per tab, w-214px center via `.i-flex-center`). -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.mode') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.appearance.mode') }}</NDivider>
           <section class="t-theme-drawer__mode-tabs">
             <NTabs
               :value="ctx.settings.value.mode"
@@ -666,20 +654,20 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             class="t-theme-drawer__row"
           >
             <span class="t-theme-drawer__row-label t-theme-drawer__row-label--hint">
-              {{ translate('admin.theme.layout.invertSider') }}
-              <THint type="info" :content="translate('admin.theme.layout.invertSiderHint')" />
+              {{ tr('admin.theme.layout.invertSider') }}
+              <THint type="info" :content="tr('admin.theme.layout.invertSiderHint')" />
             </span>
             <NSwitch :value="themeStore.invertSider" @update:value="themeStore.toggleInvertSider" />
           </section>
           <!-- Accessibility filters - a PERSONAL per-user preference (persisted
                locally, NOT saved into the global theme). Shown to every user. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.accessibility') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.appearance.accessibility') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.grayscale') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.grayscale') }}</span>
             <NSwitch :value="themeStore.grayscale" @update:value="themeStore.setGrayscale" />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.colourWeakness') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.colourWeakness') }}</span>
             <NSwitch :value="themeStore.colourWeakness" @update:value="themeStore.setColourWeakness" />
           </section>
 
@@ -688,14 +676,14 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                via `:swatches`, not rendered as a separate row of buttons. That
                removes the duplicate "swatches block above + picker below"
                feel of the previous design. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.themeColor') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.appearance.themeColor') }}</NDivider>
           <div class="t-theme-drawer__color-grid">
             <label
               v-for="role in COLOR_ROLES"
               :key="role.role"
               class="t-theme-drawer__color-row"
             >
-              <span class="t-theme-drawer__color-label">{{ translate(role.key) }}</span>
+              <span class="t-theme-drawer__color-label">{{ tr(role.key) }}</span>
               <NColorPicker
                 :value="ctx.settings.value.colors[role.role]"
                 :modes="['hex']"
@@ -708,14 +696,14 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             </label>
           </div>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.infoFollowPrimary') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.infoFollowPrimary') }}</span>
             <NSwitch :value="themeStore.infoFollowPrimary" @update:value="onToggleInfoFollowPrimary" />
           </section>
 
           <!-- Group 3: Radius (number input - soybean parity) -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.appearance.themeRadius') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.appearance.themeRadius') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.appearance.borderRadius') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.appearance.borderRadius') }}</span>
             <NInputNumber
               :value="themeStore.themeRadius"
               size="small"
@@ -732,8 +720,8 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                color stays readable. Null value = default token fallback. -->
           <NDivider class="t-theme-drawer__divider">
             <span class="t-theme-drawer__divider-title">
-              {{ translate('admin.theme.appearance.backgrounds') }}
-              <THint type="info" :content="translate('admin.theme.appearance.backgroundsHint')" />
+              {{ tr('admin.theme.appearance.backgrounds') }}
+              <THint type="info" :content="tr('admin.theme.appearance.backgroundsHint')" />
             </span>
           </NDivider>
           <div class="t-theme-drawer__color-grid">
@@ -742,7 +730,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               :key="s.key"
               class="t-theme-drawer__bg-surface"
             >
-              <span class="t-theme-drawer__color-label">{{ translate(s.labelKey) }}</span>
+              <span class="t-theme-drawer__color-label">{{ tr(s.labelKey) }}</span>
               <!-- Front: background color. Pass `null` (not `undefined`) when
                    cleared so the picker stays controlled and repaints empty. -->
               <div class="t-theme-drawer__bg-cell">
@@ -766,7 +754,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                       <Icon icon="mdi:restore" width="13" height="13" />
                     </NButton>
                   </template>
-                  {{ translate('admin.theme.appearance.resetBg') }}
+                  {{ tr('admin.theme.appearance.resetBg') }}
                 </NTooltip>
               </div>
               <!-- Back: text color. Empty picker = Auto (derives from the bg,
@@ -776,7 +764,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                   <template #trigger>
                     <Icon icon="mdi:format-color-text" class="t-theme-drawer__bg-text-icon" width="15" height="15" />
                   </template>
-                  {{ translate('admin.theme.appearance.textColor') }}
+                  {{ tr('admin.theme.appearance.textColor') }}
                 </NTooltip>
                 <NColorPicker
                   :value="s.fg()"
@@ -798,7 +786,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                       <Icon icon="mdi:restore" width="13" height="13" />
                     </NButton>
                   </template>
-                  {{ translate('admin.theme.appearance.textAuto') }}
+                  {{ tr('admin.theme.appearance.textAuto') }}
                 </NTooltip>
               </div>
             </div>
@@ -808,10 +796,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         <!-- ── Tab 2: Layout - soybean parity (Mode/Sider/Header/Tab/Footer/Content) ── -->
         <NTabPane
           name="layout"
-          :tab="translate('admin.theme.tabs.layout')"
+          :tab="tr('admin.theme.tabs.layout')"
         >
           <!-- Group 1: Layout mode (6 visual cards) -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.layout.mode') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.layout.mode') }}</NDivider>
           <section class="t-theme-drawer__section">
             <div class="t-theme-drawer__layout-grid">
               <TLayoutModeCard
@@ -819,7 +807,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 :key="m"
                 :mode="m"
                 :active="themeStore.layoutMode === m"
-                :label="translate(LAYOUT_LABEL_KEY[m])"
+                :label="tr(LAYOUT_LABEL_KEY[m])"
                 @select="selectLayoutMode"
               />
             </div>
@@ -827,9 +815,9 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 
           <!-- Group 2: Sider - hide entirely in horizontal mode (no sider exists) -->
           <template v-if="themeStore.layoutMode !== 'horizontal'">
-            <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.sider') }}</NDivider>
+            <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.sider') }}</NDivider>
             <section v-if="themeStore.layoutMode === 'vertical'" class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.siderWidth') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.siderWidth') }}</span>
               <NInputNumber
                 :value="themeStore.siderWidth"
                 size="small"
@@ -841,7 +829,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               />
             </section>
             <section v-if="themeStore.layoutMode === 'vertical'" class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.siderCollapsedWidth') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.siderCollapsedWidth') }}</span>
               <NInputNumber
                 :value="themeStore.siderCollapsedWidth"
                 size="small"
@@ -856,7 +844,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               v-if="themeStore.layoutMode === 'vertical-mix' || themeStore.layoutMode.includes('hybrid')"
               class="t-theme-drawer__row"
             >
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.mixSiderWidth') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.mixSiderWidth') }}</span>
               <NInputNumber
                 :value="themeStore.mixSiderWidth"
                 size="small"
@@ -871,7 +859,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               v-if="themeStore.layoutMode === 'vertical-mix' || themeStore.layoutMode.includes('hybrid')"
               class="t-theme-drawer__row"
             >
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.mixCollapsedWidth') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.mixCollapsedWidth') }}</span>
               <NInputNumber
                 :value="themeStore.mixCollapsedWidth"
                 size="small"
@@ -886,7 +874,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               v-if="themeStore.layoutMode === 'vertical-mix'"
               class="t-theme-drawer__row"
             >
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.mixChildMenuWidth') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.mixChildMenuWidth') }}</span>
               <NInputNumber
                 :value="themeStore.mixChildMenuWidth"
                 size="small"
@@ -901,7 +889,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               v-if="themeStore.layoutMode.includes('hybrid') || themeStore.layoutMode === 'vertical-mix'"
               class="t-theme-drawer__row"
             >
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.autoSelectFirstMenu') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.autoSelectFirstMenu') }}</span>
               <NSwitch
                 :value="themeStore.autoSelectFirstMenu"
                 @update:value="themeStore.setAutoSelectFirstMenu"
@@ -914,9 +902,9 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                in vertical modes there's no reason to hide it. Footer/tab
                keep their visibility switches because they truly are
                optional. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.header') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.header') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.headerHeight') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.headerHeight') }}</span>
             <NInputNumber
               :value="themeStore.headerHeight"
               size="small"
@@ -928,23 +916,23 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.showBreadcrumb') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.showBreadcrumb') }}</span>
             <NSwitch :value="themeStore.breadcrumbVisible" @update:value="themeStore.setBreadcrumbVisible" />
           </section>
           <section v-if="themeStore.breadcrumbVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.breadcrumbShowIcon') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.breadcrumbShowIcon') }}</span>
             <NSwitch :value="themeStore.breadcrumbShowIcon" @update:value="themeStore.setBreadcrumbShowIcon" />
           </section>
 
           <!-- Group 4: Tab - sub-rows gated on `tabVisible` so disabled
                knobs don't crowd the panel when the bar itself is off. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.tab') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.tab') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.showTab') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.showTab') }}</span>
             <NSwitch :value="themeStore.tabVisible" @update:value="themeStore.setTabVisible" />
           </section>
           <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.tabHeight') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.tabHeight') }}</span>
             <NInputNumber
               :value="themeStore.tabHeight"
               size="small"
@@ -956,28 +944,28 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
           <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.tabStyle') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.tabStyle') }}</span>
             <NSelect
               :value="themeStore.tabStyle"
               size="small"
               class="w-160px"
-              :options="TAB_STYLE_OPTIONS.map((s) => ({ value: s, label: translate(TAB_STYLE_LABEL_KEY[s]) }))"
+              :options="TAB_STYLE_OPTIONS.map((s) => ({ value: s, label: tr(TAB_STYLE_LABEL_KEY[s]) }))"
               @update:value="(v: TabStyle) => themeStore.setTabStyle(v)"
             />
           </section>
           <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.tabCache') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.tabCache') }}</span>
             <NSwitch :value="themeStore.tabCache" @update:value="themeStore.setTabCache" />
           </section>
           <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.closeTabByMiddleClick') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.closeTabByMiddleClick') }}</span>
             <NSwitch
               :value="themeStore.closeTabByMiddleClick"
               @update:value="themeStore.setCloseTabByMiddleClick"
             />
           </section>
           <section v-if="themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.tabScrollAnimation') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.tabScrollAnimation') }}</span>
             <NSwitch
               :value="themeStore.tabScrollAnimation"
               @update:value="themeStore.setTabScrollAnimation"
@@ -985,13 +973,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
 
           <!-- Group 5: Footer -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.footer') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.footer') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.showFooter') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.showFooter') }}</span>
             <NSwitch :value="themeStore.footerVisible" @update:value="themeStore.setFooterVisible" />
           </section>
           <section v-if="themeStore.footerVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.footerHeight') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.footerHeight') }}</span>
             <NInputNumber
               :value="themeStore.footerHeight"
               size="small"
@@ -1004,43 +992,43 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
 
           <!-- Group 6: Content (scroll mode + page animation + fixed pins) -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.content') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.content') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.scrollMode') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.scrollMode') }}</span>
             <NSelect
               :value="themeStore.scrollMode"
               size="small"
               class="w-160px"
               :options="[
-                { value: 'content', label: translate('admin.theme.layout.scrollModeContent') },
-                { value: 'wrapper', label: translate('admin.theme.layout.scrollModeWrapper') },
+                { value: 'content', label: tr('admin.theme.layout.scrollModeContent') },
+                { value: 'wrapper', label: tr('admin.theme.layout.scrollModeWrapper') },
               ]"
               @update:value="themeStore.setScrollMode"
             />
           </section>
           <section v-if="themeStore.scrollMode === 'wrapper'" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.fixedHeader') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.fixedHeader') }}</span>
             <NSwitch :value="themeStore.fixedHeader" @update:value="themeStore.setFixedHeader" />
           </section>
           <section v-if="themeStore.scrollMode === 'wrapper' && themeStore.tabVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.fixedTab') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.fixedTab') }}</span>
             <NSwitch :value="themeStore.fixedTab" @update:value="themeStore.setFixedTab" />
           </section>
           <section v-if="themeStore.scrollMode === 'wrapper' && themeStore.footerVisible" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.layout.fixedFooter') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.fixedFooter') }}</span>
             <NSwitch :value="themeStore.fixedFooter" @update:value="themeStore.setFixedFooter" />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.pageAnimate') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.pageAnimate') }}</span>
             <NSwitch :value="themeStore.pageAnimate" @update:value="themeStore.setPageAnimate" />
           </section>
           <section v-if="themeStore.pageAnimate" class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.pageAnimateMode') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.pageAnimateMode') }}</span>
             <NSelect
               :value="themeStore.pageTransition"
               size="small"
               class="w-160px"
-              :options="TRANSITION_OPTIONS.map((t) => ({ value: t, label: translate(TRANSITION_LABEL_KEY[t]) }))"
+              :options="TRANSITION_OPTIONS.map((t) => ({ value: t, label: tr(TRANSITION_LABEL_KEY[t]) }))"
               @update:value="(v: PageTransition) => themeStore.setPageTransition(v)"
             />
           </section>
@@ -1049,40 +1037,40 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         <!-- ── Tab 3: General - 2 NDivider groups (Global/Watermark) ── -->
         <NTabPane
           name="general"
-          :tab="translate('admin.theme.tabs.general')"
+          :tab="tr('admin.theme.tabs.general')"
         >
           <!-- Group 1: Global - header chrome visibility toggles. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.group.global') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.global') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.multilingualVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.multilingualVisible') }}</span>
             <NSwitch
               :value="themeStore.multilingualVisible"
               @update:value="themeStore.setMultilingualVisible"
             />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.globalSearchVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.globalSearchVisible') }}</span>
             <NSwitch
               :value="themeStore.globalSearchVisible"
               @update:value="themeStore.setGlobalSearchVisible"
             />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.fullscreenVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.fullscreenVisible') }}</span>
             <NSwitch
               :value="themeStore.fullscreenVisible"
               @update:value="themeStore.setFullscreenVisible"
             />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.themeSchemaVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.themeSchemaVisible') }}</span>
             <NSwitch
               :value="themeStore.themeSchemaVisible"
               @update:value="themeStore.setThemeSchemaVisible"
             />
           </section>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.reloadVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.reloadVisible') }}</span>
             <NSwitch
               :value="themeStore.reloadVisible"
               @update:value="themeStore.setReloadVisible"
@@ -1092,7 +1080,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                picker (palette button in the header). Part of the global
                snapshot - save to apply for everyone. -->
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.general.presetPickerVisible') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.general.presetPickerVisible') }}</span>
             <NSwitch
               :value="themeStore.presetPickerVisible"
               @update:value="themeStore.setPresetPickerVisible"
@@ -1102,9 +1090,9 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           <!-- Group 2: Watermark - sub-rows gated on `enabled` rather
                than disabled, so a turned-off watermark hides its
                configuration knobs entirely. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.tabs.watermark') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.tabs.watermark') }}</NDivider>
           <section class="t-theme-drawer__row">
-            <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.enabled') }}</span>
+            <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.enabled') }}</span>
             <NSwitch
               :value="themeStore.watermark.enabled"
               @update:value="(v: boolean) => themeStore.setWatermark({ enabled: v })"
@@ -1112,7 +1100,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
           <template v-if="themeStore.watermark.enabled">
             <section class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.text') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.text') }}</span>
               <NInput
                 :value="themeStore.watermark.text"
                 size="small"
@@ -1121,21 +1109,21 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               />
             </section>
             <section class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.includeUserName') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.includeUserName') }}</span>
               <NSwitch
                 :value="themeStore.watermark.includeUserName"
                 @update:value="(v: boolean) => themeStore.setWatermark({ includeUserName: v })"
               />
             </section>
             <section class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.includeDate') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.includeDate') }}</span>
               <NSwitch
                 :value="themeStore.watermark.includeDate"
                 @update:value="(v: boolean) => themeStore.setWatermark({ includeDate: v })"
               />
             </section>
             <section class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.opacity') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.opacity') }}</span>
               <NInputNumber
                 :value="themeStore.watermark.opacity"
                 size="small"
@@ -1148,7 +1136,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               />
             </section>
             <section class="t-theme-drawer__row">
-              <span class="t-theme-drawer__row-label">{{ translate('admin.theme.watermark.fontSize') }}</span>
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.watermark.fontSize') }}</span>
               <NInputNumber
                 :value="themeStore.watermark.fontSize"
                 :min="10"
@@ -1165,13 +1153,13 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
         <!-- ── Tab 4: Preset - full appearance looks + export/import ── -->
         <NTabPane
           name="preset"
-          :tab="translate('admin.theme.tabs.preset')"
+          :tab="tr('admin.theme.tabs.preset')"
         >
           <!-- Appearance looks: each card applies a COMPLETE look - accent
                color + light/dark mode + layout + corner radius + tab style +
                the per-surface background colors - not just a primary swatch.
                The mini preview shows the sider/header/accent the look sets. -->
-          <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.preset.palette') }}</NDivider>
+          <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.preset.palette') }}</NDivider>
           <div class="t-theme-drawer__preset-grid">
             <button
               v-for="look in appearanceLooks"
@@ -1251,16 +1239,16 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </div>
 
           <section class="t-theme-drawer__section">
-            <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.preset.export') }}</NDivider>
+            <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.preset.export') }}</NDivider>
             <p class="t-theme-drawer__hint">
-              {{ translate('admin.theme.preset.exportDescription') }}
+              {{ tr('admin.theme.preset.exportDescription') }}
             </p>
             <div class="t-theme-drawer__row-actions">
               <NButton size="small" @click="onCopy">
-                {{ translate('admin.theme.preset.copy') }}
+                {{ tr('admin.theme.preset.copy') }}
               </NButton>
               <NButton size="small" @click="onDownload">
-                {{ translate('admin.theme.preset.download') }}
+                {{ tr('admin.theme.preset.download') }}
               </NButton>
             </div>
             <NInput
@@ -1274,21 +1262,21 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
 
           <section class="t-theme-drawer__section">
-            <NDivider class="t-theme-drawer__divider">{{ translate('admin.theme.preset.import') }}</NDivider>
+            <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.preset.import') }}</NDivider>
             <NInput
               v-model:value="importBuffer"
               type="textarea"
               :rows="5"
               size="small"
-              :placeholder="translate('admin.theme.preset.importPlaceholder')"
+              :placeholder="tr('admin.theme.preset.importPlaceholder')"
               class="font-mono text-11px"
             />
             <div class="t-theme-drawer__row-actions mt-8px">
               <NButton size="small" @click="onChooseFile">
-                {{ translate('admin.theme.preset.chooseFile') }}
+                {{ tr('admin.theme.preset.chooseFile') }}
               </NButton>
               <NButton type="primary" size="small" :disabled="!importBuffer.trim()" @click="onImport">
-                {{ translate('admin.theme.preset.apply') }}
+                {{ tr('admin.theme.preset.apply') }}
               </NButton>
             </div>
           </section>
@@ -1307,15 +1295,15 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
       <template v-if="mode !== 'presets'" #footer>
         <div class="t-theme-drawer__footer">
           <NPopconfirm
-            :positive-text="translate('admin.theme.reset')"
+            :positive-text="tr('admin.theme.reset')"
             @positive-click="resetAll"
           >
             <template #trigger>
               <NButton size="small">
-                {{ translate('admin.theme.reset') }}
+                {{ tr('admin.theme.reset') }}
               </NButton>
             </template>
-            {{ globalEnabled ? translate('admin.theme.global.resetConfirm') : translate('admin.theme.resetConfirm') }}
+            {{ globalEnabled ? tr('admin.theme.global.resetConfirm') : tr('admin.theme.resetConfirm') }}
           </NPopconfirm>
           <NButton
             v-if="globalEnabled"
@@ -1325,10 +1313,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             @click="onSaveGlobal"
           >
             <span v-if="globalDirty" class="t-theme-drawer__dirty-dot" aria-hidden="true" />
-            {{ translate('admin.theme.global.save') }}
+            {{ tr('admin.theme.global.save') }}
           </NButton>
           <NButton v-else type="primary" size="small" @click="onCopy">
-            {{ translate('admin.theme.preset.copy') }}
+            {{ tr('admin.theme.preset.copy') }}
           </NButton>
         </div>
       </template>

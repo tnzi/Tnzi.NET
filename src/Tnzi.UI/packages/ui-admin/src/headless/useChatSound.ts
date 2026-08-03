@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { ChatSoundEffect } from '@tnzi/core/services/chat'
-import { playSoundEffect, unlockChatAudio } from './chatSounds'
+import { playSoundEffect, unlockChatAudio } from './chat-sounds'
 
 /**
  * Two-tier chat sound player.

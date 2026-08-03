@@ -133,7 +133,7 @@ public class AgentServiceRunTests
         return new AgentService(
             Mock.Of<IRepository<Agent, Guid>>(),
             Mock.Of<IRepository<AgentVersion, Guid>>(),
-            runtime,
+            TestDispatchFacade.Wrap(runtime),
             grantService.Object,
             new ServiceCollection()
                 .AddLogging()

@@ -216,7 +216,7 @@ public class AgentExecutorTests
         toolDetails.Count.ShouldBe(1);
         toolDetails[0].Name.ShouldBe("broken_tool");
         toolDetails[0].IsSuccess.ShouldBeFalse();
-        toolDetails[0].Error.ShouldContain("InvalidOperationException");
+        toolDetails[0].Error!.ShouldContain("InvalidOperationException");
     }
 
     // ── 回归锁定：系统提示最终形态必须与 13-tag 接缝删除前逐字节一致 ──────────

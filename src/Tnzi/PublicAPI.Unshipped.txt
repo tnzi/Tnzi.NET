@@ -120,7 +120,7 @@ static Tnzi.Data.DataScopeExtensions.ApplyDataScope<TEntity>(this System.Linq.IQ
 static Tnzi.Data.DataScopeExtensions.ApplyDataScope<TEntity>(this System.Linq.IQueryable<TEntity!>! source, System.IServiceProvider! serviceProvider) -> System.Linq.IQueryable<TEntity!>!
 static Tnzi.Data.DataScopeExtensions.BuildDataScopeFilter<TEntity>(System.Collections.Generic.IEnumerable<Tnzi.Data.IDataScopeProvider<TEntity!>!>! providers) -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
 static Tnzi.Data.DataScopeExtensions.BuildDataScopeFilter<TEntity>(this System.IServiceProvider! serviceProvider) -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
-static Tnzi.Data.DataScopeExtensions.CanAccessAsync<TEntity, TKey>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!, TKey>! repository, System.IServiceProvider! serviceProvider, TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Tnzi.Data.DataScopeExtensions.CanAccessByIdAsync<TEntity, TKey>(this Tnzi.Domain.Repositories.IReadOnlyRepository<TEntity!, TKey>! repository, System.IServiceProvider! serviceProvider, TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 static Tnzi.Data.DataScopeExtensions.CanAccessAsync<TEntity>(this System.IServiceProvider! serviceProvider, TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 static Tnzi.Domain.Entities.ChildCollectionSync.ReplaceChildren<TParent, TChild, TKey>(TParent parent, System.Func<TParent, System.Collections.Generic.ICollection<TChild!>!>! childrenSelector, System.Collections.Generic.IEnumerable<TChild!>! newItems, System.Func<TChild!, TKey>! keySelector) -> Tnzi.Domain.Entities.ChildCollectionSyncResult
 static Tnzi.Domain.Entities.ChildCollectionSyncResult.operator !=(Tnzi.Domain.Entities.ChildCollectionSyncResult left, Tnzi.Domain.Entities.ChildCollectionSyncResult right) -> bool
@@ -192,3 +192,85 @@ Tnzi.Security.Claims.IUserDisplayNameProvider
 Tnzi.Security.Claims.IUserDisplayNameProvider.GetDisplayNamesAsync(System.Collections.Generic.IReadOnlyCollection<System.Guid>! userIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<System.Guid, string!>!>!
 static Tnzi.Utilities.CsvBuilder.Money(decimal? value, int decimals = 2) -> decimal?
 static Tnzi.Extensions.StringExtensions.HtmlToPlainText(this string? str) -> string!
+Tnzi.Domain.Entities.FileFieldAttribute.Public.get -> bool
+Tnzi.Domain.Entities.FileFieldAttribute.Public.set -> void
+Tnzi.Storage.FileReferenceChange.IsPublicFile.get -> bool
+Tnzi.Storage.FileReferenceChange.IsPublicFile.set -> void
+Tnzi.Storage.FileReferenceDescriptor
+Tnzi.Storage.FileReferenceDescriptor.FileReferenceDescriptor() -> void
+Tnzi.Storage.FileReferenceDescriptor.FileReferenceDescriptor(System.Guid FileId, string! EntityType, System.Guid EntityId, string! FieldName) -> void
+Tnzi.Storage.FileReferenceDescriptor.FileId.get -> System.Guid
+Tnzi.Storage.FileReferenceDescriptor.FileId.init -> void
+Tnzi.Storage.FileReferenceDescriptor.EntityType.get -> string!
+Tnzi.Storage.FileReferenceDescriptor.EntityType.init -> void
+Tnzi.Storage.FileReferenceDescriptor.EntityId.get -> System.Guid
+Tnzi.Storage.FileReferenceDescriptor.EntityId.init -> void
+Tnzi.Storage.FileReferenceDescriptor.FieldName.get -> string!
+Tnzi.Storage.FileReferenceDescriptor.FieldName.init -> void
+Tnzi.Storage.FileReferenceDescriptor.Deconstruct(out System.Guid FileId, out string! EntityType, out System.Guid EntityId, out string! FieldName) -> void
+Tnzi.Storage.FileReferenceDescriptor.Equals(Tnzi.Storage.FileReferenceDescriptor other) -> bool
+override Tnzi.Storage.FileReferenceDescriptor.GetHashCode() -> int
+~override Tnzi.Storage.FileReferenceDescriptor.Equals(object obj) -> bool
+~override Tnzi.Storage.FileReferenceDescriptor.ToString() -> string
+static Tnzi.Storage.FileReferenceDescriptor.operator ==(Tnzi.Storage.FileReferenceDescriptor left, Tnzi.Storage.FileReferenceDescriptor right) -> bool
+static Tnzi.Storage.FileReferenceDescriptor.operator !=(Tnzi.Storage.FileReferenceDescriptor left, Tnzi.Storage.FileReferenceDescriptor right) -> bool
+Tnzi.Storage.IFileReferenceAccessResolver
+Tnzi.Storage.IFileReferenceAccessResolver.CanHandle(string! entityType) -> bool
+Tnzi.Storage.IFileReferenceAccessResolver.CanReadAsync(Tnzi.Storage.FileReferenceDescriptor reference, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+static Tnzi.Security.HashHelper.GetMd5Async(System.IO.Stream! stream, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+static Tnzi.Security.HashHelper.GetSha256Async(System.IO.Stream! stream, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+Tnzi.Utilities.TrendInterval
+Tnzi.Utilities.TrendInterval.Daily = 0 -> Tnzi.Utilities.TrendInterval
+Tnzi.Utilities.TrendInterval.Weekly = 1 -> Tnzi.Utilities.TrendInterval
+Tnzi.Utilities.TrendInterval.Monthly = 2 -> Tnzi.Utilities.TrendInterval
+Tnzi.Utilities.TimeBucket
+static Tnzi.Utilities.TimeBucket.Start(System.DateTime value, Tnzi.Utilities.TrendInterval interval) -> System.DateTime
+static Tnzi.Utilities.TimeBucket.Next(System.DateTime bucketStart, Tnzi.Utilities.TrendInterval interval) -> System.DateTime
+static Tnzi.Utilities.TimeBucket.Label(System.DateTime value, Tnzi.Utilities.TrendInterval interval) -> string!
+static Tnzi.Utilities.TimeBucket.Enumerate(System.DateTime from, System.DateTime to, Tnzi.Utilities.TrendInterval interval, bool endInclusive = true) -> System.Collections.Generic.IEnumerable<System.DateTime>!
+Tnzi.Resilience.ResiliencePipelineNames
+const Tnzi.Resilience.ResiliencePipelineNames.Default = "default" -> string!
+const Tnzi.Resilience.ResiliencePipelineNames.EventBus = "eventbus" -> string!
+Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>
+Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ChannelBatchProcessorBase(System.Threading.Channels.ChannelReader<TItem>! reader, System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger! logger) -> void
+Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+virtual Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.BatchSize.get -> int
+virtual Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ErrorRetryDelay.get -> System.TimeSpan
+virtual Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ServiceName.get -> string!
+abstract Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ProcessBatchAsync(System.Collections.Generic.IReadOnlyList<TItem>! batch, System.IServiceProvider! scopedServices, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+override Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ExecuteAsync(System.Threading.CancellationToken stoppingToken) -> System.Threading.Tasks.Task!
+*REMOVED*Tnzi.Application.ApplicationService.ServiceProvider.get -> System.IServiceProvider?
+Tnzi.Application.ApplicationService.ServiceProvider.get -> System.IServiceProvider!
+*REMOVED*static Tnzi.Utilities.Check.NotNull<T>(T value, string? paramName = null) -> T
+static Tnzi.Utilities.Check.NotNull<T>(T? value, string? paramName = null) -> T
+*REMOVED*Tnzi.Application.ApplicationService.LogError(string! message, params object![]! args) -> void
+*REMOVED*Tnzi.Application.ApplicationService.LogInformation(string! message, params object![]! args) -> void
+*REMOVED*Tnzi.Application.ApplicationService.LogWarning(string! message, params object![]! args) -> void
+Tnzi.Application.ApplicationService.LogError(string! message, params object?[]! args) -> void
+Tnzi.Application.ApplicationService.LogInformation(string! message, params object?[]! args) -> void
+Tnzi.Application.ApplicationService.LogWarning(string! message, params object?[]! args) -> void
+Tnzi.Security.Authorization.IPermissionChecker.IsCurrentUserSuperAdminAsync() -> System.Threading.Tasks.Task<bool>!
+Tnzi.Capabilities.CapabilityCatalog
+Tnzi.Capabilities.CapabilityCatalog.CapabilityCatalog() -> void
+Tnzi.Capabilities.CapabilityCatalog.Declare(string! capability) -> void
+Tnzi.Capabilities.CapabilityCatalog.IsDeclared(string! capability) -> bool
+Tnzi.Capabilities.CapabilityCatalog.ServerCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Capabilities.ClientCapabilities
+Tnzi.Capabilities.ClientCapabilities.ClientCapabilities(string? headerValue) -> void
+Tnzi.Capabilities.ClientCapabilities.Declared.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Capabilities.ClientCapabilities.Supports(string! capability) -> bool
+Tnzi.Capabilities.ICapabilityCatalog
+Tnzi.Capabilities.ICapabilityCatalog.Declare(string! capability) -> void
+Tnzi.Capabilities.ICapabilityCatalog.IsDeclared(string! capability) -> bool
+Tnzi.Capabilities.ICapabilityCatalog.ServerCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Capabilities.IClientCapabilities
+Tnzi.Capabilities.IClientCapabilities.Declared.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Capabilities.IClientCapabilities.Supports(string! capability) -> bool
+Tnzi.Capabilities.TnziCapabilities
+const Tnzi.Capabilities.TnziCapabilities.HeaderName = "X-Tnzi-Capabilities" -> string!
+static readonly Tnzi.Capabilities.ClientCapabilities.None -> Tnzi.Capabilities.IClientCapabilities!
+static readonly Tnzi.Capabilities.TnziCapabilities.NamePattern -> System.Text.RegularExpressions.Regex!
+static Tnzi.Capabilities.TnziCapabilities.IsValidName(string? name) -> bool
+Tnzi.Capabilities.CapabilityServiceCollectionExtensions
+static Tnzi.Capabilities.CapabilityServiceCollectionExtensions.AddTnziCapabilities(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.Capabilities.CapabilityServiceCollectionExtensions.DeclareCapability(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! capability) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!

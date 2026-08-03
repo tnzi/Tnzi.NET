@@ -1,5 +1,3 @@
-using Tnzi.AI.Sandbox.Security;
-using Tnzi.AI.Security;
 
 namespace Tnzi.AI.Sandbox.Providers.Docker;
 
@@ -14,6 +12,15 @@ public sealed class DockerSandbox : ISandbox
     /// configured list. Kept in sync with <c>SandboxModuleOptions.Docker.DeniedCommands</c>.
     /// </summary>
     private static readonly string[] DefaultDeniedCommands = ["rm -rf /", "format c:", "chmod 777 /", "mkfs"];
+
+    /// <summary>
+    /// Grace period added on top of <see cref="_commandTimeout"/> when arming the
+    /// in-container timeout, so the client-side cancellation always wins the race and
+    /// the timeout contract (exit -1 + "Command timed out") stays unchanged. The
+    /// in-container timeout is a janitor that runs after we have already walked away,
+    /// not a second source of truth for "how long may this command run".
+    /// </summary>
+    private static readonly TimeSpan InContainerTimeoutGrace = TimeSpan.FromSeconds(5);
 
     private readonly HttpClient _httpClient;
     private readonly string _containerId;
@@ -66,15 +73,23 @@ public sealed class DockerSandbox : ISandbox
 
         _logger.LogDebug("Docker sandbox {Id}: executing command in container {ContainerId}", Id, _containerId);
 
+        // Declared outside the try so the timeout path can return whatever the command
+        // already produced before it hung, instead of discarding it.
+        var stdoutBuilder = new StringBuilder();
+        var stderrBuilder = new StringBuilder();
+
         try
         {
-            // Step 1: Create exec instance
+            // Step 1: Create exec instance. The command is wrapped so the container
+            // kills it on timeout - see WrapWithInContainerTimeout. Note the denial
+            // check above ran on the raw command: the wrapper must never be able to
+            // launder a blacklisted command past it.
             var execCreateBody = new
             {
                 AttachStdout = true,
                 AttachStderr = true,
                 WorkingDir = _workspacePath,
-                Cmd = new[] { "/bin/sh", "-c", command }
+                Cmd = new[] { "/bin/sh", "-c", WrapWithInContainerTimeout(command) }
             };
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -93,10 +108,20 @@ public sealed class DockerSandbox : ISandbox
             if (createResult is null || string.IsNullOrEmpty(createResult.Id))
                 return new CommandResult(-1, "", "Failed to parse exec create response");
 
-            // Step 2: Start exec instance
-            var startBody = new { Detach = false, Tty = false };
-            var startResponse = await _httpClient.PostAsJsonAsync(
-                $"/exec/{createResult.Id}/start", startBody, cts.Token);
+            // Step 2: Start exec instance.
+            // ResponseHeadersRead is required, not an optimisation: the default
+            // ResponseContentRead buffers the entire exec output into memory before this
+            // call returns, which both defeats the _maxOutputSize cap (the memory is
+            // already spent by the time we count it) and leaves us with nothing to report
+            // when a long-running command hangs part-way through its output.
+            using var startRequest = new HttpRequestMessage(
+                HttpMethod.Post, $"/exec/{createResult.Id}/start")
+            {
+                Content = JsonContent.Create(new { Detach = false, Tty = false })
+            };
+
+            using var startResponse = await _httpClient.SendAsync(
+                startRequest, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 
             if (!startResponse.IsSuccessStatusCode)
             {
@@ -105,7 +130,7 @@ public sealed class DockerSandbox : ISandbox
             }
 
             // Step 3: Read multiplexed output stream
-            var rawOutput = await ReadOutputAsync(startResponse, cts.Token);
+            await ReadOutputAsync(startResponse, stdoutBuilder, stderrBuilder, cts.Token);
 
             // Step 4: Inspect exec to get exit code
             var inspectResponse = await _httpClient.GetAsync($"/exec/{createResult.Id}/json", cts.Token);
@@ -116,12 +141,53 @@ public sealed class DockerSandbox : ISandbox
                 exitCode = inspectResult?.ExitCode ?? 0;
             }
 
-            return new CommandResult(exitCode, rawOutput.Stdout, rawOutput.Stderr);
+            return new CommandResult(exitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return new CommandResult(-1, "", "Command timed out");
+            // Mirrors the Local provider contract: the timeout notice is a prefix, never a
+            // substitute. A command that hung mid-stream has usually already said why on
+            // stderr, and that is the only evidence of where it stopped.
+            var notice = $"Command timed out after {_commandTimeout.TotalSeconds:0.##}s.";
+            var tail = stderrBuilder.ToString();
+            return new CommandResult(-1, stdoutBuilder.ToString(),
+                string.IsNullOrWhiteSpace(tail) ? notice : $"{notice} {tail}");
         }
+    }
+
+    /// <summary>
+    /// Wrap a command so the container terminates it when it outruns the timeout.
+    /// </summary>
+    /// <remarks>
+    /// The Docker Engine API has no kill-exec endpoint: once we stop reading the exec
+    /// stream the process inside the container keeps running, still holding the
+    /// <c>PidsLimit</c>, memory and CPU quota the caller believes it released on
+    /// timeout. Repeated timeouts therefore leak the container to exhaustion while
+    /// every call site was told the work had ended. Delegating the kill to the
+    /// container's own <c>timeout</c> is the only mechanism that survives us walking away.
+    /// <para>
+    /// Two deliberate choices: the wrapper degrades to running the command unchanged
+    /// when the image ships no <c>timeout</c> (an image without coreutils/busybox must
+    /// not lose the ability to run commands at all - it just keeps the old leak), and
+    /// <c>-s KILL</c> is used because by the time this fires we have already abandoned
+    /// the result, so there is nothing to gain from a graceful shutdown. GNU
+    /// <c>timeout</c> signals the whole process group, busybox only the direct child;
+    /// grandchildren of a busybox image can still survive.
+    /// </para>
+    /// </remarks>
+    private string WrapWithInContainerTimeout(string command)
+    {
+        // No positive budget means "do not time out" (TimeSpan.Zero or Timeout.InfiniteTimeSpan,
+        // both of which CancelAfter treats as never-cancel). There is no deadline to hand the
+        // container, and inventing one would kill commands the caller deliberately left unbounded.
+        if (_commandTimeout <= TimeSpan.Zero) return command;
+
+        var seconds = (long)Math.Ceiling((_commandTimeout + InContainerTimeoutGrace).TotalSeconds);
+        var inner = EscapeSingleQuotes(command);
+
+        return $"if command -v timeout >/dev/null 2>&1; then "
+             + $"timeout -s KILL {seconds} /bin/sh -c '{inner}'; "
+             + $"else /bin/sh -c '{inner}'; fi";
     }
 
     public async Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
@@ -306,15 +372,17 @@ public sealed class DockerSandbox : ISandbox
     }
 
     /// <summary>
-    /// Read Docker exec multiplexed output stream into stdout/stderr.
+    /// Read Docker exec multiplexed output stream into the caller's stdout/stderr builders.
     /// Docker multiplexed stream format: [8-byte header][payload]
     /// Header: [stream type (1 byte)][0,0,0][size (4 bytes big-endian)]
     /// </summary>
-    private async Task<(string Stdout, string Stderr)> ReadOutputAsync(HttpResponseMessage response, CancellationToken ct)
+    /// <remarks>
+    /// The builders belong to the caller so that a cancellation part-way through a long
+    /// running command still surfaces the output collected up to that point.
+    /// </remarks>
+    private async Task ReadOutputAsync(HttpResponseMessage response,
+        StringBuilder stdout, StringBuilder stderr, CancellationToken ct)
     {
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         var header = new byte[8];
 
@@ -339,8 +407,6 @@ public sealed class DockerSandbox : ISandbox
             if (target.Length < _maxOutputSize)
                 target.Append(text);
         }
-
-        return (stdout.ToString(), stderr.ToString());
     }
 
     private static async Task<int> ReadExactAsync(Stream stream, byte[] buffer, CancellationToken ct)
@@ -355,7 +421,12 @@ public sealed class DockerSandbox : ISandbox
         return totalRead;
     }
 
-    private static string EscapePath(string path) => path.Replace("'", "'\\''");
+    /// <summary>
+    /// Escape a value for embedding inside a single-quoted POSIX shell word.
+    /// </summary>
+    private static string EscapeSingleQuotes(string value) => value.Replace("'", "'\\''");
+
+    private static string EscapePath(string path) => EscapeSingleQuotes(path);
 
     // Docker API response models
     private sealed class DockerExecCreateResponse

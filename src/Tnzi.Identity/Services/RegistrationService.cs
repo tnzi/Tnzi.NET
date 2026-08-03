@@ -16,6 +16,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly IUserDetailService? _userDetailService;
     private readonly ITokenService? _tokenService;
     private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
+    private readonly ILoginGuardEvaluator? _loginGuardEvaluator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -34,7 +35,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
         ITokenService? tokenService = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        ILoginSessionCoordinator? loginSessionCoordinator = null)
+        ILoginSessionCoordinator? loginSessionCoordinator = null,
+        ILoginGuardEvaluator? loginGuardEvaluator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -47,6 +49,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         _userDetailService = userDetailService;
         _tokenService = tokenService;
         _loginSessionCoordinator = loginSessionCoordinator;
+        _loginGuardEvaluator = loginGuardEvaluator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -126,6 +129,19 @@ public class RegistrationService : ApplicationService, IRegistrationService
         if (_tokenService == null)
         {
             return Fail<TokenResult>("Token service is not available", 500);
+        }
+
+        // 凭据之外的准入策略。注册后自动登录同样要过，否则「先注册一个号」
+        // 就成了绕开 IP 白名单 / 时段限制的旁路。被拒时账号已建好，只是这一次
+        // 不签发令牌——用户改从允许的位置正常登录即可。
+        if (_loginGuardEvaluator is { HasGuards: true })
+        {
+            var guardResult = await _loginGuardEvaluator.EvaluateAsync(new LoginGuardContext(
+                user, LoginMethod.Registration, ScopedContext?.ClientIpAddress, ScopedContext?.UserAgent));
+            if (!guardResult.Allowed)
+            {
+                return Fail<TokenResult>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+            }
         }
 
         // 注册后自动登录：建立登录会话（首登录无既有会话，策略平凡通过）

@@ -18,7 +18,7 @@ import { ref, watch } from 'vue'
 import { NBadge } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { ChatNewMessageEffect } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 const props = withDefaults(
   defineProps<{

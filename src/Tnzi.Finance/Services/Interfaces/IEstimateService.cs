@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 报价单服务（**不过账单据**：草稿 → 发出 → 接受/拒绝 → 转发票）

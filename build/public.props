@@ -19,7 +19,12 @@
     <!-- Tnzi.snk 公钥投影(sn -p + sn -tp 提取)。InternalsVisibleTo 声明统一引用
          $(TnziPublicKey),密钥轮换只改这一处;friend 测试项目须以同一 snk 签名。 -->
     <TnziPublicKey>002400000480000014010000060200000024000052534131000800000100010011744aa503fc0ddf73742d905de52c8f3f603a8e3e29be5b07a8387fb017855ff7500cb2c454296674ea41c791dcf0ae98f8834d7f3904eda080296b80d8fdcb234add10d1308216fa30ecb077ba551edaada0a922e033bd3e6f97b1fcbbf82f6141eebb4ada95885103b24ac918dc52ed5ce84113360a07d808763f7fc8031abd30ff48f4653bf49cea8e1ccd1c9af39956d344c930e29c08b7f30a9de61d088a9c0ad3afec5ea0782005b8458390ed5ac01117bc59cb1eb1debdc823573ede6cd638ece6b31e7261aba736dd205739190ba6a762b9e41ee6d012133ce5efb611b1e36b84db04987b763297affed4516d740a5bf8e4e4850fffeaf584d56899</TnziPublicKey>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- 必须为 true：①发布的 NuGet 包带 XML 文档，消费者才有 IntelliSense；
+         ②IDE0005（多余 using）只有在生成 XML 文档时才会在 build 阶段报出（dotnet/roslyn#41640），
+         设为 false 会让根 Directory.Build.props 的 EnforceCodeStyleInBuild 对 using 清理静默失效。
+         本文件经 src/Directory.Build.props 在根 props **之后**导入，故这里的值是 src 下的最终值。
+         CS1591（公共成员缺注释）已在下方 NoWarn 抑制。 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PublishRepositoryUrl>false</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <IncludeSymbols>false</IncludeSymbols>

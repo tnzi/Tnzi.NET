@@ -63,6 +63,47 @@ function makeHiddenParentRouter(): Router {
   })
 }
 
+// Mirrors the preset's Settings Center / User Center: top-level shell entries
+// that are `hideInMenu` (opened from the header avatar / the sidebar gear, not
+// from a menu row) and carry NO activeMenu. Before the fix the matched-walk
+// dropped them as "hidden" and the breadcrumb rendered nothing at all.
+function makeHiddenLeafRouter(): Router {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: '/admin',
+        name: 'admin-root',
+        component: Blank,
+        children: [
+          { path: 'settings', name: 'settings', component: Blank, meta: { title: 'Settings', hideInMenu: true } },
+          { path: 'user-center', name: 'user-center', component: Blank, meta: { title: 'User Center', hideInMenu: true } },
+        ],
+      },
+    ],
+  })
+}
+
+// A consumer deploying at the domain root passes `basePath: '/'`, which
+// rewrites the shell root's path. Matching it by path alone let it through as
+// a crumb.
+function makeRootBasePathRouter(): Router {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: '/',
+        name: 'admin-root',
+        component: Blank,
+        meta: { title: 'Admin' },
+        children: [
+          { path: 'dashboard', name: 'dashboard', component: Blank, meta: { title: 'Dashboard' } },
+        ],
+      },
+    ],
+  })
+}
+
 const stubs = {
   Breadcrumb: { template: '<div class="nb"><slot /></div>' },
   BreadcrumbItem: { template: '<span class="nbi"><slot /></span>' },
@@ -103,6 +144,24 @@ describe('TAdminAutoBreadcrumb', () => {
     const wrapper = await mountAt('/admin/matters/9', makeHiddenParentRouter())
     const labels = wrapper.findAll('.nbi').map((i) => i.text())
     expect(labels).toEqual(['Files', 'File'])
+  })
+
+  it('keeps a hideInMenu LEAF - the current page is never noise', async () => {
+    // Regression: Settings / User Center rendered an EMPTY breadcrumb because
+    // the page itself was filtered out as "hidden".
+    const router = makeHiddenLeafRouter()
+    const settings = await mountAt('/admin/settings', router)
+    expect(settings.findAll('.nbi').map((i) => i.text())).toEqual(['Settings'])
+
+    const account = await mountAt('/admin/user-center', router)
+    expect(account.findAll('.nbi').map((i) => i.text())).toEqual(['User Center'])
+  })
+
+  it('drops the shell root by name so a custom basePath does not add a crumb', async () => {
+    const wrapper = await mountAt('/dashboard', makeRootBasePathRouter())
+    const labels = wrapper.findAll('.nbi').map((i) => i.text())
+    // Not ['Admin', 'Dashboard'] - the root renders chrome, not a page.
+    expect(labels).toEqual(['Dashboard'])
   })
 
   it('renders a page-contributed full trail (cross-entity drill)', async () => {

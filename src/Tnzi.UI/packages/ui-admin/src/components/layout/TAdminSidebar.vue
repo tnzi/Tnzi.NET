@@ -11,7 +11,7 @@ import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import TSidebarSettingsFooter from './TSidebarSettingsFooter.vue'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 /**
  * Resolve a menu label. If it looks like an i18n key (`admin.*` or

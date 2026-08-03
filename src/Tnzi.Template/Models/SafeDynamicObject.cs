@@ -41,11 +41,22 @@ public class SafeDynamicObject : DynamicObject
     }
 
     /// <summary>
-    /// 转换值（嵌套字典转换为 SafeDynamicObject）
+    /// 转换值（JSON 元素归一为 CLR 原生类型，嵌套字典转换为 SafeDynamicObject）
     /// </summary>
     private static object? ConvertValue(object? value)
     {
         if (value == null) return null;
+
+        // 模板变量经 HTTP 传入时（Dictionary<string, object> 的 JSON 反序列化结果）每个值
+        // 都是 JsonElement。它不是 string/bool/int，模板里任何类型化运算都会在运行期抛异常
+        // （@Model.Flag == true 抛 "Operator '==' cannot be applied to operands of type
+        // 'JsonElement' and 'bool'"，string.IsNullOrEmpty(@Model.Url) 抛无匹配重载），
+        // 只有纯输出（走 ToString）才侥幸可用。这里先归一成原生类型，让「进程内直接传
+        // C# 值」与「经 API 传 JSON」两条路径对模板等价。
+        if (value is JsonElement element)
+        {
+            return ConvertJsonElement(element);
+        }
 
         // 处理非可空字典
         if (value is IDictionary<string, object> dict)
@@ -60,6 +71,55 @@ public class SafeDynamicObject : DynamicObject
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// 将 JsonElement 归一为 CLR 原生类型（对象递归为 SafeDynamicObject，数组递归为 List）
+    /// </summary>
+    private static object? ConvertJsonElement(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                return null;
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.String:
+                return element.GetString();
+            case JsonValueKind.Number:
+                return ConvertJsonNumber(element);
+            case JsonValueKind.Object:
+                var members = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in element.EnumerateObject())
+                {
+                    members[property.Name] = ConvertJsonElement(property.Value);
+                }
+                return FromNullableDictionary(members);
+            case JsonValueKind.Array:
+                var items = new List<object?>();
+                foreach (var item in element.EnumerateArray())
+                {
+                    items.Add(ConvertJsonElement(item));
+                }
+                return items;
+            default:
+                return element.ToString();
+        }
+    }
+
+    /// <summary>
+    /// 归一 JSON 数值：按 int → long → decimal → double 逐级放宽，保留整数的整数形态
+    /// （模板里的 @Model.Count 等值比较依赖它不是 double）
+    /// </summary>
+    private static object ConvertJsonNumber(JsonElement element)
+    {
+        if (element.TryGetInt32(out var intValue)) return intValue;
+        if (element.TryGetInt64(out var longValue)) return longValue;
+        if (element.TryGetDecimal(out var decimalValue)) return decimalValue;
+        return element.GetDouble();
     }
 
     /// <summary>

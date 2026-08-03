@@ -127,7 +127,7 @@ import {
   NTag,
 } from 'naive-ui'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
-import { type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/row-actions'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
@@ -142,7 +142,7 @@ import {
   type UserFailedLoginSummaryDto,
 } from '../../services/bridges/login-security-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { makePageTranslator } from '../_shared/translate'
 
 const client = useAdminClient()

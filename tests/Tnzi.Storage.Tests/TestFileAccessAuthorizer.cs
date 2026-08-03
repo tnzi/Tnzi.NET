@@ -11,12 +11,23 @@ public sealed class TestFileAccessAuthorizer : IFileAccessAuthorizer
 {
     private readonly bool _canRead;
     private readonly bool _canWrite;
+    private readonly HashSet<Guid>? _readableIds;
 
     public TestFileAccessAuthorizer(bool canRead = true, bool canWrite = true)
     {
         _canRead = canRead;
         _canWrite = canWrite;
     }
+
+    private TestFileAccessAuthorizer(HashSet<Guid> readableIds)
+    {
+        _readableIds = readableIds;
+        _canRead = false;
+        _canWrite = false;
+    }
+
+    /// <summary>只放行指定文件的读,用于验证批量路径逐个判定而不是一刀切。</summary>
+    public static TestFileAccessAuthorizer ReadableOnly(params Guid[] fileIds) => new(fileIds.ToHashSet());
 
     /// <summary>读写全放行,用于与访问控制无关的存储逻辑用例。</summary>
     public static TestFileAccessAuthorizer AllowAll() => new(canRead: true, canWrite: true);
@@ -28,7 +39,7 @@ public sealed class TestFileAccessAuthorizer : IFileAccessAuthorizer
     public static TestFileAccessAuthorizer DenyAll() => new(canRead: false, canWrite: false);
 
     public Task<bool> CanReadAsync(FileRecord record, CancellationToken cancellationToken = default)
-        => Task.FromResult(_canRead);
+        => Task.FromResult(_readableIds?.Contains(record.Id) ?? _canRead);
 
     public Task<bool> CanWriteAsync(FileRecord record, CancellationToken cancellationToken = default)
         => Task.FromResult(_canWrite);

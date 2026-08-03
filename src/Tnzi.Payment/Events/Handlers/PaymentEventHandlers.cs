@@ -21,28 +21,42 @@ public class PaymentCompletedEventHandler : IEventHandler<PaymentCompletedEvent>
     }
 
     // 不再吞异常：发票自动生成失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底。
+    // CreateFromPaymentAsync 已按 PaymentId 幂等，重试不会产生重复发票。
     public async Task HandleAsync(PaymentCompletedEvent eventData, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
             "Payment completed. TradeNo: {TradeNo}, Amount: {Amount} {Currency}",
             eventData.TradeNo, eventData.Amount, eventData.Currency);
 
-        // 自动生成发票
-        if (_invoiceService != null
-            && _invoiceOptions?.CurrentValue is { Enabled: true, AutoSendOnPayment: true })
+        if (_invoiceService == null || _invoiceOptions?.CurrentValue is not { Enabled: true } options)
+            return;
+
+        var invoiceResult = await _invoiceService.CreateFromPaymentAsync(
+            eventData.PaymentId, null, cancellationToken);
+
+        if (!invoiceResult.Succeeded || invoiceResult.Data == null)
         {
-            var invoiceResult = await _invoiceService.CreateFromPaymentAsync(
-                eventData.PaymentId, null, cancellationToken);
+            _logger.LogWarning(
+                "Invoice auto-creation failed. TradeNo: {TradeNo}, Error: {Error}",
+                eventData.TradeNo, invoiceResult.Message);
+            return;
+        }
 
-            if (invoiceResult.Succeeded && invoiceResult.Data != null)
-            {
-                _logger.LogInformation(
-                    "Invoice auto-created from payment. InvoiceId: {InvoiceId}, TradeNo: {TradeNo}",
-                    invoiceResult.Data.Id, eventData.TradeNo);
+        _logger.LogInformation(
+            "Invoice auto-created from payment. InvoiceId: {InvoiceId}, TradeNo: {TradeNo}",
+            invoiceResult.Data.Id, eventData.TradeNo);
 
-                // 自动发送发票
-                await _invoiceService.SendAsync(invoiceResult.Data.Id, null, null, cancellationToken);
-            }
+        if (!options.AutoSendOnPayment)
+            return;
+
+        // 发送结果此前被整个丢弃：发票"生成了但一直发不出去"在日志里毫无痕迹。
+        // 这里显式记录失败，无收件人属于数据缺失（重试也没用），不抛出以免打满 DLQ。
+        var sendResult = await _invoiceService.SendAsync(invoiceResult.Data.Id, null, null, cancellationToken);
+        if (!sendResult.Succeeded)
+        {
+            _logger.LogError(
+                "Invoice created but delivery failed. InvoiceId: {InvoiceId}, TradeNo: {TradeNo}, Error: {Error}",
+                invoiceResult.Data.Id, eventData.TradeNo, sendResult.Message);
         }
     }
 }

@@ -6,7 +6,7 @@
 import { NInput, NButton, NTooltip } from 'naive-ui';
 import { ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
+import { useAiI18n } from '../../i18n/index';
 const t = useAiI18n();
 
 const props = defineProps<{

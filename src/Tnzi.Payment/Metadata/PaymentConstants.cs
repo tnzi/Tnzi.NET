@@ -116,6 +116,76 @@ public static class PaymentConstants
 
     #endregion
 
+    #region 回调参数保留键
+
+    /// <summary>
+    /// 回调保留键前缀。回调控制器把 HTTP header 与请求体字段放进同一个字典，
+    /// 带此前缀的键由框架写入（原始报文、签名头等），解析请求体时必须跳过同名字段，
+    /// 否则渠道报文里出现同名字段就能顶掉签名验证所依赖的原始值。
+    /// </summary>
+    public const string CallbackReservedKeyPrefix = "__";
+
+    /// <summary>
+    /// 回调原始请求体（签名验证基准）
+    /// </summary>
+    public const string CallbackRawBodyKey = "__raw_body";
+
+    /// <summary>
+    /// Stripe 签名头
+    /// </summary>
+    public const string CallbackStripeSignatureKey = "__stripe_signature";
+
+    /// <summary>
+    /// PayPal 传输ID
+    /// </summary>
+    public const string CallbackPayPalTransmissionIdKey = "__paypal_transmission_id";
+
+    /// <summary>
+    /// PayPal 传输时间
+    /// </summary>
+    public const string CallbackPayPalTransmissionTimeKey = "__paypal_transmission_time";
+
+    /// <summary>
+    /// PayPal 传输签名
+    /// </summary>
+    public const string CallbackPayPalTransmissionSigKey = "__paypal_transmission_sig";
+
+    /// <summary>
+    /// PayPal 证书地址
+    /// </summary>
+    public const string CallbackPayPalCertUrlKey = "__paypal_cert_url";
+
+    /// <summary>
+    /// PayPal 签名算法
+    /// </summary>
+    public const string CallbackPayPalAuthAlgoKey = "__paypal_auth_algo";
+
+    #endregion
+
+    #region 渠道代码常量
+
+    /// <summary>
+    /// Stripe 渠道
+    /// </summary>
+    public const string StripeChannelCode = "Stripe";
+
+    /// <summary>
+    /// PayPal 渠道
+    /// </summary>
+    public const string PayPalChannelCode = "PayPal";
+
+    /// <summary>
+    /// 线下渠道（银行转账/现金/支票等由人工确认收款的方式）
+    /// </summary>
+    public const string OfflineChannelCode = "Offline";
+
+    /// <summary>
+    /// 测试渠道
+    /// </summary>
+    public const string NullChannelCode = "Null";
+
+    #endregion
+
     #region 缓存键常量
 
     /// <summary>

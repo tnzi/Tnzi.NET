@@ -8,7 +8,7 @@
 import { NCard, NButton } from 'naive-ui';
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
+import { useAiI18n } from '../../i18n/index';
 import TShimmer from '../streaming/TShimmer.vue';
 
 const t = useAiI18n();

@@ -1,8 +1,3 @@
-using Shouldly;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using Tnzi.Imaging;
-using Xunit;
 
 namespace Tnzi.Imaging.Tests;
 

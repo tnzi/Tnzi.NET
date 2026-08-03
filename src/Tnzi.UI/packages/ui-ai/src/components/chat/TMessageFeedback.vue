@@ -9,7 +9,7 @@
 import { NButton, NTooltip, NInput } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
+import { useAiI18n } from '../../i18n/index';
 export type FeedbackValue = 'positive' | 'negative' | null;
 
 const props = defineProps<{

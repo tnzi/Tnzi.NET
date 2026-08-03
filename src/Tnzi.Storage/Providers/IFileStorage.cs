@@ -13,8 +13,18 @@ public interface IFileStorage
     /// <summary>
     /// 上传文件
     /// </summary>
+    /// <remarks>
+    /// ★ 流的生命周期归调用方所有：实现**不得** dispose / close 传入的 <paramref name="stream"/>。
+    /// 调用方在上传之后往往还要用这个流（最典型的是取 <c>Length</c> 写进文件记录），
+    /// provider 提前关掉它，调用方就会拿到 <see cref="ObjectDisposedException"/>。
+    /// 使用会自动接管流的 SDK 时必须显式关掉那个行为
+    /// （例如 AWS SDK 的 <c>PutObjectRequest.AutoCloseStream</c> 默认为 <c>true</c>，须置为 <c>false</c>）。
+    /// <para>
+    /// 反过来，调用方也不应假设上传后流的位置：实现会把流读到末尾，需要复用时自行 <c>Seek</c>。
+    /// </para>
+    /// </remarks>
     /// <param name="fileName">文件名</param>
-    /// <param name="stream">文件流</param>
+    /// <param name="stream">文件流（由调用方负责释放）</param>
     /// <param name="contentType">内容类型</param>
     /// <returns>文件路径或URL</returns>
     Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null);

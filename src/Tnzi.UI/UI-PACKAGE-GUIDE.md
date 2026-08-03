@@ -6,7 +6,7 @@
 
 1. [核心原则](#核心原则)
 2. [目录结构](#目录结构)
-3. [Playground 规范](#playground-规范)
+3. [实战验证规范](#实战验证规范)
 4. [适配器开发](#适配器开发)
 5. [Store 包装](#store-包装)
 6. [组件开发](#组件开发)
@@ -46,7 +46,7 @@ UI 包中的代码应尽可能薄：
 - `MessageAdapter` — 消息/Toast
 - `DialogAdapter` — 对话框
 - `ThemeAdapter` — 主题切换
-- `ILoginFormProps` / `ILoginFormEmits` — 组件接口
+- `types/shared-ui` 的 11 个 UI 契约类型（`ITableColumn` / `IMenuItem` / `IFormRule` …）
 - `useAuthStore()` / `useUserStore()` / `useAppStore()` — Store 接口
 
 用户切换 UI 框架时，只需更换 import 路径，业务代码无需修改。
@@ -80,13 +80,13 @@ packages/{ui-package}/
 │   │   ├── auth/
 │   │   │   └── TLoginForm.vue
 │   │   ├── data/
-│   │   │   ├── TDataTable.vue
+│   │   │   ├── TTable.vue
 │   │   │   └── TDataList.vue
 │   │   ├── form/
 │   │   │   ├── TForm.vue
 │   │   │   └── TSearchForm.vue
 │   │   └── layout/
-│   │       └── TAdminLayout.vue
+│   │       └── TAppShell.vue
 │   ├── composables/              # UI 框架特定的 hooks
 │   │   ├── index.ts
 │   │   └── useTheme.ts
@@ -94,13 +94,6 @@ packages/{ui-package}/
 │   │   └── index.ts
 │   └── styles/                   # 全局样式 (可选)
 │       └── index.css
-├── playground/                   # Playground 演示应用 (必须)
-│   ├── package.json
-│   ├── vite.config.ts
-│   ├── index.html
-│   └── src/
-│       ├── main.ts
-│       └── App.vue               # 大杂烩展示页
 └── __tests__/                    # 测试文件
     ├── adapters/
     ├── stores/
@@ -122,227 +115,72 @@ packages/{ui-package}/
 | `src/adapters/dialog.ts` | DialogAdapter 实现 |
 | `src/adapters/theme.ts` | ThemeAdapter 实现 |
 | `src/resolvers/index.ts` | 组件解析器 |
-| `playground/` | Playground 演示应用（见下节） |
+| `__tests__/` | 单测 + 公开面约定测试 |
 
 ---
 
-## Playground 规范
+## 实战验证规范
 
-### Playground 作用
+### 为什么不再有 playground
 
-每个 UI 包 **必须** 提供 `playground/` 目录，用于：
+包内 `playground/` 已于 2026-08-01 全部移除。理由：playground 是**为演示而写的假消费方**——它自己决定用什么数据、什么路由、什么主题，于是包里真正难用的地方（样板多少、契约缺不缺、默认值合不合理）在 playground 里永远不会疼。一个真实业务应用才会疼。
 
-1. **功能展示** — 展示所有 T* 组件和适配器
-2. **开发调试** — 实时预览组件开发效果
-3. **交互测试** — 测试适配器、Store、组件的交互行为
-4. **文档补充** — 作为可运行的示例代码
+现在唯一的实战示例是 **Acme**（同仓库 `projects/acme/`），它以 `ProjectReference` + `pnpm link` 直接消费 `@tnzi/*` 的 `dist`，和外部消费方走同一条路径。
 
-**注意：** `@tnzi/core` 是纯逻辑层，无 UI 可展示，因此 **不需要** playground。
+### Acme 应用与包的对应关系
 
-### Playground 目录结构
+| Acme 应用 | 路径 | 端口 | 主要验证的包 |
+| --- | --- | --- | --- |
+| `@acme/admin` | `projects/acme/src/Acme.UI/admin` | 6175 | `@tnzi/ui-admin` + `@tnzi/ui` + `@tnzi/core` |
+| `@acme/chat` | `projects/acme/src/Acme.UI/chat` | 6174 | `@tnzi/ui-ai` + `@tnzi/core` |
+| `@acme/site` | `projects/acme/src/Acme.UI/site` | 6173 | `@tnzi/ui` + `@tnzi/core` |
+| `Acme.Api` | `projects/acme/src/Acme.Api` | 6000 | 后端契约（bridge 的另一端） |
 
-```
-packages/{ui-package}/playground/
-├── package.json           # playground 独立依赖
-├── vite.config.ts         # Vite 配置
-├── index.html             # HTML 入口
-├── tsconfig.json          # TypeScript 配置（可选）
-├── .gitignore             # 忽略 node_modules, dist
-└── src/
-    ├── main.ts            # 应用入口
-    └── App.vue            # 大杂烩展示页
-```
+`@tnzi/mobile` 目前没有对应的 Acme 应用，改动只能靠单测 + `pnpm -C packages/mobile dev` 的 watch 构建验证。**这是已知缺口**，新增移动端界面前应先补一个消费方。
 
-### Playground 必要文件
+### 改包之后的验证流程
 
-#### 1. package.json
+1. **重建 dist** —— 消费方读 `dist` 不读 `src`，不重建等于没改：
 
-```json
-{
-  "name": "@tnzi/{ui-package}-playground",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@tnzi/{ui-package}": "workspace:*",
-    "@tnzi/core": "workspace:*",
-    "vue": "^3.5.0",
-    "pinia": "^2.2.0",
-    "{ui-library}": "^x.x.x"  // naive-ui / vant / 等
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
-    "typescript": "^5.9.3",
-    "vite": "^5.4.0"
-  }
-}
-```
-
-#### 2. vite.config.ts
-
-```typescript
-import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-
-export default defineConfig({
-  plugins: [vue()],
-  server: {
-    port: 3004,  // shadcn: 3002, vant: 3003, naive-ui: 3004
-  },
-  resolve: {
-    alias: {
-      '@tnzi/core': '../../core/src',  // 开发时指向源码
-    },
-  },
-});
-```
-
-#### 3. src/main.ts
-
-```typescript
-import { createApp } from 'vue';
-import { createPinia } from 'pinia';
-import Tnzi{Package} from '@tnzi/{ui-package}';
-import App from './App.vue';
-
-const app = createApp(App);
-
-app.use(createPinia());
-app.use(Tnzi{Package});
-
-app.mount('#app');
-```
-
-#### 4. src/App.vue — 大杂烩展示页
-
-**设计原则：**
-- **单页集中展示** — 不使用路由，所有功能在一个页面
-- **分区域组织** — 使用卡片/面板区分不同功能模块
-- **交互式演示** — 每个功能提供按钮触发，显示实时结果
-- **参考示例：** `packages/mobile/playground/src/App.vue`
-
-**必须展示的内容：**
-
-1. **适配器示例**
-   - MessageAdapter (info/success/warning/error 消息)
-   - DialogAdapter (alert/confirm 对话框)
-   - ThemeAdapter (主题切换：light/dark/system)
-
-2. **Pinia Stores**
-   - useAuthStore (登录/登出、Token 状态)
-   - useUserStore (用户信息、偏好设置)
-   - useAppStore (主题、语言、加载状态)
-
-3. **T* 业务组件**
-   - 已开发的所有 T* 组件（TLoginForm, TDataTable 等）
-   - 每个组件提供交互示例
-
-4. **原生 UI 框架组件**
-   - 展示该 UI 框架的代表性组件（证明框架正常工作）
-   - 示例：
-     - shadcn: Button, Card, Form, Table
-     - vant: Button, Cell, Card, NavBar
-     - naive-ui: Button, Card, Form, DataTable
-
-**代码示例（结构）：**
-
-```vue
-<template>
-  <div class="playground">
-    <header>
-      <h1>@tnzi/{ui-package} Playground</h1>
-      <button @click="toggleTheme">切换主题</button>
-    </header>
-
-    <!-- 1. 适配器示例 -->
-    <section class="section">
-      <h2>适配器示例</h2>
-      <div class="buttons">
-        <button @click="showMessage">消息</button>
-        <button @click="showDialog">对话框</button>
-      </div>
-    </section>
-
-    <!-- 2. Pinia Stores -->
-    <section class="section">
-      <h2>Pinia Stores</h2>
-      <div>{{ authStore.isAuthenticated ? '已登录' : '未登录' }}</div>
-      <button @click="authStore.login(...)">登录</button>
-    </section>
-
-    <!-- 3. T* 业务组件 -->
-    <section class="section">
-      <h2>T* 业务组件</h2>
-      <TLoginForm @submit="onLogin" />
-      <TDataTable :data="tableData" :columns="columns" />
-    </section>
-
-    <!-- 4. 原生组件 -->
-    <section class="section">
-      <h2>原生组件示例</h2>
-      <!-- Vant: <van-button>, <van-card> -->
-      <!-- Naive UI: <n-button>, <n-card> -->
-    </section>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { useAuthStore, useAppStore } from '@tnzi/{ui-package}';
-import { ref } from 'vue';
-
-const authStore = useAuthStore();
-const appStore = useAppStore();
-
-function toggleTheme() {
-  appStore.setTheme(appStore.theme === 'light' ? 'dark' : 'light');
-}
-
-function showMessage() {
-  // 使用适配器显示消息
-}
-// ...
-</script>
-```
-
-### Playground 开发指南
-
-1. **启动 Playground**
    ```bash
-   cd packages/{ui-package}/playground
-   pnpm dev
+   pnpm -C src/Tnzi.UI --filter @tnzi/ui-admin build
    ```
 
-2. **构建验证**
-   ```bash
-   pnpm build
-   pnpm preview
+2. **拉起 Acme** —— 用 `/acme-up` 技能，它会增量重建 `@tnzi/*`、按需清 Vite 缓存、杀掉占端口的进程、阻塞到端口真的在监听：
+
+   ```
+   /acme-up restart admin
    ```
 
-3. **迭代开发流程**
-   - 开发新组件 → 在 playground/App.vue 中添加演示
-   - 修改适配器 → 在 playground 中测试效果
-   - 添加新功能 → 在 playground 中展示用法
+3. **在真实页面上验证** —— 走一遍受影响的流程（登录、CRUD、详情、主题切换），而不是只看组件孤立渲染。
 
-4. **最佳实践**
-   - 保持 App.vue 简洁，使用计算属性和组合式函数
-   - 使用 `<section class="section">` 划分功能区域
-   - 添加交互按钮，避免纯静态展示
-   - 显示状态数据（如 store 状态、组件 emit 事件）
+4. **消费方 typecheck 必须绿** —— 这是破坏性变更的唯一硬约束：
 
-### Playground 示例对比
+   ```bash
+   pnpm -C projects/acme/src/Acme.UI typecheck
+   ```
 
-| 包 | Playground 质量 | 改进建议 |
-|----|----------------|---------|
-| vant | ✅ 优秀 | 已完整展示所有功能，作为模板 |
-| naive-ui | ✅ 良好 | 新创建，功能完整 |
-| shadcn | ⚠️ 需改进 | 目前仅测试 i18n，需补充适配器/Store/组件展示 |
+### 组件开发期的快速反馈
 
-**参考模板：** `packages/mobile/playground/src/App.vue` （最佳实践）
+不需要每次都起整个 Acme：
+
+```bash
+# 库 watch 构建，改 src 自动出 dist，Acme 的 Vite 会热更
+pnpm -C src/Tnzi.UI --filter @tnzi/ui-admin dev
+```
+
+配合已在 Acme 里跑着的 dev server，改动几秒内可见。
+
+### 新组件的最低验收
+
+| 项 | 要求 |
+| --- | --- |
+| 单测 | `__tests__/` 下有 mount + 交互断言 |
+| 公开面 | 进 barrel，且被 `publicApi.test.ts` 约定测试覆盖 |
+| 真实使用 | 在 Acme 的至少一个页面里被实际用上，而不是只有测试用 |
+| 消费方编译 | Acme `typecheck` 绿 |
+
+「只有测试用到」的组件按未消费处理——通用性不是入选理由，被复用才是。
 
 ---
 
@@ -499,23 +337,25 @@ export const useAuthStore = defineStore('auth', () => {
 
 ## 组件开发
 
-### 组件接口 (定义在 core)
+### 组件接口
+
+**Props/Emits 默认内联 `defineProps<{...}>()` / `defineEmits<{...}>()`**，不必往 core 抬。
+
+只有**跨包共享的 UI 契约类型**才放进 core，且落点是 **`@tnzi/core/types/shared-ui`** —— 注意
+**core 没有 `components` 子路径也没有 `components/` 目录**（见 `packages/core/CLAUDE.md`），
+早期文档里的 `@tnzi/core/components` 从来不存在，照着写会解析失败。
+
+`types/shared-ui` 当前提供 11 个接口：
 
 ```typescript
-// @tnzi/core/components/auth.ts
-export interface ILoginFormProps {
-  loading?: boolean;
-  disabled?: boolean;
-  showRememberMe?: boolean;
-  showForgotPassword?: boolean;
-  title?: string;
-}
-
-export interface ILoginFormEmits {
-  (e: 'submit', data: { userName: string; password: string; rememberMe: boolean }): void;
-  (e: 'forgotPassword'): void;
-}
+import type {
+  ITableColumn, IFormRule, IDynamicFormField, IPaginationConfig,
+  IMenuItem, ISwipeAction, ITabItem, IBreadcrumbItem,
+  IDataQuery, IDataLoadState, IWebPagerConfig,
+} from '@tnzi/core/types/shared-ui';
 ```
+
+判据：**这个类型会被第二个包 import 吗？** 会 → `types/shared-ui`；不会 → 就地内联。
 
 ### 组件实现模板
 
@@ -524,19 +364,26 @@ export interface ILoginFormEmits {
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
-import type { ILoginFormProps, ILoginFormEmits } from '@tnzi/core/components';
+import type { ITableColumn, IFormRule } from '@tnzi/core/types/shared-ui';
 // 导入 UI 框架原子组件
 import { NForm, NFormItem, NInput, NButton, NCheckbox } from 'naive-ui';
 
 const { t } = useI18n();
 
-const props = withDefaults(defineProps<ILoginFormProps>(), {
+const props = withDefaults(defineProps<{
+  loading?: boolean;
+  showRememberMe?: boolean;
+  showForgotPassword?: boolean;
+}>(), {
   showRememberMe: true,
   showForgotPassword: true,
   loading: false,
 });
 
-const emit = defineEmits<ILoginFormEmits>();
+const emit = defineEmits<{
+  submit: [data: { userName: string; password: string; rememberMe: boolean }];
+  forgotPassword: [];
+}>();
 
 // 本地表单状态
 const username = ref('');
@@ -574,7 +421,7 @@ const handleSubmit = () => {
 ### 使用 Headless 控制器的组件
 
 ```vue
-<!-- packages/{ui-package}/src/components/data/TDataTable.vue -->
+<!-- packages/{ui-package}/src/components/data/TTable.vue -->
 <script setup lang="ts">
 import { DataQueryController } from '@tnzi/core/headless';
 import type { ITableColumn, IPaginationConfig } from '@tnzi/core/types/shared-ui';
@@ -626,8 +473,8 @@ const controller = props.controller ?? new DataQueryController({
 
 ### 组件开发规则
 
-1. **Props/Emits 接口必须定义在 `@tnzi/core/components`**
-2. **组件文件名使用 `T` 前缀**: `TLoginForm.vue`, `TDataTable.vue`
+1. **Props/Emits 默认就地内联**；只有跨包共享的契约类型才进 `@tnzi/core/types/shared-ui`
+2. **组件文件名使用 `T` 前缀**: `TLoginForm.vue`, `TTable.vue`
 3. **组件内不调用 API**，通过 props 接收数据或使用 headless 控制器
 4. **组件内不包含业务逻辑**，只做视图渲染和事件转发
 5. **使用 `useI18n()` 获取翻译函数**，不硬编码文字
@@ -689,7 +536,7 @@ export function createTnziXxx(options: TnziXxxOptions = {}): Plugin {
 
 ### Plugin 规则
 
-1. **工厂函数命名**: `createTnzi{Framework}` — `createTnziShadcn`, `createTnziMobile`, `createTnziNaiveUi`
+1. **工厂函数命名**: `createTnzi{Package}` — 按**包名**而非 UI 框架名，现有的是 `createTnziUi`、`createTnziUiAdmin`、`createTnziMobile`
 2. **必须返回 Vue Plugin 对象** (`{ install(app: App) }`)
 3. **Options 中的布尔开关默认为 `true`**（开箱即用）
 4. **适配器注册必须在 install 中完成**
@@ -731,7 +578,7 @@ export { useAppStore } from './stores/app';
 
 // Components
 export { TLoginForm } from './components/auth/TLoginForm.vue';
-export { TDataTable } from './components/data/TDataTable.vue';
+export { TTable } from './components/data/TTable.vue';
 // ...
 ```
 
@@ -769,14 +616,14 @@ export { TDataTable } from './components/data/TDataTable.vue';
 
 | 类别 | 格式 | 示例 |
 | --- | --- | --- |
-| **组件** | `T{Feature}` | `TLoginForm`, `TDataTable`, `TAdminLayout` |
+| **组件** | `T{Feature}` | `TLoginForm`, `TTable`, `TAdminShell` |
 | **Store** | `use{Feature}Store` | `useAuthStore`, `useUserStore`, `useAppStore` |
-| **Adapter 工厂** | `create{Framework}{Feature}Adapter` | `createNaiveMessageAdapter` |
-| **Plugin 工厂** | `createTnzi{Framework}` | `createTnziNaiveUi` |
-| **Composable** | `use{Framework}{Feature}` | `useNaiveTheme`, `useShadcnDialog` |
-| **Resolver** | `Tnzi{Framework}Resolver` | `TnziNaiveUiResolver` |
-| **组件 Props** | 内联 `defineProps<{...}>()` 或 `I{Component}Props` | `ILoginFormProps`（core 契约层导出） |
-| **组件 Emits** | 内联 `defineEmits<{...}>()` 或 `I{Component}Emits` | `ILoginFormEmits`（core 契约层导出） |
+| **Adapter 工厂** | `create{Feature}Adapter` | `createMessageAdapter`, `createDialogAdapter` |
+| **Plugin 工厂** | `createTnzi{Package}` | `createTnziUi`, `createTnziMobile` |
+| **Composable** | `use{Feature}`（**不带 UI 框架前缀**） | `useTheme`, `usePalette`, `useBreakpoints` |
+| **Resolver** | `Tnzi{Package}Resolver` | `TnziUiResolver` |
+| **组件 Props** | 内联 `defineProps<{...}>()` | 跨包共享才抬进 `types/shared-ui` |
+| **组件 Emits** | 内联 `defineEmits<{...}>()` | 同上 |
 
 ### 文件命名
 
@@ -797,8 +644,9 @@ export { TDataTable } from './components/data/TDataTable.vue';
 1. **UI 包不定义基础样式**，由 UI 框架自身提供
 2. **T* 组件样式使用 scoped CSS 或 CSS Modules**
 3. **主题通过 ThemeAdapter 管理**，不在组件中硬编码颜色
-4. **shadcn 包使用 Tailwind CSS**，通过 `globals.css` 引入
-5. **Vant/Naive UI 包通过主题 token 自定义**
+4. **原子类引擎统一是 UnoCSS**（`uno.config.ts` + `unocss/vite`）。Tailwind 已于 2026-04 全线移除，
+   **不要重新引入** `tailwindcss` / `postcss.config.js`
+5. **Naive UI / Vant 包通过各自的主题 token 自定义**（`--tnzi-*` / `--van-*`），组件内禁止硬编码颜色
 
 ### CSS 变量前缀
 
@@ -934,41 +782,20 @@ pnpm typecheck
 
 ---
 
-## 组件开发路线图
+## 组件清单去哪儿查
 
-### Phase 1 — 认证与布局 (Authentication & Layout)
+**不在本文档维护**。这里曾有一份 Phase 1-4 的组件路线图，里面半数条目
+（`TAdminLayout` / `TSidebar` / `TTable` / `TPagination` / `TFileUpload` / `TRichEditor`）
+**从未以那些名字落地**——真实名字是 `TAdminShell` / `TAdminSidebar` / `TTable` / `TListPager` /
+`TChunkFileUpload`，富文本则根本没做。一份没人对账的清单比没有清单更糟，故已删除。
 
-| 组件 | 说明 | 依赖 |
-| --- | --- | --- |
-| `TLoginForm` | 登录表单 | `ILoginFormProps` |
-| `TRegisterForm` | 注册表单 | `IRegisterFormProps` |
-| `TAdminLayout` | 管理后台布局 | `RouterAdapter` |
-| `TSidebar` | 侧边栏导航 | `RouterAdapter` |
+权威来源：
 
-### Phase 2 — 数据展示 (Data Display)
-
-| 组件 | 说明 | 依赖 |
-| --- | --- | --- |
-| `TDataTable` | 数据表格 | `DataQueryController` |
-| `TDataList` | 数据列表 | `DataQueryController` |
-| `TPagination` | 分页控件 | `PaginationController` |
-| `TEmpty` | 空状态 | — |
-
-### Phase 3 — 表单 (Form)
-
-| 组件 | 说明 | 依赖 |
-| --- | --- | --- |
-| `TForm` | 通用表单 | `FormController` |
-| `TSearchForm` | 搜索表单 | `FormController` |
-| `TSchemaForm` | 声明式 schema 表单 | `FormSchemaItem[]` |
-
-### Phase 4 — 扩展 (Extension)
-
-| 组件 | 说明 | 依赖 |
-| --- | --- | --- |
-| `TFileUpload` | 文件上传 | Storage API |
-| `TRichEditor` | 富文本编辑器 | — |
-| `TUserCard` | 用户卡片 | `AuthStateManager` |
+| 要查什么 | 去哪儿 |
+| --- | --- |
+| 某能力在哪个包里有、叫什么 | [`docs/modules/ui-component-coverage-matrix.md`](../../docs/modules/ui-component-coverage-matrix.md) |
+| 包内组件的实际列表 | `packages/{包名}/src/components/index.ts`（barrel 即公开面） |
+| 各包的设计约束与踩坑 | `packages/{包名}/CLAUDE.md` |
 
 ---
 
@@ -997,7 +824,7 @@ export default defineConfig({
         'vue',
         '@tnzi/core',
         // UI 框架包
-        'naive-ui',    // 或 'vant', 'shadcn-vue'
+        'naive-ui',    // 或 'vant'（本包用哪个 UI 库就外部化哪个）
         'pinia',
       ],
       output: {

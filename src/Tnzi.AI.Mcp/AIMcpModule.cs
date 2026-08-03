@@ -1,7 +1,5 @@
-using ModelContextProtocol.AspNetCore;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Permissions;
-using Tnzi.AI.Mcp.Services;
 using TnziMcpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 
 namespace Tnzi.AI.Mcp;

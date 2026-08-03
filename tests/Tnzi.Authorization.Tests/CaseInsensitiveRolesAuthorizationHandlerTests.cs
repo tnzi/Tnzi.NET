@@ -1,8 +1,4 @@
-using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
-using Tnzi.Authorization;
-using Xunit;
 
 namespace Tnzi.Authorization.Tests;
 

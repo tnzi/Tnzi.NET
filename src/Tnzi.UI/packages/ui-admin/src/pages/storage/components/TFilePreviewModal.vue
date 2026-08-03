@@ -4,9 +4,11 @@
  *
  * Replaces the old `window.open` preview with an in-page modal: images render
  * in an `NImage` lightbox (zoom/rotate toolbar), PDFs in an iframe, audio/video
- * in native players, and any other type falls back to a download prompt. The
- * preview/download URLs are resolved by the parent (via the storage bridge) and
- * passed in as functions so this component never hardcodes `/api/...`.
+ * in native players, and any other type falls back to a download prompt.
+ *
+ * URLs arrive already resolved: most stored files are private, so their URL
+ * carries a short-lived signed token that the parent has to fetch. Passing
+ * builder functions would force this component to be async for no reason.
  */
 import { computed } from 'vue'
 import { NModal, NImage, NButton } from 'naive-ui'
@@ -18,16 +20,18 @@ const props = defineProps<{
   show: boolean
   file: FileRecordDto | null
   translate: (key: string, params?: Record<string, unknown>) => string
-  /** Resolve a file's inline preview URL (deployment-prefix aware). */
-  previewUrl: (id: string) => string
-  /** Resolve a file's direct download URL (deployment-prefix aware). */
-  downloadUrl: (id: string) => string
+  /** Ready-to-use inline preview URL for `file` (empty while it resolves). */
+  previewSrc?: string | null
+  /** Ready-to-use download URL for `file` (empty while it resolves). */
+  downloadSrc?: string | null
 }>()
 
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 
-const previewSrc = computed(() => (props.file ? props.previewUrl(props.file.id) : ''))
-const downloadSrc = computed(() => (props.file ? props.downloadUrl(props.file.id) : ''))
+// Locals so the template never has to repeat the nullish fallback; the props
+// are null while the parent is still minting the signed URL.
+const src = computed(() => props.previewSrc ?? '')
+const downloadHref = computed(() => props.downloadSrc ?? '')
 
 type Kind = 'image' | 'pdf' | 'video' | 'audio' | 'other'
 const kind = computed<Kind>(() => {
@@ -56,26 +60,26 @@ function close(): void {
     <div v-if="file" class="t-file-preview">
       <NImage
         v-if="kind === 'image'"
-        :src="previewSrc"
+        :src="src"
         :alt="file.originalName"
         object-fit="contain"
         class="t-file-preview__image"
       />
       <iframe
         v-else-if="kind === 'pdf'"
-        :src="previewSrc"
+        :src="src"
         class="t-file-preview__frame"
         :title="file.originalName"
       />
       <video
         v-else-if="kind === 'video'"
-        :src="previewSrc"
+        :src="src"
         controls
         class="t-file-preview__media"
       />
       <audio
         v-else-if="kind === 'audio'"
-        :src="previewSrc"
+        :src="src"
         controls
         class="t-file-preview__audio"
       />
@@ -91,7 +95,7 @@ function close(): void {
 
     <template #footer>
       <div class="t-file-preview__footer">
-        <a :href="downloadSrc" :download="file?.originalName" class="t-file-preview__dl">
+        <a :href="downloadHref" :download="file?.originalName" class="t-file-preview__dl">
           <NButton type="primary" ghost size="small">
             <template #icon><TSvgIcon icon="mdi:download" :size="16" /></template>
             {{ translate('actions.download') }}

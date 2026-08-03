@@ -28,7 +28,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/row-actions'
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'

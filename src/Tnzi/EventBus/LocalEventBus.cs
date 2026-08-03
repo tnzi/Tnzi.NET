@@ -34,7 +34,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         if (_options.EnableRetry)
         {
             var pipelineProvider = serviceProvider.GetService<ResiliencePipelineProvider<string>>();
-            if (pipelineProvider != null && pipelineProvider.TryGetPipeline("eventbus", out var pipeline))
+            if (pipelineProvider != null && pipelineProvider.TryGetPipeline(ResiliencePipelineNames.EventBus, out var pipeline))
             {
                 _retryPipeline = pipeline;
             }

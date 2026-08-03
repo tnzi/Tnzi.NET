@@ -10,7 +10,7 @@ public interface IHostHttpCrypto
     /// 将收到的客户端请求进行解密
     /// </summary>
     /// <param name="request">加密的请求</param>
-    /// <returns>解密后的请求</param>
+    /// <returns>解密后的请求</returns>
     Task<HttpRequest> DecryptRequest(HttpRequest request);
 
     /// <summary>

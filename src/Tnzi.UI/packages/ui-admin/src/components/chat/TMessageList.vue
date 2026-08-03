@@ -29,7 +29,7 @@ import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { NScrollbar, NImageGroup } from 'naive-ui'
 import { MessageContentType } from '@tnzi/core/services/chat'
 import TMessageBubble from './TMessageBubble.vue'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import type { ChatMessageView } from '../../stores/useChatStore'
 import { formatMessageSeparator, shouldShowSeparator } from './time'
 

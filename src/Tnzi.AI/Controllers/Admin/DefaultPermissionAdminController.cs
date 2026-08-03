@@ -10,17 +10,17 @@ namespace Tnzi.AI.Controllers.Admin;
 public class DefaultPermissionAdminController : ApiAdminControllerBase
 {
     protected readonly IToolPermissionEvaluator PermissionEvaluator;
-    protected readonly IRepository<ToolPermissionRuleEntity, Guid> PermissionRuleRepository;
+    protected readonly IToolPermissionRuleService PermissionRuleService;
 
     /// <summary>
     /// 初始化权限管理控制器
     /// </summary>
     public DefaultPermissionAdminController(
         IToolPermissionEvaluator permissionEvaluator,
-        IRepository<ToolPermissionRuleEntity, Guid> permissionRuleRepository)
+        IToolPermissionRuleService permissionRuleService)
     {
         PermissionEvaluator = Check.NotNull(permissionEvaluator);
-        PermissionRuleRepository = Check.NotNull(permissionRuleRepository);
+        PermissionRuleService = Check.NotNull(permissionRuleService);
     }
 
     /// <summary>
@@ -106,12 +106,8 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     [HttpGet("persisted-rules")]
     public virtual async Task<ApiResult<List<PersistedPermissionRuleDto>>> GetPersistedRules()
     {
-        var entities = await PermissionRuleRepository.AsQueryable()
-            .OrderByDescending(e => e.Priority)
-            .ThenBy(e => e.Scope)
-            .ToListAsync(HttpContext.RequestAborted);
-
-        return ApiResult<List<PersistedPermissionRuleDto>>.Ok(entities.MapToList<PersistedPermissionRuleDto>());
+        var result = await PermissionRuleService.GetListAsync(HttpContext.RequestAborted);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -122,14 +118,8 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<PersistedPermissionRuleDto>> CreatePersistedRule(
         [FromBody] CreatePersistedPermissionRuleDto input)
     {
-        Check.NotNull(input);
-
-        var entity = input.MapTo<ToolPermissionRuleEntity>();
-
-        await PermissionRuleRepository.InsertAsync(entity);
-        await PermissionEvaluator.RefreshRulesAsync();
-
-        return ApiResult<PersistedPermissionRuleDto>.Ok(entity.MapTo<PersistedPermissionRuleDto>());
+        var result = await PermissionRuleService.CreateAsync(input, HttpContext.RequestAborted);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -141,34 +131,8 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
         Guid id,
         [FromBody] CreatePersistedPermissionRuleDto input)
     {
-        Check.NotNull(input);
-
-        var entity = await PermissionRuleRepository.GetAsync(id);
-        if (entity == null)
-        {
-            return ApiResult<PersistedPermissionRuleDto>.Error("Permission rule not found.", 404);
-        }
-
-        // In-place field assignment - never re-create the entity (would drop the
-        // Id / audit fields / TenantId). Behavior & Scope are persisted as int.
-        entity.ToolPattern = input.ToolPattern;
-        entity.ToolGroup = input.ToolGroup;
-        entity.CommandPrefix = input.CommandPrefix;
-        entity.ServerName = input.ServerName;
-        entity.PathPrefix = input.PathPrefix;
-        entity.Behavior = (int)input.Behavior;
-        entity.Scope = (int)input.Scope;
-        entity.Priority = input.Priority;
-        entity.IsDestructiveOnly = input.IsDestructiveOnly;
-        entity.IsSubAgentOnly = input.IsSubAgentOnly;
-        entity.Reason = input.Reason;
-        entity.UserId = input.UserId;
-        entity.IsEnabled = input.IsEnabled;
-
-        await PermissionRuleRepository.UpdateAsync(entity);
-        await PermissionEvaluator.RefreshRulesAsync();
-
-        return ApiResult<PersistedPermissionRuleDto>.Ok(entity.MapTo<PersistedPermissionRuleDto>());
+        var result = await PermissionRuleService.UpdateAsync(id, input, HttpContext.RequestAborted);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -178,16 +142,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.permissions.delete")]
     public virtual async Task<ApiResult> DeletePersistedRule(Guid id)
     {
-        var entity = await PermissionRuleRepository.GetAsync(id);
-        if (entity == null)
-        {
-            return ApiResult.Error("Permission rule not found.", 404);
-        }
-
-        await PermissionRuleRepository.DeleteAsync(entity);
-
-        await PermissionEvaluator.RefreshRulesAsync();
-
-        return ApiResult.Ok();
+        var result = await PermissionRuleService.DeleteAsync(id, HttpContext.RequestAborted);
+        return result.ToApiResult();
     }
 }

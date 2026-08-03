@@ -35,6 +35,7 @@ public class RecurringDocumentBuilder
     /// <param name="template">模板（含行）</param>
     /// <param name="periodDate">期次日期 = 单据日</param>
     /// <param name="autoPost">生成后是否过账</param>
+    /// <param name="cancellationToken">取消令牌</param>
     public async Task<Result<GeneratedDocument>> BuildAsync(
         RecurringDocument template, DateTime periodDate, bool autoPost, CancellationToken cancellationToken)
     {

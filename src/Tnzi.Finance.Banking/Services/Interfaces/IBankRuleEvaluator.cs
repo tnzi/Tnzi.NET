@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 一条流水命中的规则及其动作

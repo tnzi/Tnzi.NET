@@ -96,7 +96,7 @@
       <template v-if="$slots.toolbarLeft" #toolbarLeft><slot name="toolbarLeft" /></template>
       <template v-if="$slots.toolbarRight" #toolbarRight><slot name="toolbarRight" /></template>
       <template v-if="$slots.batchActions" #batchActions="{ selectedIds }">
-        <slot name="batchActions" :selectedIds="selectedIds" />
+        <slot name="batchActions" :selected-ids="selectedIds" />
       </template>
       <template v-if="$slots.error" #error="e"><slot name="error" v-bind="e" /></template>
       <template #form="f"><slot name="form" v-bind="f" /></template>
@@ -117,8 +117,8 @@ import TCrudColumnSetting from './TCrudColumnSetting.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormModalMode } from '../../headless/useFormModal'
-import type { FormSchemaItem } from '../../pages/_shared/form-schema'
-import type { RowAction } from '../../headless/rowActions'
+import type { FormSchemaItem } from '@tnzi/ui'
+import type { RowAction } from '../../headless/row-actions'
 
 export interface TCrudPageProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>

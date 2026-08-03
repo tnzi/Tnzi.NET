@@ -98,7 +98,11 @@ public static class DataScopeExtensions
     /// 按主键校验访问权限：先经仓储加载实体（不存在=不可访问），再走
     /// <see cref="CanAccessAsync{TEntity}(IServiceProvider, TEntity, CancellationToken)"/> 逐 provider AND 校验。
     /// </summary>
-    public static async Task<bool> CanAccessAsync<TEntity, TKey>(
+    /// <remarks>
+    /// 刻意与 <see cref="CanAccessAsync{TEntity}(IServiceProvider, TEntity, CancellationToken)"/> 分开命名：
+    /// 两者都带可选的 <c>cancellationToken</c>，同名重载会让日后给任一方加可选参数变成二进制破坏（RS0026）。
+    /// </remarks>
+    public static async Task<bool> CanAccessByIdAsync<TEntity, TKey>(
         this IReadOnlyRepository<TEntity, TKey> repository,
         IServiceProvider serviceProvider,
         TKey id,

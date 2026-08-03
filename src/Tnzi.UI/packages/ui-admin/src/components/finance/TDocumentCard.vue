@@ -67,9 +67,9 @@ import TItemCard, { type ItemCardTag, type ItemCardTone } from '../data/TItemCar
 import TMoney from './TMoney.vue'
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { isoDateToLocalTs } from '../../utils/finance-format'
-import { DOC_STATUS_META, type FinanceDocRow } from '../../pages/finance/document-config'
+import { DOC_STATUS_META, type FinanceDocRow } from './document-row'
 import { FinanceDocumentStatus } from '../../services/bridges/finance-bridge'
-import { fmtDate } from '../../pages/finance/money'
+import { formatAccountingDate as fmtDate } from '../../utils/finance-format'
 
 interface Props {
   row: FinanceDocRow

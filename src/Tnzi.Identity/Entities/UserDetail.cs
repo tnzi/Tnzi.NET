@@ -43,9 +43,15 @@ public class UserDetail : MultiTenantAuditedEntity<Guid>
     public string? AvatarUrl { get; set; }
 
     /// <summary>
-    /// 获取或设置 头像文件ID（用于集成文件管理系统）
+    /// 获取或设置 头像文件ID（用于集成文件管理系统）。
+    ///
+    /// <c>Public = true</c>：头像天生就是要以匿名 <c>&lt;img src="/api/files/{id}/download"&gt;</c>
+    /// 渲染的（消息气泡、成员列表、评论区都不会带 Authorization 头），因此只要有文件 id
+    /// 写进这个字段，框架就在同一个事务里把该文件标记为公开可读。
+    /// 声明放在字段上而不是交给调用方：写头像的路径有个人中心、管理端、OAuth 导入、
+    /// 消费应用自己的服务等多条，任何一条漏传参数都会让头像变成 404。
     /// </summary>
-    [FileField]
+    [FileField(Public = true)]
     public Guid? AvatarId { get; set; }
 
     /// <summary>

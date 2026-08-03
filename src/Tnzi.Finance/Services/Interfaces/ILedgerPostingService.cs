@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 总账过账服务 —— 财务核心对外的唯一扩展点
@@ -28,6 +28,7 @@ public interface ILedgerPostingService
     /// </summary>
     /// <param name="journalEntryId">要冲销的凭证ID（通常经 <see cref="GetBySourceAsync"/> 反查获得）</param>
     /// <param name="input">冲销选项（null 表示与原凭证同日、自动生成摘要）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<JournalEntryDto>> ReverseAsync(Guid journalEntryId, ReverseJournalEntryDto? input = null, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -58,6 +59,7 @@ public interface ILedgerPostingService
     /// </para>
     /// </remarks>
     /// <param name="journalEntryId">要判定的凭证ID</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<ReversibilityDto>> GetReversibilityAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<ReversibilityDto>.Failure(
             "This ILedgerPostingService implementation does not support reversibility checks.", 501));

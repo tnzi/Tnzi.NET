@@ -1,4 +1,3 @@
-using Tnzi.Exceptions;
 
 namespace Tnzi.AI.Tests.Middleware;
 

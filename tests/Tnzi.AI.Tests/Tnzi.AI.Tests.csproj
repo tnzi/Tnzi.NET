@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Signed so Tnzi.AI's InternalsVisibleTo (strong-named) grants access to engine internals. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +20,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <!-- 提升传递依赖：Data.Sqlite 带来的 bundle 2.1.11 内含有漏洞的 SQLite 原生库（GHSA-2m69-gcr7-jv3q） -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
     <PackageReference Include="MockQueryable.Moq" Version="10.0.2" />
     <PackageReference Include="Moq" Version="4.20.72" />

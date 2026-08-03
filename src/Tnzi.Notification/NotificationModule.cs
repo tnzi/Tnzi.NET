@@ -94,6 +94,13 @@ public class NotificationModule : TnziApplicationModule
         context.Services.AddHostedService(sp => sp.GetRequiredService<ChannelQueueService>());
         context.Services.AddSingleton<INotificationQueueService>(sp => sp.GetRequiredService<ChannelQueueService>());
 
+        // 退订（群发合规：CASL / CAN-SPAM 要求一键退订且须很快生效）
+        context.Services.AddScoped<INotificationOptOutService, NotificationOptOutService>();
+
+        // 派发恢复：把进程中途退出后停在 Sending 的批次接着发完。
+        // 收件人状态本来就逐行持久化，缺的只是把它接回去的那个循环。
+        context.Services.AddHostedService<NotificationDispatchBackgroundService>();
+
         return Task.CompletedTask;
     }
 }

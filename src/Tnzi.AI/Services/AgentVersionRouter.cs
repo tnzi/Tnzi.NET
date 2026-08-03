@@ -214,7 +214,7 @@ public class AgentVersionRouter : IAgentVersionRouter
     }
 
     /// <summary>
-    /// 稳定的 0-99 流量分配值。基于 SHA256 而非 <see cref="HashCode.Combine(object?,object?,object?)"/> ——
+    /// 稳定的 0-99 流量分配值。基于 SHA256 而非 <c>HashCode.Combine</c> ——
     /// 后者使用每进程随机化的哈希种子，跨进程/重启不稳定，会让同一路由键在重启后切换 A/B 变体。
     /// </summary>
     private static int StableRoll(string routingKey, Guid agentId, int versionA, int versionB)

@@ -324,7 +324,7 @@ public class AgentEvaluatorTests
 
         result.Passed.ShouldBeTrue();
         result.Score.ShouldBe(0.92);
-        result.Reason.ShouldContain("LLM judge");
+        result.Reason!.ShouldContain("LLM judge");
     }
 
     [Fact]

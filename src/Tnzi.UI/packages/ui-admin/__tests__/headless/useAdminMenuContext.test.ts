@@ -82,11 +82,16 @@ describe('useAdminMenuContext', () => {
     expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(false)
   })
 
-  it('falls back to first item with children when the route matches nothing', () => {
-    // 'phantom-route' is not in any menu key - fall back to first
-    // 1st level item with children = 'identity'.
+  it('resolves to NO active module when a named route matches nothing', () => {
+    // 'phantom-route' is in no menu key. This used to fall back to the first
+    // 1st level item with children ('identity') - which is how Settings and
+    // User Center (hideInMenu, no activeMenu) ended up highlighting Identity
+    // and rendering ITS sub-menu in the hybrid sider. A wrong answer is worse
+    // than none: off-menu pages now get no highlight and no sub-menu.
     const { ctx } = makeContext('phantom-route')
-    expect(ctx.activeFirstLevelMenuKey.value).toBe('identity')
+    expect(ctx.activeFirstLevelMenuKey.value).toBe('')
+    expect(ctx.secondLevelMenus.value).toEqual([])
+    expect(ctx.isActiveFirstLevelMenuHasChildren.value).toBe(false)
   })
 
   it('exposes secondLevelMenus matching the active 1st level item', () => {
@@ -130,6 +135,11 @@ describe('useAdminMenuContext', () => {
     // Vue watchers are async - let microtasks drain.
     await Promise.resolve()
     expect(ctx.activeFirstLevelMenuKey.value).toBe('system')
+  })
+
+  it('still auto-selects the first item with children on a cold load (no route name)', () => {
+    const { ctx } = makeContext('')
+    expect(ctx.activeFirstLevelMenuKey.value).toBe('identity')
   })
 
   it('autoSelectFirstWith=false leaves activeFirstLevelMenuKey at first item', () => {

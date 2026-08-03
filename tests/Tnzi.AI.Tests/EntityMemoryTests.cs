@@ -1,6 +1,4 @@
-using Tnzi.AI.Infrastructure.ContextProviders;
 using Tnzi.AI.Infrastructure.Memory;
-using Tnzi.AI.Memory;
 
 namespace Tnzi.AI.Tests;
 

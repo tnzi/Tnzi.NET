@@ -41,6 +41,9 @@ export function deviceIconColor(
   family: DeviceOsFamily,
   override?: Partial<Record<DeviceOsFamily, string>>,
 ): string {
-  const table = override ? { ...DEFAULT_DEVICE_BRAND_COLORS, ...override } : DEFAULT_DEVICE_BRAND_COLORS
-  return table[family] ?? table.unknown
+  // Consult the override first rather than spreading it over the defaults:
+  // spreading a `Partial<Record<…>>` widens every value back to
+  // `string | undefined`, so the result was only assignable by accident.
+  // The defaults are a complete record, which is what makes the fallback total.
+  return override?.[family] ?? DEFAULT_DEVICE_BRAND_COLORS[family]
 }

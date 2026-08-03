@@ -16,6 +16,7 @@ public static class MapperExtensions
     /// 使用 Volatile.Write 确保多线程环境下的内存可见性
     /// </summary>
     /// <param name="mapper">映射执行者</param>
+    /// <param name="config">类型适配配置；为空时沿用当前配置</param>
     public static void SetMapper(IMapper mapper, TypeAdapterConfig? config = null)
     {
         mapper = Check.NotNull(mapper);

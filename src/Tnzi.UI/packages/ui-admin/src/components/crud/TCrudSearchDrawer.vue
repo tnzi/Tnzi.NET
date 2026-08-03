@@ -36,7 +36,7 @@ import { NDrawer, NDrawerContent, NButton } from 'naive-ui'
 import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import type { SearchableState } from './TCrudSearch.vue'
-import type { FormSchemaItem } from '../../pages/_shared/form-schema'
+import type { FormSchemaItem } from '@tnzi/ui'
 
 interface Props {
   show: boolean

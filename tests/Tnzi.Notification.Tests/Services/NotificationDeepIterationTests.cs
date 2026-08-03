@@ -1,5 +1,4 @@
 using MockQueryable;
-using MockQueryable.Moq;
 using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 

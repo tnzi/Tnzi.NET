@@ -4,7 +4,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { AccountRootType, AccountSystemRole, CashFlowActivity } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtAmount } from './money'
+
 import TMoney from '../../components/finance/TMoney.vue'
 /** All-optional row shape (house pattern) so ColumnDef<AccountRow> stays
  * assignable to the ColumnDef<Record<string, unknown>> the CRUD shell expects.

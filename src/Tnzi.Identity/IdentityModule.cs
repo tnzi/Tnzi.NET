@@ -107,6 +107,10 @@ public class IdentityModule : TnziApplicationModule
         // 注册登录会话协调器（多设备/单设备/限并发策略 + 令牌签发前同步建立会话）
         context.Services.AddScoped<ILoginSessionCoordinator, LoginSessionCoordinator>();
 
+        // 注册登录守卫求值器。始终注册（消费应用未实现任何 ILoginGuard 时直接放行，零开销），
+        // 这样每条令牌签发路径无需判空；守卫本身由消费应用注册。
+        context.Services.AddScoped<ILoginGuardEvaluator, LoginGuardEvaluator>();
+
         // 注册会话维护后台服务（定期清理过期/失活会话，避免幽灵会话累积影响并发计数）
         context.Services.AddHostedService<SessionMaintenanceBackgroundService>();
 

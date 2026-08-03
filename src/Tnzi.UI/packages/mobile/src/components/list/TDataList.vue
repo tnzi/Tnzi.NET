@@ -12,7 +12,7 @@ interface IDataListEmits<T = unknown> {
 }
 
 const props = withDefaults(defineProps<{
-  items: T[];
+  items?: T[];
   query?: IDataQuery;
   /**
    * Load state reported by the parent. When `loading` is a boolean, the

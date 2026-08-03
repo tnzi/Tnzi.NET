@@ -26,11 +26,10 @@ export default defineConfig({
         index: resolve(__dirname, 'src/index.ts'),
         'components/index': resolve(__dirname, 'src/components/index.ts'),
         'stores/index': resolve(__dirname, 'src/stores/index.ts'),
-        'headless/index': resolve(__dirname, 'src/headless/index.ts'),
         // Declared as an entry so the barrel survives: a pure re-export module
         // that is not an entry gets folded into the importer and the
-        // `./composables` subpath export would resolve to a missing file.
-        'composables/index': resolve(__dirname, 'src/composables/index.ts'),
+        // `./headless` subpath export would resolve to a missing file.
+        'headless/index': resolve(__dirname, 'src/headless/index.ts'),
         'adapters/index': resolve(__dirname, 'src/adapters/index.ts'),
       },
       name: 'TnziMobile',

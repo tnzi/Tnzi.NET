@@ -5,7 +5,6 @@ global using Microsoft.Extensions.Logging;
 global using System.Collections.Concurrent;
 global using System.Linq.Expressions;
 global using System.Reflection;
-global using Tnzi;
 global using Tnzi.Mapping;
 global using Tnzi.Mapster.Adapters;
 global using Tnzi.Modules;

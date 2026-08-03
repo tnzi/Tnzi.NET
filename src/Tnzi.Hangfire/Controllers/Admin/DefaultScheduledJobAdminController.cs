@@ -1,4 +1,3 @@
-using global::Hangfire;
 using global::Hangfire.Storage;
 
 namespace Tnzi.Hangfire.Controllers.Admin;

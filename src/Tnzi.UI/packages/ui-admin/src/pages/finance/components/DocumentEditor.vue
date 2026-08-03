@@ -120,7 +120,7 @@ import { NButton, NDatePicker, NInput, NInputNumber, NSelect } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { PAYMENT_METHODS } from '../../../services/bridges/finance-bridge'
 import { makePageTranslator } from '../../_shared/translate'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import type { SelectOption } from '../options'
 import { fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../money'
 

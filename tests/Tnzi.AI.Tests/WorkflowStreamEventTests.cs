@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using Tnzi.AI.Controllers.Admin;
 
 namespace Tnzi.AI.Tests;
 

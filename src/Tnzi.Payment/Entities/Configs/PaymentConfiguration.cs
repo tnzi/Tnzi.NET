@@ -15,6 +15,10 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.Property(p => p.OriginalAmount).HasMoneyPrecision();
         builder.Property(p => p.PaidAmount).HasMoneyPrecision();
         builder.Property(p => p.DiscountAmount).HasMoneyPrecision();
+        builder.Property(p => p.TaxAmount).HasMoneyPrecision();
+        builder.Property(p => p.PayableAmount).HasMoneyPrecision();
+        builder.Property(p => p.CustomerName).HasMaxLength(256);
+        builder.Property(p => p.CustomerEmail).HasMaxLength(256);
         // ChannelResponse和ExtraData存储JSON数据，不指定类型以保持数据库兼容性
         // EF Core会根据数据库提供者自动选择合适的类型
 
@@ -44,5 +48,8 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.HasIndex(p => p.Status);
         builder.HasIndex(p => p.ChannelCode);
         builder.HasIndex(p => p.CreationTime);
+        builder.HasIndex(p => p.UserId);
+        // 过期支付清扫：按状态 + 过期时间过滤
+        builder.HasIndex(p => new { p.Status, p.ExpireTime });
     }
 }

@@ -11,7 +11,6 @@ Tnzi.AspNetCore.Dtos.AdminShellModulesDto
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.AdminShellModulesDto() -> void
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminShellModuleDto!>!
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.set -> void
-virtual Tnzi.AspNetCore.Controllers.DefaultAdminShellController.GetModules(Tnzi.ITnziApplication! tnziApp) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminShellModulesDto!>!
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions.AspNetCorePermissions() -> void
 Tnzi.AspNetCore.Permissions.AspNetCorePermissions.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void
@@ -34,3 +33,57 @@ virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpd
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!
 static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.RunPostMigrationStartupTasksAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
 override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.Priority.get -> int
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.get -> System.Collections.Generic.List<string!>?
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.set -> void
+*REMOVED*Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.Interfaces.ILogFileService! logFileService) -> void
+Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.ILogFileService! logFileService) -> void
+*REMOVED*readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.Interfaces.ILogFileService!
+readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.ILogFileService!
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Equals(object? obj) -> bool
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.GetHashCode() -> int
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.ToString() -> string!
+static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator !=(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
+static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator ==(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
+Tnzi.AspNetCore.Dtos.AdminShellHubDto
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.AdminShellHubDto() -> void
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.get -> string!
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.get -> string!
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Realtime.get -> Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto!
+Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Realtime.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.AdminShellRealtimeDto() -> void
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Available.get -> bool
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Available.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Hubs.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminShellHubDto!>!
+Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Hubs.set -> void
+Tnzi.AspNetCore.Services.IRealtimeHubRegistry
+Tnzi.AspNetCore.Services.IRealtimeHubRegistry.Hubs.get -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Services.RealtimeHubDescriptor!>!
+Tnzi.AspNetCore.Services.IRealtimeHubRegistry.Register(string! name, string! path) -> void
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.<Clone>$() -> Tnzi.AspNetCore.Services.RealtimeHubDescriptor!
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Deconstruct(out string! Name, out string! Path) -> void
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Equals(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? other) -> bool
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Name.get -> string!
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Name.init -> void
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Path.get -> string!
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Path.init -> void
+Tnzi.AspNetCore.Services.RealtimeHubDescriptor.RealtimeHubDescriptor(string! Name, string! Path) -> void
+Tnzi.AspNetCore.Services.RealtimeHubRegistry
+Tnzi.AspNetCore.Services.RealtimeHubRegistry.Hubs.get -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Services.RealtimeHubDescriptor!>!
+Tnzi.AspNetCore.Services.RealtimeHubRegistry.RealtimeHubRegistry() -> void
+Tnzi.AspNetCore.Services.RealtimeHubRegistry.Register(string! name, string! path) -> void
+virtual Tnzi.AspNetCore.Controllers.DefaultAdminShellController.GetModules(Tnzi.ITnziApplication! tnziApp, Tnzi.AspNetCore.Services.IRealtimeHubRegistry? hubRegistry = null) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminShellModulesDto!>!
+Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController
+Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.DefaultCapabilitiesController(Tnzi.Capabilities.ICapabilityCatalog! catalog) -> void
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.set -> void
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.ServerCapabilitiesDto() -> void
+Tnzi.AspNetCore.Http.HttpClientCapabilities
+Tnzi.AspNetCore.Http.HttpClientCapabilities.Declared.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.AspNetCore.Http.HttpClientCapabilities.HttpClientCapabilities(Microsoft.AspNetCore.Http.IHttpContextAccessor! httpContextAccessor) -> void
+Tnzi.AspNetCore.Http.HttpClientCapabilities.Supports(string! capability) -> bool
+readonly Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.Catalog -> Tnzi.Capabilities.ICapabilityCatalog!
+virtual Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.GetCapabilities() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto!>!

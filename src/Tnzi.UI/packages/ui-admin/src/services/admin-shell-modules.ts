@@ -27,9 +27,47 @@ export interface AdminShellModule {
   isEnabled: boolean
 }
 
+/** One mapped realtime hub (raw wire shape). */
+export interface AdminShellHub {
+  /** Logical hub name, e.g. `"settings"` / `"chat"` / `"presence"`. */
+  name: string
+  /** Path to connect to, PathBase included, e.g. `"/api/hubs/settings"`. */
+  path: string
+}
+
+/** Realtime capability block of `GET /admin/shell/modules`. */
+export interface AdminShellRealtimeWire {
+  available: boolean
+  hubs: AdminShellHub[]
+}
+
 /** Response shape of `GET /admin/shell/modules`. */
 export interface AdminShellModules {
   modules: AdminShellModule[]
+  /** Absent on backends predating the realtime signal. */
+  realtime?: AdminShellRealtimeWire
+}
+
+/**
+ * Which realtime hubs the backend actually mapped, keyed by logical hub name.
+ *
+ * `null` means the backend never told us (older backend / failed request) -
+ * callers MUST treat that as "unknown → do not gate", exactly like the module
+ * set, so an old backend keeps today's behaviour.
+ */
+export interface AdminShellRealtime {
+  /** True when the host mapped at least one hub. */
+  available: boolean
+  /** Hub name → connect path (PathBase applied by the backend). */
+  hubs: Record<string, string>
+}
+
+/** Both halves of the admin shell bootstrap signal. */
+export interface AdminShellSignal {
+  /** Enabled business modules, normalized; `null` = signal unavailable. */
+  modules: Set<string> | null
+  /** Realtime capability; `null` = backend didn't report it. */
+  realtime: AdminShellRealtime | null
 }
 
 /**
@@ -52,21 +90,46 @@ export function normalizeModuleName(name: string): string {
  * treat `null` as "signal unavailable → do NOT gate" (fail-open: show every
  * module), so the sidebar is never blanked by a missing/failed signal.
  */
-export async function fetchAdminShellModules(
-  client: HttpClient,
-): Promise<Set<string> | null> {
+export async function fetchAdminShellSignal(client: HttpClient): Promise<AdminShellSignal> {
   try {
     const result = await client.get<AdminShellModules>('/admin/shell/modules')
     const data = result?.data
-    if (!data || !Array.isArray(data.modules)) return null
+    if (!data || !Array.isArray(data.modules)) return { modules: null, realtime: null }
     const set = new Set<string>()
     for (const m of data.modules) {
       if (m && m.isEnabled && typeof m.name === 'string' && m.name) {
         set.add(normalizeModuleName(m.name))
       }
     }
-    return set
+    return { modules: set, realtime: parseRealtime(data.realtime) }
   } catch {
-    return null
+    return { modules: null, realtime: null }
   }
+}
+
+/**
+ * Normalize the realtime block. Returns `null` when the backend omitted it -
+ * a host predating the signal, where the only safe reading is "unknown", not
+ * "no realtime": claiming the latter would silently kill live config push on
+ * every backend that has not been upgraded yet.
+ */
+function parseRealtime(raw: AdminShellRealtimeWire | undefined): AdminShellRealtime | null {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.hubs)) return null
+  const hubs: Record<string, string> = {}
+  for (const h of raw.hubs) {
+    if (h && typeof h.name === 'string' && h.name && typeof h.path === 'string' && h.path) {
+      hubs[h.name.toLowerCase()] = h.path
+    }
+  }
+  return { available: raw.available === true, hubs }
+}
+
+/**
+ * Modules-only convenience over {@link fetchAdminShellSignal} - kept because it
+ * is part of the package's public surface.
+ */
+export async function fetchAdminShellModules(
+  client: HttpClient,
+): Promise<Set<string> | null> {
+  return (await fetchAdminShellSignal(client)).modules
 }

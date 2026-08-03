@@ -5,8 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>Banking domain for the Tnzi.NET finance module: bank account profiles, party remit-to accounts, statement import (OFX/CSV) and matching, bank rules, cheque register and printing lifecycle, EFT (NACHA / CPA-005) file output, and receipt capture. Optional module; a pure-accounting consumer never pulls in statement parsers, MICR composition or fixed-width file builders.</Description>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

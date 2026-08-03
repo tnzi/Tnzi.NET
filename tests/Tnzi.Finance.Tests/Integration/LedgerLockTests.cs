@@ -182,6 +182,6 @@ public class LedgerLockTests : FinanceIntegrationTestBase
         var inClosedYear = await PostOnAsync(new DateTime(year - 1, 6, 15));
         inClosedYear.Succeeded.ShouldBeFalse();
         inClosedYear.Code.ShouldBe(409);
-        inClosedYear.Message.ShouldContain("fiscal year");
+        inClosedYear.Message!.ShouldContain("fiscal year");
     }
 }

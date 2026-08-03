@@ -21,9 +21,9 @@ public abstract class ApplicationService : IApplicationService
     private readonly Lazy<ILogger> _logger;
 
     /// <summary>
-    /// 服务提供者
+    /// 服务提供者。唯一的构造函数已对其做非空校验，因此这里始终有值。
     /// </summary>
-    protected IServiceProvider? ServiceProvider { get; }
+    protected IServiceProvider ServiceProvider { get; }
 
     /// <summary>
     /// 推荐构造函数：使用 IServiceProvider 延迟加载服务
@@ -35,21 +35,18 @@ public abstract class ApplicationService : IApplicationService
 
         // 使用 Lazy<T> 确保线程安全的延迟初始化
         // LazyThreadSafetyMode.ExecutionAndPublication 保证只初始化一次
-        _currentUser = new Lazy<ICurrentUser?>(() => ServiceProvider?.GetService<ICurrentUser>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _permissionChecker = new Lazy<IPermissionChecker?>(() => ServiceProvider?.GetService<IPermissionChecker>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _unitOfWorkManager = new Lazy<IUnitOfWorkManager?>(() => ServiceProvider?.GetService<IUnitOfWorkManager>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _eventBus = new Lazy<IEventBus?>(() => ServiceProvider?.GetService<IEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _distributedEventBus = new Lazy<IDistributedEventBus?>(() => ServiceProvider?.GetService<IDistributedEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _eventStore = new Lazy<IEventStore?>(() => ServiceProvider?.GetService<IEventStore>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _scopedContext = new Lazy<IScopedContext?>(() => ServiceProvider?.GetService<IScopedContext>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _postCommitActionQueue = new Lazy<IPostCommitActionQueue?>(() => ServiceProvider?.GetService<IPostCommitActionQueue>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _currentUser = new Lazy<ICurrentUser?>(() => ServiceProvider.GetService<ICurrentUser>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _permissionChecker = new Lazy<IPermissionChecker?>(() => ServiceProvider.GetService<IPermissionChecker>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _unitOfWorkManager = new Lazy<IUnitOfWorkManager?>(() => ServiceProvider.GetService<IUnitOfWorkManager>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _eventBus = new Lazy<IEventBus?>(() => ServiceProvider.GetService<IEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _distributedEventBus = new Lazy<IDistributedEventBus?>(() => ServiceProvider.GetService<IDistributedEventBus>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _eventStore = new Lazy<IEventStore?>(() => ServiceProvider.GetService<IEventStore>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _scopedContext = new Lazy<IScopedContext?>(() => ServiceProvider.GetService<IScopedContext>(), LazyThreadSafetyMode.ExecutionAndPublication);
+        _postCommitActionQueue = new Lazy<IPostCommitActionQueue?>(() => ServiceProvider.GetService<IPostCommitActionQueue>(), LazyThreadSafetyMode.ExecutionAndPublication);
         _timeProvider = new Lazy<TimeProvider>(() => serviceProvider.GetRequiredService<TimeProvider>(), LazyThreadSafetyMode.ExecutionAndPublication);
-        _logger = new Lazy<ILogger>(() =>
-        {
-            if (ServiceProvider == null)
-                throw new InvalidOperationException($"ServiceProvider is not available in {GetType().Name}");
-            return ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(GetType());
-        }, LazyThreadSafetyMode.ExecutionAndPublication);
+        _logger = new Lazy<ILogger>(
+            () => ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(GetType()),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
 
@@ -233,9 +230,6 @@ public abstract class ApplicationService : IApplicationService
     /// <exception cref="InvalidOperationException">服务未注册时抛出</exception>
     protected T GetRequiredService<T>() where T : notnull
     {
-        if (ServiceProvider == null)
-            throw new InvalidOperationException($"ServiceProvider is not available in {GetType().Name}");
-
         var service = ServiceProvider.GetService<T>();
         if (service == null)
             throw new InvalidOperationException($"Service {typeof(T).Name} is not registered. Please ensure the required module is loaded.");
@@ -250,7 +244,7 @@ public abstract class ApplicationService : IApplicationService
     /// <returns>服务是否可用</returns>
     protected bool IsServiceAvailable<T>() where T : class
     {
-        return ServiceProvider?.GetService<T>() != null;
+        return ServiceProvider.GetService<T>() != null;
     }
 
     /// <summary>
@@ -468,17 +462,21 @@ public abstract class ApplicationService : IApplicationService
     /// <summary>
     /// 记录信息级日志
     /// </summary>
-    protected void LogInformation(string message, params object[] args) => Logger.LogInformation(message, args);
+    /// <remarks>
+    /// <c>args</c> 是 <c>object?[]</c> 而非 <c>object[]</c>，与 <see cref="ILogger"/> 的原生签名一致：
+    /// 日志占位符取到 null 是合法的（渲染为空），不该逼调用方在每个可空实参上写 <c>?? "..."</c>。
+    /// </remarks>
+    protected void LogInformation(string message, params object?[] args) => Logger.LogInformation(message, args);
 
     /// <summary>
     /// 记录警告级日志
     /// </summary>
-    protected void LogWarning(string message, params object[] args) => Logger.LogWarning(message, args);
+    protected void LogWarning(string message, params object?[] args) => Logger.LogWarning(message, args);
 
     /// <summary>
     /// 记录错误级日志
     /// </summary>
-    protected void LogError(string message, params object[] args) => Logger.LogError(message, args);
+    protected void LogError(string message, params object?[] args) => Logger.LogError(message, args);
 
     // 对象映射请直接使用Tnzi.Mapster.MapperExtensions扩展方法
     // 示例: var dto = entity.MapTo<EntityDto>();

@@ -35,7 +35,7 @@ public class AgingBucketConfigTests : FinanceIntegrationTestBase
 
         var aging = await InScopeAsync<IFinancialReportService, Result<AgingReportDto>>(s => s.GetArAgingAsync(today));
 
-        var row = aging.Data!.Rows.Single(r => r.PartyId == customer.Data.Id);
+        var row = aging.Data!.Rows.Single(r => r.PartyId == customer.Data!.Id);
         row.Days1To30.ShouldBe(0m);
         row.Days31To60.ShouldBe(250m);
     }

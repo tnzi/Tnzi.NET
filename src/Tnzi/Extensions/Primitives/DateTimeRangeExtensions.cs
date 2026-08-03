@@ -17,7 +17,7 @@ public static class DateTimeRangeExtensions
     /// var range = DateTimeRange.ThisMonth;
     /// var utcRange = range.ToUtc(); // 转换为 UTC 时间范围
     /// var queryable = dbContext.Users
-    ///     .Where(u => u.CreationTime >= utcRange.StartTime && u.CreationTime <= utcRange.EndTime);
+    ///     .Where(u => u.CreationTime &gt;= utcRange.StartTime &amp;&amp; u.CreationTime &lt;= utcRange.EndTime);
     /// </code>
     /// </example>
     public static DateTimeRange ToUtc(this DateTimeRange range)
@@ -44,7 +44,7 @@ public static class DateTimeRangeExtensions
     /// // StartTime: 2025-12-13 16:00:00 UTC (对应本地 2025-12-14 00:00:00)
     /// // EndTime: 2025-12-14 15:59:59.999 UTC (对应本地 2025-12-14 23:59:59.999)
     /// var queryable = dbContext.Users
-    ///     .Where(u => u.CreationTime >= utcRange.StartTime && u.CreationTime <= utcRange.EndTime);
+    ///     .Where(u => u.CreationTime &gt;= utcRange.StartTime &amp;&amp; u.CreationTime &lt;= utcRange.EndTime);
     /// </code>
     /// </example>
     public static DateTimeRange CreateUtcDateRange(DateTime localDate)

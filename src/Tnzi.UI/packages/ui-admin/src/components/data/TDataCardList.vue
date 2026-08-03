@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, isVNode, type PropType, type VNodeChild } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
-import TEmpty from './TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 
 /**
  * Column descriptor for the mobile card list. A subset of the table column

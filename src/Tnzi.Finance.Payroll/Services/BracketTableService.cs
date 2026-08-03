@@ -220,7 +220,7 @@ public class BracketTableService : ApplicationService, IBracketTableService
 
                 var expected = rows[i].LowerBound * rows[i].Rate - cumulative;
                 if (Math.Abs(rows[i].QuickDeduction!.Value - expected) > 0.01m)
-                    return Fail($"Row {rows[i].Sequence}: QuickDeduction {rows[i].QuickDeduction.Value} is inconsistent with the rate schedule (expected {expected:0.####} to match progressive tax). Correct the value, or clear QuickDeduction on all rows to use pure progressive calculation.");
+                    return Fail($"Row {rows[i].Sequence}: QuickDeduction {rows[i].QuickDeduction!.Value} is inconsistent with the rate schedule (expected {expected:0.####} to match progressive tax). Correct the value, or clear QuickDeduction on all rows to use pure progressive calculation.");
             }
         }
 

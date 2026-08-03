@@ -91,7 +91,10 @@ public class R2Storage : IFileStorage, IDisposable
             BucketName = _options.BucketName,
             Key = fileName,
             InputStream = stream,
-            ContentType = contentType ?? "application/octet-stream"
+            ContentType = contentType ?? "application/octet-stream",
+            // 同 S3Storage：AWS SDK 默认读完即关掉 InputStream，而流归调用方所有
+            // （见 IFileStorage.UploadAsync 的所有权约定）。
+            AutoCloseStream = false
         };
 
         await _s3Client.PutObjectAsync(request);

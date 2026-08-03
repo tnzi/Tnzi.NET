@@ -62,7 +62,7 @@ import { computed, h, nextTick, ref, type CSSProperties, type ComponentPublicIns
 import { NTabs, NTabPane, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
-import { maybeTranslateKey } from '../../pages/_shared/translate'
+import { maybeTranslateKey } from '../../i18n/translate'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import type { DetailSection, DetailLayout } from '../../headless/useDetail'
 

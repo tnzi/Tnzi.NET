@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// Embedded 薪酬提供者契约（Check/Gusto Embedded 形态；v1 仅定契约 + 摄取，不做编排）

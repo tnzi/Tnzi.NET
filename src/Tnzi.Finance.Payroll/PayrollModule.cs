@@ -7,8 +7,8 @@ namespace Tnzi.Finance.Payroll;
 /// </summary>
 /// <remarks>
 /// Finance 的硬依赖子模块（非 AI 的 NoOp 回退形态）：只消费 Finance 的公共扩展面
-/// （<see cref="Tnzi.Finance.Services.Interfaces.ILedgerPostingService"/> /
-/// <see cref="Tnzi.Finance.Services.Interfaces.IVendorService"/> 等），
+/// （<see cref="Tnzi.Finance.Services.ILedgerPostingService"/> /
+/// <see cref="Tnzi.Finance.Services.IVendorService"/> 等），
 /// 不触碰其 Services/Internal。税级表只内置结构，内容由 country pack 播种或
 /// 管理员手录——框架永不内置税表数值。
 /// </remarks>

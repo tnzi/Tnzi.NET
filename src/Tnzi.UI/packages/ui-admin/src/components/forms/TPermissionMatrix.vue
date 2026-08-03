@@ -13,7 +13,18 @@
       <span class="t-perm-matrix__section-count">{{ group.sectionStart.count }}</span>
     </div>
     <div class="t-perm-matrix__mcard">
-      <div class="t-perm-matrix__mcard-head" @click="toggleExpand(group.module.id)">
+      <!-- role/tabindex/keydown, not a bare click handler: this is the only way
+           to open a module's permissions on this breakpoint, so without them a
+           keyboard user cannot reach any of them. -->
+      <div
+        class="t-perm-matrix__mcard-head"
+        role="button"
+        tabindex="0"
+        :aria-expanded="isExpanded(group.module.id)"
+        @click="toggleExpand(group.module.id)"
+        @keydown.enter.prevent="toggleExpand(group.module.id)"
+        @keydown.space.prevent="toggleExpand(group.module.id)"
+      >
         <TSvgIcon
           icon="mdi:menu-right"
           :size="18"
@@ -420,7 +431,7 @@ import { computed, ref, watch } from 'vue'
 import { NCheckbox, NTag, NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { isCodeRedundant } from '../../headless/codeLabel'
+import { isCodeRedundant } from '../../headless/code-label'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 import { PermissionCategory } from '@tnzi/core/services/authorization'
 

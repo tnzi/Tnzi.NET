@@ -1,4 +1,3 @@
-using Tnzi.AI.Rag.Dtos;
 using Tnzi.AI.Rag.FileExtractors;
 using Tnzi.AI.Rag.Metadata;
 

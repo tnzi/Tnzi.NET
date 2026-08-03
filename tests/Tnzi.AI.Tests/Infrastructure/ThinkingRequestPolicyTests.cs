@@ -2,8 +2,6 @@ using System.ClientModel;
 using System.ClientModel.Primitives;
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
-using Tnzi.AI.Infrastructure.Streaming;
 
 namespace Tnzi.AI.Tests.Infrastructure;
 

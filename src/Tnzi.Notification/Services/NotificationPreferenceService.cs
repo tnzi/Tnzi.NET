@@ -5,10 +5,10 @@ namespace Tnzi.Notification.Services;
 /// </summary>
 public class NotificationPreferenceService : ApplicationService, INotificationPreferenceService
 {
-    private readonly IRepository<NotificationPreference, Guid> _repository;
+    private readonly IRepository<Preference, Guid> _repository;
 
     public NotificationPreferenceService(
-        IRepository<NotificationPreference, Guid> repository,
+        IRepository<Preference, Guid> repository,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -95,7 +95,7 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         }
 
         // 创建新记录
-        var preference = new NotificationPreference
+        var preference = new Preference
         {
             UserId = userId,
             Channel = input.Channel,

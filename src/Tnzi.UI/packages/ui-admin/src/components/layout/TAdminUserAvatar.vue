@@ -17,7 +17,7 @@ import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import { TSvgIcon, TAvatar } from '@tnzi/ui'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import TPresenceDot from '../chat/TPresenceDot.vue'
 
 interface Props {

@@ -1,8 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.Extensions.Logging;
-using Moq;
 using Tnzi.Chat.Events.Handlers;
-using Tnzi.Domain.Repositories;
 using Tnzi.Identity.Presence.Events;
 using Tnzi.SignalR.Services;
 

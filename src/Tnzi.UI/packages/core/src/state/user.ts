@@ -10,6 +10,7 @@ import { defaultUserPreferences } from './types/user';
 import type { UserDto, UpdateUserDto } from '../services/identity/types';
 import { useProfileApi } from '../services/identity/index';
 import type { StateDeps } from './types/deps';
+import { normalizeThemeMode } from '../types/theme';
 
 // ============================================
 // Initial state
@@ -257,7 +258,17 @@ export class UserStateManager {
     const recents = this.deps.storage.get<RecentItem[]>(STORAGE_KEY_RECENTS);
     const favs = this.deps.storage.get<RecentItem[]>(STORAGE_KEY_FAVORITES);
 
-    if (prefs) this.preferences = { ...defaultUserPreferences, ...prefs };
+    if (prefs) {
+      // Spreading persisted prefs straight in would let a legacy `theme: 'system'`
+      // (written before the 'system' → 'auto' unification) escape the declared
+      // union and reach `deps.theme.applyTheme`, which would resolve it as
+      // "not dark" and quietly strand the user in light mode.
+      this.preferences = {
+        ...defaultUserPreferences,
+        ...prefs,
+        theme: normalizeThemeMode(prefs.theme, defaultUserPreferences.theme),
+      };
+    }
     if (recents) this.recentItems = recents;
     if (favs) this.favorites = favs;
   }

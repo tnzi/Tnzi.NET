@@ -1,5 +1,5 @@
 
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Marker interface for no-op fallback service implementations.

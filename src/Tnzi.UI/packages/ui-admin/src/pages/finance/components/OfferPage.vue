@@ -107,7 +107,7 @@
  * documents never reach the ledger and borrowing Post/Void would suggest they do.
  */
 import { EMPTY_DASH } from '../../../utils/placeholders'
-import { computed, h, onMounted, ref, watch, type Component, type VNode } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { NAlert, NButton, NDatePicker, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -119,13 +119,13 @@ import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } fro
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../../headless/rowActions'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { editAction, deleteAction, type RowAction } from '../../../headless/row-actions'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { makePageTranslator } from '../../_shared/translate'
 import { useAdminClient } from '../../../plugin/client'
 import { createFinanceOptionSources } from '../options'
 import { buildOfferColumns, offerStatusCell, type OfferRow } from '../offer-config'
-import { fmtDate, fmtMoney, moneyCell, tsToIsoDate, isoDateToLocalTs } from '../money'
+import { fmtDate, fmtMoney, moneyCell, tsToIsoDate } from '../money'
 import {
   createFinanceBridge,
   FinanceOfferStatus,

@@ -39,7 +39,7 @@
 
 <script setup lang="ts">
 import { computed, ref, type CSSProperties } from 'vue'
-import { useFocusTrap } from '../../composables/feedback/useFocusTrap'
+import { useFocusTrap } from '../../headless/feedback/useFocusTrap'
 
 type Placement = 'left' | 'right' | 'top' | 'bottom'
 

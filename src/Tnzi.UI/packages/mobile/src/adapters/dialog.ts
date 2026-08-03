@@ -9,7 +9,7 @@ import type { DialogAdapter, DialogOptions } from '@tnzi/core/adapters';
 import type { DialogOptions as VantDialogOptions } from 'vant';
 import { Field as VanField, showConfirmDialog, showDialog } from 'vant';
 
-// Re-export Vant functions for direct use in playgrounds
+// Re-export Vant functions so consumers can call them directly
 export { showConfirmDialog, showDialog };
 
 /**

@@ -7,7 +7,7 @@ import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
 import { useAdminAppStore } from '../../src/stores/useAdminAppStore'
-import { ADMIN_LOGIN_CONFIG_KEY, type AdminLoginConfig } from '../../src/plugin/loginConfig'
+import { ADMIN_LOGIN_CONFIG_KEY, type AdminLoginConfig } from '../../src/plugin/login-config'
 
 const dummyClient = {
   get: async () => ({ success: true, code: 200, data: null }),
@@ -70,8 +70,10 @@ describe('defineAdminApp', () => {
     defineAdminApp({ client }).install(app, pinia, router)
     // The load is fire-and-forget; flush the microtask/macrotask queue.
     await new Promise((resolve) => setTimeout(resolve, 0))
+    // Themes became scoped per front-end product on 2026-08-02; the admin
+    // console reads its own scope rather than the old single endpoint.
     expect(
-      get.mock.calls.some((c) => String(c[0]).includes('appearance/admin-theme')),
+      get.mock.calls.some((c) => String(c[0]).includes('appearance/theme/admin')),
     ).toBe(true)
   })
 

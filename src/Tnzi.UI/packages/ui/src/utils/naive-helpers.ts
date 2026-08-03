@@ -8,6 +8,7 @@
 import type { MenuOption, FormItemRule } from 'naive-ui'
 import type { IMenuItem, IFormRule } from '@tnzi/core'
 import type { ThemeMode } from '@tnzi/core/types'
+import { applyThemeModeToDocument } from '../theme/document'
 
 // ============================================
 // Menu conversion
@@ -83,18 +84,15 @@ export function convertFormRules(rules: Record<string, IFormRule[]>): Record<str
 
 /**
  * Apply theme mode to the document root element by toggling the 'dark' class.
- * Resolves 'system' mode using `prefers-color-scheme` media query.
+ * Resolves `'auto'` using the `prefers-color-scheme` media query.
  * Safe to call in SSR (no-ops when `document` is unavailable).
+ *
+ * Thin delegate to {@link applyThemeModeToDocument}, which is the package's one
+ * writer of that class. Kept as a named export because it is the shape the core
+ * `ThemeAdapter` contract is wired to.
  */
 export function applyThemeToDOM(theme: ThemeMode): void {
-  if (typeof document === 'undefined') return
-
-  const isDark =
-    theme === 'dark' ||
-    (theme === 'system' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches)
-
-  document.documentElement.classList.toggle('dark', isDark)
+  applyThemeModeToDocument(theme)
 }
 
 /**

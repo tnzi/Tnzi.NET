@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Workflow.Services.Interfaces;
+namespace Tnzi.AI.Workflow.Services;
 
 /// <summary>
 /// 工作流节点接口 - 定义可扩展的节点执行逻辑

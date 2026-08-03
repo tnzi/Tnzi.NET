@@ -1,6 +1,3 @@
-using System.Reflection;
-using Tnzi.AI.Skills;
-using Tnzi.AI.Skills.Models;
 using Tnzi.AI.Tools.Models;
 
 namespace Tnzi.AI.Tests.Skills;

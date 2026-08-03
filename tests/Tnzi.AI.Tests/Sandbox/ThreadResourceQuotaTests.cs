@@ -1,10 +1,8 @@
 using Microsoft.Extensions.Caching.Memory;
 using Tnzi.AI.Sandbox.Events;
-using Tnzi.AI.Sandbox.Options;
 using Tnzi.AI.Sandbox.Quota;
 using Tnzi.AI.Sandbox.Tools;
 using Tnzi.Caching;
-using Tnzi.EventBus;
 
 namespace Tnzi.AI.Tests.Sandbox;
 

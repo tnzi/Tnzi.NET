@@ -102,7 +102,11 @@ public class AIModuleOptionalDependencyTests
             typeof(ISkillLoadTracker), typeof(ISkillService), typeof(ISkillStore),
             typeof(ISkillTemplateEngine), typeof(ISkillConstraintEnforcer),
             typeof(ISkillSearchService), typeof(ISkillRequirementsValidator),
-            typeof(ITextSearchService)
+            typeof(ITextSearchService),
+            // Tnzi.AI.Cli。ICliAgentBindingService 不在此列 —— 它的回退
+            // (BuiltInOnlyCliAgentBindingService) 刻意不实现 INoOpService：读路径返回 null
+            // 表示「本部署没装外部执行能力，全部走内建」，那是正确答案而非降级。
+            typeof(ICliAgentDispatcher), typeof(ICliRuntimeService)
         };
 
         var noOpImpls = typeof(AIModule).Assembly.GetTypes()

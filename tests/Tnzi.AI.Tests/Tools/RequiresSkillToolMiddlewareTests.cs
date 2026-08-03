@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.AI.Tools.Models;
 
 namespace Tnzi.AI.Tests.Tools;
@@ -49,7 +47,7 @@ public class RequiresSkillToolMiddlewareTests
                 }
 
                 var toolResult = messages.Last().Contents.OfType<FunctionResultContent>().Single();
-                toolResult.Result?.ToString().ShouldContain("Required skills");
+                toolResult.Result!.ToString()!.ShouldContain("Required skills");
                 return CreateTextStream(["guidelines loaded"], ct);
             });
 
@@ -72,7 +70,7 @@ public class RequiresSkillToolMiddlewareTests
         var toolCall = chunks.Single(x => x.ToolCalls is { Count: > 0 }).ToolCalls!.Single();
         toolCall.Name.ShouldBe("deploy");
         toolCall.IsSuccess.ShouldBeFalse();
-        toolCall.Error.ShouldContain("Required skills not loaded");
+        toolCall.Error!.ShouldContain("Required skills not loaded");
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> CreateToolCallStream([EnumeratorCancellation] CancellationToken cancellationToken)

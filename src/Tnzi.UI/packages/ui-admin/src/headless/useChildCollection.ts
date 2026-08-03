@@ -19,7 +19,7 @@
  *   })
  */
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
-import { canAction, normalizeCrudPermission, type CrudActionPermissions } from './permissionGates'
+import { canAction, normalizeCrudPermission, type CrudActionPermissions } from './permission-gates'
 
 export interface UseChildCollectionOptions<TItem, TCreate, TUpdate, TId> {
   /** Fetch the children (e.g. `() => bridge.byParent(parentId)`). Re-run after each write. */

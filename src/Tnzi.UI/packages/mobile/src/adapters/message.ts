@@ -7,7 +7,7 @@
 import type { MessageAdapter, MessageOptions } from '@tnzi/core/adapters';
 import { showFailToast, showLoadingToast, showSuccessToast, showToast } from 'vant';
 
-// Re-export Vant functions for direct use in playgrounds
+// Re-export Vant functions so consumers can call them directly
 export { showFailToast, showLoadingToast, showSuccessToast, showToast };
 
 function toVantOptions(options?: MessageOptions): Record<string, unknown> | undefined {

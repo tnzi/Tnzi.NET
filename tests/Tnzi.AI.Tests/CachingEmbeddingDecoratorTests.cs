@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tnzi.Caching;
 
 namespace Tnzi.AI.Tests;

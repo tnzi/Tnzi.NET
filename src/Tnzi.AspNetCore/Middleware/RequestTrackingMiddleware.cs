@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.AspNetCore.Middleware;
 
 /// <summary>
@@ -28,6 +28,74 @@ public class RequestTrackingMiddleware
     [
         "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs", "/hubs/*"
     ];
+
+    /// <summary>
+    /// 查询串里默认要脱敏的参数名。它们都是**凭据**:
+    /// <c>access_token</c>(SignalR 传输携带的 JWT)、<c>sig</c>(文件签名访问令牌)、
+    /// <c>password</c>(分享链接口令)。原样落日志等于把凭据写进运维能读到的地方。
+    /// </summary>
+    private static readonly string[] DefaultSensitiveQueryKeys =
+    [
+        "access_token", "sig", "password"
+    ];
+
+    private const string RedactedValue = "***";
+
+    /// <summary>
+    /// 把敏感参数的值替换成 <c>***</c>,其余原样保留。
+    ///
+    /// 重建而不是正则替换:值可能被 URL 编码、可能含 <c>&amp;</c>,按已解析的 Query 集合
+    /// 重建才不会漏也不会误伤。没有命中任何敏感参数时返回原串(常见路径零分配)。
+    /// </summary>
+    private static string? RedactQueryString(IQueryCollection query, string? raw, RequestTrackingOptions options)
+    {
+        if (string.IsNullOrEmpty(raw) || query.Count == 0)
+            return raw;
+
+        var keys = options.SensitiveQueryKeys is { Count: > 0 }
+            ? options.SensitiveQueryKeys
+            : (IReadOnlyList<string>)DefaultSensitiveQueryKeys;
+
+        var hit = false;
+        foreach (var key in keys)
+        {
+            if (query.ContainsKey(key))
+            {
+                hit = true;
+                break;
+            }
+        }
+
+        if (!hit)
+            return raw;
+
+        var builder = new StringBuilder("?");
+        var first = true;
+        foreach (var pair in query)
+        {
+            var sensitive = false;
+            foreach (var key in keys)
+            {
+                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    sensitive = true;
+                    break;
+                }
+            }
+
+            // 敏感参数不论原本有几个值，都只留一个 *** —— 值的个数本身也是信息。
+            var values = sensitive ? new[] { RedactedValue } : pair.Value.ToArray();
+            foreach (var value in values)
+            {
+                if (!first) builder.Append('&');
+                first = false;
+                builder.Append(Uri.EscapeDataString(pair.Key)).Append('=');
+                builder.Append(sensitive ? RedactedValue : Uri.EscapeDataString(value ?? string.Empty));
+            }
+        }
+
+        return builder.ToString();
+    }
 
     public RequestTrackingMiddleware(
         RequestDelegate next,
@@ -119,7 +187,7 @@ public class RequestTrackingMiddleware
                     RequestId = requestId,
                     Method = context.Request.Method,
                     Path = context.Request.Path.Value ?? "",
-                    QueryString = context.Request.QueryString.Value,
+                    QueryString = RedactQueryString(context.Request.Query, context.Request.QueryString.Value, trackingOptions),
                     IpAddress = context.Connection.RemoteIpAddress?.ToString(),
                     UserAgent = context.Request.Headers["User-Agent"].ToString(),
                     RequestBody = requestBody,

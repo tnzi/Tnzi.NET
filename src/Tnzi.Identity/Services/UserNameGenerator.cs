@@ -1,5 +1,5 @@
 
-namespace Tnzi.Identity;
+namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 用户名生成工具类

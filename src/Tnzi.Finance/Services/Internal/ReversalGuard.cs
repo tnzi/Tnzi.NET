@@ -46,6 +46,7 @@ public sealed class ReversalGuard
     /// </summary>
     /// <param name="original">原凭证（<see cref="JournalEntry.Lines"/> 必须已加载——行 id 是判定输入）</param>
     /// <param name="postingDate">冲销凭证的过账日期（各 <c>VoidAsync</c> 传原凭证记账日=回填到原始记账日）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     public async Task<ReversalBlock?> EvaluateAsync(JournalEntry original, DateTime postingDate, CancellationToken cancellationToken = default)
     {
         Check.NotNull(original);

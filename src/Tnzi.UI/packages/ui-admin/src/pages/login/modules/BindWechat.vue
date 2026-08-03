@@ -6,7 +6,7 @@
  * literally `<div></div>` upstream). WeChat OAuth binding is an ecosystem-optional
  * flow; this module stays a placeholder unless a consumer overrides it.
  */
-import { useLoginContext } from '../useLoginContext'
+import { useLoginContext } from '@tnzi/ui'
 
 defineOptions({ name: 'BindWechat' })
 

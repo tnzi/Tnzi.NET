@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 工资单计算钩子（公式表达不了的规则；default 空实现，按 <see cref="Order"/> 升序执行）

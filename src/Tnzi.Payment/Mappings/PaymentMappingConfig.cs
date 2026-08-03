@@ -14,9 +14,12 @@ public class PaymentMappingConfig : IMappingConfig
         context.NewConfig<Refund, RefundDto>()
             .Map(dest => dest.TradeNo, src => src.Payment != null ? src.Payment.TradeNo : null);
 
-        // 订阅实体映射：映射关联的 PlanName
+        // 订阅实体映射：映射关联的 PlanName；
+        // HasPaymentMethod 由 token 是否存在推导（可翻译成 SQL，列表查询走 ProjectTo 也成立），
+        // 前端据此提示"未绑卡将无法自动续费"。
         context.NewConfig<Subscription, SubscriptionDto>()
-            .Map(dest => dest.PlanName, src => src.Plan != null ? src.Plan.PlanName : null);
+            .Map(dest => dest.PlanName, src => src.Plan != null ? src.Plan.PlanName : null)
+            .Map(dest => dest.HasPaymentMethod, src => src.PaymentMethodToken != null);
 
         // 优惠券使用记录映射：映射关联的 CouponCode，使用 CreationTime 作为 UsedTime
         context.NewConfig<CouponUsage, CouponUsageDto>()

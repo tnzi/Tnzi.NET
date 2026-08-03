@@ -5,9 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>User presence (online status) sub-module for the Tnzi.NET identity module: manual status intent, connection-derived online resolution, and configurable auto-away. Independent of Chat; Chat depends on it.</Description>
-    <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

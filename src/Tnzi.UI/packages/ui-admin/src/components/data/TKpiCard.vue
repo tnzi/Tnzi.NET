@@ -208,10 +208,15 @@ const precision = computed<number>(() => {
 .t-stat-card__value--success { color: var(--tnzi-success, #18a058); }
 .t-stat-card__value--warning { color: var(--tnzi-warning, #f0a020); }
 .t-stat-card__value--error { color: var(--tnzi-error, #d03050); }
+/* The figure is the card. It must never be the thing that gets truncated:
+   an ellipsised KPI reads as "$…", which is not a smaller version of the
+   answer, it is no answer at all - and unlike a clipped label there is no
+   hover affordance on a phone to recover it.
+   No `min-width: 0` here on purpose: automatic minimum sizing keeps this flex
+   item at its content width, so a `suffix` or an `#extra` tag wraps to the next
+   line (the value row is already `flex-wrap: wrap`) instead of squeezing the
+   number. `nowrap` because a currency figure has no safe break point. */
 .t-stat-card__number {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .t-stat-card__suffix {
@@ -221,5 +226,13 @@ const precision = computed<number>(() => {
 }
 .t-stat-card__footer {
   margin-top: 10px;
+}
+/* Phone: step the figure down rather than let a long money value push past the
+   card. Paired with the no-truncation rule above - the number stays whole, it
+   just occupies less width. */
+@media (max-width: 767px) {
+  .t-stat-card__value {
+    font-size: 20px;
+  }
 }
 </style>

@@ -5,8 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>Canadian country pack for the Tnzi.NET finance module: maps posted GST/HST to the CRA GST34 return lines (101 / 105 / 108 / 109). Optional module - the framework never ships any one country's tax tables, so load this only if you file in Canada.</Description>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

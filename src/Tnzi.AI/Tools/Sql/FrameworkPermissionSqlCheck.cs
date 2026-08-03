@@ -1,4 +1,3 @@
-using Tnzi.Security.Authorization;
 
 namespace Tnzi.AI.Tools.Sql;
 

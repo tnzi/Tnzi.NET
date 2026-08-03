@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Presence.Services.Interfaces;
+namespace Tnzi.Identity.Presence.Services;
 
 public interface IPresenceService
 {

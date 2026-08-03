@@ -1,4 +1,3 @@
-using Tnzi.AI.Infrastructure.Memory;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Integration;

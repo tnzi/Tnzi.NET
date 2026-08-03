@@ -1,10 +1,7 @@
 global using Hangfire;
 global using Hangfire.Dashboard;
-global using Hangfire.InMemory;
 global using Hangfire.PostgreSql;
 global using Hangfire.Redis.StackExchange;
-global using Hangfire.SqlServer;
-global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;

@@ -117,7 +117,7 @@ public class DefaultAuditOperationAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<List<AuditTrendPointDto>>> GetTrend(
         [FromQuery] DateTime startDate,
         [FromQuery] DateTime endDate,
-        [FromQuery] AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily)
+        [FromQuery] TrendInterval groupBy = TrendInterval.Daily)
     {
         var result = await AuditOperationService.GetAuditTrendAsync(startDate, endDate, groupBy);
         return result.ToApiResult();

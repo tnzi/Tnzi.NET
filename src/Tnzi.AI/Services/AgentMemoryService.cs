@@ -1,5 +1,3 @@
-using Tnzi.AI.Entities;
-using Tnzi.AI.Memory;
 
 namespace Tnzi.AI.Services;
 

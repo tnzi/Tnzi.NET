@@ -9,7 +9,7 @@ internal static class SecretMask
 {
     /// <summary>
     /// Returns a fixed-length redaction marker when the value is non-empty,
-    /// and "<null>" / "<empty>" otherwise. Uses a constant length so the
+    /// and "&lt;null&gt;" / "&lt;empty&gt;" otherwise. Uses a constant length so the
     /// output reveals neither the secret nor its length.
     /// </summary>
     public static string Mask(string? value)

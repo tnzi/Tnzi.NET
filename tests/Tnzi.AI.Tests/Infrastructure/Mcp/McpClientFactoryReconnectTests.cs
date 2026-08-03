@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Http;
 using System.Reflection;
 using Tnzi.AI.Infrastructure.Mcp;
 
@@ -287,7 +285,7 @@ public class McpClientFactoryReconnectTests
         {
         }
 
-        protected override Task<IMcpClientAdapter> CreateAndConnectInternalAsync(McpServerConfig config, CancellationToken ct)
+        protected internal override Task<IMcpClientAdapter> CreateAndConnectInternalAsync(McpServerConfig config, CancellationToken ct)
         {
             CreateCallCount++;
             if (CreateFunc != null)

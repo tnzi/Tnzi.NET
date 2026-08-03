@@ -59,11 +59,11 @@ import { ref } from 'vue'
 import { NButton, NPagination, NSpin } from 'naive-ui'
 import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
 import TDetailSection from '../../../components/detail/TDetailSection.vue'
-import TEmpty from '../../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import type { LoginLogDto } from '@tnzi/core/services/identity'
 
 const props = defineProps<{

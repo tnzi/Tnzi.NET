@@ -14,7 +14,7 @@ namespace Tnzi.AI.Tests.Channels.Gateway;
 /// <see cref="SessionBindingRule"/> 行<b>按 TenantId 分区</b>，杜绝跨租户绑定泄漏：
 /// 租户 A 的入站流量绝不会命中租户 B 的规则，反之亦然。
 /// <para>
-/// 关键证明点：<see cref="SessionBindingRule"/> 现在是真正的 <see cref="IMultiTenant"/> 实体。
+/// 关键证明点：<see cref="SessionBindingRule"/> 现在是真正的 <see cref="Tnzi.Domain.Entities.IMultiTenant"/> 实体。
 /// 绑定器的后台缓存在一个<b>无当前租户</b>的全新作用域里加载所有规则，因此必须在加载时
 /// 临时禁用 <see cref="IMultiTenantFilter"/>，否则全局过滤器 <c>e.TenantId == null</c> 会把
 /// 所有带租户的规则隐藏掉、缓存为空。隔离改由<b>匹配时</b>的 <c>rule.TenantId == context.TenantId</c>

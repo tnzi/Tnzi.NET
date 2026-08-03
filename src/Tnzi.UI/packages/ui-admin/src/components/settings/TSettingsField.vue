@@ -92,8 +92,8 @@ import { computed } from 'vue'
 import { NButton, NInput, NInputNumber, NSelect, NSwitch, NTag } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import type { SettingsCenterFieldDto } from '@tnzi/core/services/system'
-import { resolveBackendLabel, translatePageKey } from '../../pages/_shared/translate'
-import { isChatSoundSettingKey } from '../../headless/chatSounds'
+import { resolveBackendLabel, translatePageKey } from '../../i18n/translate'
+import { isChatSoundSettingKey } from '../../headless/chat-sounds'
 
 // Mirror of TSettingsGroupPanel's FieldValue - the parent owns the form state
 // and passes the current value down; this component only renders the control.

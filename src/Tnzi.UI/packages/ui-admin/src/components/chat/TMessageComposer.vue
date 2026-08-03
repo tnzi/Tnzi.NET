@@ -89,7 +89,7 @@
 import { ref } from 'vue'
 import { NPopover } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { COMMON_EMOJIS, getFrequentEmojis, recordEmojiUse } from './emoji'
 
 const props = defineProps<{

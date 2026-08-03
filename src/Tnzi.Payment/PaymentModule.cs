@@ -49,6 +49,7 @@ public class PaymentModule : TnziApplicationModule
 
         // 注册服务
         context.Services.AddScoped<IPaymentService, PaymentService>();
+        context.Services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         context.Services.AddScoped<IRefundService, RefundService>();
         context.Services.AddScoped<ISubscriptionService, SubscriptionService>();
         context.Services.AddScoped<IInvoiceService, InvoiceService>();
@@ -56,10 +57,14 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<ICouponService, CouponService>();
         context.Services.AddScoped<IPaymentStatisticsService, PaymentStatisticsService>();
 
+        // 税额计算：默认按配置的单一税率；应用可在自己的模块里覆盖（TryAdd 让消费者的注册优先）
+        context.Services.TryAddScoped<ITaxCalculator, DefaultTaxCalculator>();
+
         // 注册支付渠道
         context.Services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
         context.Services.AddScoped<IPaymentProvider, StripeProvider>();
         context.Services.AddScoped<IPaymentProvider, PayPalProvider>();
+        context.Services.AddScoped<IPaymentProvider, OfflineProvider>();
         context.Services.AddScoped<IPaymentProvider, NullProvider>();
 
         // 注册后台任务（过期支付关闭 + 订阅到期续费）

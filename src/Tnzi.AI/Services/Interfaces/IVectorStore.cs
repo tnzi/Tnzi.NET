@@ -1,5 +1,5 @@
 
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 向量存储接口 - RAG 向量搜索和管理的抽象层

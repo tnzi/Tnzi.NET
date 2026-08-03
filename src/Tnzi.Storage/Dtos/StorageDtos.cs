@@ -1,4 +1,4 @@
-namespace Tnzi.Storage.Dtos;
+﻿namespace Tnzi.Storage.Dtos;
 
 /// <summary>
 /// 文件存储统计信息
@@ -596,6 +596,12 @@ public class FileShareSummaryDto
     public bool IsExhausted => MaxAccessCount.HasValue && AccessCount >= MaxAccessCount.Value;
 
     /// <summary>
+    /// When the link was last used successfully (null = never used).
+    /// Answers the question a share list is most often opened to answer.
+    /// </summary>
+    public DateTime? LastAccessedAt { get; set; }
+
+    /// <summary>
     /// Creation time
     /// </summary>
     public DateTime CreationTime { get; set; }
@@ -704,4 +710,89 @@ public class SetFileMetadataRequest
     /// Metadata key-value pairs to set (replaces existing metadata)
     /// </summary>
     public Dictionary<string, string> Metadata { get; set; } = null!;
+}
+
+/// <summary>
+/// Set file visibility request
+/// </summary>
+public class SetFileVisibilityRequest
+{
+    /// <summary>
+    /// True makes the file readable by anyone (including unauthenticated callers);
+    /// false restores the default "owner or storage.file.view" policy.
+    /// </summary>
+    public bool IsPublic { get; set; }
+}
+
+/// <summary>
+/// Body of the anonymous share-password check.
+/// </summary>
+public class VerifyShareRequest
+{
+    /// <summary>Password to check. Null / empty for links that need none.</summary>
+    public string? Password { get; set; }
+}
+
+/// <summary>
+/// What a share-link recipient is shown BEFORE downloading: enough to decide
+/// whether to trust the link, and nothing more.
+/// </summary>
+/// <remarks>
+/// Deliberately narrower than `FileSharePublicDto`: no `fileId` (an anonymous
+/// visitor has no business learning internal ids), no access counts, no creator.
+/// Returned only while the link is actually usable - an expired, exhausted or
+/// revoked token gets a plain 404, so probing tells the caller nothing.
+/// </remarks>
+public class FileSharePreviewDto
+{
+    /// <summary>File name as uploaded, so the recipient can tell what they are about to open.</summary>
+    public string FileName { get; set; } = string.Empty;
+
+    /// <summary>Size in bytes.</summary>
+    public long Size { get; set; }
+
+    /// <summary>MIME type, for picking an icon.</summary>
+    public string? ContentType { get; set; }
+
+    /// <summary>True when the link asks for a password before it hands over the file.</summary>
+    public bool RequirePassword { get; set; }
+
+    /// <summary>When the link stops working (null = no expiry).</summary>
+    public DateTime? ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// A short-lived token that lets a browser fetch one private file without an
+/// Authorization header. Append it to any read URL of that file as the `sig`
+/// query parameter (download / preview / thumbnail all accept it).
+/// </summary>
+public class FileAccessTokenDto
+{
+    /// <summary>File the token is valid for. A token never works for another file.</summary>
+    public Guid FileId { get; set; }
+
+    /// <summary>Opaque signed token. Pass it as the `sig` query parameter.</summary>
+    public string Token { get; set; } = string.Empty;
+
+    /// <summary>Expiry instant (UTC). Refresh before this to keep long-lived pages working.</summary>
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
+/// <summary>
+/// Batch request for file access tokens.
+/// </summary>
+/// <remarks>
+/// A list page renders many files at once; minting one token per request would
+/// turn a single screen into N round trips. Files the caller may not read are
+/// omitted from the response rather than failing the batch, so one unreadable
+/// id never blanks the whole page (and the omission does not reveal whether
+/// that id exists).
+/// </remarks>
+public class FileAccessTokenRequest
+{
+    /// <summary>File ids to mint tokens for.</summary>
+    public List<Guid> FileIds { get; set; } = null!;
+
+    /// <summary>Optional lifetime override in seconds. Defaults to `Storage:SignedUrlTtlSeconds`.</summary>
+    public int? ExpiresInSeconds { get; set; }
 }

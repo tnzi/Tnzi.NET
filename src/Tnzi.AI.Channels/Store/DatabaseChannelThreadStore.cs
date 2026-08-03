@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Internal;
 
 namespace Tnzi.AI.Channels.Store;
 

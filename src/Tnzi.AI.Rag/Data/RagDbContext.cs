@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Pgvector.EntityFrameworkCore;
 
 namespace Tnzi.AI.Rag.Data;
 

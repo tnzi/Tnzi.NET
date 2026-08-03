@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Services.Interfaces;
+namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
 /// RAG 检索器接口 - 封装查询改写 → 嵌入生成 → 向量搜索 → 后处理的共享检索管线

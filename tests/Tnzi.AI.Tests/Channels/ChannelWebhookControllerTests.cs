@@ -1,7 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Tnzi.AI.Channels.Abstractions;
 using Tnzi.AI.Channels.Controllers;
 
 namespace Tnzi.AI.Tests.Channels;

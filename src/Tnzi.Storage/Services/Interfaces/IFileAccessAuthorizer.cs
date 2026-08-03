@@ -23,4 +23,16 @@ public interface IFileAccessAuthorizer
     /// 能否变更(删除 / 改标签或元数据 / 建版本 / 建分享链接)。
     /// </summary>
     Task<bool> CanWriteAsync(FileRecord record, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 能否为这个文件**签发**访问令牌。
+    ///
+    /// 与 <see cref="CanReadAsync"/> 分开的唯一理由:签发不该认「签名令牌」这条判据。
+    /// 否则一个 10 分钟的渲染凭据就能在到期前拿去换一张新的,无限续期 —— TTL 对任何
+    /// 已登录的持有者都形同虚设,而 TTL 正是这套机制唯一的止损面。
+    ///
+    /// 默认实现等同读取权限;<see cref="FileAccessAuthorizer"/> 覆盖它以排除签名那一条。
+    /// </summary>
+    Task<bool> CanMintAccessTokenAsync(FileRecord record, CancellationToken cancellationToken = default)
+        => CanReadAsync(record, cancellationToken);
 }

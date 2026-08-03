@@ -9,7 +9,7 @@
 import type { ThemeContext, ThemeColors } from '@tnzi/ui'
 import type { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import type { AdminThemeSnapshot } from './admin-config'
-import { applyAppearancePreset, type AdminThemePreset } from './appearancePresets'
+import { applyAppearancePreset, type AdminThemePreset } from './appearance-presets'
 
 export type AdminThemeStore = ReturnType<typeof useAdminThemeStore>
 

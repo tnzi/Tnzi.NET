@@ -11,6 +11,12 @@ public class SubscriptionPlan : AuditedEntity<Guid>
     public string PlanCode { get; set; } = string.Empty;
 
     /// <summary>
+    /// 产品代码（同一产品下的多个计划互为升降级；null 表示单产品应用）。
+    /// 订阅判重与计划变更的边界都按它划分：跨产品不算“已有订阅”，也不允许互相变更。
+    /// </summary>
+    public string? ProductCode { get; set; }
+
+    /// <summary>
     /// 计划名称
     /// </summary>
     public string PlanName { get; set; } = string.Empty;

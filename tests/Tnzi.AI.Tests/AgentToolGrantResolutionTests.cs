@@ -1,5 +1,3 @@
-using Tnzi.Security.Authorization;
-using Tnzi.AI.Tools.Models;
 
 namespace Tnzi.AI.Tests;
 

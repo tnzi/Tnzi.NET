@@ -154,11 +154,31 @@
    column so the buttons line up with the form's right edge. */
 .t-uc-save-bar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
   padding-top: 14px;
   border-top: 1px solid var(--tnzi-border);
+}
+
+/* Unsaved-changes marker - only rendered when the Profile extension block joined
+   the single Reset/Save pair, i.e. when one bar governs two backends and the
+   user can no longer tell from the page alone whether anything is pending.
+   Pushed to the far left so it never crowds the buttons. */
+.t-uc-save-bar__dirty {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-uc-save-bar__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tnzi-warning, #f0a020);
 }
 
 .t-uc-row {
@@ -182,23 +202,58 @@
   font-size: 13px;
 }
 
-/* Profile-section avatar uploader: the circular picker + a label/hint column. */
-.t-uc-avatar-field {
+/* Profile-section identity row: the circular avatar picker beside the name
+   fields, vertically centred against them - the picture and the name answer the
+   same question, so they read as one block. Deliberately only the TOP block
+   shares the row: the profile form is long (gender / birthday / email / phone /
+   bio / address / website), and pairing a 96px avatar with all of it would
+   leave a tall column of dead space beside the picker. */
+.t-uc-identity {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 24px;
+  margin-bottom: 12px;
 }
-.t-uc-avatar-field-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* The picker sizes itself (TImageUpload defaults to 96px), so this is just a
+   no-shrink slot. Hidden outright by `v-module` when Storage isn't loaded, in
+   which case the fields simply claim the whole row.
+
+   `margin-top` is an OPTICAL correction, not a geometric one. The row already
+   centres the picker perfectly (`align-items: center` puts the avatar's centre
+   exactly on the line's centre, measured delta 0), but the field column starts
+   with a label and ends on an input, so its visual mass sits lower than the
+   box centre and the circle reads as floating too high. Aligning the circle to
+   the block the eye actually tracks - first input top to last input bottom -
+   needs it 13px lower.
+   The value is 26px rather than 13px because flexbox centres the MARGIN box:
+   with a 26px top margin and no bottom margin, the border box lands
+   26 / 2 = 13px below the line's centre. Compensation is therefore doubled. */
+.t-uc-identity__avatar {
+  flex-shrink: 0;
+  margin-top: 26px;
+}
+/* Also carries `.t-uc-form-grid` (same two-column responsive grid as the rest of
+   the form); `min-width: 0` lets it shrink inside the flex row instead of
+   overflowing, and the row owns the bottom margin. Declared AFTER
+   `.t-uc-form-grid` above so the margin reset wins at equal specificity. */
+.t-uc-identity__fields {
+  flex: 1 1 auto;
   min-width: 0;
+  margin-bottom: 0;
 }
-.t-uc-avatar-field-label {
-  font-weight: 500;
-  font-size: 13px;
-  color: var(--tnzi-base-text);
+/* Narrow: stack the picker above the fields (same breakpoint as the form grid,
+   which collapses to one column here). Stacked, the picker sits ABOVE the
+   fields instead of beside them, so the optical nudge above has nothing left to
+   correct - it would only open a stray gap at the top of the row. Reset it. */
+@media (max-width: 640px) {
+  .t-uc-identity {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .t-uc-identity__avatar {
+    margin-top: 0;
+  }
 }
 
 /* Linked-accounts list. */

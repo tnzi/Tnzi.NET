@@ -5,9 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>Document rendering for the Tnzi.NET finance module: the default template-driven ICheckDocumentRenderer (Razor cheque templates from the Tnzi.Template store, CPA Standard 006 Canadian business cheque seeded out of the box) plus a PdfSharp-backed alternative. Optional module; load it to make finance check printing and preview work out of the box.</Description>
-    <!-- 生成 XML 文档以启用 IDE0005（多余 using 检查）；成员级缺注释（CS1591）不作为门禁 -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

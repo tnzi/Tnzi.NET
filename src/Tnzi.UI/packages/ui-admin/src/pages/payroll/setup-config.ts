@@ -66,6 +66,8 @@ export const componentFormSchema: FormSchemaItem[] = [
       { label: 'Earning', value: SalaryComponentType.Earning, labelKey: 'componentType.earning' },
       { label: 'Deduction', value: SalaryComponentType.Deduction, labelKey: 'componentType.deduction' },
       { label: 'Employer Contribution', value: SalaryComponentType.EmployerContribution, labelKey: 'componentType.employerContribution' },
+      // 备注项:印在工资条上、可被后续公式引用,但不进任何合计也不产生分录。
+      { label: 'Informational', value: SalaryComponentType.Informational, labelKey: 'componentType.informational' },
     ],
   },
   { key: 'formula', labelKey: 'form.formula', label: 'Formula', type: 'textarea' },

@@ -1,5 +1,3 @@
-using Tnzi.AI;
-using Tnzi.AI.Workspace;
 
 namespace Tnzi.AI.Tests.Workspace;
 

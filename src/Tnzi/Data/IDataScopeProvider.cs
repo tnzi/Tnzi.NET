@@ -8,7 +8,7 @@ namespace Tnzi.Data;
 /// <para><b>opt-in</b>：容器里未注册任何 <see cref="IDataScopeProvider{TEntity}"/> 时零影响
 /// （<see cref="DataScopeExtensions"/> 的合成结果为 <c>null</c>，查询原样返回）。</para>
 /// <para>注册多个同实体 provider 时，它们的 <see cref="GetFilter"/> 谓词以 <b>AND</b> 组合
-/// （逐层收紧）——见 <see cref="DataScopeExtensions.BuildDataScopeFilter{TEntity}"/>。</para>
+/// （逐层收紧）——见 <see cref="DataScopeExtensions.BuildDataScopeFilter{TEntity}(System.Collections.Generic.IEnumerable{IDataScopeProvider{TEntity}})"/>。</para>
 /// <para>这是「行级可见性」的可组合抽象，区别于 <see cref="IDataFilter"/> 家族的全局过滤器
 /// （软删除 / 多租户，由 DbContext 无条件施加）。</para>
 /// </remarks>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Electronic signature engine for the Tnzi.NET framework: reusable templates with placed fields, multi-recipient signing requests with their own lifecycle, single-use hashed link tokens, and a sealed, hash-anchored final PDF. Binds to its owning record polymorphically, so it depends on no business module.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      PDF 原语（Office 转 PDF / 读页与定位 / 盖章压平）来自可选包 Tnzi.Documents；
+      重量级 PDF 依赖收在那里，本包不重复引入。
+      ★ 刻意不引用任何业务模块：宿主记录是多态引用（HostEntityType + HostEntityId），
+        业务模块从自己那侧插 IMergeSourceProvider / IDocumentHostSink 进来，
+        依赖方向永远是单向的。
+    -->
+    <ProjectReference Include="..\Tnzi.Documents\Tnzi.Documents.csproj" />
+    <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
+    <!-- 渲染稿与密封成品都要落成文件；FileRecord 的 id 就是实体上那些 [FileField] 存的东西。 -->
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
+    <!-- 匿名签署端点：ApiControllerBase / [DefaultController] -->
+    <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.Documents.Signing.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+</Project>

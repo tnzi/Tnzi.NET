@@ -35,7 +35,53 @@ public class McpServerSecurityMiddleware
     }
 
     /// <summary>
-    /// 验证 API Key
+    /// 验证调用方：静态 API Key，或（若已注册）<b>运行范围</b>凭据。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 运行范围凭据是给<b>外部 CLI agent 回写</b>用的：由 <c>Tnzi.AI.Cli</c> 为每次运行签发，
+    /// 随运行结束失效。校验走核心契约 <see cref="IRunScopedCredentialValidator"/>，
+    /// 因此本模块<b>不引用</b> <c>Tnzi.AI.Cli</c> —— 未加载它时这条路径根本不存在，
+    /// server 只认自己配置的静态 key，这正是应有的默认。
+    /// </para>
+    /// <para>
+    /// 顺序上先试静态 key：那是纯内存的常数时间比较，而运行范围凭据要查一次库。
+    /// </para>
+    /// </remarks>
+    public async Task<bool> ValidateCallerAsync(string? apiKey, CancellationToken cancellationToken = default)
+    {
+        if (ValidateApiKey(apiKey))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return false;
+        }
+
+        using var scope = _serviceProvider.CreateScope();
+        var validator = scope.ServiceProvider.GetService<IRunScopedCredentialValidator>();
+        if (validator is null)
+        {
+            return false;
+        }
+
+        var credential = await validator.ValidateAsync(apiKey, cancellationToken);
+        if (credential is null)
+        {
+            return false;
+        }
+
+        _logger.LogDebug(
+            "MCP Server accepted a run-scoped credential for run {RunId} (agent {AgentId})",
+            credential.RunId, credential.AgentId);
+
+        return true;
+    }
+
+    /// <summary>
+    /// 验证静态 API Key
     /// </summary>
     /// <returns>验证通过返回 true</returns>
     public bool ValidateApiKey(string? apiKey)

@@ -37,27 +37,8 @@ public class AccessLogStatisticsDto
     public double AverageResponseTime { get; set; }
 }
 
-/// <summary>
-/// 访问日志趋势时间间隔
-/// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum AccessLogTrendInterval
-{
-    /// <summary>
-    /// 按天
-    /// </summary>
-    Daily = 0,
-
-    /// <summary>
-    /// 按周
-    /// </summary>
-    Weekly = 1,
-
-    /// <summary>
-    /// 按月
-    /// </summary>
-    Monthly = 2
-}
+// 访问日志趋势时间间隔已收口到核心 Tnzi.Utilities.TrendInterval（成员名与序号一致，
+// 线缆形态不变）。分桶与标签走 Tnzi.Utilities.TimeBucket。
 
 /// <summary>
 /// 访问日志趋势数据点
@@ -109,7 +90,7 @@ public class AccessLogTrendDto
     /// 时间间隔
     /// </summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public AccessLogTrendInterval Interval { get; set; }
+    public TrendInterval Interval { get; set; }
 
     /// <summary>
     /// 起始时间

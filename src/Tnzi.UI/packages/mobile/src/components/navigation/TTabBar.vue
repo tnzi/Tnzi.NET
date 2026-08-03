@@ -2,7 +2,7 @@
 import type { ITabItem } from '@tnzi/core/types/shared-ui';
 
 interface ITabBarProps {
-  tabs: ITabItem[];
+  tabs?: ITabItem[];
   badge?: Record<string, number>;
   fixed?: boolean;
   safeAreaInsetBottom?: boolean;

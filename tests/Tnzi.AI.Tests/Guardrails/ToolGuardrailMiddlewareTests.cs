@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 
 namespace Tnzi.AI.Tests.Guardrails;
 
@@ -234,7 +233,7 @@ public class ToolGuardrailMiddlewareTests
                 }
 
                 var toolResult = messages.Last().Contents.OfType<FunctionResultContent>().Single();
-                toolResult.Result?.ToString().ShouldContain("blocked by guardrail policy");
+                toolResult.Result!.ToString()!.ShouldContain("blocked by guardrail policy");
                 return new ChatResponse([new ChatMessage(ChatRole.Assistant, "guardrail handled")]);
             });
 
@@ -282,7 +281,7 @@ public class ToolGuardrailMiddlewareTests
                 }
 
                 var toolResult = messages.Last().Contents.OfType<FunctionResultContent>().Single();
-                toolResult.Result?.ToString().ShouldContain("blocked by guardrail policy");
+                toolResult.Result!.ToString()!.ShouldContain("blocked by guardrail policy");
                 return CreateTextStream(["guard", "rail", " handled"], ct);
             });
 
@@ -347,7 +346,7 @@ public class ToolGuardrailMiddlewareTests
         var toolCall = chunks.Single(x => x.ToolCalls is { Count: > 0 }).ToolCalls!.Single();
         toolCall.Name.ShouldBe("bash");
         toolCall.IsSuccess.ShouldBeFalse();
-        toolCall.Error.ShouldContain("Dangerous tool");
+        toolCall.Error!.ShouldContain("Dangerous tool");
     }
 
     private static async IAsyncEnumerable<ChatResponseUpdate> CreateToolCallStream([EnumeratorCancellation] CancellationToken cancellationToken)

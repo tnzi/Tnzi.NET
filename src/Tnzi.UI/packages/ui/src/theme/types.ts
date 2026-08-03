@@ -2,6 +2,7 @@
  * Theme type definitions shared across the theme subsystem.
  */
 import type { GlobalThemeOverrides } from 'naive-ui'
+import type { ThemeMode } from '@tnzi/core/types'
 
 /** The 11 palette levels used for color ramps. 500 is the base color. */
 export type PaletteLevel = 50 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 950
@@ -27,8 +28,8 @@ export interface ThemeSettings {
   colors: ThemeColors
   /** Generated 11-level palettes for each role. */
   palettes: Record<ColorRole, ColorPalette>
-  /** Theme mode: 'light' | 'dark' | 'auto'. */
-  mode: 'light' | 'dark' | 'auto'
+  /** Theme mode. `'auto'` follows the OS colour scheme. */
+  mode: ThemeMode
   /** Whether info color should follow primary. */
   isInfoFollowPrimary: boolean
   /** Whether the user's chosen color should be recommended to the nearest soybean-style palette. */

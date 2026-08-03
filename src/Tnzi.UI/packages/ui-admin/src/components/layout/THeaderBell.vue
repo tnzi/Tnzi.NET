@@ -7,7 +7,14 @@
     class because no bell existed). Mount it in the header via
     `defineAdminApp({ headerNotification })` (the `#header-notification` slot).
   -->
-  <n-popover trigger="click" placement="bottom-end" :show-arrow="false" style="padding: 0" class="t-header-bell__pop">
+  <n-popover
+    trigger="click"
+    placement="bottom-end"
+    :show-arrow="false"
+    style="padding: 0"
+    class="t-header-bell__pop"
+    @update:show="(v: boolean) => emit('update:show', v)"
+  >
     <template #trigger>
       <button type="button" class="t-header-bell__trigger" :aria-label="title">
         <n-badge :value="unreadCount" :max="99" :show="unreadCount > 0" processing>
@@ -72,7 +79,18 @@ const props = withDefaults(
   },
 )
 
-const emit = defineEmits<{ 'load-more': [] }>()
+const emit = defineEmits<{
+  'load-more': []
+  /**
+   * The dropdown opened (`true`) or closed (`false`).
+   *
+   * ★ Without it a host has no moment to refresh on. Polling on a timer is the
+   * only alternative, and it costs a request every interval to catch a change
+   * the user will only see if they happen to open the panel - whereas opening
+   * it is exactly when freshness matters.
+   */
+  'update:show': [value: boolean]
+}>()
 
 defineSlots<{
   item?: (props: { item: T; index: number }) => unknown

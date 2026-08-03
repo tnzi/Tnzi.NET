@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Document primitives for the Tnzi.NET framework: Office-to-PDF conversion (LibreOffice), PDF inspection with coordinate-bearing tag lookup (PdfPig), and coordinate-based PDF stamping and flattening (PDFsharp). Optional module with no entities and no tables; load it to get the three primitives out of the box.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只依赖核心：本包是与业务无关的文档原语，不认识任何业务模块 -->
+    <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      重量级 PDF 依赖收在本可选包内，核心与其它消费者不被传递拉入。
+      版本与既有消费者对齐：PdfSharp 6.2.1（Tnzi.Finance.Documents）、PdfPig 0.1.15（Tnzi.AI / Tnzi.AI.Rag）。
+    -->
+    <PackageReference Include="PdfSharp" Version="6.2.1" />
+    <PackageReference Include="PdfPig" Version="0.1.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 坐标换算/字体探测/soffice 定位都是 internal，测试须直达（src 下全部强命名同一 key，故须带 PublicKey）。 -->
+    <InternalsVisibleTo Include="Tnzi.Documents.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+</Project>

@@ -21,7 +21,7 @@
     :state="detail"
     layout="plain"
     :title="workflow?.name || t('editor.untitled')"
-    :back="'/admin/ai/workflows'"
+    :back="backToList"
     :translate="t"
   >
     <template #title>
@@ -453,7 +453,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, h, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, reactive, ref, watch, type VNode } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NAlert,
@@ -481,7 +481,7 @@ import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { translatePageKey, interpolate } from '../../_shared/translate'
 import {
   workflowNodeTypes,
@@ -509,15 +509,17 @@ import { WorkflowExecutionMode } from '../../../services/bridges/ai-bridge'
 import { Handle, Position, type NodeProps } from '@tnzi/ui-ai/workflow'
 
 // `@vue-flow/core` lives inside `@tnzi/ui-ai`'s dependency tree but isn't a
-// direct ui-admin dep - type the canvas inputs structurally so we can keep
-// the canvas import lazy without pulling vue-flow's type declarations into
-// the ui-admin typecheck pass.
+// direct ui-admin dep, so the canvas inputs are typed structurally here. These
+// shapes must stay assignable to VueFlow's own `Node` / `Edge`: the canvas is
+// now checked against its real declarations (the `shims-ui-ai.d.ts` stub that
+// used to widen it to `any` is gone), so a mismatch is a compile error rather
+// than something that only shows up on the canvas.
 interface FlowNode {
   id: string
   type?: string
-  // VueFlow accepts string OR VNode for `label`; we use VNode to inline an icon
-  // beside the step id so canvas tiles read at a glance.
-  label?: string | unknown
+  // VueFlow accepts a string or a VNode. We pass the step id; the icon beside
+  // it is rendered by the `#node-<type>` template off `data`, not off `label`.
+  label?: string | VNode
   position: { x: number; y: number }
   style?: Record<string, string>
   class?: string
@@ -570,6 +572,10 @@ const route = useRoute()
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
+
+// Smart back with a NAME-resolved fallback - a literal `/admin/ai/workflows`
+// dangles under `defineAdminApp({ basePath })`.
+const backToList = computed(() => ({ fallback: router.resolve({ name: 'ai.workflows' }).path }))
 // Phone (<768px): the DAG canvas is drag-to-move + drag-to-connect, which is
 // unusable on touch; overlay a read-only scrim + guidance while keeping the
 // left node list (view/select) usable. Desktop canvas is untouched.

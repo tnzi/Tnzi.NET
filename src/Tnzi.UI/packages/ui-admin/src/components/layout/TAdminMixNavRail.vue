@@ -29,7 +29,7 @@ import { computed, h, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'v
 import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { TSvgIcon } from '@tnzi/ui'
 import { TMenuToggler } from '@tnzi/ui'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 function resolveLabel(label: string): string {
   if (!label) return ''

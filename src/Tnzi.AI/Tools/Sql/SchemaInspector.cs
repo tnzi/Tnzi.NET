@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-using Microsoft.Extensions.Options;
 
 namespace Tnzi.AI.Tools.Sql;
 

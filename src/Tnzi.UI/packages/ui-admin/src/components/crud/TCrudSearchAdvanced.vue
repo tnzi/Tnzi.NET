@@ -40,7 +40,7 @@ import {
   NSpace,
   NSwitch,
 } from 'naive-ui'
-import type { FormSchemaItem } from '../../pages/_shared/form-schema'
+import type { FormSchemaItem } from '@tnzi/ui'
 import type { SearchableState } from './TCrudSearch.vue'
 
 /**

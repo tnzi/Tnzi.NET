@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Services.Interfaces;
+namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
 /// 文件文本提取服务接口

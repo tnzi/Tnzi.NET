@@ -1,5 +1,3 @@
-using Tnzi.AI.Sandbox.Security;
-using Tnzi.AI.Security;
 
 namespace Tnzi.AI.Sandbox.Providers.Local;
 
@@ -120,7 +118,24 @@ public class LocalSandbox : ISandbox
         catch (OperationCanceledException)
         {
             try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-            return new CommandResult(-1, stdoutBuilder.ToString(), "Command timed out");
+
+            // Keep whatever the command already wrote to stderr. A timeout is precisely
+            // when that output matters - it is the only evidence of where the command
+            // hung - so the timeout notice is PREPENDED, never substituted for it.
+            // Read under the lock: the async output callbacks are still running on
+            // other threads at this point (the process was only just killed).
+            string stdoutSoFar, stderrSoFar;
+            lock (_outputLock)
+            {
+                stdoutSoFar = stdoutBuilder.ToString();
+                stderrSoFar = stderrBuilder.ToString();
+            }
+
+            var notice = $"Command timed out after {_commandTimeout.TotalSeconds:0.#}s";
+            return new CommandResult(
+                -1,
+                stdoutSoFar,
+                string.IsNullOrWhiteSpace(stderrSoFar) ? notice : $"{notice}. {stderrSoFar}");
         }
 
         return new CommandResult(process.ExitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());

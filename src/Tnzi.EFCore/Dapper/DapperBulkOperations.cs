@@ -12,7 +12,16 @@ public static class DapperBulkOperations
     /// <summary>
     /// 批量插入（使用数据库特定的批量插入语法）
     /// </summary>
+    /// <typeparam name="T">实体类型</typeparam>
+    /// <param name="connection">数据库连接</param>
+    /// <param name="provider">数据库提供者（负责标识符转义与方言差异）</param>
+    /// <param name="dbContext">用于解析实体到表/列映射的上下文</param>
+    /// <param name="entities">待插入实体</param>
+    /// <param name="tableName">目标表名；为空时从映射解析</param>
+    /// <param name="transaction">外部事务；为空则由连接自行处理</param>
     /// <param name="batchSize">每批处理的实体数量，默认 1000</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>受影响的行数</returns>
     public static async Task<int> BulkInsertAsync<T>(
         IDbConnection connection,
         IDatabaseProvider provider,
@@ -85,7 +94,17 @@ public static class DapperBulkOperations
     /// <summary>
     /// 批量更新（使用数据库特定的批量更新语法）
     /// </summary>
+    /// <typeparam name="T">实体类型</typeparam>
+    /// <param name="connection">数据库连接</param>
+    /// <param name="provider">数据库提供者（负责标识符转义与方言差异）</param>
+    /// <param name="dbContext">用于解析实体到表/列映射的上下文</param>
+    /// <param name="entities">待更新实体</param>
+    /// <param name="tableName">目标表名；为空时从映射解析</param>
+    /// <param name="keyColumn">主键列名；为空时从映射解析</param>
+    /// <param name="transaction">外部事务；为空则由连接自行处理</param>
     /// <param name="batchSize">每批处理的实体数量，默认 1000</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>受影响的行数</returns>
     internal static async Task<int> BulkUpdateAsync<T>(
         IDbConnection connection,
         IDatabaseProvider provider,
@@ -173,8 +192,12 @@ public static class DapperBulkOperations
     /// <summary>
     /// 生成批量更新 SQL（根据数据库类型）
     /// </summary>
+    /// <param name="provider">数据库提供者（决定生成哪种方言的 SQL）</param>
+    /// <param name="escapedTable">已转义的表名</param>
+    /// <param name="escapedKey">已转义的主键列名</param>
     /// <param name="keyColumn">未转义的原始主键列名（用于参数名）</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
+    /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
     private static string GenerateBulkUpdateSql(
         IDatabaseProvider provider,
         string escapedTable,
@@ -205,8 +228,12 @@ public static class DapperBulkOperations
     /// <summary>
     /// 生成使用 UPDATE ... FROM (VALUES ...) 的批量更新 SQL（SQL Server / PostgreSQL）
     /// </summary>
+    /// <param name="provider">数据库提供者（负责标识符转义）</param>
+    /// <param name="escapedTable">已转义的表名</param>
+    /// <param name="escapedKey">已转义的主键列名</param>
     /// <param name="keyColumn">未转义的原始主键列名（用于参数名）</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
+    /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
     private static string GenerateBulkUpdateSqlUsingFrom(
         IDatabaseProvider provider,
         string escapedTable,
@@ -250,8 +277,12 @@ WHERE {escapedTable}.{escapedKey} = v.{escapedKeyAlias}";
     /// <summary>
     /// 生成使用 INSERT ... ON DUPLICATE KEY UPDATE 的批量更新 SQL（MySQL）
     /// </summary>
+    /// <param name="provider">数据库提供者（负责标识符转义）</param>
+    /// <param name="escapedTable">已转义的表名</param>
+    /// <param name="escapedKey">已转义的主键列名</param>
     /// <param name="keyColumn">未转义的原始主键列名（用于参数名）</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
+    /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
     private static string GenerateBulkUpdateSqlUsingInsertOnDuplicate(
         IDatabaseProvider provider,
         string escapedTable,
@@ -287,7 +318,17 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
     /// <summary>
     /// 批量删除
     /// </summary>
+    /// <param name="connection">数据库连接</param>
+    /// <param name="provider">数据库提供者（负责标识符转义与方言差异）</param>
+    /// <param name="dbContext">用于解析实体到表/列映射的上下文</param>
+    /// <param name="keys">待删除记录的主键值</param>
+    /// <param name="entityType">实体类型（用于解析表名与主键列）</param>
+    /// <param name="tableName">目标表名；为空时从映射解析</param>
+    /// <param name="keyColumn">主键列名；为空时从映射解析</param>
+    /// <param name="transaction">外部事务；为空则由连接自行处理</param>
     /// <param name="batchSize">每批处理的键数量，默认 1000</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>受影响的行数</returns>
     internal static async Task<int> BulkDeleteAsync(
         IDbConnection connection,
         IDatabaseProvider provider,
@@ -336,7 +377,10 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
     /// <summary>
     /// 生成批量插入 SQL
     /// </summary>
+    /// <param name="provider">数据库提供者（负责标识符转义）</param>
+    /// <param name="escapedTable">已转义的表名</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
+    /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
     private static string GenerateBulkInsertSql(IDatabaseProvider provider, string escapedTable, List<string> columnNames, int entityCount)
     {
         var escapedColumns = columnNames.Select(p => provider.EscapeIdentifier(p)).ToList();

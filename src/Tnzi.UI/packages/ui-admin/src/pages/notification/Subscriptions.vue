@@ -30,7 +30,7 @@
 import { h } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'

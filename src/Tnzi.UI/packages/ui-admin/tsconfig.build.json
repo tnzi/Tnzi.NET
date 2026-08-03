@@ -8,6 +8,11 @@
   // `dist`, and `@tnzi/*` resolve to their node_modules dist `.d.ts`. (ui-admin
   // does not use the internal `@/` alias, so clearing all paths is safe.)
   "extends": "./tsconfig.json",
+  // Tests must not reach the declaration program. `exclude` does not inherit
+  // through `extends`, so leaving it off here is what put
+  // `dist/components/pages/__tests__/TLoginPage.spec.d.ts` in the published
+  // package. The other four packages carry this same list.
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"],
   "compilerOptions": {
     "paths": {},
     "noEmit": false,

@@ -192,11 +192,11 @@ import {
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDate, formatDateOnly, formatDateTime } from '@tnzi/core'
-import TEmpty from '../../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TUserSelector from '../../../components/forms/TUserSelector.vue'
 import { TDrawerShell } from '../../../components/overlay'
 import type { SelectorOption } from '../../../components/forms/_selector-factory'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 // 0.2.72+ (B4): Re-routed through the bridge so the page stays clean
 // under the `no-restricted-imports` guard against direct
 // `@tnzi/core/services/*` value imports from `pages/**`.

@@ -16,8 +16,9 @@ import type { StatusType } from '@tnzi/ui'
  *     Cancelled / Expired / PastDue
  *   BillingCycleType:   Day / Week / Month / Year / OneTime
  *
- * Page is read-only: subscriptions are initiated by users and there is no admin
- * update endpoint. The only lifecycle action is cancel-at-period-end.
+ * Subscriptions are initiated by users, so the list stays read-only; the admin
+ * surface is lifecycle actions (cancel at period end, pause / resume, retry the
+ * failed charge, toggle auto-renew) rather than editing a record.
  */
 const STATUS_TONE: Record<string, StatusType> = {
   Pending: 'warning',
@@ -92,6 +93,25 @@ export function buildSubscriptionColumns(t: (key: string) => string): ColumnDef[
       render: (row) => formatDateTime(row.nextBillingTime as string | null | undefined),
     },
     {
+      // Whether a renewal can actually be charged. Without it the only way to
+      // find out is to watch the subscription go past due on its charge date.
+      key: 'hasPaymentMethod',
+      title: 'columns.paymentMethod',
+      width: 150,
+      render: (row) => {
+        if (!row.hasPaymentMethod) {
+          return h(TStatusBadge, {
+            value: 'none',
+            type: 'warning',
+            label: t('paymentMethod.missing'),
+          })
+        }
+        const brand = String(row.paymentMethodBrand ?? '')
+        const last4 = String(row.paymentMethodLast4 ?? '')
+        return last4 ? `${brand || t('paymentMethod.card')} ****${last4}` : t('paymentMethod.onFile')
+      },
+    },
+    {
       key: 'paidAmount',
       title: 'columns.paidAmount',
       width: 120,
@@ -121,4 +141,11 @@ export const paymentSubscriptionFormSchema: FormSchemaItem[] = [
   { key: 'originalPrice', labelKey: 'form.originalPrice', label: 'Original Price', type: 'number' },
   { key: 'paidAmount', labelKey: 'form.paidAmount', label: 'Paid Amount', type: 'number' },
   { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
+  { key: 'productCode', labelKey: 'form.productCode', label: 'Product', type: 'text' },
+  { key: 'paymentMethodBrand', labelKey: 'form.paymentMethodBrand', label: 'Card Brand', type: 'text' },
+  { key: 'paymentMethodLast4', labelKey: 'form.paymentMethodLast4', label: 'Card Last 4', type: 'text' },
+  { key: 'renewalRetryCount', labelKey: 'form.renewalRetryCount', label: 'Failed Attempts', type: 'number' },
+  { key: 'pastDueSince', labelKey: 'form.pastDueSince', label: 'Past Due Since', type: 'text' },
+  { key: 'pausedAt', labelKey: 'form.pausedAt', label: 'Paused Since', type: 'text' },
+  { key: 'pausedUntil', labelKey: 'form.pausedUntil', label: 'Paused Until', type: 'text' },
 ]

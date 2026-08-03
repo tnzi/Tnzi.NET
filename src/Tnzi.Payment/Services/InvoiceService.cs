@@ -15,12 +15,14 @@ public class InvoiceService : ApplicationService, IInvoiceService
     private readonly INotificationService? _notificationService;
     private readonly IFileStorageService? _fileStorage;
     private readonly IOptionsSnapshot<InvoiceOptions> _invoiceOptions;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptions;
 
     public InvoiceService(
         IRepository<Invoice, Guid> invoiceRepository,
         IRepository<InvoiceLineItem, Guid> lineItemRepository,
         IRepository<PaymentEntity, Guid> paymentRepository,
         IOptionsSnapshot<InvoiceOptions> invoiceOptions,
+        IOptionsMonitor<PaymentOptions> paymentOptions,
         IServiceProvider serviceProvider,
         IHtmlToPdfConverter? pdfConverter = null,
         ITemplateRenderService? templateRenderService = null,
@@ -32,6 +34,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         _lineItemRepository = Check.NotNull(lineItemRepository);
         _paymentRepository = Check.NotNull(paymentRepository);
         _invoiceOptions = Check.NotNull(invoiceOptions);
+        _paymentOptions = Check.NotNull(paymentOptions);
         _pdfConverter = pdfConverter;
         _templateRenderService = templateRenderService;
         _notificationService = notificationService;
@@ -44,27 +47,56 @@ public class InvoiceService : ApplicationService, IInvoiceService
         if (payment == null)
             return Fail<InvoiceDto>(ErrorCodes.PaymentNotFound, 404);
 
-        if (payment.Status != PaymentStatus.Succeeded)
+        if (payment.Status is not (PaymentStatus.Succeeded or PaymentStatus.PartialRefunded or PaymentStatus.Refunded))
             return Fail<InvoiceDto>(ErrorCodes.InvoicePaymentNotSucceeded, 400);
+
+        // 幂等：一笔支付只开一张发票。事件总线是 at-least-once 投递，
+        // 没有这道拦截，一次重试就会给同一笔付款生成两张发票号。
+        var existing = await _invoiceRepository
+            .Where(i => i.PaymentId == paymentId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existing != null)
+            return Ok(existing.MapTo<InvoiceDto>());
 
         request ??= new CreateInvoiceDto();
 
+        // 客户身份优先取支付上的快照：自动开票发生在事件处理器/回调里，那里没有当前用户上下文，
+        // 只依赖 CurrentUser 会得到空邮箱，发票永远发不出去。
+        var customerName = FirstNonEmpty(request.CustomerName, payment.CustomerName, CurrentUser?.UserName) ?? "Customer";
+        var customerEmail = FirstNonEmpty(request.CustomerEmail, payment.CustomerEmail, CurrentUser?.Email);
+
+        if (string.IsNullOrWhiteSpace(customerEmail))
+        {
+            Logger.LogWarning(
+                "Invoice for payment {TradeNo} has no customer email; it will be created but cannot be delivered.",
+                payment.TradeNo);
+        }
+
+        var now = DateTime.UtcNow;
         var invoice = new Invoice
         {
             InvoiceNo = Invoice.GenerateInvoiceNo(),
             PaymentId = payment.Id,
             Type = request.Type,
-            Status = InvoiceStatus.Draft,
-            Amount = payment.PaidAmount,
+            // 由已收款的支付生成的发票本就是"已付"凭据，落 Draft/未付会让账面凭空多出一笔应收
+            Status = InvoiceStatus.Paid,
+            Amount = payment.OriginalAmount,
             Currency = payment.Currency,
-            TaxAmount = 0,
+            TaxAmount = payment.TaxAmount,
             DiscountAmount = payment.DiscountAmount,
-            DueAmount = payment.PaidAmount - payment.DiscountAmount,
-            PaidAmount = 0,
-            CustomerName = CurrentUser?.UserName ?? "Customer",
-            CustomerEmail = "",
-            InvoiceDate = DateTime.UtcNow,
-            DueDate = request.DueDate ?? DateTime.UtcNow.AddDays(30),
+            DueAmount = payment.PayableAmount,
+            PaidAmount = payment.PaidAmount,
+            PaidDate = payment.PaidTime ?? now,
+            UserId = payment.UserId ?? CurrentUser?.Id,
+            CustomerName = customerName,
+            CustomerEmail = customerEmail ?? string.Empty,
+            CustomerCompany = request.CustomerCompany,
+            CustomerTaxId = request.CustomerTaxId,
+            CustomerAddress = request.CustomerAddress,
+            BillingAddress = request.BillingAddress,
+            InvoiceDate = now,
+            DueDate = request.DueDate ?? payment.PaidTime ?? now,
             TemplateName = request.TemplateName ?? _invoiceOptions.Value.DefaultTemplate,
             Notes = request.Notes,
             InternalNotes = request.InternalNotes
@@ -75,30 +107,19 @@ public class InvoiceService : ApplicationService, IInvoiceService
         {
             await _invoiceRepository.InsertAsync(invoice, ct);
 
+            var lineItems = request.LineItems is { Count: > 0 }
+                ? BuildLineItems(invoice.Id, request.LineItems)
+                : [BuildPaymentLineItem(invoice.Id, payment)];
+
+            await _lineItemRepository.InsertManyAsync(lineItems, ct);
+
+            // 明细由调用方提供时，汇总以明细为准；否则保持支付侧的金额拆分
             if (request.LineItems is { Count: > 0 })
             {
-                var lineItems = request.LineItems.Select((item, index) => new InvoiceLineItem
-                {
-                    InvoiceId = invoice.Id,
-                    LineNumber = index + 1,
-                    Description = item.Description,
-                    Quantity = item.Quantity,
-                    UnitPrice = item.UnitPrice,
-                    Amount = item.Quantity * item.UnitPrice,
-                    DiscountAmount = item.DiscountAmount,
-                    TaxRate = item.TaxRate,
-                    TaxAmount = (item.Quantity * item.UnitPrice - item.DiscountAmount) * item.TaxRate / 100,
-                    ProductCode = item.ProductCode
-                }).ToList();
-
-                await _lineItemRepository.InsertManyAsync(lineItems, ct);
-
-                // 更新发票汇总信息
-                invoice.TaxAmount = lineItems.Sum(l => l.TaxAmount);
                 invoice.Amount = lineItems.Sum(l => l.Amount);
+                invoice.TaxAmount = lineItems.Sum(l => l.TaxAmount);
                 invoice.DiscountAmount = lineItems.Sum(l => l.DiscountAmount) + payment.DiscountAmount;
                 invoice.DueAmount = invoice.Amount - invoice.DiscountAmount + invoice.TaxAmount;
-
                 await _invoiceRepository.UpdateAsync(invoice, ct);
             }
 
@@ -111,25 +132,35 @@ public class InvoiceService : ApplicationService, IInvoiceService
 
     public async Task<Result<InvoiceDto>> CreateManualAsync(CreateInvoiceDto request, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(request);
+
+        if (request.LineItems is not { Count: > 0 })
+            return Fail<InvoiceDto>("At least one line item is required.", 400);
+
+        if (string.IsNullOrWhiteSpace(request.CustomerName))
+            return Fail<InvoiceDto>("Customer name is required.", 400);
+
         var invoice = new Invoice
         {
             InvoiceNo = Invoice.GenerateInvoiceNo(),
             Type = request.Type,
             Status = InvoiceStatus.Draft,
             Amount = request.LineItems.Sum(l => l.Quantity * l.UnitPrice),
-            Currency = "USD",
+            // 币种取请求或全局默认，不再写死 USD：写死会让非美元账套的发票金额全部标错币种
+            Currency = request.Currency ?? _paymentOptions.CurrentValue.DefaultCurrency,
             TaxAmount = 0,
             DiscountAmount = request.LineItems.Sum(l => l.DiscountAmount),
             DueAmount = 0,
             PaidAmount = 0,
+            UserId = request.UserId,
             CustomerName = request.CustomerName,
-            CustomerEmail = request.CustomerEmail,
+            CustomerEmail = request.CustomerEmail ?? string.Empty,
             CustomerCompany = request.CustomerCompany,
             CustomerTaxId = request.CustomerTaxId,
             CustomerAddress = request.CustomerAddress,
             BillingAddress = request.BillingAddress,
             InvoiceDate = request.InvoiceDate,
-            DueDate = request.DueDate,
+            DueDate = request.DueDate ?? request.InvoiceDate.AddDays(PaymentConstants.DefaultInvoiceDueDays),
             TemplateName = request.TemplateName ?? _invoiceOptions.Value.DefaultTemplate,
             Notes = request.Notes,
             InternalNotes = request.InternalNotes
@@ -140,19 +171,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         {
             await _invoiceRepository.InsertAsync(invoice, ct);
 
-            var lineItems = request.LineItems.Select((item, index) => new InvoiceLineItem
-            {
-                InvoiceId = invoice.Id,
-                LineNumber = index + 1,
-                Description = item.Description,
-                Quantity = item.Quantity,
-                UnitPrice = item.UnitPrice,
-                Amount = item.Quantity * item.UnitPrice,
-                DiscountAmount = item.DiscountAmount,
-                TaxRate = item.TaxRate,
-                TaxAmount = (item.Quantity * item.UnitPrice - item.DiscountAmount) * item.TaxRate / 100,
-                ProductCode = item.ProductCode
-            }).ToList();
+            var lineItems = BuildLineItems(invoice.Id, request.LineItems);
 
             await _lineItemRepository.InsertManyAsync(lineItems, ct);
 
@@ -169,28 +188,73 @@ public class InvoiceService : ApplicationService, IInvoiceService
         }, cancellationToken);
     }
 
+    private static List<InvoiceLineItem> BuildLineItems(Guid invoiceId, List<InvoiceLineItemDto> items)
+    {
+        return items.Select((item, index) =>
+        {
+            var amount = item.Quantity * item.UnitPrice;
+            return new InvoiceLineItem
+            {
+                InvoiceId = invoiceId,
+                LineNumber = index + 1,
+                Description = item.Description,
+                Quantity = item.Quantity,
+                UnitPrice = item.UnitPrice,
+                Amount = amount,
+                DiscountAmount = item.DiscountAmount,
+                TaxRate = item.TaxRate,
+                TaxAmount = (amount - item.DiscountAmount) * item.TaxRate / 100,
+                ProductCode = item.ProductCode
+            };
+        }).ToList();
+    }
+
+    /// <summary>
+    /// 支付未提供明细时生成的单行明细，保证发票总有可打印的内容
+    /// </summary>
+    private static InvoiceLineItem BuildPaymentLineItem(Guid invoiceId, PaymentEntity payment) => new()
+    {
+        InvoiceId = invoiceId,
+        LineNumber = 1,
+        Description = payment.Description ?? payment.BusinessOrderNo,
+        Quantity = 1,
+        UnitPrice = payment.OriginalAmount,
+        Amount = payment.OriginalAmount,
+        DiscountAmount = payment.DiscountAmount,
+        TaxRate = 0,
+        TaxAmount = payment.TaxAmount,
+        ProductCode = payment.BusinessOrderNo
+    };
+
+    private static string? FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
     public async Task<Result> SendAsync(Guid invoiceId, string? recipientEmail, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         if (_notificationService == null)
             return Fail("Notification module is not loaded. Cannot send invoice.", 500);
 
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(
-            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
+            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.UserId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail(ErrorCodes.InvoiceNotFound, 404);
 
-        if (invoice.Status == InvoiceStatus.Sent)
-            return Fail(ErrorCodes.InvoiceAlreadySent, 400);
+        if (invoice.Status == InvoiceStatus.Cancelled)
+            return Fail(ErrorCodes.InvoiceCannotCancel, 400);
 
-        // 生成PDF
-        var pdfResult = await GeneratePdfAsync(invoiceId, cancellationToken);
-        if (!pdfResult.Succeeded)
-            return Fail(pdfResult.Message ?? ErrorCodes.InvoiceNotFound);
+        // 重发次数上限：客服反复补发是常态，但要有上限防止被当成群发通道
+        if (invoice.SendCount >= PaymentConstants.MaxInvoiceSendCount)
+            return Fail(ErrorCodes.InvoiceSendLimitReached, 400);
 
         // 发送邮件
         var email = recipientEmail ?? invoice.CustomerEmail;
         if (string.IsNullOrEmpty(email))
             return Fail(ErrorCodes.InvoiceRecipientEmailRequired, 400);
+
+        // 生成PDF
+        var pdfResult = await GeneratePdfAsync(invoiceId, cancellationToken);
+        if (!pdfResult.Succeeded)
+            return Fail(pdfResult.Message ?? ErrorCodes.InvoiceNotFound);
 
         var sendResult = await _notificationService.CreateAndSendAsync(
             new CreateNotificationRequest
@@ -214,8 +278,11 @@ public class InvoiceService : ApplicationService, IInvoiceService
         if (!sendResult.Succeeded)
             return Fail(sendResult.Message ?? "Failed to send invoice email.");
 
-        // 更新发票状态
-        invoice.Status = InvoiceStatus.Sent;
+        // 只把"未发出"的发票推进为已发送：已支付的发票再补发一次不应被降级回 Sent，
+        // 那会让一张已收款的发票在账面上重新变成未收款。
+        if (invoice.Status is InvoiceStatus.Draft or InvoiceStatus.Pending)
+            invoice.Status = InvoiceStatus.Sent;
+
         invoice.SendCount++;
         invoice.LastSentTime = DateTime.UtcNow;
         await _invoiceRepository.UpdateAsync(invoice, cancellationToken);
@@ -382,7 +449,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
     public async Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(
-            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
+            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.UserId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail<string>(ErrorCodes.InvoiceNotFound, 404);
 
@@ -450,7 +517,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
     public async Task<Result<InvoiceDto>> GetAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(
-            i => i.Id == id && (!ownerUserId.HasValue || i.CreatorId == ownerUserId.Value), cancellationToken);
+            i => i.Id == id && (!ownerUserId.HasValue || i.UserId == ownerUserId.Value), cancellationToken);
         if (invoice == null)
             return Fail<InvoiceDto>(ErrorCodes.InvoiceNotFound, 404);
 
@@ -462,7 +529,7 @@ public class InvoiceService : ApplicationService, IInvoiceService
         var queryable = _invoiceRepository.AsNoTracking().Filter(query);
 
         if (ownerUserId.HasValue)
-            queryable = queryable.Where(i => i.CreatorId == ownerUserId.Value);
+            queryable = queryable.Where(i => i.UserId == ownerUserId.Value);
 
         var pagedList = await queryable
             .OrderByDescending(i => i.InvoiceDate)

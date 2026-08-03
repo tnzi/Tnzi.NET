@@ -1,7 +1,5 @@
-using Tnzi.Identity.Entities;
 using Tnzi.Identity.Events;
 using Tnzi.Identity.Events.Handlers;
-using Tnzi.Identity.Services;
 
 namespace Tnzi.Identity.Tests;
 

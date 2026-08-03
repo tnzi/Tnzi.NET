@@ -1,10 +1,7 @@
-using System.Reflection;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Tnzi.Finance.Documents.Metadata;
 using Tnzi.Finance.Documents.Services.Internal;
-using Tnzi.Template;
 using Tnzi.Template.Services;
 
 namespace Tnzi.Finance.Tests;

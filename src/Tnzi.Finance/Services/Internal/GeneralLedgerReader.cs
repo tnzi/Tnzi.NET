@@ -275,7 +275,7 @@ public class GeneralLedgerReader
     /// 三个来源都以子查询留在数据库侧，只有最终的 Id 列表回到内存
     /// </summary>
     /// <remarks>
-    /// 支票只认 <see cref="CheckStatus.Issued"/>：作废与毁票的号码虽然占位留痕，
+    /// 支票只认 <c>CheckStatus.Issued</c>：作废与毁票的号码虽然占位留痕，
     /// 但"当前有效票据"才是操作员按支票号找账时想要的答案。
     /// Guid → string 的转换刻意放在 .NET 侧而非 SQL 侧：各数据库对 uuid 的文本化格式与大小写
     /// 并不一致，交给 SQL 转换会静默匹配不上（<c>SourceId</c> 写入时用的是 .NET 的 "D" 格式）

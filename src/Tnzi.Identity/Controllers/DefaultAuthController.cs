@@ -132,7 +132,7 @@ public class DefaultAuthController : ApiControllerBase
     /// <summary>
     /// 忘记密码
     /// </summary>
-    /// <param name="email">邮箱地址</param>
+    /// <param name="input">忘记密码请求（含邮箱地址）</param>
     /// <returns>操作结果</returns>
     [HttpPost("forgot-password")]
     [AllowAnonymous]

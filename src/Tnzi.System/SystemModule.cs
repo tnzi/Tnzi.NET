@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.System;
 
 [DependsOn(typeof(EFCoreModule))]
@@ -163,7 +163,7 @@ public class SystemModule : TnziApplicationModule
         var tnziApp = context.ServiceProvider.GetService<ITnziApplication>();
         if (webApp != null && tnziApp != null && tnziApp.IsModuleLoaded<SignalRModule>())
         {
-            webApp.MapHub<SettingsRealtimeHub>("/hubs/settings");
+            webApp.MapTnziHub<SettingsRealtimeHub>("settings", "/hubs/settings");
         }
     }
 }

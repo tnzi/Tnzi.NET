@@ -1,4 +1,3 @@
-using Tnzi.AI.Skills;
 
 namespace Tnzi.AI.Tests.Skills;
 

@@ -2,6 +2,56 @@
 
 This guide collects breaking changes by version range. Read [CHANGELOG.md](./CHANGELOG.md) alongside.
 
+## `@tnzi/*` unreleased — directory naming unified across all five packages
+
+**Breaking: four published subpaths were renamed with no compatibility alias.**
+
+One concept now has one name in every package, so a consumer no longer has to
+relearn the layout per package. Nothing moved between packages and no behaviour
+changed — only where the code sits and what the subpath is called.
+
+| Old subpath | New subpath | Packages affected |
+| --- | --- | --- |
+| `@tnzi/ui/composables` | `@tnzi/ui/headless` | `@tnzi/ui` |
+| `@tnzi/ui-ai/composables` | `@tnzi/ui-ai/headless` | `@tnzi/ui-ai` |
+| `@tnzi/ui-ai/locale`, `/locale/*` | `@tnzi/ui-ai/locales`, `/locales/*` | `@tnzi/ui-ai` |
+| `@tnzi/ui-ai/themes`, `/themes/*` | `@tnzi/ui-ai/theme`, `/theme/*` | `@tnzi/ui-ai` |
+| `@tnzi/core/composables` | `@tnzi/core/headless` | `@tnzi/core` |
+| `@tnzi/mobile/composables` | `@tnzi/mobile/headless` | `@tnzi/mobile` |
+
+`@tnzi/ui-admin` is unaffected — its subpaths were already the target names.
+
+### New subpath
+
+`@tnzi/ui-ai/i18n` now holds the translation engine (`createAiI18n` /
+`useAiI18n` / `formatAiMessage`), which used to live inside the locale barrel.
+`@tnzi/ui-ai/locales` keeps the dictionaries (`en` / `zhCn`). Splitting them
+means a component can reach the translator without pulling a language pack in
+with it. Importing either name from the package root still works.
+
+### How to migrate
+
+A find/replace over the table above is the whole migration — the exported
+members are unchanged in both name and behaviour:
+
+```diff
+- import { useSafeMessage } from '@tnzi/ui/composables'
++ import { useSafeMessage } from '@tnzi/ui/headless'
+
+- import { useChatThreads } from '@tnzi/ui-ai/composables'
++ import { useChatThreads } from '@tnzi/ui-ai/headless'
+
+- import { applyAiTheme } from '@tnzi/ui-ai/themes'
++ import { applyAiTheme } from '@tnzi/ui-ai/theme'
+
+- import { createAiI18n, en } from '@tnzi/ui-ai/locale'
++ import { createAiI18n } from '@tnzi/ui-ai/i18n'
++ import { en } from '@tnzi/ui-ai/locales'
+```
+
+No alias was left behind deliberately: keeping both names alive is the thing
+this change exists to end.
+
 ## `@tnzi/ui-admin` 0.2.70 → unreleased — page consistency overhaul
 
 Custom (non-TCrudPage) pages were rewritten to use the same NCard chrome, theme tokens, and message-helper pattern that TCrudPage pages enforce. **Pure cleanup — no public API additions.** Two opt-in points exist if you extend custom pages:
@@ -11,7 +61,7 @@ Custom (non-TCrudPage) pages were rewritten to use the same NCard chrome, theme 
 `useSafeMessage` is now the canonical way to consume `useMessage()` in a way that doesn't crash when no `NMessageProvider` ancestor is mounted:
 
 ```ts
-import { useSafeMessage } from '@tnzi/ui-admin/pages/_shared/safeMessage'
+import { useSafeMessage } from '@tnzi/ui/headless'
 
 const message = useSafeMessage()
 message.success('saved')  // works whether or not NMessageProvider is installed
@@ -412,7 +462,7 @@ export function createIdentityBridge(client: HttpClient) {
   return {
     users: {
       async fetch(query: PagedQuery) {
-        const api = useUsersApi(client)  // per-call
+        const api = useAdminUserApi(client)  // per-call
         return api.getPaged(query)
       },
       // ... other methods likewise
@@ -449,9 +499,9 @@ app.mount('#app')
 
 This single call registers:
 
-- `TAdminShell`, `TCrudPage`, `TFormModal`, `TCrudToolbar`, `TBatchActions`
-- All 29 + 13 = 42 preset pages via `defaultAdminRoutes` (routes guarded by a `DefaultControllerEnabledMarker` equivalent on the frontend)
-- Pinia stores (`useAdminAppStore`, `useAdminUserStore`, `useAdminPermissionStore`)
+- `TAdminShell`, `TCrudPage`, `TFormModal`, `TListShell`, `TRowActions`（`TCrudToolbar` / `TBatchActions` 后来被内联进 `TListShell`，已不再单独存在）
+- 预置页面 via `defaultAdminRoutes`（数量随版本增长，以 `src/router/routes.ts` 为准，当前 102 个懒加载路由组件）
+- Pinia stores（`useAdminAppStore`、`useAdminAuthStore`、`useAdminRouteStore`、`useAdminTabStore`、`useAdminThemeStore`、`useAdminBreadcrumbStore`）
 - i18n messages (en + zh-cn) under the `tnzi.admin.*` namespace
 - Theme preset with `--tnzi-admin-*` CSS variables inheriting from `@tnzi/ui`'s palette
 
@@ -465,8 +515,8 @@ The `admin/` subdirectory has been removed. If you were importing `@tnzi/ui-ai/a
 // Before
 import AgentManagement from '@tnzi/ui-ai/admin/AgentManagement.vue'
 
-// After — use the preset routes or import directly
-import { AgentList, AgentDetail } from '@tnzi/ui-admin/pages/ai/agents'
+// After — 这些页面由 `defaultAdminRoutes` 自动挂载，无需手动 import。
+// 只在需要替换/包装某一页时，用 `defineAdminApp` 的路由覆盖能力接管对应 route name。
 ```
 
 The `@tnzi/ui-ai` public surface now consists of:
@@ -541,9 +591,16 @@ All chat product code must move to `TChatApp`.
 - Stop button automatically appears in composer when `is-streaming=true`
 
 If `TChatApp`'s shell is too prescriptive (embedded chat panel, customer-support
-widget, kiosk mode, etc.), compose the `@tnzi/ui-ai/shell` primitives
-(`TCollapsibleSidebar`, `TLandingPage`, `TSettingsDialog`, `TCommandPalette`)
-together with the `components/chat/*` thread primitives directly.
+widget, kiosk mode, etc.), compose the region frames from
+`@tnzi/ui-ai/components` (`TCollapsibleSidebar`, `TLandingPage`,
+`TSettingsDialog`, `TCommandPalette`) together with the `components/chat/*`
+thread primitives directly.
+
+> These four used to live behind a `@tnzi/ui-ai/shell` subpath. That subpath was
+> removed on 2026-08-02: its admission rule ("frames a region of an app shell")
+> could not be told apart from `components/layout`'s ("frames a screen"), which
+> is how `TSettingRow` / `TSettingGroup` ended up in one and `TSettingsDialog`
+> in the other. Nothing outside the package imported it.
 
 ---
 
@@ -563,23 +620,28 @@ together with the `components/chat/*` thread primitives directly.
 <div class="bg-[--tnzi-ai-surface] text-[--tnzi-ai-text]">...</div>
 ```
 
-Or consume via Tailwind's theme extension if you've configured it:
+> ⚠️ 早期版本的本节曾建议「用 Tailwind 的 theme extension 消费这些变量」。**该建议已作废**：
+> Tailwind 于 2026-04 从整个 monorepo 移除，原子类引擎统一为 **UnoCSS**，且各包 `CLAUDE.md`
+> 明令禁止重新引入 `tailwindcss` / `postcss.config.js`。
 
-```js
-// tailwind.config.js (consumer)
-module.exports = {
+若消费方也用 UnoCSS，把变量映射进 `theme.colors` 即可（与 `@tnzi/ui-ai` 自身 `uno.config.ts` 同一写法）：
+
+```ts
+// uno.config.ts (consumer)
+import { defineConfig, presetWind4 } from 'unocss'
+
+export default defineConfig({
+  presets: [presetWind4({ preflights: { reset: false } })],
   theme: {
-    extend: {
-      colors: {
-        'tnzi-ai': {
-          surface: 'var(--tnzi-ai-surface)',
-          text: 'var(--tnzi-ai-text)',
-          // ...
-        },
+    colors: {
+      'tnzi-ai': {
+        surface: 'var(--tnzi-ai-surface)',
+        text: 'var(--tnzi-ai-text)',
+        // ...
       },
     },
   },
-}
+})
 ```
 
 ---
@@ -660,7 +722,7 @@ Phase 6 coverage thresholds (per package `vitest.config.ts`):
 | `@tnzi/ui-admin` | 80%   | 80%        | 70%      | 60%       |
 | `@tnzi/ui-ai`    | 80%   | 80%        | 70%      | 60%       |
 
-The lowered ui-admin / ui-ai function thresholds reflect the fact that mount-based integration tests under happy-dom can't reach 80% without full user-flow simulation — covered instead by Playwright E2E in `e2e/`. Lines/statements/branches meet 80/70 honestly.
+The lowered ui-admin / ui-ai function thresholds reflect the fact that mount-based integration tests under happy-dom can't reach 80% without full user-flow simulation. At the time this was written those flows were covered by Playwright specs in `e2e/`; **that suite was deleted on 2026-08-01 along with the package playgrounds it ran against**, so those flows now have no automated coverage at all — see `docs/frontend/architecture.md` §4.2. The current ui-admin thresholds are also a ratchet rather than the 80/70 targets quoted here.
 
 ---
 

@@ -6,9 +6,9 @@ namespace Tnzi.Payment.Services;
 public interface ISubscriptionService
 {
     /// <summary>
-    /// 创建订阅
+    /// 创建订阅。返回订阅本体与首期支付凭据（需要收款时），供前端直接拉起收银台。
     /// </summary>
-    Task<Result<SubscriptionDto>> CreateSubscriptionAsync(CreateSubscriptionDto request, CancellationToken cancellationToken = default);
+    Task<Result<SubscriptionCreateResultDto>> CreateSubscriptionAsync(CreateSubscriptionDto request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 取消订阅
@@ -16,24 +16,29 @@ public interface ISubscriptionService
     Task<Result> CancelSubscriptionAsync(Guid subscriptionId, CancelSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 恢复订阅
+    /// 暂停订阅（到期自动恢复或手动恢复）
+    /// </summary>
+    Task<Result> PauseSubscriptionAsync(Guid subscriptionId, PauseSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 恢复订阅（暂停或已取消的订阅重新激活）
     /// </summary>
     Task<Result> ResumeSubscriptionAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 变更订阅计划
+    /// 绑定/更新订阅使用的支付方式
     /// </summary>
-    Task<Result<SubscriptionDto>> ChangePlanAsync(Guid subscriptionId, ChangeSubscriptionDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 更新支付方式
-    /// </summary>
-    Task<Result> UpdatePaymentMethodAsync(Guid subscriptionId, string paymentMethodId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+    Task<Result<SubscriptionDto>> UpdatePaymentMethodAsync(Guid subscriptionId, AttachPaymentMethodDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 启用/禁用自动续费
     /// </summary>
     Task<Result> UpdateAutoRenewAsync(Guid subscriptionId, bool autoRenew, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 立即重试扣款（逾期欠费的订阅在用户换卡后主动挽回）
+    /// </summary>
+    Task<Result> RetryBillingAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取订阅信息
@@ -53,7 +58,7 @@ public interface ISubscriptionService
     /// <summary>
     /// 获取订阅计划列表
     /// </summary>
-    Task<Result<List<SubscriptionPlanDto>>> GetSubscriptionPlansAsync(bool activeOnly = true, CancellationToken cancellationToken = default);
+    Task<Result<List<SubscriptionPlanDto>>> GetSubscriptionPlansAsync(bool activeOnly = true, string? productCode = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 创建订阅计划
@@ -66,7 +71,7 @@ public interface ISubscriptionService
     Task<Result> UpdatePlanAsync(Guid planId, SubscriptionPlanDto planDto, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 删除订阅计划
+    /// 停用订阅计划
     /// </summary>
     Task<Result> DeletePlanAsync(Guid planId, CancellationToken cancellationToken = default);
 
@@ -84,6 +89,16 @@ public interface ISubscriptionService
     /// 过期到期订阅（后台任务调用：到期未续费/逾期超宽限期的订阅置为 Expired）
     /// </summary>
     Task<Result<int>> ExpireOverdueSubscriptionsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 恢复暂停到期的订阅（后台任务调用）
+    /// </summary>
+    Task<Result<int>> ResumeDuePausedSubscriptionsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 发送续费提醒（后台任务调用：在下次扣款前 N 天提醒用户）
+    /// </summary>
+    Task<Result<int>> SendRenewalRemindersAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 支付完成回流：根据计费用途推进订阅状态机（激活/续费/试用转正/升级补差生效）。由支付完成事件处理器调用。

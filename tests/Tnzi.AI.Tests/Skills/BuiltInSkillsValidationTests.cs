@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-using Tnzi.AI.Infrastructure.ContextProviders;
 
 namespace Tnzi.AI.Tests.Skills;
 

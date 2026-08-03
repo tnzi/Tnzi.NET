@@ -1,4 +1,4 @@
-namespace Tnzi.Chat.Services.Interfaces;
+namespace Tnzi.Chat.Services;
 
 /// <summary>
 /// 系统通知发送服务。业务模块可注入本接口，在处理业务时给指定用户或角色发送系统通知

@@ -81,7 +81,7 @@
 import { watch } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import TContentPage from './TContentPage.vue'
-import type { BackTarget } from './backTarget'
+import type { BackTarget } from './back-target'
 import { useSectionRoute } from '../../headless/useSectionRoute'
 
 /** One primary tab. `label` is the (already-translated) tab title; `scroll`

@@ -5,7 +5,7 @@ import { TCountTo } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useEcharts } from '../../headless/useEcharts'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import type { EChartsOption } from 'echarts'
 
 /**

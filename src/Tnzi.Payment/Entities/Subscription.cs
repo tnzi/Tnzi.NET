@@ -16,6 +16,22 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     public Guid UserId { get; set; }
 
     /// <summary>
+    /// 客户名称快照（后台续费/催款通知与开票使用，避免跨模块回查 Identity）
+    /// </summary>
+    public string? CustomerName { get; set; }
+
+    /// <summary>
+    /// 客户邮箱快照（后台续费/催款通知与开票使用，避免跨模块回查 Identity）
+    /// </summary>
+    public string? CustomerEmail { get; set; }
+
+    /// <summary>
+    /// 产品代码（订阅归属的产品；null 表示单产品应用）。
+    /// 判重维度：同一用户在同一产品下至多一条有效订阅，不同产品可并存。
+    /// </summary>
+    public string? ProductCode { get; set; }
+
+    /// <summary>
     /// 订阅计划ID
     /// </summary>
     public Guid PlanId { get; set; }
@@ -101,14 +117,32 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     public string ChannelCode { get; set; } = string.Empty;
 
     /// <summary>
-    /// 渠道侧客户标识（用于 off-session 自动扣款，如 Stripe Customer ID）
+    /// 渠道侧客户标识（用于 off-session 自动扣款，如 Stripe Customer ID）。
+    /// 由绑卡链路（<see cref="Services.IPaymentMethodService"/>）写入的快照，
+    /// 后台计费直读，避免每次扣款都 join 支付方式表。
     /// </summary>
     public string? ProviderCustomerId { get; set; }
 
     /// <summary>
-    /// 渠道侧已保存的支付方式标识（用于 off-session 自动扣款，如 Stripe PaymentMethod ID）
+    /// 渠道侧已保存的支付方式标识（用于 off-session 自动扣款，如 Stripe PaymentMethod ID）。
+    /// 同为绑卡链路写入的快照，权威记录见 <see cref="StoredPaymentMethodId"/>。
     /// </summary>
     public string? PaymentMethodToken { get; set; }
+
+    /// <summary>
+    /// 绑定的已保存支付方式ID（用户级，见 <see cref="StoredPaymentMethod"/>）
+    /// </summary>
+    public Guid? StoredPaymentMethodId { get; set; }
+
+    /// <summary>
+    /// 已绑定支付方式的卡组织/类型（展示用快照，如 visa）
+    /// </summary>
+    public string? PaymentMethodBrand { get; set; }
+
+    /// <summary>
+    /// 已绑定支付方式的尾号（展示用快照）
+    /// </summary>
+    public string? PaymentMethodLast4 { get; set; }
 
     /// <summary>
     /// 续费/转正扣款连续失败次数（用于宽限期重试与降级 PastDue）
@@ -129,6 +163,25 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     /// 最近一次已应用到状态机的计费支付流水号（幂等：重复投递的同一支付不再重复推进周期）
     /// </summary>
     public string? LastBillingTradeNo { get; set; }
+
+    /// <summary>
+    /// 暂停开始时间。恢复时用它把剩余周期原样还给用户。
+    /// </summary>
+    /// <remarks>
+    /// 没有它就只能在恢复时重算一个完整周期，等于"暂停一天换一个免费周期"——
+    /// 在临近扣款日暂停再恢复即可反复白嫖。
+    /// </remarks>
+    public DateTime? PausedAt { get; set; }
+
+    /// <summary>
+    /// 暂停恢复时间（Paused 状态下由后台扫描到期自动恢复；null = 手动恢复）
+    /// </summary>
+    public DateTime? PausedUntil { get; set; }
+
+    /// <summary>
+    /// 已针对哪个计费周期发送过续费提醒（存该周期的 NextBillingTime，避免同一周期重复提醒）
+    /// </summary>
+    public DateTime? RenewalReminderSentFor { get; set; }
 
     /// <summary>
     /// 取消原因

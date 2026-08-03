@@ -157,7 +157,9 @@ public class ContextInjection_IdempotencyTests
         var middleware = CreateMiddleware();
         var context = CreateContextWithInlinePersona("You are a streaming ninja.");
 
-        static async IAsyncEnumerable<AgentStreamChunk> FakeNext(AiMiddlewareContext ctx, CancellationToken _)
+        static async IAsyncEnumerable<AgentStreamChunk> FakeNext(
+            AiMiddlewareContext ctx,
+            [EnumeratorCancellation] CancellationToken _)
         {
             yield return new AgentStreamChunk { Text = "chunk" };
         }

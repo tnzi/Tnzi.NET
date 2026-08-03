@@ -192,7 +192,7 @@ public class CustomerStatementTests : FinanceIntegrationTestBase
         candidates.Succeeded.ShouldBeTrue(candidates.Message);
         // 没逾期的不进催收名单。
         candidates.Data!.ShouldNotContain(c => c.PartyId == current);
-        candidates.Data.Count.ShouldBe(2);
+        candidates.Data!.Count.ShouldBe(2);
         // 最该催的排最前。
         candidates.Data[0].PartyId.ShouldBe(late);
         candidates.Data[0].Level.ShouldBe(DunningLevel.FinalNotice);

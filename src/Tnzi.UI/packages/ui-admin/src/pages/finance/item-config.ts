@@ -4,7 +4,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { ItemType } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtAmount } from './money'
+
 import TMoney from '../../components/finance/TMoney.vue'
 import type { SearchFieldItem } from '../../components/crud/TCrudSearchAdvanced.vue'
 

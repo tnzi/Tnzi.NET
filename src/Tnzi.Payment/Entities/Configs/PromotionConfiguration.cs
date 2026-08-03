@@ -10,7 +10,10 @@ public class PromotionConfiguration : EntityTypeConfigurationBase<Promotion, Gui
         builder.Property(p => p.Name).HasMaxLength(128).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
         builder.Property(p => p.StripeCouponId).HasMaxLength(128);
+        builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
         builder.Property(p => p.DiscountValue).HasMoneyPrecision();
+        // 列名保持 ScopeIds，属性名刻意不同（避免与 DTO 的 Guid 列表同名被自动映射误配）
+        builder.Property(p => p.ScopeIdsJson).HasColumnName("ScopeIds");
         builder.Property(p => p.MaxDiscountAmount).HasMoneyPrecision();
         builder.Property(p => p.MinimumOrderAmount).HasMoneyPrecision();
         // ScopeIds 存储 JSON 数组，不指定类型以保持数据库兼容性
@@ -23,6 +26,11 @@ public class PromotionConfiguration : EntityTypeConfigurationBase<Promotion, Gui
         builder.HasMany(p => p.RedemptionCodes)
             .WithOne(r => r.Promotion)
             .HasForeignKey(r => r.PromotionId)
+            .HasPrincipalKey(p => p.Id);
+
+        builder.HasMany(p => p.UserCoupons)
+            .WithOne(u => u.Promotion)
+            .HasForeignKey(u => u.PromotionId)
             .HasPrincipalKey(p => p.Id);
 
         if (multiTenancyEnabled)

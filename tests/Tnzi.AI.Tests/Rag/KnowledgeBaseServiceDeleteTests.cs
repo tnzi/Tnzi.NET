@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Tnzi.AI.Tests.Rag;
 

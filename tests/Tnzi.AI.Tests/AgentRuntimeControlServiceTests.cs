@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Tnzi.AI.Tests;
 
@@ -255,7 +254,7 @@ public class AgentRuntimeControlServiceTests
         result.Data.Count.ShouldBe(1);
         result.Data[0].DefaultModel.ShouldBe("gpt-5.4");
         result.Data[0].DefaultApprovalMode.ShouldBe(ToolApprovalMode.Specific);
-        result.Data[0].CapabilityTags.ShouldContain("quality");
+        result.Data[0].CapabilityTags!.ShouldContain("quality");
     }
 
     [Fact]

@@ -95,6 +95,18 @@ public class AspNetCoreModule : TnziFrameworkModule
         {
             context.Services.TryAddSingleton<IUserAgentParserService, UserAgentParserService>();
         }
+        // 实时 Hub 注册表：由映射 Hub 的模块经 MapTnziHub 写入，admin shell 端点读出。
+        // 无条件注册（不依赖 SignalR 模块）——没加载 SignalR 时它就是个空表，
+        // 正是"本机不提供实时通道"这个前端必须知道的答案。
+        context.Services.TryAddSingleton<IRealtimeHubRegistry, RealtimeHubRegistry>();
+
+        // 跨版本能力协商。目录注册成**实例**而非类型：模块在 ConfigureServices 阶段
+        // （容器尚未 build）经 context.Services.DeclareCapability(...) 写进去的必须就是
+        // 端点稍后读出的那个对象。空表是合法状态，表示"本部署没有任何需要两端协商才能启用的协议特性"。
+        // 客户端侧按请求解析，作用域必须是 Scoped —— 声明属于某一次请求，跨请求缓存会串台。
+        context.Services.AddTnziCapabilities();
+        context.Services.TryAddScoped<IClientCapabilities, HttpClientCapabilities>();
+
         // 替换 EFCoreModule 注册的 DesignTimeCurrentUser 为 HttpContextCurrentUser
         // 使用 RemoveAll 确保移除所有已有的 ICurrentUser 注册
         context.Services.RemoveAll<ICurrentUser>();

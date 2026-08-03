@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 收付款单服务（单据范式：草稿工作流 + 过账 + 作废；核销见 P2c 结算服务）

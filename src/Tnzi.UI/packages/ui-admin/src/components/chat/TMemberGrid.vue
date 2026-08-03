@@ -27,7 +27,15 @@
 
       <!-- Add button - always the last cell, same row (never wraps onto its own
            line): in collapsed mode it sits as the final cell of the last row. -->
-      <div v-if="canAdd" class="t-member-grid__cell t-member-grid__add-cell" @click="emit('add')">
+      <div
+        v-if="canAdd"
+        class="t-member-grid__cell t-member-grid__add-cell"
+        role="button"
+        tabindex="0"
+        @click="emit('add')"
+        @keydown.enter.prevent="emit('add')"
+        @keydown.space.prevent="emit('add')"
+      >
         <div class="t-member-grid__add">
           <Icon icon="mdi:plus" :width="AVATAR_SIZE * 0.5" :height="AVATAR_SIZE * 0.5" class="t-member-grid__add-icon" />
         </div>
@@ -51,7 +59,7 @@
 import { ref, computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import type { ConversationMemberDto } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { useChatStore } from '../../stores/useChatStore'
 import TChatAvatar from './TChatAvatar.vue'
 import TMemberPopover from './TMemberPopover.vue'

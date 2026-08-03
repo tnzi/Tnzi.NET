@@ -76,7 +76,7 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { buildUsageColumns } from './userusage-config'
 import type { UserStorageUsageDto } from '@tnzi/core/services/storage'
 

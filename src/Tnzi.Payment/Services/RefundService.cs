@@ -10,6 +10,8 @@ public class RefundService : ApplicationService, IRefundService
     private readonly IPaymentProviderFactory _paymentProviderFactory;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
 
+    private const int ReconcileScanPageSize = 200;
+
     private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
     public RefundService(
@@ -28,8 +30,13 @@ public class RefundService : ApplicationService, IRefundService
 
     public async Task<Result<RefundDto>> CreateRefundAsync(CreateRefundDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(request);
+
+        if (request.RefundAmount <= 0)
+            return Fail<RefundDto>(ErrorCodes.PaymentInvalidAmount, 400);
+
         var payment = await _paymentRepository.FirstOrDefaultAsync(
-            p => p.TradeNo == request.TradeNo && (!ownerUserId.HasValue || p.CreatorId == ownerUserId.Value), cancellationToken);
+            p => p.TradeNo == request.TradeNo && (!ownerUserId.HasValue || p.UserId == ownerUserId.Value), cancellationToken);
 
         if (payment == null)
             return Fail<RefundDto>(ErrorCodes.PaymentNotFound, 404);
@@ -51,10 +58,13 @@ public class RefundService : ApplicationService, IRefundService
             if (request.RefundAmount > payment.PaidAmount - existingRefundAmount)
                 return Fail<Refund>(ErrorCodes.PaymentRefundExceedAmount, 400);
 
-            // 检查每日退款限额
+            // 每日退款限额按币种统计：跨币种求和会把 100 JPY 和 100 USD 当成同一量级
+            var todayStart = DateTime.UtcNow.Date;
+            var todayEnd = todayStart.AddDays(1);
             var todayRefunds = await _refundRepository
-                .Where(r => r.CreationTime.Date == DateTime.UtcNow.Date &&
-                            r.Status != RefundStatus.Cancelled && r.Status != RefundStatus.Failed)
+                .Where(r => r.CreationTime >= todayStart && r.CreationTime < todayEnd
+                            && r.Currency == payment.Currency
+                            && r.Status != RefundStatus.Cancelled && r.Status != RefundStatus.Failed)
                 .SumAsync(r => r.RefundAmount, ct);
 
             if (todayRefunds + request.RefundAmount > options.MaxRefundAmountPerDay)
@@ -98,6 +108,8 @@ public class RefundService : ApplicationService, IRefundService
 
     public async Task<Result> ApproveRefundAsync(Guid refundId, ApproveRefundDto request, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(request);
+
         var refund = await _refundRepository.FirstOrDefaultAsync(r => r.Id == refundId, cancellationToken);
         if (refund == null)
             return Fail(ErrorCodes.RefundNotFound, 404);
@@ -161,44 +173,109 @@ public class RefundService : ApplicationService, IRefundService
             ExternalTradeNo = payment.ExternalTradeNo,
             RefundNo = refund.RefundNo,
             RefundAmount = refund.RefundAmount,
+            Currency = refund.Currency,
             Reason = refund.Reason
         });
 
-        if (!result.Succeeded)
+        if (!result.Succeeded || result.Data == null)
         {
             refund.Status = RefundStatus.Failed;
             await _refundRepository.UpdateAsync(refund, cancellationToken);
+            await PublishRefundEventAsync(refund, payment, succeeded: false, result.Message);
             return Fail(result.Message ?? ErrorCodes.StripeRefundFailed);
         }
 
-        refund.Status = RefundStatus.Succeeded;
-        refund.ExternalRefundNo = result.Data?.ExternalRefundNo;
-        refund.CompletedTime = DateTime.UtcNow;
+        refund.ExternalRefundNo = result.Data.ExternalRefundNo;
+
+        // 尊重渠道回报的真实状态：渠道说 pending 就落 Refunding，由对账扫描推进到终态。
+        // 此前无条件写 Succeeded，会把数日后才可能失败的退款当场记成成功。
+        await ApplyRefundStatusAsync(refund, payment, result.Data.Status, cancellationToken);
+
+        return refund.Status == RefundStatus.Failed
+            ? Fail(ErrorCodes.StripeRefundFailed)
+            : Ok();
+    }
+
+    public async Task<Result<int>> ReconcilePendingRefundsAsync(CancellationToken cancellationToken = default)
+    {
+        var since = DateTime.UtcNow.AddDays(-PaymentOptions.RefundReconcileLookbackDays);
+
+        var pending = await _refundRepository
+            .Where(r => r.Status == RefundStatus.Refunding
+                && r.ExternalRefundNo != null
+                && r.CreationTime >= since)
+            .OrderBy(r => r.CreationTime)
+            .Take(ReconcileScanPageSize)
+            .ToListAsync(cancellationToken);
+
+        if (pending.Count == 0)
+            return Ok(0);
+
+        var settled = 0;
+
+        foreach (var refund in pending)
+        {
+            try
+            {
+                var payment = await _paymentRepository.FirstOrDefaultAsync(p => p.Id == refund.PaymentId, cancellationToken);
+                if (payment == null)
+                    continue;
+
+                var provider = _paymentProviderFactory.GetProvider(payment.ChannelCode);
+                if (provider == null)
+                    continue;
+
+                var query = await provider.QueryRefundAsync(refund.ExternalRefundNo!);
+                if (!query.Succeeded || query.Data == null)
+                    continue;
+
+                if (query.Data.Status == RefundStatus.Refunding)
+                    continue;
+
+                await ApplyRefundStatusAsync(refund, payment, query.Data.Status, cancellationToken);
+                settled++;
+            }
+            catch (Exception ex)
+            {
+                // 单笔对账失败不拖累整批
+                Logger.LogError(ex, "Refund reconciliation failed. RefundNo: {RefundNo}", refund.RefundNo);
+            }
+        }
+
+        if (settled > 0)
+            Logger.LogInformation("Reconciled {Count} in-flight refunds", settled);
+
+        return Ok(settled);
+    }
+
+    /// <summary>
+    /// 落地渠道回报的退款状态，并在成功时回写支付状态、发布事件
+    /// </summary>
+    private async Task ApplyRefundStatusAsync(Refund refund, PaymentEntity payment, RefundStatus status, CancellationToken cancellationToken)
+    {
+        refund.Status = status;
+
+        if (status == RefundStatus.Succeeded)
+            refund.CompletedTime ??= DateTime.UtcNow;
+
         await _refundRepository.UpdateAsync(refund, cancellationToken);
+
+        if (status != RefundStatus.Succeeded)
+        {
+            if (status is RefundStatus.Failed or RefundStatus.Cancelled)
+            {
+                Logger.LogWarning("Refund settled as {Status}. RefundNo: {RefundNo}", status, refund.RefundNo);
+                await PublishRefundEventAsync(refund, payment, succeeded: false, $"Channel settled refund as {status}");
+            }
+            return;
+        }
 
         // 回写支付状态：累计成功退款额达到已付额 → Refunded，否则 PartialRefunded
         await SyncPaymentRefundStatusAsync(payment, cancellationToken);
-
-        // 发布退款完成事件
-        if (EventBus != null)
-        {
-            await EventBus.PublishAsync(new RefundProcessedEvent
-            {
-                RefundId = refund.Id,
-                RefundNo = refund.RefundNo,
-                PaymentId = payment.Id,
-                TradeNo = payment.TradeNo,
-                Amount = refund.RefundAmount,
-                Currency = refund.Currency,
-                CompletedTime = refund.CompletedTime.Value,
-                Succeeded = true
-            });
-        }
+        await PublishRefundEventAsync(refund, payment, succeeded: true, null);
 
         Logger.LogInformation("Refund processed. RefundNo: {RefundNo}, Amount: {Amount}",
             refund.RefundNo, refund.RefundAmount);
-
-        return Ok();
     }
 
     /// <summary>
@@ -221,18 +298,43 @@ public class RefundService : ApplicationService, IRefundService
         }
     }
 
+    private async Task PublishRefundEventAsync(Refund refund, PaymentEntity payment, bool succeeded, string? failReason)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new RefundProcessedEvent
+        {
+            RefundId = refund.Id,
+            RefundNo = refund.RefundNo,
+            PaymentId = payment.Id,
+            TradeNo = payment.TradeNo,
+            Amount = refund.RefundAmount,
+            Currency = refund.Currency,
+            CompletedTime = refund.CompletedTime ?? DateTime.UtcNow,
+            Succeeded = succeeded,
+            FailReason = failReason
+        });
+    }
+
     public async Task<Result> CancelRefundAsync(Guid refundId, string? reason, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         var refund = await _refundRepository.FirstOrDefaultAsync(
-            r => r.Id == refundId && (!ownerUserId.HasValue || r.Payment!.CreatorId == ownerUserId.Value), cancellationToken);
+            r => r.Id == refundId && (!ownerUserId.HasValue || r.Payment!.UserId == ownerUserId.Value), cancellationToken);
         if (refund == null)
             return Fail(ErrorCodes.RefundNotFound, 404);
 
         if (refund.Status != RefundStatus.Pending && refund.Status != RefundStatus.Approved)
             return Fail(ErrorCodes.RefundCannotCancel, 400);
 
-        refund.Status = RefundStatus.Cancelled;
-        await _refundRepository.UpdateAsync(refund, cancellationToken);
+        // CAS：避免与"审批通过后自动执行"竞态，把已在退款中的记录取消掉
+        var affected = await _refundRepository.AsQueryable()
+            .Where(r => r.Id == refundId
+                && (r.Status == RefundStatus.Pending || r.Status == RefundStatus.Approved))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, RefundStatus.Cancelled), cancellationToken);
+
+        if (affected == 0)
+            return Fail(ErrorCodes.RefundCannotCancel, 409);
 
         Logger.LogInformation("Refund cancelled. RefundNo: {RefundNo}, Reason: {Reason}",
             refund.RefundNo, reason);
@@ -243,7 +345,7 @@ public class RefundService : ApplicationService, IRefundService
     public async Task<Result<RefundDto>> GetRefundAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         var refund = await _refundRepository.FirstOrDefaultAsync(
-            r => r.Id == id && (!ownerUserId.HasValue || r.Payment!.CreatorId == ownerUserId.Value), cancellationToken);
+            r => r.Id == id && (!ownerUserId.HasValue || r.Payment!.UserId == ownerUserId.Value), cancellationToken);
         if (refund == null)
             return Fail<RefundDto>(ErrorCodes.RefundNotFound, 404);
 
@@ -252,10 +354,12 @@ public class RefundService : ApplicationService, IRefundService
 
     public async Task<Result<IPagedList<RefundDto>>> GetRefundListAsync(RefundQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(query);
+
         var queryable = _refundRepository.AsNoTracking().Filter(query);
 
         if (ownerUserId.HasValue)
-            queryable = queryable.Where(r => r.Payment!.CreatorId == ownerUserId.Value);
+            queryable = queryable.Where(r => r.Payment!.UserId == ownerUserId.Value);
 
         var pagedList = await queryable
             .OrderByDescending(r => r.CreationTime)
@@ -271,7 +375,7 @@ public class RefundService : ApplicationService, IRefundService
             .Where(r => r.Payment!.TradeNo == tradeNo);
 
         if (ownerUserId.HasValue)
-            queryable = queryable.Where(r => r.Payment!.CreatorId == ownerUserId.Value);
+            queryable = queryable.Where(r => r.Payment!.UserId == ownerUserId.Value);
 
         var refunds = await queryable
             .OrderByDescending(r => r.CreationTime)

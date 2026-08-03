@@ -36,14 +36,18 @@ public interface IPromotionService
     Task<Result<IPagedList<PromotionDto>>> GetListAsync(PromotionQueryDto query, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 验证优惠券
+    /// 验证优惠券并试算折扣。
     /// </summary>
-    Task<Result<CouponValidationResultDto>> ValidateCouponAsync(string couponCode, Guid? userId = null, CancellationToken cancellationToken = default);
+    /// <remarks>
+    /// 校验覆盖：启用状态、生效时间、总量/每用户次数、最低订单金额、适用产品类型与范围、
+    /// 首单限定、以及非公开券是否已被该用户领取。这些条件此前存在于数据模型却从未参与判定。
+    /// </remarks>
+    Task<Result<CouponValidationResultDto>> ValidateCouponAsync(CouponApplyContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 计算折扣
+    /// 计算折扣（校验通过后按促销规则算出折扣金额）
     /// </summary>
-    Task<Result<DiscountCalculationResultDto>> CalculateDiscountAsync(string couponCode, decimal orderAmount, CancellationToken cancellationToken = default);
+    Task<Result<DiscountCalculationResultDto>> CalculateDiscountAsync(CouponApplyContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 同步到Stripe

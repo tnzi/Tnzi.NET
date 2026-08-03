@@ -68,6 +68,36 @@ public static class ErrorCodes
     /// </summary>
     public const string PaymentAmountMismatch = "PAYMENT_AMOUNT_MISMATCH";
 
+    /// <summary>
+    /// 渠道不支持保存支付方式（绑卡）
+    /// </summary>
+    public const string PaymentMethodStorageNotSupported = "PAYMENT_METHOD_STORAGE_NOT_SUPPORTED";
+
+    /// <summary>
+    /// 已保存的支付方式不存在
+    /// </summary>
+    public const string PaymentMethodNotFound = "PAYMENT_METHOD_NOT_FOUND";
+
+    /// <summary>
+    /// 绑定支付方式失败
+    /// </summary>
+    public const string PaymentMethodBindingFailed = "PAYMENT_METHOD_BINDING_FAILED";
+
+    /// <summary>
+    /// 手动确认收款仅适用于线下渠道
+    /// </summary>
+    public const string PaymentManualConfirmChannelOnly = "PAYMENT_MANUAL_CONFIRM_CHANNEL_ONLY";
+
+    /// <summary>
+    /// 当前状态的支付不能确认收款
+    /// </summary>
+    public const string PaymentCannotConfirm = "PAYMENT_CANNOT_CONFIRM";
+
+    /// <summary>
+    /// 应用优惠券需要登录用户上下文
+    /// </summary>
+    public const string PaymentCouponRequiresUser = "PAYMENT_COUPON_REQUIRES_USER";
+
     #endregion
 
     #region Stripe Provider 错误码
@@ -111,6 +141,11 @@ public static class ErrorCodes
     /// </summary>
     public const string PayPalRefundFailed = "PAYPAL_REFUND_FAILED";
 
+    /// <summary>
+    /// PayPal 账户保存 / 商户发起扣款失败（Vault v3 + reference transactions）
+    /// </summary>
+    public const string PayPalVaultFailed = "PAYPAL_VAULT_FAILED";
+
     #endregion
 
     #region Invoice 错误码
@@ -129,6 +164,11 @@ public static class ErrorCodes
     /// 发票已发送
     /// </summary>
     public const string InvoiceAlreadySent = "INVOICE_ALREADY_SENT";
+
+    /// <summary>
+    /// 发票补发次数已达上限
+    /// </summary>
+    public const string InvoiceSendLimitReached = "INVOICE_SEND_LIMIT_REACHED";
 
     /// <summary>
     /// 收件人邮箱必填
@@ -229,6 +269,21 @@ public static class ErrorCodes
     /// </summary>
     public const string SubscriptionPaymentMethodMissing = "SUBSCRIPTION_PAYMENT_METHOD_MISSING";
 
+    /// <summary>
+    /// 只有活动中或试用中的订阅才能暂停
+    /// </summary>
+    public const string SubscriptionCannotPause = "SUBSCRIPTION_CANNOT_PAUSE";
+
+    /// <summary>
+    /// 只有逾期欠费的订阅才能立即重试扣款
+    /// </summary>
+    public const string SubscriptionCannotRetryBilling = "SUBSCRIPTION_CANNOT_RETRY_BILLING";
+
+    /// <summary>
+    /// 该产品下已存在有效订阅
+    /// </summary>
+    public const string SubscriptionProductAlreadySubscribed = "SUBSCRIPTION_PRODUCT_ALREADY_SUBSCRIBED";
+
     #endregion
 
     #region Refund 错误码
@@ -306,6 +361,26 @@ public static class ErrorCodes
     /// 最低订单金额未满足
     /// </summary>
     public const string CouponMinimumAmountNotMet = "COUPON_MINIMUM_AMOUNT_NOT_MET";
+
+    /// <summary>
+    /// 非公开优惠券需先通过兑换码领取
+    /// </summary>
+    public const string CouponNotHeld = "COUPON_NOT_HELD";
+
+    /// <summary>
+    /// 优惠券不适用于当前产品或计划
+    /// </summary>
+    public const string CouponScopeMismatch = "COUPON_SCOPE_MISMATCH";
+
+    /// <summary>
+    /// 优惠券仅限首次订阅使用
+    /// </summary>
+    public const string CouponFirstSubscriptionOnly = "COUPON_FIRST_SUBSCRIPTION_ONLY";
+
+    /// <summary>
+    /// 试用期开通不产生首期支付，无法使用优惠券
+    /// </summary>
+    public const string CouponNotApplicableToTrial = "COUPON_NOT_APPLICABLE_TO_TRIAL";
 
     #endregion
 

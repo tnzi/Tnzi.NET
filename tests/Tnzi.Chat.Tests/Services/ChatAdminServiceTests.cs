@@ -1,4 +1,3 @@
-using Shouldly;
 using Tnzi.Data;
 
 namespace Tnzi.Chat.Tests.Services;

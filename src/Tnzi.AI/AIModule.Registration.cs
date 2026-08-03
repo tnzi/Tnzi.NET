@@ -49,6 +49,13 @@ public partial class AIModule
 
         // RAG 文本检索回退 - 用户/子模块（Tnzi.AI.Rag）可注册真实 ITextSearchService 连接向量存储
         services.TryAddScoped<ITextSearchService, NoOpTextSearchService>();
+
+        // 外部 CLI agent 回退（Tnzi.AI.Cli）。绑定服务的回退刻意不叫 NoOp 也不带
+        // INoOpService：它在读路径上返回 null = 「全部走内建」，那是正确答案而非降级
+        //（抛 501 会让未装子模块的部署连普通聊天都跑不起来）。
+        services.TryAddScoped<ICliAgentDispatcher, NoOpCliAgentDispatcher>();
+        services.TryAddScoped<ICliAgentBindingService, BuiltInOnlyCliAgentBindingService>();
+        services.TryAddScoped<ICliRuntimeService, NoOpCliRuntimeService>();
     }
 
     // ───────────────────────── 引擎注册助手 ─────────────────────────
@@ -284,6 +291,8 @@ public partial class AIModule
 
         // 注册工具权限规则持久化存储（Scoped：需要 IRepository）
         services.AddScoped<IToolPermissionRuleStore, DatabaseToolPermissionRuleStore>();
+        services.AddScoped<IToolPermissionRuleService, ToolPermissionRuleService>();
+        services.AddScoped<ISubAgentTypeService, SubAgentTypeService>();
     }
 
     private static void RegisterBuiltInToolsAndGuardrails(IServiceCollection services)
@@ -368,6 +377,10 @@ public partial class AIModule
             sp.GetRequiredService<ILogger<EventPublisher>>()));
         services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
         services.AddScoped<IAgentRuntime, AgentRuntime>();
+
+        // 执行路由门面：全框架唯一的「内建 vs 外部 CLI」分支点。ChatService / AgentService
+        // 注入它而不是 IAgentRuntime，于是「这个 Agent 走哪条路」的判断只存在于一个类里。
+        services.AddScoped<IAgentDispatchFacade, AgentDispatchFacade>();
 
         // Sub-agent cancellation registry - Singleton so the background Task.Run closure
         // and the cancel signal path both see the same in-process registry.

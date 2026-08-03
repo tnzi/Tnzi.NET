@@ -7,7 +7,7 @@ import {
   type BankTransactionDto,
 } from '../../services/bridges/finance-bridge'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { amountCell, fmtMoney, fmtDate } from './money'
+import { fmtMoney, fmtDate } from './money'
 
 /** All-optional row shape (house pattern) so ColumnDef stays assignable. */
 export type BankTransactionRow = Partial<BankTransactionDto>

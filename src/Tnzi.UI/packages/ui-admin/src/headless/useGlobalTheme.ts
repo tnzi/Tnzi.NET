@@ -24,7 +24,7 @@ import { isValidSnapshot, type AdminThemeSnapshot } from '../theme/admin-config'
 import { applyThemeSnapshot, buildThemeSnapshot, overlayUserPreset } from '../theme/snapshot'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { createSystemBridge, type SystemBridge } from '../services/bridges/system-bridge'
-import type { AdminThemePreset } from '../theme/appearancePresets'
+import type { AdminThemePreset } from '../theme/appearance-presets'
 
 type HttpClientLike = NonNullable<Parameters<typeof createSystemBridge>[0]>['client']
 

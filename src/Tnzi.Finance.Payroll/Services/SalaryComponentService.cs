@@ -127,9 +127,18 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("Component name is required.");
         if (!Enum.IsDefined(input.Type))
-            return Fail("Component type must be Earning, Deduction or EmployerContribution.");
-        if (input.DefaultAmount is < 0)
+            return Fail("Component type must be Earning, Deduction, EmployerContribution or Informational.");
+        // 备注项不进任何合计，负数在它身上产生不了荒谬的净额；其余三类的负默认额
+        // 等于一次没人申报的反向发放。
+        if (input.DefaultAmount is < 0 && input.Type != SalaryComponentType.Informational)
             return Fail("DefaultAmount cannot be negative.");
+        // 备注项不产生分录，所以挂在它上面的科目**永远不会被用到**。静默忽略一个
+        // 明确填写的配置，比拒绝它更糟：填的人会以为自己已经把账接好了。
+        if (input.Type == SalaryComponentType.Informational
+            && (input.ExpenseAccountId.HasValue || input.LiabilityAccountId.HasValue))
+        {
+            return Fail("An Informational component posts nothing, so it must not carry an expense or liability account. Clear the account, or change the type if the amount really belongs in the ledger.");
+        }
 
         var code = input.Code.Trim().ToUpperInvariant();
         if (code.Length > 64 || !ComponentCodeRegex().IsMatch(code))

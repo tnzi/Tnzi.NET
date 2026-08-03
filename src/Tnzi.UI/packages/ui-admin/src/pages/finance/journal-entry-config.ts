@@ -5,7 +5,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
 import { JournalEntryStatus } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtMoney, fmtDate } from './money'
+import { fmtDate } from './money'
 import { financeSourceTypeLabel } from './source-type'
 import TMoney from '../../components/finance/TMoney.vue'
 

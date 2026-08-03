@@ -10,7 +10,14 @@ vi.mock('naive-ui', () => ({
   NPopover: {
     name: 'NPopover',
     props: ['trigger', 'placement', 'showArrow'],
-    template: '<div class="npop"><slot name="trigger" /><div class="npop-body"><slot /></div></div>',
+    emits: ['update:show'],
+    methods: {
+      open() {
+        ;(this as unknown as { $emit: (e: string, v: boolean) => void }).$emit('update:show', true)
+      },
+    },
+    template:
+      '<div class="npop"><button class="npop-toggle" @click="open" /><slot name="trigger" /><div class="npop-body"><slot /></div></div>',
   },
 }))
 vi.mock('@tnzi/ui', () => ({
@@ -40,5 +47,13 @@ describe('THeaderBell', () => {
     const w = mount(THeaderBell, { props: { items: [], emptyText: 'All caught up' } })
     expect(w.text()).toContain('All caught up')
     expect(w.find('.nbadge').attributes('data-show')).toBe('false')
+  })
+
+  it('forwards the popover open/close as update:show', async () => {
+    // ★ 没有它,宿主没有任何时机去刷新。剩下的唯一办法是定时轮询 —— 每个间隔
+    //   花一次请求去追一个「只有用户打开面板才看得见」的变化。
+    const w = mount(THeaderBell, { props: { items: [] } })
+    await w.find('.npop-toggle').trigger('click')
+    expect(w.emitted('update:show')?.[0]?.[0]).toBe(true)
   })
 })

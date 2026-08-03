@@ -401,7 +401,7 @@ public class BankFeedTests : FinanceIntegrationTestBase
         var confirmed = await ConfirmAsync(txn.Id);
         confirmed.Succeeded.ShouldBeFalse();
         confirmed.Code.ShouldBe(400);
-        confirmed.Message.ShouldContain("draft reconciliation");
+        confirmed.Message!.ShouldContain("draft reconciliation");
     }
 
     [Fact]

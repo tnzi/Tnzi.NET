@@ -12,7 +12,21 @@ public enum SalaryComponentType
     Deduction = 2,
 
     /// <summary>雇主承担项（借 费用科目 + 贷 负债科目双边；不影响 Net）</summary>
-    EmployerContribution = 3
+    EmployerContribution = 3,
+
+    /// <summary>
+    /// 备注项：印在工资条上、可被后续公式按 Code 引用，但**不进任何合计**
+    /// （Gross / Deductions / EmployerCost / Net 一个都不动），也**不产生任何分录**。
+    ///
+    /// ★ 没有它，两类东西无处安放，而两条替代路径都会让已经印出去的数字发生变化：
+    /// ① 只作说明的行（无薪假天数、排班额与实发额的差、休假余额）——记成 Deduction 会扣第二遍，
+    ///    抬进 Gross 会改掉 T4 的收入框；
+    /// ② 具名中间量（附加税之前的省税、CPP/EI 抵免）——没有它，一条税务公式只能把子表达式
+    ///    原文重复几遍，于是全系统最该被人逐行核对的那条公式变成一个不可读的长字符串。
+    ///
+    /// 由于不参与任何合计，本类型是**唯一允许为负**的组件：中间量常常带符号（抵免、冲回）。
+    /// </summary>
+    Informational = 4
 }
 
 /// <summary>

@@ -51,11 +51,13 @@
         <!-- Image: NImage gives a click-to-zoom lightbox (with prev/next across the
              whole thread via the NImageGroup wrapper in TMessageList) instead of
              opening a raw link in a new tab. -->
-        <NImage
+<TFileImage
           v-if="message.contentType === MessageContentType.Image"
           class="t-bubble-image"
-          :src="fileUrl ?? ''"
-          :img-props="{ alt: message.fileName ?? 'image', class: 't-bubble-image__img' }"
+          :file-id="message.fileId"
+          lightbox
+          :alt="message.fileName ?? 'image'"
+          :img-props="{ class: 't-bubble-image__img' }"
           object-fit="cover"
         />
 
@@ -65,13 +67,13 @@
           class="t-bubble"
           :class="mine ? 't-bubble--mine' : 't-bubble--other'"
         >
-          <a class="t-bubble-file" :href="fileUrl ?? '#'" target="_blank" rel="noopener noreferrer" download>
+          <TFileLink class="t-bubble-file" :file-id="message.fileId">
             <span class="t-bubble-file__icon"><Icon :icon="fileIcon" :width="28" :style="{ color: fileIconColor }" /></span>
             <span class="t-bubble-file__meta">
               <span class="t-bubble-file__name">{{ message.fileName ?? 'File' }}</span>
               <span v-if="fileSizeLabel" class="t-bubble-file__size">{{ fileSizeLabel }}</span>
             </span>
-          </a>
+          </TFileLink>
         </div>
 
         <!-- Text -->
@@ -93,10 +95,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
-import { NImage } from 'naive-ui'
 import { MessageContentType } from '@tnzi/core/services/chat'
-import { resolveChatAvatarUrl } from './avatar'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
+import TFileImage from '../display/TFileImage.vue'
+import TFileLink from '../display/TFileLink.vue'
 import type { ChatMessageView } from '../../stores/useChatStore'
 import TChatAvatar from './TChatAvatar.vue'
 
@@ -129,9 +131,6 @@ const linkLabel = computed(() => translatePageKey('chat', 'window.viewDetails'))
 
 // Tooltip fallback on the retry marker when the backend gave no reason.
 const retryLabel = computed(() => translatePageKey('chat', 'window.resend'))
-
-// File/image URL - reuse the file preview helper (/api/files/{id}/preview).
-const fileUrl = computed(() => resolveChatAvatarUrl(props.message.fileId))
 
 // File-type icon: map the extension to a recognisable coloured icon so a PDF /
 // Word / Excel / archive / media file reads at a glance instead of a generic

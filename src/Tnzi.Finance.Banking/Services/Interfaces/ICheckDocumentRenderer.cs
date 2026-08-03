@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 支票文档渲染器（契约在银行域，本模块零渲染库引用）

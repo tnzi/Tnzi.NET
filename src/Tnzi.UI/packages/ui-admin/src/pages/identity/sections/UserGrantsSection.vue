@@ -87,7 +87,7 @@ import { useAdminClient } from '../../../plugin/client'
 import { useAdminAppStore } from '../../../stores/useAdminAppStore'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
 import { makePageTranslator } from '../../_shared/translate'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { ZH_SURFACE_LABELS } from '../../authorization/surface-labels'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 

@@ -2,7 +2,6 @@ using ModelContextProtocol.Protocol;
 using Tnzi.AI.Mcp.Controllers.Admin;
 using Tnzi.AI.Mcp.Server;
 using McpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
-using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Mcp;
 

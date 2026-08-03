@@ -1,4 +1,3 @@
-using Moq;
 using Tnzi.Security.Authorization;
 
 namespace Tnzi.Chat.Tests.Services;

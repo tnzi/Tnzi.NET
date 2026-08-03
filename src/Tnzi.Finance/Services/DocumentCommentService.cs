@@ -8,6 +8,8 @@ public class DocumentCommentService : ApplicationService, IDocumentCommentServic
     private readonly IRepository<DocumentComment, Guid> _repository;
     private readonly IUserDisplayNameProvider? _displayNames;
 
+    /// <param name="serviceProvider">服务提供者（基类延迟解析用）</param>
+    /// <param name="repository">单据评论仓储</param>
     /// <param name="displayNames">
     /// 可选：Identity 未加载时为 null，作者名留空、呈现端回落到"某人"。Finance
     /// 刻意零 Identity 引用，这是它拿到名字的唯一方式。

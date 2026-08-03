@@ -176,7 +176,8 @@ import { useAdminTabStore, type AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { humanise, translatePageKey } from '../../pages/_shared/translate'
+import { humanise, translatePageKey } from '../../i18n/translate'
+import { DEFAULT_ROUTE_ICONS } from '../../router/route-icons'
 import { TSvgIcon } from '@tnzi/ui'
 import TChromeTabBg from './TChromeTabBg.vue'
 
@@ -250,14 +251,20 @@ function renderTitle(raw: string): string {
   return humanise(raw)
 }
 
-/** Phase H1 D2: prefix icon resolver. `tab.meta.icon` wins (matches
- *  soybean's per-route `meta.icon`); fall back to a generic file icon
- *  so every tab gets a visual anchor even if the route metadata
- *  hasn't been wired with an icon yet. */
+/** Prefix icon resolver, same lookup order the sidebar / breadcrumb / page
+ *  header use: `meta.icon` wins (soybean's per-route override), then the
+ *  route-name map, then a generic file icon.
+ *
+ *  The `DEFAULT_ROUTE_ICONS` step used to be missing here, and the preset
+ *  route table sets `meta.icon` on exactly zero routes - so every built-in
+ *  tab rendered the same generic document glyph while its sidebar row and
+ *  breadcrumb crumb showed the real icon. `tab.id` is the route name for
+ *  ordinary tabs; multi-instance detail tabs key by path, so they fall back
+ *  to `tab.meta.icon` / the generic glyph as before. */
 function tabIconOf(tab: AdminTab): string {
   const metaIcon = tab.meta?.icon
   if (typeof metaIcon === 'string' && metaIcon) return metaIcon
-  return 'mdi:file-document-outline'
+  return DEFAULT_ROUTE_ICONS[tab.id] ?? 'mdi:file-document-outline'
 }
 
 function onMouseDown(tab: AdminTab, event: MouseEvent): void {

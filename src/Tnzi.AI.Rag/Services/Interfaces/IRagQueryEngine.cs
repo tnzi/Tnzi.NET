@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Services.Interfaces;
+namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
 /// RAG 查询引擎 - 单轮 Q&amp;A（无历史上下文）

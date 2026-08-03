@@ -48,7 +48,7 @@ public class TestEntityWithoutId : IEntity
 
 /// <summary>
 /// 测试实体 - 只读 Id 属性（用于测试边界情况）
-/// 注意：不实现 IEntity<Guid>，因为只读属性无法满足接口要求
+/// 注意：不实现 IEntity&lt;Guid&gt;，因为只读属性无法满足接口要求
 /// </summary>
 public class TestEntityWithReadOnlyId : IEntity
 {

@@ -32,7 +32,12 @@ vi.mock('naive-ui', async () => {
 let routeParams: Record<string, unknown> = { id: 'wf-1' }
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: routeParams }),
-  useRouter: () => ({ push: vi.fn(() => Promise.resolve()) }),
+  // `resolve` is part of the real router contract - the page uses it to build
+  // its back-target fallback by route NAME.
+  useRouter: () => ({
+    push: vi.fn(() => Promise.resolve()),
+    resolve: (to: { name: string }) => ({ path: `/admin/${String(to.name).replace(/\./g, '/')}` }),
+  }),
 }))
 
 vi.mock('../../../src/plugin/client', () => ({

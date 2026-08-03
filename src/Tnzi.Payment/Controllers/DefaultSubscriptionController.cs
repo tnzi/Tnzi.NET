@@ -19,10 +19,10 @@ public class DefaultSubscriptionController : ApiControllerBase
     protected ISubscriptionService SubscriptionService => _subscriptionService;
 
     /// <summary>
-    /// 创建订阅
+    /// 创建订阅。返回订阅本体与首期支付凭据，前端据此直接拉起收银台。
     /// </summary>
     [HttpPost]
-    public virtual async Task<ApiResult<SubscriptionDto>> Create([FromBody] CreateSubscriptionDto request)
+    public virtual async Task<ApiResult<SubscriptionCreateResultDto>> Create([FromBody] CreateSubscriptionDto request)
     {
         var result = await _subscriptionService.CreateSubscriptionAsync(request);
         return result.ToApiResult();
@@ -73,6 +73,17 @@ public class DefaultSubscriptionController : ApiControllerBase
     }
 
     /// <summary>
+    /// 暂停订阅
+    /// </summary>
+    [HttpPost("{id:guid}/pause")]
+    public virtual async Task<ApiResult> Pause(Guid id, [FromBody] PauseSubscriptionDto request)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.PauseSubscriptionAsync(id, request, userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 恢复订阅
     /// </summary>
     [HttpPost("{id:guid}/resume")]
@@ -80,6 +91,17 @@ public class DefaultSubscriptionController : ApiControllerBase
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
         var result = await _subscriptionService.ResumeSubscriptionAsync(id, userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 立即重试扣款（逾期欠费的订阅换卡后主动挽回）
+    /// </summary>
+    [HttpPost("{id:guid}/retry-billing")]
+    public virtual async Task<ApiResult> RetryBilling(Guid id)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.RetryBillingAsync(id, userId);
         return result.ToApiResult();
     }
 
@@ -106,13 +128,13 @@ public class DefaultSubscriptionController : ApiControllerBase
     }
 
     /// <summary>
-    /// 更新支付方式
+    /// 绑定/更新本订阅使用的支付方式；订阅处于逾期欠费时会立即重试一次扣款
     /// </summary>
     [HttpPost("{id:guid}/payment-method")]
-    public virtual async Task<ApiResult> UpdatePaymentMethod(Guid id, [FromBody] UpdatePaymentMethodDto request)
+    public virtual async Task<ApiResult<SubscriptionDto>> UpdatePaymentMethod(Guid id, [FromBody] AttachPaymentMethodDto request)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
-        var result = await _subscriptionService.UpdatePaymentMethodAsync(id, request.PaymentMethodId, userId);
+        var result = await _subscriptionService.UpdatePaymentMethodAsync(id, request, userId);
         return result.ToApiResult();
     }
 
@@ -131,9 +153,9 @@ public class DefaultSubscriptionController : ApiControllerBase
     /// 获取订阅计划列表
     /// </summary>
     [HttpGet("plans")]
-    public virtual async Task<ApiResult<List<SubscriptionPlanDto>>> GetPlans([FromQuery] bool activeOnly = true)
+    public virtual async Task<ApiResult<List<SubscriptionPlanDto>>> GetPlans([FromQuery] bool activeOnly = true, [FromQuery] string? productCode = null)
     {
-        var result = await _subscriptionService.GetSubscriptionPlansAsync(activeOnly);
+        var result = await _subscriptionService.GetSubscriptionPlansAsync(activeOnly, productCode);
         return result.ToApiResult();
     }
 

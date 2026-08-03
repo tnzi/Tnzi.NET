@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 支票打印与登记服务

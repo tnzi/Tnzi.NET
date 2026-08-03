@@ -4,7 +4,7 @@
  * Store exports and initialization.
  */
 
-// Store composables
+// Store hooks
 export { useAuth } from './auth';
 export { useUser } from './user';
 export { useApp } from './app';

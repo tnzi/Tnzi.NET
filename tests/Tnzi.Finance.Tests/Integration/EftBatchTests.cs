@@ -51,7 +51,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
             IsDefault = true
         }));
         party.Succeeded.ShouldBeTrue(party.Message);
-        return vendor.Data.Id;
+        return vendor.Data!.Id;
     }
 
     private async Task<Guid> CreatePostedTransferPaymentAsync(Guid ledgerId, Guid vendorId, decimal amount)
@@ -217,7 +217,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
         gen1.Data!.FileCreationNumber.ShouldBe(1);
 
         // 作废释放付款
-        var voided = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.VoidBatchAsync(batch1.Data.Id, new VoidEftBatchDto { Reason = "Rebuild" }));
+        var voided = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.VoidBatchAsync(batch1.Data!.Id, new VoidEftBatchDto { Reason = "Rebuild" }));
         voided.Succeeded.ShouldBeTrue(voided.Message);
         voided.Data!.Status.ShouldBe(EftBatchStatus.Voided);
 

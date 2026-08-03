@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Tnzi.Chat.Events;
 using Tnzi.Chat.Events.Handlers;
 using Tnzi.SignalR.Services;

@@ -14,27 +14,27 @@ import { installDirectives } from '../directives'
 import {
   provideAdminLoginConfig,
   type AdminLoginConfig,
-} from './loginConfig'
+} from './login-config'
 import {
   provideAdminDashboardConfig,
   type AdminDashboardConfig,
-} from './dashboardConfig'
+} from './dashboard-config'
 import {
   provideAdminSettingsConfig,
   type AdminSettingsConfig,
-} from './settingsConfig'
+} from './settings-config'
 import {
   provideAdminChatConfig,
   type AdminChatConfig,
-} from './chatConfig'
+} from './chat-config'
 import {
   provideAdminThemeConfig,
   type AdminThemeConfig,
-} from './themeConfig'
+} from './theme-config'
 import {
   provideAdminUserCenterConfig,
   type AdminUserCenterConfig,
-} from './userCenterConfig'
+} from './user-center-config'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -216,12 +216,13 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 }
 
 export { TnziUiAdminResolver } from './resolver'
-export { registerBrandIcon, type BrandIconData } from './brandIcon'
+export { registerBrandIcon, type BrandIconData } from './brand-icon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
 export { defineAdminApp, normalizeBasePath } from './defineAdminApp'
 export { createAdminApp } from './createAdminApp'
 export type { CreateAdminAppOptions, AdminAppHandle } from './createAdminApp'
-export { buildDefaultLoginCallbacks, codeChannelFields, type AdminAuthRuntime } from './defaultAuth'
+// Moved to `@tnzi/ui` on 2026-08-02 with the rest of the login stack.
+export { buildDefaultLoginCallbacks, codeChannelFields, type AdminAuthRuntime } from '@tnzi/ui'
 export { installDirectives, vPermission, vModule } from '../directives'
 export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
 export {
@@ -229,45 +230,45 @@ export {
   provideAdminLoginConfig,
   useAdminLoginConfig,
   type AdminLoginConfig,
-} from './loginConfig'
+} from './login-config'
 export {
   ADMIN_DASHBOARD_CONFIG_KEY,
   provideAdminDashboardConfig,
   useAdminDashboardConfig,
   type AdminDashboardConfig,
-} from './dashboardConfig'
+} from './dashboard-config'
 export {
   ADMIN_SETTINGS_CONFIG_KEY,
   provideAdminSettingsConfig,
   useAdminSettingsConfig,
   type AdminSettingsConfig,
   type AdminSettingsSection,
-} from './settingsConfig'
+} from './settings-config'
 export {
   ADMIN_DEEP_LINK_KEY,
   resolveDeepLinkConfig,
   tryInjectDeepLinkConfig,
   type AdminDeepLinkConfig,
   type ResolvedDeepLinkConfig,
-} from './deepLinkConfig'
+} from './deep-link-config'
 export {
   ADMIN_CHAT_CONFIG_KEY,
   provideAdminChatConfig,
   useAdminChatConfig,
   type AdminChatConfig,
-} from './chatConfig'
+} from './chat-config'
 export {
   ADMIN_THEME_CONFIG_KEY,
   provideAdminThemeConfig,
   useAdminThemeConfig,
   type AdminThemeConfig,
   type ThemeColorPreset,
-} from './themeConfig'
+} from './theme-config'
 export {
   BUILTIN_APPEARANCE_PRESETS,
   applyAppearancePreset,
   type AdminThemePreset,
-} from '../theme/appearancePresets'
+} from '../theme/appearance-presets'
 export {
   surfaceTone,
   isDarkSurface,
@@ -284,7 +285,9 @@ export {
   type AdminUserCenterProfileConfig,
   type UserCenterBuiltInSectionKey,
   type UserCenterProfileField,
-} from './userCenterConfig'
+  type UserCenterIdentityField,
+  type UserCenterReadonlyField,
+} from './user-center-config'
 export {
   fetchAdminManifest,
   type AdminManifest,
@@ -293,6 +296,7 @@ export {
 } from '../services/admin-manifest'
 export {
   fetchAdminShellModules,
+  fetchAdminShellSignal,
   normalizeModuleName,
   type AdminShellModule,
   type AdminShellModules,

@@ -25,6 +25,7 @@ export const ZH_SURFACE_LABELS: Record<string, string> = {
   'module:ai': 'AI 管理',
   'module:finance': '财务',
   'module:payroll': '薪酬',
+  'module:signing': '电子签署',
 
   // ── Identity ───────────────────────────────────────────────────────────
   identity: '身份管理',
@@ -142,6 +143,12 @@ export const ZH_SURFACE_LABELS: Record<string, string> = {
   'payroll.config': '薪酬配置',
   'payroll.run': '发薪批次',
   'payroll.pack': '国家薪酬包',
+
+  // ── E-Signature ────────────────────────────────────────────────────────
+  // 收件人签署面不在目录里：它是匿名的、凭一次性令牌进入。
+  signing: '电子签署',
+  'signing.template': '签署模板',
+  'signing.request': '签署请求',
 }
 
 /**

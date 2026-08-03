@@ -1,7 +1,8 @@
 namespace Tnzi.Payment.Services;
 
 /// <summary>
-/// 订阅计费引擎（partial）：off-session 扣款、支付完成/失败回流状态机、后台续费/试用转正/过期扫描、PastDue 催款。
+/// 订阅计费引擎（partial）：off-session 扣款、支付完成/失败回流状态机、
+/// 后台续费/试用转正/过期/暂停恢复/续费提醒扫描、PastDue 催款。
 /// 与 SubscriptionService.cs 共享字段与 CalculateNextBillingTime 等私有成员。
 /// </summary>
 public partial class SubscriptionService
@@ -105,7 +106,7 @@ public partial class SubscriptionService
     public async Task<Result<int>> ExpireOverdueSubscriptionsAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
-        var subscriptionOptions = PaymentOptions.Subscription;
+        var subscriptionOptions = SubscriptionOptions;
         var graceLimit = now.AddDays(-subscriptionOptions.GracePeriodDays);
         var maxRetry = subscriptionOptions.MaxRetryCount;
 
@@ -140,6 +141,102 @@ public partial class SubscriptionService
 
         Logger.LogInformation("Expired {Count} overdue subscriptions", expired);
         return Ok(expired);
+    }
+
+    public async Task<Result<int>> ResumeDuePausedSubscriptionsAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        var duePaused = await _subscriptionRepository
+            .Where(s => s.Status == SubscriptionStatus.Paused
+                && s.PausedUntil != null
+                && s.PausedUntil <= now)
+            .OrderBy(s => s.PausedUntil)
+            .Take(BillingScanPageSize)
+            .ToListAsync(cancellationToken);
+
+        if (duePaused.Count == 0)
+            return Ok(0);
+
+        var resumed = 0;
+        foreach (var subscription in duePaused)
+        {
+            try
+            {
+                await ResumeInternalAsync(subscription, cancellationToken);
+                resumed++;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Subscription auto-resume failed. SubscriptionNo: {SubscriptionNo}", subscription.SubscriptionNo);
+            }
+        }
+
+        Logger.LogInformation("Auto-resumed {Count} paused subscriptions", resumed);
+        return Ok(resumed);
+    }
+
+    public async Task<Result<int>> SendRenewalRemindersAsync(CancellationToken cancellationToken = default)
+    {
+        var reminderDays = SubscriptionOptions.AutoRenewalReminderDays;
+        if (reminderDays <= 0 || _notificationService == null)
+            return Ok(0);
+
+        var now = DateTime.UtcNow;
+        var threshold = now.AddDays(reminderDays);
+
+        // 只提醒本周期尚未提醒过的订阅：以 NextBillingTime 作为"周期标识"，
+        // 续费成功后计费时间前移，下一周期自然重新具备提醒资格。
+        var candidates = await _subscriptionRepository
+            .Where(s => s.AutoRenew
+                && s.Status == SubscriptionStatus.Active
+                && s.NextBillingTime != null
+                && s.NextBillingTime > now
+                && s.NextBillingTime <= threshold
+                && s.CustomerEmail != null
+                && (s.RenewalReminderSentFor == null || s.RenewalReminderSentFor != s.NextBillingTime))
+            .Include(s => s.Plan)
+            .OrderBy(s => s.NextBillingTime)
+            .Take(BillingScanPageSize)
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+            return Ok(0);
+
+        var sent = 0;
+        foreach (var subscription in candidates)
+        {
+            try
+            {
+                var hasPaymentMethod = !string.IsNullOrWhiteSpace(subscription.PaymentMethodToken);
+                var body = hasPaymentMethod
+                    ? $"Your {subscription.Plan?.PlanName ?? "subscription"} renews on {subscription.NextBillingTime:yyyy-MM-dd} for {subscription.OriginalPrice} {subscription.Currency}."
+                    : $"Your {subscription.Plan?.PlanName ?? "subscription"} renews on {subscription.NextBillingTime:yyyy-MM-dd}, but no payment method is on file. Please add one to avoid interruption.";
+
+                var delivered = await SendSubscriptionEmailAsync(
+                    subscription,
+                    $"Upcoming renewal for {subscription.SubscriptionNo}",
+                    body,
+                    cancellationToken);
+
+                if (!delivered)
+                    continue;
+
+                // 标记的是"针对哪个周期发过"，不是"发过没有"，才能保证每个周期恰好提醒一次
+                subscription.RenewalReminderSentFor = subscription.NextBillingTime;
+                await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+                sent++;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Renewal reminder failed. SubscriptionNo: {SubscriptionNo}", subscription.SubscriptionNo);
+            }
+        }
+
+        if (sent > 0)
+            Logger.LogInformation("Sent {Count} renewal reminders", sent);
+
+        return Ok(sent);
     }
 
     public async Task<Result> ApplyPaymentCompletedAsync(SubscriptionPaymentContext context, CancellationToken cancellationToken = default)
@@ -227,6 +324,11 @@ public partial class SubscriptionService
             subscription.LastBillingTradeNo = context.PaymentTradeNo;
         subscription.BillingLockedUntil = null;
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+        // 扣款成功回写支付方式的最近使用时间，便于识别长期未用/已失效的卡
+        if (subscription.StoredPaymentMethodId.HasValue)
+            await _paymentMethodService.MarkUsedAsync(subscription.StoredPaymentMethodId.Value, cancellationToken);
+
         return Ok();
     }
 
@@ -239,6 +341,7 @@ public partial class SubscriptionService
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
         var now = DateTime.UtcNow;
+        var shouldNotify = false;
 
         switch (context.Purpose)
         {
@@ -247,6 +350,7 @@ public partial class SubscriptionService
                 subscription.RenewalRetryCount++;
                 subscription.PastDueSince ??= now;
                 subscription.Status = SubscriptionStatus.PastDue;
+                shouldNotify = true;
                 Logger.LogWarning(
                     "Subscription billing failed -> PastDue. SubscriptionNo: {SubscriptionNo}, Retry: {Retry}, Reason: {Reason}",
                     subscription.SubscriptionNo, subscription.RenewalRetryCount, context.FailReason);
@@ -271,6 +375,11 @@ public partial class SubscriptionService
 
         subscription.BillingLockedUntil = null;
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+        // 催款：只改状态不通知，用户根本不知道自己被停服了
+        if (shouldNotify)
+            await SendDunningNoticeAsync(subscription, context.FailReason, cancellationToken);
+
         return Ok();
     }
 
@@ -286,9 +395,38 @@ public partial class SubscriptionService
     }
 
     /// <summary>
+    /// 用户换卡后主动重试一次扣款（不等下一轮扫描）
+    /// </summary>
+    private async Task RetryBillingInternalAsync(Subscription subscription, CancellationToken cancellationToken)
+    {
+        var plan = subscription.Plan
+            ?? await _planRepository.FirstOrDefaultAsync(p => p.Id == subscription.PlanId, cancellationToken);
+
+        if (plan == null)
+            return;
+
+        var now = DateTime.UtcNow;
+        if (!await TryClaimAsync(subscription.Id, now, now.AddMinutes(PaymentOptions.BillingLockMinutes), cancellationToken))
+            return;
+
+        var purpose = subscription.TrialEndTime != null && subscription.TrialConvertedTime == null
+            ? SubscriptionBillingPurpose.TrialConversion
+            : SubscriptionBillingPurpose.Renewal;
+
+        // 计划显式传入而不是挂到导航属性上：订阅实体随后可能被保存，
+        // 挂一个游离的计划会让 EF 把它当新计划插入
+        await ChargeSubscriptionAsync(subscription, purpose, plan.Price, cancellationToken, plan);
+    }
+
+    /// <summary>
     /// 对订阅发起 off-session 扣款（无已保存支付方式则直接降级 PastDue）
     /// </summary>
-    private async Task ChargeSubscriptionAsync(Subscription subscription, SubscriptionBillingPurpose purpose, decimal amount, CancellationToken cancellationToken)
+    private async Task ChargeSubscriptionAsync(
+        Subscription subscription,
+        SubscriptionBillingPurpose purpose,
+        decimal amount,
+        CancellationToken cancellationToken,
+        SubscriptionPlan? plan = null)
     {
         if (string.IsNullOrWhiteSpace(subscription.PaymentMethodToken))
         {
@@ -302,7 +440,8 @@ public partial class SubscriptionService
             return;
         }
 
-        // 渠道不可用 / 不支持无人值守扣款（如 PayPal）时，ChargeOffSessionAsync 在建单前就返回失败，
+        // 渠道不可用 / 不支持无人值守扣款（如未开启 vault 的 PayPal、线下渠道）时，
+        // ChargeOffSessionAsync 在建单前就返回失败，
         // 不产生任何支付事件，状态机拿不到回流：订阅既不推进也不降级，会被每轮扫描无限重扫。
         // 因此在此显式走失败分支，与"无已保存支付方式"同样降级 PastDue，交宽限期/重试上限收口。
         var provider = _paymentProviderFactory.GetProvider(subscription.ChannelCode);
@@ -331,9 +470,12 @@ public partial class SubscriptionService
             Amount = amount,
             Currency = subscription.Currency,
             ChannelCode = subscription.ChannelCode,
-            Description = $"Subscription {purpose}: {subscription.Plan?.PlanName}",
+            Description = $"Subscription {purpose}: {(plan ?? subscription.Plan)?.PlanName}",
             ProviderCustomerId = subscription.ProviderCustomerId,
             PaymentMethodToken = subscription.PaymentMethodToken,
+            UserId = subscription.UserId,
+            CustomerName = subscription.CustomerName,
+            CustomerEmail = subscription.CustomerEmail,
             ExtraData = meta.ToExtraData()
         }, cancellationToken);
     }
@@ -342,7 +484,7 @@ public partial class SubscriptionService
     /// 升级补差价收款：有已保存支付方式则 off-session 即时扣款，否则生成待支付订单由用户完成；
     /// 两种路径均在支付完成事件回流后应用计划变更（见 ApplyProrationChangeAsync）
     /// </summary>
-    private async Task ChargeOrCreateProrationPaymentAsync(
+    private async Task<PaymentOrderResultDto?> ChargeOrCreateProrationPaymentAsync(
         Subscription subscription, SubscriptionPlan currentPlan, SubscriptionPlan newPlan, Guid changeId, decimal amount, CancellationToken cancellationToken)
     {
         var meta = new SubscriptionBillingMetadata
@@ -365,22 +507,28 @@ public partial class SubscriptionService
                 Description = description,
                 ProviderCustomerId = subscription.ProviderCustomerId,
                 PaymentMethodToken = subscription.PaymentMethodToken,
+                UserId = subscription.UserId,
+                CustomerName = subscription.CustomerName,
+                CustomerEmail = subscription.CustomerEmail,
                 ExtraData = meta.ToExtraData()
             }, cancellationToken);
+
+            return null;
         }
-        else
+
+        // 未绑卡：生成待支付单并把凭据回传，否则用户拿不到任何可付款的入口
+        var payment = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
         {
-            await _paymentService.CreatePaymentAsync(new CreatePaymentDto
-            {
-                BusinessOrderNo = subscription.SubscriptionNo,
-                BusinessType = BusinessType.Subscription,
-                Amount = amount,
-                Currency = newPlan.Currency,
-                ChannelCode = subscription.ChannelCode,
-                Description = description,
-                ExtraData = meta.ToExtraData()
-            }, cancellationToken);
-        }
+            BusinessOrderNo = subscription.SubscriptionNo,
+            BusinessType = BusinessType.Subscription,
+            Amount = amount,
+            Currency = newPlan.Currency,
+            ChannelCode = subscription.ChannelCode,
+            Description = description,
+            ExtraData = meta.ToExtraData()
+        }, cancellationToken);
+
+        return payment.Succeeded ? payment.Data : null;
     }
 
     /// <summary>
@@ -397,6 +545,7 @@ public partial class SubscriptionService
         subscription.Status = SubscriptionStatus.Expired;
         subscription.EndTime = now;
         subscription.BillingLockedUntil = null;
+        subscription.NextBillingTime = null;
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
 
         if (EventBus != null)
@@ -430,7 +579,8 @@ public partial class SubscriptionService
             return;
 
         subscription.PlanId = newPlan.Id;
-        subscription.Plan = newPlan;
+        // 不设 Plan 导航（游离实体会被 EF 当新计划 INSERT）
+        subscription.ProductCode = newPlan.ProductCode;
         subscription.CycleType = newPlan.CycleType;
         subscription.CycleValue = newPlan.CycleValue;
         subscription.OriginalPrice = newPlan.Price;
@@ -454,6 +604,67 @@ public partial class SubscriptionService
     {
         subscription.RenewalRetryCount = 0;
         subscription.PastDueSince = null;
+    }
+
+    /// <summary>
+    /// 催款通知：告诉用户扣款失败、还有多久停服、怎么补救
+    /// </summary>
+    private async Task SendDunningNoticeAsync(Subscription subscription, string? failReason, CancellationToken cancellationToken)
+    {
+        if (_notificationService == null)
+            return;
+
+        var graceDays = SubscriptionOptions.GracePeriodDays;
+        var deadline = (subscription.PastDueSince ?? DateTime.UtcNow).AddDays(graceDays);
+
+        var reason = string.Equals(failReason, ErrorCodes.SubscriptionPaymentMethodMissing, StringComparison.Ordinal)
+            ? "no payment method is on file"
+            : "the payment could not be completed";
+
+        var body =
+            $"We could not renew subscription {subscription.SubscriptionNo} because {reason}. " +
+            $"Please update your payment method before {deadline:yyyy-MM-dd} to keep your service active. " +
+            $"Attempt {subscription.RenewalRetryCount} of {SubscriptionOptions.MaxRetryCount}.";
+
+        await SendSubscriptionEmailAsync(
+            subscription,
+            $"Action required: payment failed for {subscription.SubscriptionNo}",
+            body,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 给订阅的账单联系人发一封邮件。缺邮箱或通知模块未加载时安静跳过（计费本身不应因通知失败而中断）。
+    /// </summary>
+    private async Task<bool> SendSubscriptionEmailAsync(Subscription subscription, string subject, string body, CancellationToken cancellationToken)
+    {
+        if (_notificationService == null || string.IsNullOrWhiteSpace(subscription.CustomerEmail))
+            return false;
+
+        var result = await _notificationService.CreateAndSendAsync(new CreateNotificationRequest
+        {
+            Type = Tnzi.Notification.Metadata.NotificationType.Email,
+            Subject = subject,
+            Content = body,
+            IsHtml = false,
+            SendImmediately = true,
+            Recipients =
+            [
+                new RecipientInput
+                {
+                    Address = subscription.CustomerEmail,
+                    Name = subscription.CustomerName
+                }
+            ]
+        }, cancellationToken);
+
+        if (!result.Succeeded)
+        {
+            Logger.LogWarning("Subscription notification failed. SubscriptionNo: {SubscriptionNo}, Error: {Error}",
+                subscription.SubscriptionNo, result.Message);
+        }
+
+        return result.Succeeded;
     }
 
     private async Task PublishRenewedAsync(Subscription subscription, SubscriptionPaymentContext context)

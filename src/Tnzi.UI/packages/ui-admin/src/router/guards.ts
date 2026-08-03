@@ -156,6 +156,11 @@ function addTabFromRoute(to: RouteLocationNormalized): void {
       fixedIndexInTab: to.meta?.fixedIndexInTab as number | undefined,
       multiTab: to.meta?.multiTab as boolean | undefined,
       icon: to.meta?.icon as string | undefined,
+      // MUST be forwarded: `addTab` refuses the route on this flag, and this
+      // hand-built meta is what it sees. Dropping it (as this copy did) made
+      // `meta.hideInTab` silently dead - a consumer route flagged non-tab
+      // still opened a tab.
+      hideInTab: to.meta?.hideInTab as boolean | undefined,
     },
   })
 }

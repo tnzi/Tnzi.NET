@@ -5,6 +5,7 @@
  */
 
 import type { UserDto } from '../../services/identity/types';
+import type { ThemeMode } from '../../types/theme';
 
 // ============================================
 // User Preferences Types
@@ -12,8 +13,13 @@ import type { UserDto } from '../../services/identity/types';
 
 /**
  * User interface theme preference.
+ *
+ * Alias of {@link ThemeMode} rather than a second hand-written union: the app
+ * theme and the user's stored preference are the same three values, and keeping
+ * two literal unions in sync by hand is how `'system'`/`'auto'` diverged in the
+ * first place.
  */
-export type UserTheme = 'light' | 'dark' | 'system';
+export type UserTheme = ThemeMode;
 
 /**
  * User interface language preference.
@@ -248,7 +254,7 @@ export interface UserStore extends UserState, UserStoreGetters, UserStoreActions
  * Default user preferences.
  */
 export const defaultUserPreferences: UserPreferences = {
-  theme: 'system',
+  theme: 'auto',
   language: 'zh-CN',
   dateFormat: 'YYYY-MM-DD',
   timeFormat: '24h',

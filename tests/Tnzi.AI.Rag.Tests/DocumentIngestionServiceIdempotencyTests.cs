@@ -2,8 +2,6 @@ using Tnzi.AI.Options;
 using Tnzi.AI.Rag.Chunking;
 using Tnzi.AI.Rag.Graph;
 using Tnzi.AI.Rag.Options;
-using Tnzi.AI.Rag.Services;
-using Tnzi.AI.Services.Interfaces;
 using Tnzi.Results;
 
 namespace Tnzi.AI.Rag.Tests;

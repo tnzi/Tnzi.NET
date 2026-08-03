@@ -199,7 +199,13 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: 'agent-1' }, query: {} }),
-  useRouter: () => ({ replace: routerReplaceMock }),
+  // `resolve` is part of the real router contract - the page uses it to build
+  // its back-target fallback by route NAME (path literals dangle under a
+  // custom basePath).
+  useRouter: () => ({
+    replace: routerReplaceMock,
+    resolve: (to: { name: string }) => ({ path: `/admin/${String(to.name).replace(/\./g, '/')}` }),
+  }),
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
 
@@ -275,10 +281,13 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
     expect(keys).toEqual(
       expect.arrayContaining([
         'basicInfo', 'persona', 'skills', 'tools', 'knowledge', 'memory',
+        // Execution decides HOW this agent runs (built-in pipeline vs an
+        // external CLI runtime), so it belongs with Setup, not Operations.
+        'execution',
         'runs', 'versions', 'abtest', 'validation',
       ]),
     )
-    expect(keys).toHaveLength(10)
+    expect(keys).toHaveLength(11)
   })
 
   it('lazy-loads version history when the versions section activates', async () => {

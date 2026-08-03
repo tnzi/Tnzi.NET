@@ -70,7 +70,6 @@ const props = withDefaults(defineProps<Props>(), {
   defaultUserName: '',
   defaultPassword: '',
   translate: undefined,
-  onLogin: undefined as unknown as Props['onLogin'],
 })
 
 const emit = defineEmits<{

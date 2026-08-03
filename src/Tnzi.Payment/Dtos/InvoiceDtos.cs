@@ -16,16 +16,27 @@ public class CreateInvoiceDto
     public Guid? PaymentId { get; set; }
 
     /// <summary>
-    /// 客户名称
+    /// 账单归属用户ID（手工开票时指定，用户才能在"我的发票"里看到）
     /// </summary>
-    [Required]
-    public string CustomerName { get; set; } = string.Empty;
+    public Guid? UserId { get; set; }
 
     /// <summary>
-    /// 客户邮箱
+    /// 客户名称。从支付创建发票时留空，由支付上的客户快照回填。
     /// </summary>
-    [Required]
-    public string CustomerEmail { get; set; } = string.Empty;
+    [MaxLength(256)]
+    public string? CustomerName { get; set; }
+
+    /// <summary>
+    /// 客户邮箱。从支付创建发票时留空，由支付上的客户快照回填。
+    /// </summary>
+    [EmailAddress(ErrorMessage = "Customer email is not a valid email address.")]
+    [MaxLength(256)]
+    public string? CustomerEmail { get; set; }
+
+    /// <summary>
+    /// 币种；手工开票时必填，从支付创建时取支付币种
+    /// </summary>
+    public string? Currency { get; set; }
 
     /// <summary>
     /// 客户公司
@@ -73,11 +84,9 @@ public class CreateInvoiceDto
     public string? InternalNotes { get; set; }
 
     /// <summary>
-    /// 发票明细
+    /// 发票明细。手工开票时必填；从支付创建时可留空，按支付金额生成单行。
     /// </summary>
-    [Required]
-    [MinLength(1, ErrorMessage = "At least one line item is required.")]
-    public List<InvoiceLineItemDto> LineItems { get; set; } = null!;
+    public List<InvoiceLineItemDto>? LineItems { get; set; }
 }
 
 /// <summary>

@@ -5,8 +5,8 @@ import type { StatusType } from '@tnzi/ui'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
-import type { FileShareSummaryDto } from '@tnzi/core/services/storage'
 import { formatDateTime } from '@tnzi/core'
+import type { FileShareSummaryDto } from '@tnzi/core/services/storage'
 
 // Aligned to Tnzi.Storage.Dtos.FileShareSummaryDto. `allColumns` is typed as
 // the untyped `ColumnDef[]`, so the render row is cast to the DTO locally.
@@ -37,6 +37,15 @@ export function buildShareColumns(t: (key: string) => string): ColumnDef[] {
   return [
     { key: 'originalName', title: 'columns.originalName', primary: true, ellipsis: { tooltip: true } },
     { key: 'shareToken', title: 'columns.shareToken', ellipsis: { tooltip: true } },
+    {
+      // 分享列表最常被打开是为了回答"这条链接到底有没有人用过"。
+      key: 'lastAccessedAt',
+      title: 'columns.lastAccessedAt',
+      render: (r) => {
+        const at = asShare(r).lastAccessedAt
+        return at ? formatDateTime(at) : EMPTY_DASH
+      },
+    },
     {
       key: 'accessCount',
       title: 'columns.accessCount',

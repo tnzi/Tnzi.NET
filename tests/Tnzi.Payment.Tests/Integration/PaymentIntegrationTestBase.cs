@@ -2,7 +2,6 @@ using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Moq;
 using Tnzi.Data;
 using Tnzi.Domain.Entities;
 using Tnzi.Domain.Repositories;
@@ -41,8 +40,13 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
             o.AllowTestProvider = true;
             o.EnableRefundApproval = false;
             o.DefaultCurrency = "USD";
+            // 测试渠道即默认渠道，否则建单会去找未注册的 Stripe
+            o.DefaultChannelCode = "Null";
+            // 线下渠道与其它真实渠道一样需要显式启用
+            o.Channels["Offline"] = new ChannelOptions { Enabled = true, Currency = "USD" };
         });
         services.Configure<PromotionOptions>(_ => { });
+        services.Configure<TaxOptions>(_ => { });
 
         // 仓储
         AddRepo<PaymentEntity>(services);
@@ -53,6 +57,8 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         AddRepo<Promotion>(services);
         AddRepo<CouponUsage>(services);
         AddRepo<RedemptionCode>(services);
+        AddRepo<UserCoupon>(services);
+        AddRepo<StoredPaymentMethod>(services);
         AddRepo<Invoice>(services);
         AddRepo<InvoiceLineItem>(services);
 
@@ -63,8 +69,9 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         services.AddSingleton(_ => entityManagerMock.Object);
         services.AddScoped<IUnitOfWorkManager, UnitOfWorkManager>();
 
-        // 支付渠道（仅 NullProvider）
+        // 支付渠道：测试渠道 + 线下渠道（线下确认收款链路需要它）
         services.AddScoped<IPaymentProvider, NullProvider>();
+        services.AddScoped<IPaymentProvider, OfflineProvider>();
         services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
 
         // EventBus + 订阅状态机回流处理器
@@ -75,7 +82,9 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         services.AddScoped<IEventHandler<PaymentExpiredEvent>, SubscriptionPaymentExpiredHandler>();
 
         // 业务服务
+        services.AddScoped<ITaxCalculator, DefaultTaxCalculator>();
         services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();
         services.AddScoped<IRefundService, RefundService>();
         services.AddScoped<IPromotionService, PromotionService>();

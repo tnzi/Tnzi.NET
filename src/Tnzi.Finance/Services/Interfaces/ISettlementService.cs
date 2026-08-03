@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 结算服务（核销 = 收付款单/贷项单 → 发票/账单的对应关系，独立于 GL）

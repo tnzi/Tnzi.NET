@@ -48,6 +48,18 @@ public class DefaultRefundAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 代客发起退款。客服代客退款是退款场景里占比最高的一种，
+    /// 此前只有用户端能创建退款记录，管理端只能审批既有申请。
+    /// </summary>
+    [HttpPost]
+    [ApiAuthorize(PermissionName = "payment.refund.create")]
+    public virtual async Task<ApiResult<RefundDto>> Create([FromBody] CreateRefundDto request)
+    {
+        var result = await _refundService.CreateRefundAsync(request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 审批退款
     /// </summary>
     [HttpPost("{id:guid}/approve")]

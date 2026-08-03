@@ -85,7 +85,7 @@ import { ConversationType, UserPresenceStatus } from '@tnzi/core/services/chat'
 import TConversationItem from './TConversationItem.vue'
 import TPresencePicker from './TPresencePicker.vue'
 import TChatAvatar from './TChatAvatar.vue'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 const props = defineProps<{
   conversations: ConversationListItemDto[]

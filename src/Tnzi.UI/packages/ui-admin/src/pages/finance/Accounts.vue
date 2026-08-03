@@ -27,7 +27,7 @@ import { NButton, NPopconfirm, NSelect, NSwitch } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   AccountRootType,
@@ -39,7 +39,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer, type FieldRenderContext } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import {
   accountColumns,
   accountFormSchema,

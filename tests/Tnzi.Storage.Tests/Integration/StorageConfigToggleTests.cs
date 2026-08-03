@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Tnzi.Storage.Tests.Integration;
 

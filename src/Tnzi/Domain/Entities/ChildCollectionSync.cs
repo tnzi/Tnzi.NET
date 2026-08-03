@@ -17,9 +17,9 @@ public readonly record struct ChildCollectionSyncResult(int Added, int HardRemov
 /// <remarks>
 /// <para>消除消费者「清空集合再手写逐条删除」的样板，以及「清空跟踪集合不软删=软删实体被物理 DELETE」的坑。</para>
 /// <para>本方法是<b>纯内存集合操作</b>（不做 I/O）：持久化由外层工作单元的 <c>SaveChangesAsync</c> 完成，
-/// 因此有意<b>非异步</b>，避免 async-over-sync。前置条件：<paramref name="parent"/> 的子集合已加载
+/// 因此有意<b>非异步</b>，避免 async-over-sync。前置条件：父实体的子集合已加载
 /// （EF 导航属性），且父实体处于变更跟踪中。</para>
-/// <para>键匹配语义：目标与现有子项按 <paramref name="keySelector"/> 的键比较——
+/// <para>键匹配语义：目标与现有子项按 <c>keySelector</c> 的键比较——
 /// 两侧都有=保留（若曾软删则复活）；仅现有=移除（软删或物理删）；仅目标=新增。
 /// 新增子项的键为默认值（尚未持久化）时一律视为新增。<b>匹配到的子项其标量值不会被覆盖</b>
 /// （整体替换只处理增删，字段更新请另行映射）。</para>
@@ -43,6 +43,7 @@ public static class ChildCollectionSync
         Func<TParent, ICollection<TChild>> childrenSelector,
         IEnumerable<TChild> newItems,
         Func<TChild, TKey> keySelector)
+        where TParent : notnull
         where TChild : class
     {
         Check.NotNull(parent);

@@ -13,7 +13,7 @@
  *   import { TStatusBadge } from '@tnzi/ui'
  */
 import { TStatusBadge as TStatusBadgeBase, type StatusType } from '@tnzi/ui'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 interface Props {
   value: string | number | boolean | null | undefined

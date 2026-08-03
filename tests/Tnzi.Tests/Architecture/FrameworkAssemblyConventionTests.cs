@@ -1,5 +1,3 @@
-using System.Reflection;
-using Tnzi.DependencyInjection;
 using Tnzi.Hosting;
 using Tnzi.TestBase;
 

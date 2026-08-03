@@ -39,7 +39,7 @@ public interface IAccessLogService
     /// 获取访问日志趋势统计（按天/周/月）
     /// </summary>
     Task<Result<AccessLogTrendDto>> GetAccessLogTrendAsync(
-        AccessLogTrendInterval interval,
+        TrendInterval interval,
         DateTime startDate,
         DateTime endDate,
         CancellationToken cancellationToken = default)

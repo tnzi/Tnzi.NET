@@ -1,4 +1,5 @@
 export { default as TEmpty } from './TEmpty.vue'
+export type { TEmptyProps, TEmptySize } from './TEmpty.vue'
 export { default as TResult } from './TResult.vue'
 // TSkeleton was relocated to `display/` in 0.2.71+ (C2 sink) with a
 // richer variant/lines/radius API. Re-exported from `@tnzi/ui` via the

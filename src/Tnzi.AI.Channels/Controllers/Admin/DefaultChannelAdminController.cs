@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Tnzi.AspNetCore.Models;
-using Tnzi.AspNetCore.Mvc;
 
 namespace Tnzi.AI.Channels.Controllers.Admin;
 

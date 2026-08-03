@@ -175,11 +175,23 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
                 break;
 
             case "YTD":
+            {
                 RequireArgs(args, 1, "Ytd(componentCode)");
                 if (context.YtdResolver == null)
                     throw new FormulaFunctionException("Ytd() is not available in this evaluation context.");
-                args.Result = context.YtdResolver(ToText(args.Parameters.Evaluate(0), "Ytd", "componentCode"));
+                var ytdKey = ToText(args.Parameters.Evaluate(0), "Ytd", "componentCode");
+                // 组件编码查不到就是 0（这个员工今年确实还没有过这一项）。而 `#` 命名空间
+                // 是**封闭的**：查不到只可能是拼错，静默返回 0 会让一个法定上限的基数变成零，
+                // 于是上限永不触发——要到年终对账才看得出来。
+                var normalized = ytdKey.Trim().ToUpperInvariant();
+                if (normalized.StartsWith('#') && !PayrollYtdAggregates.All.Contains(normalized))
+                {
+                    throw new FormulaFunctionException(
+                        $"Ytd('{ytdKey}') is not a known aggregate. Valid aggregates: {string.Join(", ", PayrollYtdAggregates.All)}.");
+                }
+                args.Result = context.YtdResolver(ytdKey);
                 break;
+            }
 
             case "ATTR":
             {

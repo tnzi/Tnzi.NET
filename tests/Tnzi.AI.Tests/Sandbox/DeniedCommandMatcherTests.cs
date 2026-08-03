@@ -1,12 +1,11 @@
 using Tnzi.AI.Sandbox.Security;
-using Tnzi.AI.Security;
 
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
 /// Unit tests for <see cref="DeniedCommandMatcher"/>, the shared blacklist
-/// evaluator used by both <see cref="Providers.Local.LocalSandbox"/> and
-/// <see cref="Providers.Docker.DockerSandbox"/>.
+/// evaluator used by both <see cref="Tnzi.AI.Sandbox.Providers.Local.LocalSandbox"/> and
+/// <see cref="Tnzi.AI.Sandbox.Providers.Docker.DockerSandbox"/>.
 ///
 /// The matcher combines a backwards-compatible substring list with a
 /// quote/whitespace-resistant prefix list driven by <see cref="IShellCommandAnalyzer"/>.

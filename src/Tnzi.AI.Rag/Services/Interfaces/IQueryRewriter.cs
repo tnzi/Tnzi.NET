@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Services.Interfaces;
+namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
 /// 查询改写接口 - 将用户查询改写为更适合语义搜索的形式

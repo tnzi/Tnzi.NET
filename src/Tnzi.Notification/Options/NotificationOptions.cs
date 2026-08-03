@@ -51,6 +51,95 @@ public class NotificationOptions
     /// 获取或设置 重试配置
     /// </summary>
     public RetryOptions Retry { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 派发（恢复 + 限速）配置
+    /// </summary>
+    public DispatchOptions Dispatch { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 退订配置
+    /// </summary>
+    public OptOutOptions OptOut { get; set; } = new();
+}
+
+/// <summary>
+/// 退订配置。
+/// </summary>
+[ConfigSection("Notification:OptOut")]
+public class OptOutOptions
+{
+    /// <summary>
+    /// 一键退订令牌的签名密钥。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>未配置时签发令牌会直接抛异常，这是刻意的。</b>换成一个内置默认密钥会让签名形同虚设 ——
+    /// 任何知道这个框架的人都能替任意地址退订，而这种失效不会有任何症状：链接照常工作，
+    /// 直到有人发现自己"被退订"了。宁可在部署时炸，也不要发出一批可伪造的链接。
+    /// </para>
+    /// <para>密钥即配置，可跨环境迁移；与 <c>AesGcmHelper</c> 的取舍一致。</para>
+    /// </remarks>
+    public string? TokenSecret { get; set; }
+}
+
+/// <summary>
+/// 派发配置：进程重启后的续发恢复，以及发送节奏。
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>为什么需要恢复。</b>收件人状态本来就逐行持久化（<c>Recipient.Status</c>），所以进程中途退出
+/// 并不丢数据 —— 但也<b>没有任何东西会去把它接着发完</b>：消息停在 <c>Sending</c>，剩下的收件人
+/// 停在 <c>Pending</c>，除非有人手工调 <c>RetryAsync</c>。对群发来说这等于"发了一半，没人知道"。
+/// </para>
+/// <para>
+/// 恢复是<b>幂等</b>的：续发只挑 <c>Pending</c> / <c>Failed</c> 的收件人（已 <c>Sent</c> 的不会重发），
+/// 这是既有发送路径本来的行为，恢复只是把它重新触发一次。
+/// </para>
+/// </remarks>
+[ConfigSection("Notification:Dispatch")]
+public class DispatchOptions
+{
+    /// <summary>
+    /// 获取或设置 是否启用重启续发恢复（默认 true）
+    /// </summary>
+    [RuntimeSetting(Label = "Enable Recovery", I18n = "admin.modules.system.settings.fields.notificationEnableRecovery",
+        Type = SettingFieldType.Boolean)]
+    public bool EnableRecovery { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 恢复扫描间隔（分钟，默认 5）
+    /// </summary>
+    [RuntimeSetting(Label = "Recovery Interval (min)", I18n = "admin.modules.system.settings.fields.notificationRecoveryIntervalMinutes",
+        Type = SettingFieldType.Int, Min = 1)]
+    public int RecoveryIntervalMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// 获取或设置 判定"卡住"的时长（分钟，默认 15）。
+    /// </summary>
+    /// <remarks>
+    /// 一条正在正常发送中的消息也处于 <c>Sending</c>，所以不能一看到 <c>Sending</c> 就抢。
+    /// 只有<b>超过这个时长仍未推进</b>的才认定是被中断的批次。取值应明显大于一次正常群发的耗时。
+    /// </remarks>
+    [RuntimeSetting(Label = "Stuck After (min)", I18n = "admin.modules.system.settings.fields.notificationStuckAfterMinutes",
+        Type = SettingFieldType.Int, Min = 1)]
+    public int StuckAfterMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// 获取或设置 每分钟发送上限（0 = 不限速）。
+    /// </summary>
+    /// <remarks>
+    /// 群发不限速会触发服务商的滥用防护 —— 结果不是发得慢，是<b>整个账号被封</b>，
+    /// 连正常的密码重置邮件一起停摆。设成服务商配额的一个保守分数。
+    /// </remarks>
+    [RuntimeSetting(Label = "Rate Per Minute", I18n = "admin.modules.system.settings.fields.notificationRatePerMinute",
+        Type = SettingFieldType.Int, Min = 0)]
+    public int RatePerMinute { get; set; }
+
+    /// <summary>
+    /// 获取或设置 单次恢复扫描最多接手的消息数（默认 50），防止一次扫描独占整个派发窗口。
+    /// </summary>
+    public int RecoveryBatchSize { get; set; } = 50;
 }
 
 

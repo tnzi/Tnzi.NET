@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 过账前校验钩子 —— 消费应用以此在过账/作废/冲销前拦截并否决操作

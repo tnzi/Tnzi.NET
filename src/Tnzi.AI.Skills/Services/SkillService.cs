@@ -127,7 +127,7 @@ public partial class SkillService : ApplicationService, ISkillService
                 Source = skill.Source,
                 ActivatedAt = DateTime.UtcNow,
                 UserId = CurrentUser?.Id,
-                TenantId = skill.TenantId,
+                SkillTenantId = skill.TenantId,
                 OwnerUserId = skill.OwnerUserId
             });
         }

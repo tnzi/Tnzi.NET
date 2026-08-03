@@ -1,6 +1,6 @@
 import { ref, watch, toValue, type MaybeRefOrGetter, type Ref } from 'vue'
-import { useQueryScope } from './queryScope'
-import { tryInjectDeepLinkConfig } from '../plugin/deepLinkConfig'
+import { useQueryScope } from './query-scope'
+import { tryInjectDeepLinkConfig } from '../plugin/deep-link-config'
 
 /**
  * Options for {@link useSectionRoute}. Every field accepts a ref / getter so a

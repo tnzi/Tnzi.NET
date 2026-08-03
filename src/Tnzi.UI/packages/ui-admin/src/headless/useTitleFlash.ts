@@ -9,6 +9,8 @@
  *
  * SSR/test-safe: no-ops when `document`/`window` are unavailable.
  */
+import { getCurrentScope, onScopeDispose } from 'vue'
+
 const FLASH_INTERVAL_MS = 1000
 
 export function useTitleFlash() {
@@ -50,6 +52,13 @@ export function useTitleFlash() {
     if (typeof window !== 'undefined') window.removeEventListener('focus', stop)
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility)
   }
+
+  // Self-cleaning. `flash()` owns an interval plus two global listeners and
+  // overwrites `document.title`, so a caller that unmounts mid-flash without
+  // calling `stop()` leaks all three and leaves a dead component rewriting the
+  // tab title forever. Today's single caller does clean up; the next one should
+  // not have to know that it must.
+  if (getCurrentScope()) onScopeDispose(stop)
 
   return { flash, stop }
 }

@@ -83,7 +83,7 @@ export interface SearchItem {
 }
 
 interface Props {
-  show: boolean
+  show?: boolean
   matcher?: (query: string, item: SearchItem) => boolean
   translate?: (key: string) => string
 }

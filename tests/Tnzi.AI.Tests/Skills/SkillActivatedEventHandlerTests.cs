@@ -1,5 +1,3 @@
-using Tnzi.AI.Skills.Events.Handlers;
-using Tnzi.AI.Entities.Configs;
 
 namespace Tnzi.AI.Tests.Skills;
 
@@ -173,7 +171,7 @@ public class SkillActivatedEventHandlerTests
                 Scope = SkillScope.User,
                 Source = SkillSource.Database,
                 OwnerUserId = ownerA,
-                TenantId = null,
+                SkillTenantId = null,
                 ActivatedAt = activatedAt
             };
 
@@ -252,7 +250,7 @@ public class SkillActivatedEventHandlerTests
                 Slug = "shared-slug",
                 Scope = SkillScope.Tenant,
                 Source = SkillSource.Database,
-                TenantId = tenantA,
+                SkillTenantId = tenantA,
                 OwnerUserId = null,
                 ActivatedAt = activatedAt
             };

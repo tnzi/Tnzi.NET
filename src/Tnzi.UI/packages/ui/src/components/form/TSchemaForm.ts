@@ -16,7 +16,7 @@
  */
 import { computed, defineComponent, h, type PropType, type VNode, type VNodeChild } from 'vue'
 import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTag } from 'naive-ui'
-import { useBreakpoints } from '../../composables/theme/useBreakpoints'
+import { useBreakpoints } from '../../headless/theme/useBreakpoints'
 import TDescriptions, { type DescriptionItem } from '../display/TDescriptions.vue'
 import TSvgIcon from '../display/TSvgIcon.vue'
 import { EMPTY_DASH, isEmptyValue } from '../../utils/placeholders'
@@ -245,6 +245,12 @@ const TSchemaForm = defineComponent({
       // identical to edit mode, just non-interactive.
       const viewMode = props.readonly
       const value = props.model[item.key]
+      // `model` is a shared reactive bag passed as `:model="formData"`, not a
+      // v-model value: every consumer (TCrudPage's `#form` slot, the detail
+      // hosts, TItemPage) reads its edits back off the same object. Emitting an
+      // update event instead would force ~130 call sites to thread the write
+      // back by hand.
+      // eslint-disable-next-line vue/no-mutating-props
       const onUpdate = (v: unknown) => { props.model[item.key] = v }
       const effectiveType = effectiveTypeOf(item)
       // A custom renderer registered for this (possibly non-builtin) type wins.

@@ -1,6 +1,4 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using Microsoft.Extensions.Options;
 using Tnzi.EFCore;
 using Tnzi.MultiTenancy;
 

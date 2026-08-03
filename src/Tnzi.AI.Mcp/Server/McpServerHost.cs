@@ -268,7 +268,7 @@ public partial class McpServerHost : IMcpServerHost
     /// 单一执行守卫：速率限制 → 执行 → 异常映射 → 审计/分析记录。
     /// Agent 与自定义工具的所有真实调用均经此处，消除多路径下重复的限流/审计逻辑。
     /// <para>
-    /// 成功/失败由是否抛异常权威判定（<paramref name="IsError"/>），而非对结果文本嗅探
+    /// 成功/失败由是否抛异常权威判定（<c>IsError</c>），而非对结果文本嗅探
     /// <c>"Error:"</c> 前缀——避免合法工具结果恰好以 <c>"Error:"</c> 开头时被误判。
     /// </para>
     /// </summary>

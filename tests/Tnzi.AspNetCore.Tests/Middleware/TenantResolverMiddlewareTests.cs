@@ -1,5 +1,4 @@
 
-using Tnzi.AspNetCore.Options;
 using Tnzi.MultiTenancy;
 
 namespace Tnzi.AspNetCore.Tests.Middleware;

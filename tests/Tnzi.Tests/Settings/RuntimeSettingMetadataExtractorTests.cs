@@ -1,6 +1,4 @@
-using System.Linq;
 using Tnzi.Settings;
-using Xunit;
 
 public class RuntimeSettingMetadataExtractorTests
 {

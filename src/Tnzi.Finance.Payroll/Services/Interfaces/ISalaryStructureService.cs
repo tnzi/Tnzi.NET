@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 薪资结构服务（行内嵌全量重建；保存时做依赖序 + 未知变量静态校验）

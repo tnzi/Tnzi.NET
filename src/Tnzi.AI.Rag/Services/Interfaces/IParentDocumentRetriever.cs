@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Services.Interfaces;
+namespace Tnzi.AI.Rag.Services;
 
 /// <summary>
 /// Parent Document Retriever - 将细粒度匹配块扩展为更大的上下文窗口

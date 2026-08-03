@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 
 namespace Tnzi.AI.Tests.Rag;

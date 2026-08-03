@@ -176,7 +176,7 @@ public class RevaluationService : ApplicationService, IRevaluationService
     }
 
     /// <summary>
-    /// 计算逐科目重估行（单次 DB 条件求和聚合）。范围：外币限定（Currency != null && != base）的
+    /// 计算逐科目重估行（单次 DB 条件求和聚合）。范围：外币限定（Currency != null &amp;&amp; != base）的
     /// Asset/Liability 叶子；inactive 带余额者给 SkipReason 不过账；缺汇率整单 400 列出币种。
     /// </summary>
     private async Task<Result<RevaluationPreviewDto>> BuildPreviewAsync(DateTime asOfInput, List<Guid>? accountIds, CancellationToken cancellationToken)

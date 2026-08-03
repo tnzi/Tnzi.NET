@@ -1,6 +1,12 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns"
-    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage
+    :state="crud"
+    :all-columns="columns"
+    :search-fields="searchFields"
+    :title="title"
+    :row-actions="rowActions"
+    :translate="t"
+  >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="itemFormSchema"
@@ -18,7 +24,7 @@
 import { onMounted } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { createFinanceBridge, ItemType, type UpdateItemDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'

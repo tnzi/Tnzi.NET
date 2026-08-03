@@ -17,7 +17,7 @@ export type { TnziUiOptions } from './plugin';
 export * from './components/index';
 
 // Composables
-export * from './composables/index';
+export * from './headless/index';
 
 // Theme
 export * from './theme/index';
@@ -34,5 +34,5 @@ export * from './resolvers/index';
 // Utils (naive-helpers, device-icon)
 export * from './utils/index';
 
-// Locales
-export { en, zhCN, getNaiveLocale, type Locale, type NaiveLocaleBundle } from './locales';
+// Naive UI locale bridge (message catalogue lives in @tnzi/core/adapters/i18n)
+export { getNaiveLocale, type NaiveLocaleBundle } from './locales';

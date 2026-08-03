@@ -8,38 +8,14 @@ import TMoney from '../../components/finance/TMoney.vue'
 import { TRelativeTime } from '@tnzi/ui'
 
 import { FinanceDocumentStatus } from '../../services/bridges/finance-bridge'
+import { DOC_STATUS_META, type FinanceDocRow } from '../../components/finance/document-row'
 import { fmtDate } from './money'
 
-/** All-optional row shape shared by the five document list pages. */
-export interface FinanceDocRow {
-  id?: string
-  number?: string | null
-  status?: FinanceDocumentStatus
-  docDate?: string
-  dueDate?: string | null
-  customerName?: string | null
-  vendorName?: string | null
-  partyName?: string | null
-  // 行内下游动作要把往来方交接给下一张单据（收款 / 付款），所以行里必须带 id。
-  customerId?: string | null
-  vendorId?: string | null
-  partyId?: string | null
-  currency?: string
-  total?: number
-  amount?: number
-  appliedTotal?: number
-  memo?: string | null
-  creationTime?: string
-}
-
-/** FinanceDocumentStatus → badge meta（键为后端 PascalCase 成员名；label 为页面作用域 i18n 键）。 */
-export const DOC_STATUS_META: Record<string, { type: 'info' | 'success' | 'warning' | 'error' | 'default'; label: string }> = {
-  [FinanceDocumentStatus.Draft]: { type: 'warning', label: 'status.draft' },
-  [FinanceDocumentStatus.Posted]: { type: 'success', label: 'status.posted' },
-  [FinanceDocumentStatus.PartiallyPaid]: { type: 'info', label: 'status.partiallyPaid' },
-  [FinanceDocumentStatus.Paid]: { type: 'default', label: 'status.paid' },
-  [FinanceDocumentStatus.Voided]: { type: 'error', label: 'status.voided' },
-}
+// Row shape + status vocabulary moved to the component layer - TDocumentCard
+// renders them, and a component reaching up into pages/ for the contract it
+// displays inverts the layering. Re-exported so the five document pages and
+// their configs keep importing them from here.
+export { DOC_STATUS_META, type FinanceDocRow } from '../../components/finance/document-row'
 
 export function docStatusBadge(t: (key: string) => string, status?: FinanceDocumentStatus) {
   const meta = DOC_STATUS_META[status ?? '']

@@ -261,9 +261,12 @@ public class ChannelManager : IChannelManager
                 message.ChannelName, message.ChatId, result.ThreadId.Value, message.TopicId, message.UserId);
         }
 
+        // Outbound goes to a real person in an IM client: send the deliverable, not the
+        // running commentary. Identical to Response on the non-streaming path used here,
+        // and correct on its own terms if this ever moves to streaming.
         await _bus.PublishOutboundAsync(new OutboundMessage(
             message.ChannelName, message.ChatId, actualThreadId,
-            result.Response,
+            result.EffectiveDeliverable,
             IsFinal: true));
     }
 

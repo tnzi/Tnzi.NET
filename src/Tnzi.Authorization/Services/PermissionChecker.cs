@@ -74,5 +74,14 @@ public class PermissionChecker : IPermissionChecker
             throw new ForbiddenException($"Permission '{permissionName}' is not granted.");
         }
     }
+
+    /// <inheritdoc />
+    public async Task<bool> IsCurrentUserSuperAdminAsync()
+    {
+        if (_currentUser?.Id == null)
+            return false;
+
+        return await _functionAuthorizationService.IsSuperAdminAsync(_currentUser.Id.Value);
+    }
 }
 

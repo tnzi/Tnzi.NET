@@ -1,5 +1,4 @@
 using Pgvector;
-using Tnzi.AI.Rag.Dtos;
 
 namespace Tnzi.AI.Tests.Rag;
 

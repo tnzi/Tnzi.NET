@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.IO;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 namespace Tnzi.AI.Tools.Sql;

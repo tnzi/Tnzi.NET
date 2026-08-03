@@ -32,21 +32,21 @@ import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useChatStore } from '../stores/useChatStore'
 import { createChatImBridge } from '../services/bridges/chat-im-bridge'
 import type { UserPresenceStatus } from '@tnzi/core/services/chat'
-import { useAdminLoginConfig } from '../plugin/loginConfig'
-import { useAdminChatConfig } from '../plugin/chatConfig'
-import { useAdminSettingsConfig } from '../plugin/settingsConfig'
-import { useAdminThemeConfig } from '../plugin/themeConfig'
-import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearancePresets'
+import { useAdminLoginConfig } from '../plugin/login-config'
+import { useAdminChatConfig } from '../plugin/chat-config'
+import { useAdminSettingsConfig } from '../plugin/settings-config'
+import { useAdminThemeConfig } from '../plugin/theme-config'
+import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearance-presets'
 import { useAdminClient } from '../plugin/client'
 import { usePermissionGuard } from '../headless/usePermissionGuard'
 import { useModuleAvailability } from '../headless/useModuleAvailability'
+import { useRealtimeHub } from '../headless/useRealtimeHub'
 import { useGlobalTheme } from '../headless/useGlobalTheme'
 import { useSettingsRealtime } from '../headless/useSettingsRealtime'
 import { usePresenceActivity } from '../headless/usePresenceActivity'
 import { useStorageApi } from '@tnzi/core/services/storage'
 import { resolveAvatarUrl } from '../utils/resolveAvatarUrl'
-import { en } from '../locales/en'
-import { zhCn } from '../locales/zh-cn'
+import { getLocaleMessages } from '../i18n/messages'
 
 const router = useRouter()
 const route = useRoute()
@@ -211,6 +211,9 @@ watch(
         fixedIndexInTab: route.meta?.fixedIndexInTab as number | undefined,
         multiTab: route.meta?.multiTab as boolean | undefined,
         icon: route.meta?.icon as string | undefined,
+        // `addTab` refuses the route on this flag - it must survive the copy
+        // or `meta.hideInTab` is dead (see the same note in guards.ts).
+        hideInTab: route.meta?.hideInTab as boolean | undefined,
       },
     })
   },
@@ -282,17 +285,26 @@ const themeBtnVisible = computed(
 //   Chat:*                → re-fetch chat config (the chat window reads
 //                           store.config reactively, so the invisible option /
 //                           presence / attachment gating update in place)
-// Gated on `system` module availability (the hub lives in Tnzi.System) so a host
-// without it never opens a doomed socket. Fail-open on old backends (no signal).
+// Gated on the backend's REALTIME signal, not on `system` module availability:
+// the hub lives in Tnzi.System but is only mapped when Tnzi.SignalR is loaded
+// too, and SignalR (a framework module) never appears in the loaded-module list.
+// Gating on `system` alone let a System-without-SignalR host through, where the
+// client then retried a hub that does not exist - forever, and with live config
+// hot-reload silently dead. Fail-open when the backend doesn't report realtime
+// (older backend), which keeps the previous behaviour there.
 // Presence auto-away reporter (declared before settingsRealtime, whose onChanged reloads it
 // on a `Presence:*` runtime config change).
 const presenceActivity = usePresenceActivity(storageClient)
 
 const settingsConfig = useAdminSettingsConfig()
+const realtimeHub = useRealtimeHub()
 const settingsRealtime = useSettingsRealtime({
-  // Optional hub URL override (e.g. '/api/hubs/settings' under a sub-path).
-  // Undefined when unset, so useSettingsRealtime falls back to '/hubs/settings'.
-  hubUrl: settingsConfig?.hubUrl,
+  // Precedence: explicit consumer config (defineAdminApp settings.hubUrl, or the
+  // apiBase-derived default) > the path the backend reports > '/hubs/settings'.
+  // Consumer config wins because only the app knows about cross-origin or proxy
+  // topologies the server cannot see; the backend-reported path already carries
+  // its own PathBase, so a sub-application deployment needs no config at all.
+  hubUrl: () => settingsConfig?.hubUrl ?? realtimeHub.path('settings'),
   getToken: () => storageClient?.getAccessToken?.() ?? authStore.token ?? '',
   onChanged: (p) => {
     if (p.key === 'Appearance:AdminTheme') {
@@ -321,10 +333,15 @@ const settingsRealtime = useSettingsRealtime({
   },
 })
 watch(
-  () => authStore.isLogin && !!storageClient && moduleAvailability.canActivate('system'),
+  () => authStore.isLogin && !!storageClient && realtimeHub.canConnect('settings'),
   (ready) => {
-    if (ready) void settingsRealtime.start()
-    else void settingsRealtime.stop()
+    // Failure is caught, not left to bubble: this is an OPTIONAL live-update
+    // channel, and an unhandled rejection here would surface as a console error
+    // on every host the gate above fails open for (backends predating the
+    // realtime signal). The gate is what prevents doomed attempts; this only
+    // keeps a genuine connect failure from looking like an app-level crash.
+    if (ready) void settingsRealtime.start().catch(() => undefined)
+    else void settingsRealtime.stop().catch(() => undefined)
   },
   { immediate: true },
 )
@@ -383,7 +400,7 @@ function goUserCenter(): void {
  */
 function defaultTranslate(key: string, fallback?: string): string {
   if (!key) return key
-  const messages = (appStore.locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
+  const messages = getLocaleMessages(appStore.locale) ?? {}
   // Strip optional `tnzi.` prefix - bundled locales are rooted at `admin.*`
   // (mirrors translatePageKey / resolveI18nKey).
   const normalised = key.startsWith('tnzi.') ? key.slice(5) : key

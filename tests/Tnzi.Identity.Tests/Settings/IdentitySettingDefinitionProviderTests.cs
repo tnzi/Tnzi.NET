@@ -1,5 +1,4 @@
 using Tnzi.Settings;
-using Tnzi.Identity.Options;
 
 namespace Tnzi.Identity.Tests.Settings;
 

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.AI;
-using Tnzi.AI.Infrastructure.Providers;
 using Tnzi.Modules;
 
 namespace Tnzi.AI.Tests.Rag;

@@ -35,7 +35,7 @@ import {
 } from 'vue'
 import { NGrid, NGi } from 'naive-ui'
 import TWidgetCard from './TWidgetCard.vue'
-import { useWorkbenchLayout } from '../../composables/layout/useWorkbenchLayout'
+import { useWorkbenchLayout } from '../../headless/layout/useWorkbenchLayout'
 import type { SpanValue, WidgetDef, WorkbenchConfig } from './widget-types'
 
 // `vue-draggable-plus` is an optional peer dependency. Lazy-load it via

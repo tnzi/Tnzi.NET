@@ -1,13 +1,8 @@
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging.Abstractions;
 using MsOptions = Microsoft.Extensions.Options.Options;
 using Tnzi.EFCore;
 using Tnzi.MultiTenancy;
-using Tnzi.Security.Claims;
 using Tnzi.Storage.Entities.Configs;
-using Tnzi.Storage.Helpers;
-using Tnzi.Storage.Providers;
 using Tnzi.TestBase;
 
 namespace Tnzi.Storage.Tests.Integration;

@@ -95,7 +95,7 @@ import { UserPresenceStatus } from '@tnzi/core/services/chat'
 import type { ChatContactProfileDto } from '@tnzi/core/services/chat'
 import { formatDateTime } from '@tnzi/core'
 import { useChatStore } from '../../stores/useChatStore'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import TChatAvatar from './TChatAvatar.vue'
 
 // Popover must clear the chat NModal - give it a z-index above it. It also opens

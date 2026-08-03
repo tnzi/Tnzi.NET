@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 轻量级系统级 AI 调用工具 - 不加载 tools/skills/middleware，

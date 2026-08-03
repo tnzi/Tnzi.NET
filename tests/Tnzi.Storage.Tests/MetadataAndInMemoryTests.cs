@@ -1,4 +1,4 @@
-using Mapster;
+﻿using Mapster;
 using MapsterMapper;
 using Tnzi.Mapster;
 
@@ -51,6 +51,8 @@ public class MetadataAndInMemoryTests
             _mockStorage.Object,
             optionsMonitor.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            TestPublicFileFieldResolver.Empty(),
+            new TestFileUrlSigner(),
             _mockServiceProvider.Object);
     }
 

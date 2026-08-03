@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.AspNetCore.Options;
 
 /// <summary>
@@ -76,4 +76,14 @@ public class RequestTrackingOptions
     /// 设置后将覆盖默认值
     /// </summary>
     public List<string>? ExcludePaths { get; set; }
+
+    /// <summary>
+    /// 记录 QueryString 时要脱敏的参数名(大小写不敏感)。留空使用默认名单。
+    ///
+    /// 存在的理由:本中间件原样记录查询串,而查询串里偶尔就是带凭据的 ——
+    /// SignalR 的 `access_token`、文件签名令牌 `sig`、分享链接口令 `password`。
+    /// 此前只能靠**整条路径**排除(`/hubs/*` 正是为此),代价是那条路径的日志全丢。
+    /// 按参数名脱敏更精确:请求照常留痕,只是值变成 `***`。
+    /// </summary>
+    public List<string>? SensitiveQueryKeys { get; set; }
 }

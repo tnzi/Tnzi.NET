@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
-import { viewAction, type RowAction } from '../../headless/rowActions'
+import { viewAction, type RowAction } from '../../headless/row-actions'
 import { createStorageBridge, type FileChunkAuditDto } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'

@@ -61,7 +61,8 @@ public class DefaultGateway : IGateway
             return new GatewayResponse
             {
                 Success = true,
-                Response = result.Response,
+                // Outbound to a channel peer - deliverable, not narration (see AgentRunResult).
+                Response = result.EffectiveDeliverable,
                 ThreadId = result.ThreadId
             };
         }

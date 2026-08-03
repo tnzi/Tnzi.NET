@@ -120,15 +120,18 @@ describe('utils/naive-helpers', () => {
       expect(document.documentElement.classList.contains('dark')).toBe(false)
     })
 
-    it('system theme defers to matchMedia (dark)', () => {
+    it('auto theme defers to matchMedia (dark)', () => {
       window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as any
-      applyThemeToDOM('system')
+      applyThemeToDOM('auto')
       expect(document.documentElement.classList.contains('dark')).toBe(true)
     })
 
-    it('system theme defers to matchMedia (light)', () => {
+    // Starts from the dark class already set, so a broken 'auto' resolution
+    // cannot pass by simply never adding it.
+    it('auto theme defers to matchMedia (light)', () => {
+      document.documentElement.classList.add('dark')
       window.matchMedia = vi.fn().mockReturnValue({ matches: false }) as any
-      applyThemeToDOM('system')
+      applyThemeToDOM('auto')
       expect(document.documentElement.classList.contains('dark')).toBe(false)
     })
   })

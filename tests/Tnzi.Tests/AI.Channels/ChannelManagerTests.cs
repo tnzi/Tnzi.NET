@@ -5,8 +5,6 @@ using Tnzi.AI.Channels.Manager;
 using Tnzi.AI.Channels.Models;
 using Tnzi.AI.Channels.Options;
 using Tnzi.AI.Dtos;
-using Tnzi.AI.Services.Interfaces;
-using Tnzi.Results;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.Tests.AI.Channels;

@@ -8,18 +8,27 @@
   <div class="t-attachment-wall">
     <n-image-group>
       <div v-for="(att, i) in attachments" :key="keyOf(att, i)" class="t-attachment-wall__tile" :style="tileStyle">
-        <n-image
-          v-if="isImage(att)"
-          :src="att.url"
-          :width="size"
-          :height="size"
-          object-fit="cover"
-          class="t-attachment-wall__img"
-        />
-        <a v-else :href="safeHref(att.url)" target="_blank" rel="noopener" class="t-attachment-wall__file" :title="att.name ?? ''">
-          <Icon :icon="glyph(att)" class="t-attachment-wall__glyph" />
-          <span class="t-attachment-wall__name">{{ att.name ?? 'File' }}</span>
-        </a>
+        <slot name="tile" :attachment="att" :index="i" :size="size" :is-image="isImage(att)" :glyph="glyph(att)">
+          <n-image
+            v-if="isImage(att)"
+            :src="att.url"
+            :width="size"
+            :height="size"
+            object-fit="cover"
+            class="t-attachment-wall__img"
+          />
+          <a
+            v-else
+            :href="safeHref(att.url)"
+            target="_blank"
+            rel="noopener"
+            class="t-attachment-wall__file"
+            :title="att.name ?? ''"
+          >
+            <Icon :icon="glyph(att)" class="t-attachment-wall__glyph" />
+            <span class="t-attachment-wall__name">{{ att.name ?? 'File' }}</span>
+          </a>
+        </slot>
         <button
           v-if="removable"
           type="button"
@@ -44,7 +53,14 @@ import { NImage, NImageGroup } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 
 export interface Attachment {
-  url: string
+  /**
+   * Directly-renderable URL. Optional, because a private file has no such URL:
+   * it is reachable only through a short-lived signed URL fetched at render
+   * time. Those tiles supply `id` and render through the `#tile` slot.
+   */
+  url?: string
+  /** Stable identity - and what a `#tile` slot needs to resolve the file. */
+  id?: string | number
   name?: string
   /** Force image treatment; otherwise inferred from `contentType` / extension. */
   isImage?: boolean
@@ -69,27 +85,62 @@ const props = withDefaults(
 
 const emit = defineEmits<{ add: []; remove: [attachment: Attachment] }>()
 
+defineSlots<{
+  /**
+   * Replaces a tile's contents; the frame, the remove button, the add tile and
+   * the shared lightbox group stay ours.
+   *
+   * ★ This is the seam for files that are NOT publicly readable. Their URL is a
+   * short-lived signed one that has to be fetched, and the machinery that does
+   * the fetching lives a layer ABOVE this package (it needs the HTTP client and
+   * the storage bridge). Rather than invert that dependency - or make the host
+   * pre-resolve every URL into a map prop, which the framework already retired
+   * once - the host renders its own resolving component per tile right here.
+   *
+   * ```
+   * <TAttachmentWall :attachments="files">
+   *   <template #tile="{ attachment, size, isImage }">
+   *     <TFileImage v-if="isImage" :file-id="attachment.id" :width="size" :height="size" />
+   *     <TFileLink v-else :file-id="attachment.id">{{ attachment.name }}</TFileLink>
+   *   </template>
+   * </TAttachmentWall>
+   * ```
+   */
+  tile?: (props: {
+    attachment: Attachment
+    index: number
+    size: number
+    isImage: boolean
+    glyph: string
+  }) => unknown
+}>()
+
 const tileStyle = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }))
 
-const keyOf = (att: Attachment, index: number): string | number => props.itemKey?.(att, index) ?? att.url
+const keyOf = (att: Attachment, index: number): string | number =>
+  props.itemKey?.(att, index) ?? att.id ?? att.url ?? index
 
 /**
  * Guard a caller-supplied file URL used in `<a :href>` - Vue does not sanitize
  * `:href`, so a `javascript:` / `vbscript:` / `data:text/html` scheme would run
  * on click. Everything else (http/https, relative, blob:, data: media) passes.
  */
-function safeHref(url: string): string {
+function safeHref(url: string | undefined): string | undefined {
+  // No URL at all (a private file whose host did not fill the `#tile` slot):
+  // emit no href. An `<a>` without one is not a link - it neither navigates nor
+  // takes focus - whereas `#` would scroll the page to the top on click.
+  if (!url) return undefined
   return /^\s*(javascript:|vbscript:|data:text\/html)/i.test(url) ? '#' : url
 }
 
 function isImage(att: Attachment): boolean {
   if (att.isImage !== undefined) return att.isImage
   if (att.contentType) return att.contentType.startsWith('image/')
-  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(att.name ?? att.url)
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(att.name ?? att.url ?? '')
 }
 
 function glyph(att: Attachment): string {
-  const s = `${att.contentType ?? ''} ${att.name ?? att.url}`.toLowerCase()
+  const s = `${att.contentType ?? ''} ${att.name ?? att.url ?? ''}`.toLowerCase()
   if (s.includes('pdf')) return 'mdi:file-pdf-box'
   if (/\.(docx?|word)/.test(s) || s.includes('word')) return 'mdi:file-word-box'
   if (/\.(xlsx?|csv)/.test(s) || s.includes('spreadsheet') || s.includes('excel')) return 'mdi:file-excel-box'

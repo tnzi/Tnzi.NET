@@ -1,18 +1,12 @@
-using Tnzi.AI.Channels;
-using Tnzi.AI.Channels.Abstractions;
 using Tnzi.AI.Channels.Adapters.Feishu;
 using Tnzi.AI.Channels.Adapters.Telegram;
 using Tnzi.AI.Channels.Options;
 using Tnzi.AI.Mcp;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Server;
-using Tnzi.AI.Mcp.Services.Interfaces;
 using Tnzi.AI.Sandbox;
 using Tnzi.AI.Sandbox.Middleware;
-using Tnzi.AI.Sandbox.Providers.Docker;
-using Tnzi.AI.Sandbox.Providers.Kubernetes;
 using Tnzi.AI.Sandbox.Tools;
-using Tnzi.AI.Workflow;
 using Tnzi.Modules;
 
 namespace Tnzi.AI.Tests.Modules;

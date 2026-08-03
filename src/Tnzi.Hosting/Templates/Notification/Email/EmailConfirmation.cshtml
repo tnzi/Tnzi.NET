@@ -1,135 +1,64 @@
 ---
-subject: Confirm Your Email Address - @Model.AppName
+subject: Confirm your email address
 layout: DefaultEmail
 description: Email confirmation template for verifying user email address
 metadata:
   type: Email
-  version: "3.0"
+  version: "5.0"
 ---
-<!-- Greeting -->
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
     <tr>
-        <td class="greeting" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 24px; font-weight: 600; color: #1a1a2e; line-height: 1.3; padding-bottom: 24px;">
-            Verify Your Email Address
+        <td class="greeting ink" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a2e; line-height: 1.35; padding-bottom: 14px;">
+            Confirm your email address
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.65; color: #4a5568;">
+            Hi @(Model.UserName ?? "there"), confirm this address to finish setting up your account.
         </td>
     </tr>
 </table>
 
-<!-- Body Text -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+<!-- CTA -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" class="btn" style="margin: 26px 0 0 0;">
     <tr>
-        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.7; color: #4a5568; padding-bottom: 20px;">
-            Hi @(Model.UserName ?? "there"),
-        </td>
-    </tr>
-    <tr>
-        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.7; color: #4a5568; padding-bottom: 20px;">
-            Thank you for registering with <strong style="color: #1a1a2e;">@(Model.AppName ?? "us")</strong>. To complete your registration and activate your account, please verify your email address by clicking the button below.
-        </td>
-    </tr>
-</table>
-
-<!-- Highlight Box -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 24px 0;">
-    <tr>
-        <td width="4" style="background-color: #10b981;"></td>
-        <td style="background: linear-gradient(135deg, #f8f9fa 0%, #eef1f5 100%); padding: 24px 28px;">
+        <td bgcolor="#0f3460" style="border-radius: 8px;">
             <!--[if mso]>
-            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="#f8f9fa">
-            <tr>
-            <td style="padding: 24px 28px;">
-            <![endif]-->
-            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                <tr>
-                    <td style="font-family: Arial, sans-serif; font-size: 12px; font-weight: bold; color: #10b981; letter-spacing: 2px; text-transform: uppercase; padding-bottom: 12px;">
-                        One Click Away
-                    </td>
-                </tr>
-                <tr>
-                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #2d3748;">
-                        Click the button below to verify your email and unlock full access to your account.
-                    </td>
-                </tr>
-            </table>
-            <!--[if mso]>
-            </td>
-            </tr>
-            </table>
-            <![endif]-->
-        </td>
-    </tr>
-</table>
-
-<!-- CTA Button -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
-    <tr>
-        <td align="center">
-            <!--[if mso]>
-            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="@Model.ConfirmationUrl" style="height:52px;v-text-anchor:middle;width:220px;" arcsize="50%" stroke="false">
-            <v:fill type="gradient" color="#34d399" color2="#10b981" angle="135"/>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="@Model.ConfirmationUrl" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="16%" fillcolor="#0f3460" stroke="false">
             <w:anchorlock/>
-            <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Verify Email Address</center>
+            <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Confirm email address</center>
             </v:roundrect>
             <![endif]-->
             <!--[if !mso]><!-->
-            <a href="@Model.ConfirmationUrl" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #10b981 0%, #34d399 100%); color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; text-decoration: none; padding: 16px 40px; border-radius: 50px; letter-spacing: 0.5px; box-shadow: 0 4px 16px rgba(16,185,129,0.3);">Verify Email Address</a>
+            <a href="@Model.ConfirmationUrl" target="_blank" style="display: inline-block; padding: 14px 28px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px; background-color: #0f3460; text-align: center;">Confirm email address</a>
             <!--<![endif]-->
         </td>
     </tr>
 </table>
 
-<!-- Fallback Link -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-    <tr>
-        <td align="center" style="padding-top: 16px; font-family: Arial, sans-serif; font-size: 13px; color: #718096; line-height: 1.6;">
-            If the button doesn't work, <a href="@Model.ConfirmationUrl" style="color: #10b981; text-decoration: underline;">click here to verify</a>
-        </td>
-    </tr>
-</table>
-
-@if (!string.IsNullOrEmpty(Model.ExpirationHours))
-{
-    <!-- Warning Box -->
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 24px 0;">
+<!-- Expiry + copyable link -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 22px;">
+    @if (Model.ExpirationHours != null)
+    {
         <tr>
-            <td width="4" style="background-color: #f59e0b;"></td>
-            <td style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); padding: 20px 24px;">
-                <!--[if mso]>
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="#fef3c7">
-                <tr>
-                <td style="padding: 20px 24px;">
-                <![endif]-->
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                    <tr>
-                        <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #92400e;">
-                            <strong>Important:</strong> This verification link will expire in <strong>@Model.ExpirationHours hours</strong>. Please verify your email before then.
-                        </td>
-                    </tr>
-                </table>
-                <!--[if mso]>
-                </td>
-                </tr>
-                </table>
-                <![endif]-->
+            <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #4a5568; padding-bottom: 10px;">
+                The link expires in @Model.ExpirationHours hours.
             </td>
         </tr>
-    </table>
-}
-
-<!-- Divider -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 32px 0;">
+    }
     <tr>
-        <td style="height: 1px; background: linear-gradient(90deg, transparent 0%, #e2e8f0 50%, transparent 100%); font-size: 1px; line-height: 1px;">
-            &nbsp;
+        <td class="ink-faint" style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #8b929b;">
+            Or paste this into your browser:<br>
+            <a href="@Model.ConfirmationUrl" style="color: #6b7280; text-decoration: underline; word-break: break-all;">@Model.ConfirmationUrl</a>
         </td>
     </tr>
 </table>
 
-<!-- Small Text -->
-<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+<!-- Reassurance -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 22px;">
     <tr>
-        <td style="font-family: Arial, sans-serif; font-size: 12px; color: #999999; line-height: 1.6;">
-            If you didn't create an account with us, please ignore this email. Your email address will not be verified and no account will be created.
+        <td class="ink-faint" style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #8b929b;">
+            Didn't create an account? Ignore this email.
         </td>
     </tr>
 </table>

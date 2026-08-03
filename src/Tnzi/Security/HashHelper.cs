@@ -44,6 +44,23 @@ public static class HashHelper
     }
 
     /// <summary>
+    /// 异步获取文件流的MD5哈希值
+    /// </summary>
+    /// <remarks>
+    /// 与同步的 <see cref="GetMd5(Stream)"/> 语义一致：**先回到流首**再读，因此调用方不必事先定位；
+    /// 但读完后流停在末尾，需要复用的调用方要自己 <c>stream.Position = 0</c>。
+    /// 大文件走这条异步路径，不要用同步版本阻塞线程池线程。
+    /// </remarks>
+    public static async Task<string> GetMd5Async(Stream stream, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(stream);
+
+        stream.Seek(0, SeekOrigin.Begin);
+        byte[] hashBytes = await MD5.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
     /// 获取字符串的SHA1哈希值, 默认编码为<see cref="Encoding.UTF8"/>
     /// </summary>
     public static string GetSha1(string value, Encoding? encoding = null)
@@ -104,6 +121,21 @@ public static class HashHelper
         stream.Seek(0, SeekOrigin.Begin);
         using var hash = SHA256.Create();
         byte[] hashBytes = hash.ComputeHash(stream);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 异步获取文件流的SHA256哈希值
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="GetMd5Async"/> 同样先回到流首；读完流停在末尾。
+    /// </remarks>
+    public static async Task<string> GetSha256Async(Stream stream, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(stream);
+
+        stream.Seek(0, SeekOrigin.Begin);
+        byte[] hashBytes = await SHA256.HashDataAsync(stream, cancellationToken);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 

@@ -1,5 +1,4 @@
 using Tnzi.Identity.Services;
-using Tnzi.Identity.Dtos;
 
 namespace Tnzi.Identity.IntegrationTests.Services;
 

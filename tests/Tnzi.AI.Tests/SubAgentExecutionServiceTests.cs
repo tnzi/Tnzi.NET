@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 namespace Tnzi.AI.Tests;
 
@@ -261,7 +259,7 @@ public class SubAgentExecutionServiceTests
         });
 
         result.Succeeded.ShouldBeFalse();
-        result.Message.ShouldContain("depth");
+        result.Message!.ShouldContain("depth");
         runtimeInvoked.ShouldBeFalse();
         // CreateAsync must not have been called
         runStore.Verify(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -321,7 +319,7 @@ public class SubAgentExecutionServiceTests
         });
 
         result.Succeeded.ShouldBeFalse();
-        result.Message.ShouldContain("descendants");
+        result.Message!.ShouldContain("descendants");
         runtimeInvoked.ShouldBeFalse();
         runStore.Verify(x => x.CreateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>()), Times.Never);
     }

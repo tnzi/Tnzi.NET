@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Security.Cryptography;
-using System.Text;
 
 namespace Tnzi.AI.Channels.Adapters.Dingtalk;
 

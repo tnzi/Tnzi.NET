@@ -1,8 +1,5 @@
 using Microsoft.Extensions.Options;
-using Moq;
 using Tnzi.Chat.Options;
-using Tnzi.Chat.Services;
-using Tnzi.Domain.Repositories;
 using Tnzi.Identity.Entities;
 using Tnzi.Security.Authorization;
 

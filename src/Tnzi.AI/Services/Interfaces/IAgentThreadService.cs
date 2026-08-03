@@ -1,5 +1,5 @@
 
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Agent 线程管理服务接口（公共 CRUD + 查询）
@@ -65,11 +65,17 @@ public interface IAgentThreadInternalService
     /// <summary>
     /// 保存消息到线程。
     /// </summary>
+    /// <param name="threadId">目标线程 ID</param>
+    /// <param name="role">消息角色（user / assistant / tool …）</param>
+    /// <param name="content">消息正文</param>
+    /// <param name="toolCalls">工具调用的序列化 JSON；无则为 null</param>
+    /// <param name="usage">Token 用量的序列化 JSON；无则为 null</param>
     /// <param name="messageId">
     /// Optional pre-generated message ID. When supplied, the message is persisted with this
     /// exact ID - letting callers (e.g. streaming pipelines) surface the ID to clients
     /// before the database write completes. When null, the framework generates one.
     /// </param>
+    /// <param name="ct">取消令牌</param>
     /// <returns>The persisted message ID.</returns>
     Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default);
 

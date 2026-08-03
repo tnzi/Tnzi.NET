@@ -4,9 +4,7 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
-using Microsoft.EntityFrameworkCore;
 using Tnzi.EFCore.Extensions;
-using Tnzi.EFCore.Tests.TestEntities;
 
 namespace Tnzi.EFCore.Tests;
 

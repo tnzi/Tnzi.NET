@@ -4,12 +4,11 @@
   "private": true,
   "description": "Tnzi.NET Frontend Packages Monorepo - core, ui, ui-admin, ai, mobile.",
   "scripts": {
-    "build": "pnpm --filter @tnzi/core build && pnpm --filter @tnzi/ui build && pnpm --filter @tnzi/ui-admin build && pnpm --filter @tnzi/ui-ai build && pnpm --filter @tnzi/mobile build",
+    "build": "pnpm --filter @tnzi/core build && pnpm --filter @tnzi/ui build && pnpm --filter @tnzi/ui-ai build && pnpm --filter @tnzi/ui-admin build && pnpm --filter @tnzi/mobile build",
     "build:all": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage",
     "test:unit": "pnpm -r test:unit",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint packages/ui/src packages/ui-admin/src packages/ui-ai/src packages/core/src packages/mobile/src",
     "lint:fix": "eslint packages/ui/src packages/ui-admin/src packages/ui-ai/src packages/core/src packages/mobile/src --fix",
@@ -35,13 +34,11 @@
     "commit-msg": "cat \"$1\" | (cd src/Tnzi.UI && pnpm --silent exec commitlint)"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
     "@commitlint/cli": "^21.1.0",
     "@commitlint/config-conventional": "^21.1.0",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.61.1",
     "@size-limit/preset-small-lib": "^12.1.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "^4.1.9",

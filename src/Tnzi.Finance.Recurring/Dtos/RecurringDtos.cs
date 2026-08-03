@@ -103,7 +103,7 @@ public class CreateRecurringLineDto
 /// 更新模板
 /// </summary>
 /// <remarks>
-/// <see cref="Kind"/> 不在此列：改生成什么单据等于换一个模板，而已生成的历史会
+/// <see cref="RecurringDocument.Kind"/> 不在此列：改生成什么单据等于换一个模板，而已生成的历史会
 /// 指向另一种单据类型 —— 停用旧的、建一个新的，比让一条模板前后不是同一件东西干净。
 /// </remarks>
 public class UpdateRecurringDocumentDto

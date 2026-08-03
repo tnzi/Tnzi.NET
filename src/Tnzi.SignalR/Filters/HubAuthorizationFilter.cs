@@ -1,5 +1,4 @@
 
-using Tnzi.Security.Claims;
 
 namespace Tnzi.SignalR.Filters;
 

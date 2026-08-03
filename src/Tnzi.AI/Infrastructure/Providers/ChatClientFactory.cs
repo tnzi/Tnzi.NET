@@ -1,7 +1,4 @@
 
-using Microsoft.AspNetCore.DataProtection;
-using OpenAI.Chat;
-using OpenAI.Embeddings;
 
 namespace Tnzi.AI.Infrastructure.Providers;
 

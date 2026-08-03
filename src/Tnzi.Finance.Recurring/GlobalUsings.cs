@@ -36,11 +36,9 @@ global using Tnzi.Settings;
 global using Tnzi.Utilities;
 
 // Finance 核心：往来方、单据服务契约（生成一律委托它们）、来源令牌
-global using Tnzi.Finance;
 global using Tnzi.Finance.Dtos;
 global using Tnzi.Finance.Entities;
 global using Tnzi.Finance.Metadata;
-global using Tnzi.Finance.Services.Interfaces;
 
 // 本模块
 global using Tnzi.Finance.Recurring.Dtos;
@@ -49,5 +47,5 @@ global using Tnzi.Finance.Recurring.Metadata;
 global using Tnzi.Finance.Recurring.Options;
 global using Tnzi.Finance.Recurring.Permissions;
 global using Tnzi.Finance.Recurring.Services;
-global using Tnzi.Finance.Recurring.Services.Interfaces;
 global using Tnzi.Finance.Recurring.Services.Internal;
+global using Tnzi.Finance.Services;

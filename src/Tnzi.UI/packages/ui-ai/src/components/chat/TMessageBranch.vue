@@ -8,7 +8,7 @@
 
 import { NButton } from 'naive-ui';
 import { Icon } from '@iconify/vue';
-const props = defineProps<{
+defineProps<{
   /** 1-based index. */
   currentBranch: number;
   totalBranches: number;

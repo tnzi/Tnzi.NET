@@ -40,12 +40,12 @@ import { h, ref, watch } from 'vue'
 import { NButton, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
-import type { RowAction } from '../../../headless/rowActions'
+import type { RowAction } from '../../../headless/row-actions'
 import TModalShell from '../../../components/overlay/TModalShell.vue'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import type { FormSchemaItem } from '../../_shared/form-schema'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import {
   BankNumberScheme,
   BankAccountType,

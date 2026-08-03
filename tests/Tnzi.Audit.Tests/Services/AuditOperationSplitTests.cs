@@ -297,8 +297,8 @@ public class AuditOperationSplitTests
 
         result.Succeeded.ShouldBeTrue();
         result.Data!.ShouldContain("Users.Create");
-        result.Data.ShouldNotContain("Users.GetProfile");
-        result.Data.ShouldNotContain("Legacy.NoMethod");
+        result.Data!.ShouldNotContain("Users.GetProfile");
+        result.Data!.ShouldNotContain("Legacy.NoMethod");
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public class AuditOperationSplitTests
 
         result.Succeeded.ShouldBeTrue();
         result.Data!.ShouldContain("'=HYPERLINK");
-        result.Data.ShouldContain("'-cmd|calc");
-        result.Data.ShouldNotContain(",=HYPERLINK");
+        result.Data!.ShouldContain("'-cmd|calc");
+        result.Data!.ShouldNotContain(",=HYPERLINK");
     }
 }

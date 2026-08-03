@@ -219,6 +219,110 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     }
 
     /// <inheritdoc />
+    public async Task<Result> SetUserFunctionsInScopeAsync(
+        Guid userId, IEnumerable<Guid> scopeFunctionIds, IEnumerable<Guid> functionIds)
+    {
+        var invalid = UserFunctionScope.Normalize(scopeFunctionIds, functionIds, out var scope, out var functionIdList);
+        if (invalid != null) return invalid;
+
+        var violation = await GetUserGrantViolationAsync(userId, functionIdList);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        var missing = await FindMissingFunctionsAsync(functionIdList);
+        if (missing != null) return missing;
+
+        // 与 SetUserFunctionsAsync 逐字同构,唯一差别是 allow 的删除被 scope 夹住——
+        // 切片外的 allow 行与 deny 行都碰不到,这正是本方法存在的理由。
+        var result = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            await _userFunctionRepository.DeleteAsync(uf =>
+                uf.UserId == userId && uf.IsGranted && scope.Contains(uf.FunctionId));
+
+            if (functionIdList.Count > 0)
+            {
+                await _userFunctionRepository.DeleteAsync(uf =>
+                    uf.UserId == userId && !uf.IsGranted && functionIdList.Contains(uf.FunctionId));
+
+                var userFunctions = functionIdList.Select(functionId => new UserFunction
+                {
+                    UserId = userId,
+                    FunctionId = functionId,
+                    IsGranted = true,
+                    IsEnabled = true
+                }).ToList();
+                await _userFunctionRepository.InsertManyAsync(userFunctions);
+            }
+
+            LogInformation("Set {Count} direct functions for user {UserId} within a scope of {ScopeCount}",
+                functionIdList.Count, userId, scope.Count);
+            return Ok($"Set {functionIdList.Count} functions for user within the given scope");
+        });
+
+        if (result.Succeeded)
+        {
+            await InvalidateUserCacheAsync(userId);
+            // 受影响面 = 整个切片(切片内被删掉的行也变了),而不只是新集。
+            await PublishUserFunctionsChangedAsync(userId, PermissionChangeType.Reset, scope);
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> SetUserDeniedFunctionsInScopeAsync(
+        Guid userId, IEnumerable<Guid> scopeFunctionIds, IEnumerable<Guid> functionIds)
+    {
+        var invalid = UserFunctionScope.Normalize(scopeFunctionIds, functionIds, out var scope, out var functionIdList);
+        if (invalid != null) return invalid;
+
+        var violation = await GetUserGrantViolationAsync(userId, functionIdList, action: "deny");
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        var missing = await FindMissingFunctionsAsync(functionIdList);
+        if (missing != null) return missing;
+
+        // 与 SetUserDeniedFunctionsAsync 同构,deny 的删除被 scope 夹住。
+        var result = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            await _userFunctionRepository.DeleteAsync(uf =>
+                uf.UserId == userId && !uf.IsGranted && scope.Contains(uf.FunctionId));
+
+            if (functionIdList.Count > 0)
+            {
+                await _userFunctionRepository.DeleteAsync(uf =>
+                    uf.UserId == userId && uf.IsGranted && functionIdList.Contains(uf.FunctionId));
+
+                var userFunctions = functionIdList.Select(functionId => new UserFunction
+                {
+                    UserId = userId,
+                    FunctionId = functionId,
+                    IsGranted = false,
+                    IsEnabled = true
+                }).ToList();
+                await _userFunctionRepository.InsertManyAsync(userFunctions);
+            }
+
+            LogInformation("Set {Count} denied functions for user {UserId} within a scope of {ScopeCount}",
+                functionIdList.Count, userId, scope.Count);
+            return Ok($"Set {functionIdList.Count} denied functions for user within the given scope");
+        });
+
+        if (result.Succeeded)
+        {
+            await InvalidateUserCacheAsync(userId);
+            await PublishUserFunctionsChangedAsync(userId, PermissionChangeType.Reset, scope);
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
     public async Task<Result> SetUserDeniedFunctionsAsync(Guid userId, IEnumerable<Guid> functionIds)
     {
         var functionIdList = functionIds.ToList();

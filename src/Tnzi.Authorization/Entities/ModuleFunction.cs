@@ -51,7 +51,7 @@ public class ModuleFunction : FullAuditedEntity<Guid>
 
     /// <summary>
     /// True when this row was seeded from an
-    /// <see cref="Permissions.IPermissionDefinitionProvider"/>. Admin UI
+    /// <see cref="Tnzi.Security.Authorization.IPermissionDefinitionProvider"/>. Admin UI
     /// must show this as a read-only row and prevent code/delete edits -
     /// only re-seeding via code can change the contract.
     /// </summary>

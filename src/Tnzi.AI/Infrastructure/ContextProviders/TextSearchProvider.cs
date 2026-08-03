@@ -33,6 +33,9 @@ public sealed class TextSearchProvider : IContextProvider
     /// <summary>
     /// 初始化 TextSearchProvider
     /// </summary>
+    /// <param name="textSearchService">文本检索服务（RAG 抽象）</param>
+    /// <param name="options">检索配置（Top-K、阈值、注入模板等）</param>
+    /// <param name="logger">日志</param>
     /// <param name="knowledgeBaseIds">该 Agent 分配的知识库 ID（非空时检索仅限这些知识库）</param>
     public TextSearchProvider(
         ITextSearchService textSearchService,

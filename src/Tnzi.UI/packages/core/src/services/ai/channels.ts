@@ -55,8 +55,6 @@ export interface SessionBindingRuleDto {
   scope: number;
   priority: number;
   isEnabled: boolean;
-  creationTime?: string | null;
-  lastModificationTime?: string | null;
 }
 
 // ---------------------------------------------------------------------------

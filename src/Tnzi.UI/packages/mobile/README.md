@@ -40,11 +40,15 @@ createApp(App)
 - 按 `@tnzi/core/components` 契约实现移动端 `T*` 组件
 - 已实现导航语义组件：`TMenu`、`TNavBar`、`TTabBar`
 
-## Playground
+## 本地开发
 
 ```bash
+# 库 watch 构建：改 src 自动出 dist，消费方的 Vite 会热更
 pnpm -C packages/mobile dev
 ```
+
+本包目前没有对应的 Acme 应用（Acme 只有 admin / chat / site 三个 Web 端），
+改动靠 `pnpm -C packages/mobile test` 与消费方项目验证。
 
 ## 内置依赖
 

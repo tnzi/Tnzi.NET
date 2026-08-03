@@ -32,11 +32,11 @@ import {
   type FormRules,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { useFormRules } from '../../../headless/useFormRules'
+import { useFormRules } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
-import { useLoginCaptcha } from '../../../headless/useLoginCaptcha'
-import { isModuleAvailable } from '../../../headless/loginFeatures'
-import { useLoginContext, type LoginDemoAccount } from '../useLoginContext'
+import { useLoginCaptcha } from '@tnzi/ui'
+import { isModuleAvailable } from '@tnzi/ui'
+import { useLoginContext, type LoginDemoAccount } from '@tnzi/ui'
 import TLoginCaptcha from './TLoginCaptcha.vue'
 
 defineOptions({ name: 'PwdLogin' })

@@ -14,11 +14,12 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { createChatImBridge } from '../../services/bridges/chat-im-bridge'
 import { useChatRealtime } from '../../headless/useChatRealtime'
+import { useRealtimeHub } from '../../headless/useRealtimeHub'
 import { useChatSound } from '../../headless/useChatSound'
 import { useTitleFlash } from '../../headless/useTitleFlash'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { useAdminClient } from '../../plugin/client'
-import { useAdminChatConfig } from '../../plugin/chatConfig'
+import { useAdminChatConfig } from '../../plugin/chat-config'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useChatStore } from '../../stores/useChatStore'
 import TChatLauncher from './TChatLauncher.vue'
@@ -44,12 +45,13 @@ if (client) {
 
   store.init(bridge)
 
+  const realtimeHub = useRealtimeHub()
   const realtime = useChatRealtime({
     client,
     store,
     // Optional hub URL override (e.g. '/api/hubs/chat' under a sub-path).
     // Undefined when unset, so useChatRealtime falls back to '/hubs/chat'.
-    hubUrl: chatConfig?.hubUrl,
+    hubUrl: () => chatConfig?.hubUrl ?? realtimeHub.path('chat'),
     // Read the freshest token from the HttpClient (it self-refreshes on 401),
     // falling back to the auth store. The store token is only written at login
     // and never re-synced, so reading it alone would go stale after the access
@@ -146,7 +148,13 @@ if (client) {
       const peerIds = store.conversations.map(c => c.peerUserId).filter(Boolean) as string[]
       await store.loadPresence(peerIds).catch(() => undefined)
     }
-    await realtime.start()
+    // Same realtime gate as the settings hub: /hubs/chat is mapped by Tnzi.Chat
+    // only when Tnzi.SignalR is loaded, so a Chat-without-SignalR host must not
+    // connect. Everything above (conversations, presence, config) is plain REST
+    // and keeps working - chat degrades to non-live rather than disappearing.
+    if (realtimeHub.canConnect('chat')) {
+      await realtime.start().catch(() => undefined)
+    }
   })
 
   onUnmounted(() => {

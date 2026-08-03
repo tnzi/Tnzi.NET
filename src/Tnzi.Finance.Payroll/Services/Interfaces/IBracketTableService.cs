@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 税级表服务（行内嵌全量重建 + 连续性校验；同编码多版本按生效日解析）

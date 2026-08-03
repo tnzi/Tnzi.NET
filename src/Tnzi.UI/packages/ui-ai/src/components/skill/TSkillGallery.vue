@@ -6,8 +6,8 @@
 import { NInput, NScrollbar } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
-import { useLocalSearch } from '@/composables/useLocalSearch';
+import { useAiI18n } from '../../i18n/index';
+import { useLocalSearch } from '../../headless/useLocalSearch';
 import TSkillCard, { type SkillInfo } from './TSkillCard.vue';
 
 const t = useAiI18n();

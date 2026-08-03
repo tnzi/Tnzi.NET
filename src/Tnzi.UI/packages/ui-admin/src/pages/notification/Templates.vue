@@ -45,7 +45,7 @@
             v-model:value="variablesJson"
             type="textarea"
             :rows="4"
-            placeholder='{"name":"Alice","code":"123456"}'
+            placeholder="{&quot;name&quot;:&quot;Alice&quot;,&quot;code&quot;:&quot;123456&quot;}"
             @blur="parseVariables"
           />
         </NFormItem>
@@ -68,14 +68,19 @@
         </div>
         <NCard size="small" :bordered="false" class="t-notif-preview__content">
           <!--
-            Plain-text content gets escaped via {{ }} interpolation; HTML
+            Plain-text content gets escaped via {{ }} interpolation. HTML
             content (the template engine flags it via NotificationPreviewDto.IsHtml)
-            gets v-html so the rendered Razor output displays correctly. This
-            matches the backend contract - admins decide trust via the template
-            channel (email = HTML; sms / push = plain text).
+            goes through a sandboxed frame rather than `v-html`: the rendered
+            Razor output is author-controlled markup, and whoever can edit a
+            template should not thereby get script execution in a super-admin's
+            session. See THtmlPreview.
           -->
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <div v-if="previewResult?.isHtml" class="t-notif-preview__body" v-html="previewResult.content || t('preview.empty')" />
+          <THtmlPreview
+            v-if="previewResult?.isHtml"
+            :html="previewResult.content || ''"
+            :height="360"
+            :title="t('preview.frameLabel')"
+          />
           <div v-else class="t-notif-preview__body">{{ previewResult?.content || t('preview.empty') }}</div>
         </NCard>
       </div>
@@ -147,11 +152,12 @@ import {
 } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import THtmlPreview from '../../components/display/THtmlPreview.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import {
   createNotificationBridge,
   type NotificationTemplatePreviewResult,

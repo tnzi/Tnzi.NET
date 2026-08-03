@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
-using Tnzi.Logging.Dtos;
-using Tnzi.Results;
 
 namespace Tnzi.Logging.Services;
 
@@ -184,10 +182,10 @@ public class LogFileService : ILogFileService
                 if (toUtc.HasValue && file.LastWriteTimeUtc > toUtc.Value.AddDays(1)) continue;
                 var lineNumber = 0;
                 using var reader = new StreamReader(file.OpenRead(), Encoding.UTF8);
-                while (!reader.EndOfStream)
+                // 用 ReadLineAsync 返回 null 判定文件结束，而不是 reader.EndOfStream ——
+                // 后者会在异步方法里做一次同步阻塞读（CA2024）。
+                while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
                 {
-                    var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-                    if (line == null) break;
                     lineNumber++;
                     // 内存比较用 OrdinalIgnoreCase，避免为每一行额外分配一份小写副本
                     if (line.Contains(keyword, StringComparison.OrdinalIgnoreCase))
@@ -335,10 +333,8 @@ public class LogFileService : ILogFileService
         stream.Seek(pos, SeekOrigin.Begin);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var lines = new List<string>();
-        while (!reader.EndOfStream)
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (line == null) break;
             lines.Add(line);
         }
         // The backwards scan can over-count by one newline at EOF; trim to N.

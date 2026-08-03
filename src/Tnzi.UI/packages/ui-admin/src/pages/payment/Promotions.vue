@@ -62,10 +62,10 @@ import {
   type PromotionDto,
 } from '../../services/bridges/promotion-bridge'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, type RowAction } from '../../headless/rowActions'
+import { editAction, type RowAction } from '../../headless/row-actions'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TFormSchemaRenderer, { type FieldRenderer } from '../_shared/form-schema'
 import { buildPromotionColumns, promotionFormSchema } from './promotion-config'

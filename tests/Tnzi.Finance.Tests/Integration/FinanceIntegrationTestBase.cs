@@ -1,6 +1,5 @@
 using Mapster;
 using MapsterMapper;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Tnzi.Domain.Entities;

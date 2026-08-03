@@ -20,7 +20,7 @@ public class PayRunGuardTests : PayrollIntegrationTestBase
 
         var post = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.PostAsync(runId));
         post.Succeeded.ShouldBeFalse();
-        post.Message.ShouldContain("approval");
+        post.Message!.ShouldContain("approval");
 
         // 零残留：仍 Calculated、无凭证
         var run = await ReloadAsync<PayRun>(runId);

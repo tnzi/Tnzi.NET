@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import type { IMenuItem } from '@tnzi/core/types/shared-ui';
 
 interface IMenuProps {
-  items: IMenuItem[];
+  items?: IMenuItem[];
   activeKey?: string;
   openedKeys?: string[];
   horizontal?: boolean;

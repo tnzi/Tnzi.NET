@@ -82,7 +82,8 @@ public class FileReferenceChangeTracker
                 EntityType = entityType,
                 EntityId = entityId,
                 FieldName = fieldName,
-                FileId = fileId
+                FileId = fileId,
+                IsPublicFile = attr.Public
             });
         }
     }
@@ -127,7 +128,8 @@ public class FileReferenceChangeTracker
                 EntityType = entityType,
                 EntityId = entityId,
                 FieldName = fieldName,
-                FileId = fileId
+                FileId = fileId,
+                IsPublicFile = attr.Public
             });
         }
     }

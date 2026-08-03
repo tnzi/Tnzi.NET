@@ -194,7 +194,7 @@ import {
 import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'

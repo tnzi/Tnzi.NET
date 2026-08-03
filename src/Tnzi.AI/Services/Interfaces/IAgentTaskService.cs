@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Agent 任务持久化服务接口 - 将 TodoTools 的瞬态任务同步到数据库

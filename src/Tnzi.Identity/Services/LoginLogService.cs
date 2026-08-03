@@ -424,13 +424,12 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             .OrderBy(t => t.Date)
             .ToListAsync();
 
-        // Fill in missing dates with zero values
-        var result = new List<LoginTrendItem>();
-        for (var date = startDate.Date; date <= endDate.Date; date = date.AddDays(1))
-        {
-            var existing = dailyData.FirstOrDefault(d => d.Date == date);
-            result.Add(existing ?? new LoginTrendItem { Date = date });
-        }
+        // 补零：没有登录的那天在图表上应当是 0 而不是断点。桶枚举统一走核心 TimeBucket，
+        // 顺带把逐日 FirstOrDefault 的 O(天数 × 记录数) 扫描换成一次索引。
+        var byDate = dailyData.ToDictionary(d => d.Date);
+        var result = TimeBucket.Enumerate(startDate, endDate, TrendInterval.Daily)
+            .Select(date => byDate.TryGetValue(date, out var existing) ? existing : new LoginTrendItem { Date = date })
+            .ToList();
 
         return Ok<IEnumerable<LoginTrendItem>>(result);
     }

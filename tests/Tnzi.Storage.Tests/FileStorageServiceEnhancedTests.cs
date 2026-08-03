@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
@@ -42,6 +42,8 @@ public class FileStorageServiceEnhancedTests
             _mockStorage.Object,
             optionsMonitor.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            TestPublicFileFieldResolver.Empty(),
+            new TestFileUrlSigner(),
             _mockServiceProvider.Object);
     }
 
@@ -51,6 +53,8 @@ public class FileStorageServiceEnhancedTests
             _mockShareRepository.Object,
             _mockFileRepository.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            new FileAccessGrantContext(),
+            new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object);
     }
 

@@ -100,7 +100,7 @@ public class TnziAiClientTests
         response.Reasoning.ShouldBe("thinking");
         response.HandoffPath.ShouldNotBeNull();
         response.FinalAgentName.ShouldBe("writer");
-        response.Suggestions.ShouldContain("Tell me more about X");
+        response.Suggestions!.ShouldContain("Tell me more about X");
         response.Artifacts.ShouldNotBeNull();
         response.ClarificationQuestion.ShouldBe("Which region should I use?");
     }

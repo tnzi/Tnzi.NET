@@ -89,9 +89,9 @@ describe('TCommentThread', () => {
     const post = vi.fn(async () => { throw new Error('offline') })
     const wrapper = mount(TCommentThread, { props: { items: [], post }, global: { stubs } })
 
-    const vm = wrapper.vm as unknown as { draft: string; post: () => Promise<void> }
+    const vm = wrapper.vm as unknown as { draft: string; submitComment: () => Promise<void> }
     vm.draft = 'a thought worth keeping'
-    await vm.post()
+    await vm.submitComment()
     await flushPromises()
 
     // Losing what someone typed is the least forgivable thing a comment box does.
@@ -103,9 +103,9 @@ describe('TCommentThread', () => {
     const post = vi.fn(async () => undefined)
     const wrapper = mount(TCommentThread, { props: { items: [], post }, global: { stubs } })
 
-    const vm = wrapper.vm as unknown as { draft: string; post: () => Promise<void> }
+    const vm = wrapper.vm as unknown as { draft: string; submitComment: () => Promise<void> }
     vm.draft = 'noted'
-    await vm.post()
+    await vm.submitComment()
     await flushPromises()
 
     expect(vm.draft).toBe('')

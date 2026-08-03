@@ -1,7 +1,4 @@
 using System.Net;
-using System.Text.Json;
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Moq.Protected;
 using Tnzi.AI.Channels.Adapters.Slack;
 using Tnzi.AI.Channels.Bus;

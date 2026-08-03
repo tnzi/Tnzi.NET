@@ -1,5 +1,5 @@
 
-namespace Tnzi.EFCore;
+namespace Tnzi.EFCore.DocumentNumbering;
 
 /// <summary>
 /// 单据连续编号服务

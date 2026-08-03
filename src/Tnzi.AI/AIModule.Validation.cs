@@ -88,6 +88,12 @@ public partial class AIModule
             "ISkillSearchService is a no-op fallback; skill search will be unavailable until Tnzi.AI.Skills module is loaded."),
         (typeof(ISkillRequirementsValidator),
             "ISkillRequirementsValidator is a no-op fallback; skill requirements validation will be unavailable until Tnzi.AI.Skills module is loaded."),
+        (typeof(ICliAgentDispatcher),
+            "ICliAgentDispatcher is a no-op fallback; external CLI agent execution will return 501 until Tnzi.AI.Cli module is loaded."),
+        (typeof(ICliRuntimeService),
+            "ICliRuntimeService is a no-op fallback; external CLI runtime registration will return 501 until Tnzi.AI.Cli module is loaded."),
+        // ICliAgentBindingService 不在此列：它的回退（BuiltInOnlyCliAgentBindingService）
+        // 刻意不实现 INoOpService —— 读路径返回 null 表示「全部走内建」，那是正常状态而非降级。
     ];
 
     /// <summary>

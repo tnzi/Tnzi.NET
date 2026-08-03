@@ -1,8 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Moq;
-using Tnzi.Chat.Entities;
-using Tnzi.Chat.Services;
-using Tnzi.Domain.Repositories;
 using Tnzi.Security.Authorization;
 
 namespace Tnzi.Chat.Tests.Services;

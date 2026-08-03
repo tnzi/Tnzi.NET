@@ -1,28 +1,28 @@
 #nullable enable
-override Tnzi.EFCore.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentSequence!>! builder) -> void
+override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentNumbering.DocumentSequence!>! builder) -> void
 override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
-Tnzi.EFCore.DocumentNumberService
-Tnzi.EFCore.DocumentNumberService.DocumentNumberService(System.IServiceProvider! serviceProvider, Tnzi.Domain.Repositories.IRepository<Tnzi.EFCore.DocumentSequence!, System.Guid>! repository) -> void
-Tnzi.EFCore.DocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
-Tnzi.EFCore.DocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
-Tnzi.EFCore.DocumentSequence
-Tnzi.EFCore.DocumentSequence.DocumentSequence() -> void
-Tnzi.EFCore.DocumentSequence.NextValue.get -> long
-Tnzi.EFCore.DocumentSequence.NextValue.set -> void
-Tnzi.EFCore.DocumentSequence.Scope.get -> string!
-Tnzi.EFCore.DocumentSequence.Scope.set -> void
-Tnzi.EFCore.DocumentSequence.TenantId.get -> System.Guid?
-Tnzi.EFCore.DocumentSequence.TenantId.set -> void
-Tnzi.EFCore.DocumentSequenceConfiguration
-Tnzi.EFCore.DocumentSequenceConfiguration.DocumentSequenceConfiguration() -> void
-Tnzi.EFCore.IDocumentNumberService
-Tnzi.EFCore.IDocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
-Tnzi.EFCore.IDocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+Tnzi.EFCore.DocumentNumbering.DocumentNumberService
+Tnzi.EFCore.DocumentNumbering.DocumentNumberService.DocumentNumberService(System.IServiceProvider! serviceProvider, Tnzi.Domain.Repositories.IRepository<Tnzi.EFCore.DocumentNumbering.DocumentSequence!, System.Guid>! repository) -> void
+Tnzi.EFCore.DocumentNumbering.DocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Tnzi.EFCore.DocumentNumbering.DocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+Tnzi.EFCore.DocumentNumbering.DocumentSequence
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.DocumentSequence() -> void
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.NextValue.get -> long
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.NextValue.set -> void
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.Scope.get -> string!
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.Scope.set -> void
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.TenantId.get -> System.Guid?
+Tnzi.EFCore.DocumentNumbering.DocumentSequence.TenantId.set -> void
+Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration
+Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.DocumentSequenceConfiguration() -> void
+Tnzi.EFCore.DocumentNumbering.IDocumentNumberService
+Tnzi.EFCore.DocumentNumbering.IDocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+Tnzi.EFCore.DocumentNumbering.IDocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int value) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
 *REMOVED*Tnzi.EFCore.Caching.QueryableCacheExtensions
@@ -30,3 +30,15 @@ static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int
 *REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedFirstOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
 *REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
 *REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedPagedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Data.PagedQuery! query, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator
+Tnzi.EFCore.Data.DefaultEntityIdGenerator
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
+Tnzi.EFCore.Data.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+Tnzi.EFCore.Data.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator
+Tnzi.EFCore.Data.IEntityIdGenerator
+*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+Tnzi.EFCore.Data.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNull(string! columnName) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnNull(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!

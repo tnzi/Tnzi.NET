@@ -17,3 +17,9 @@ export { default as TTableRenderer } from './renderers/TTableRenderer.vue'
 export { default as TItemPage } from './TItemPage.vue'
 export { default as TItemRenderer } from './renderers/TItemRenderer.vue'
 export { default as TCrudSearchDrawer } from './TCrudSearchDrawer.vue'
+// The advanced-search field panel itself (one field per row in `labeled` mode).
+// The drawer above wraps it on desktop and TListShell inlines it on phones;
+// exported so a custom shell can mount the same panel, and because the
+// `render?: (model) => VNodeChild` escape hatch documented for `searchFields`
+// lives on this component.
+export { default as TCrudSearchAdvanced } from './TCrudSearchAdvanced.vue'

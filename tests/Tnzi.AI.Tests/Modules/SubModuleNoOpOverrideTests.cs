@@ -1,6 +1,4 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Tnzi.AI.Skills;
-using Tnzi.AI.Workflow;
 
 namespace Tnzi.AI.Tests.Modules;
 
@@ -58,7 +56,7 @@ public class SubModuleNoOpOverrideTests
     /// 若有人把回退搬回 Configure 阶段，此测试立刻变红。
     /// </summary>
     [Fact]
-    public void TryAdd_InConfigurePhase_BeatsNoOpFallback()
+    public async Task TryAdd_InConfigurePhase_BeatsNoOpFallback()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -66,12 +64,12 @@ public class SubModuleNoOpOverrideTests
         var context = new Tnzi.Modules.ServiceConfigurationContext(services, configuration);
 
         var aiModule = new AIModule();
-        aiModule.ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        await aiModule.ConfigureServicesAsync(context);
 
         // 模拟子模块（或应用插件模块）在 Configure 阶段以 TryAdd 注册真实实现 - 历史上被 NoOp 抢占的形态
         services.TryAddSingleton<ISkillTemplateEngine, SkillTemplateEngine>();
 
-        aiModule.PostConfigureServicesAsync(context).GetAwaiter().GetResult();
+        await aiModule.PostConfigureServicesAsync(context);
 
         var descriptors = services.Where(d => d.ServiceType == typeof(ISkillTemplateEngine)).ToList();
         descriptors.Count.ShouldBe(1, "the PostConfigure NoOp TryAdd must skip when a real registration exists");

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Pgvector;
 
 namespace Tnzi.AI.Tests.Rag;
 

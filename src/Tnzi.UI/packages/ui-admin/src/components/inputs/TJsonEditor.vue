@@ -20,7 +20,7 @@ import { useBreakpoint } from '../../headless/useBreakpoint'
 const { isTouch } = useBreakpoint()
 
 interface Props {
-  value: string
+  value?: string
   rows?: number
   placeholder?: string
   readonly?: boolean

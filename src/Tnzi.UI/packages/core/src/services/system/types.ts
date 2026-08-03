@@ -425,23 +425,32 @@ export interface ClearCacheDto {
 }
 
 // ============================================
-// Appearance (Global Admin Theme) Types
+// Appearance (Global Theme Snapshots)
 // ============================================
 
 /**
- * Mirror of Tnzi.System.Dtos.AdminThemeDto.
- * `theme` is an opaque snapshot document owned by the admin front-end
- * (layout mode, tab-bar visibility, colors, ...); null when no global
- * theme has been saved yet (clients fall back to local defaults).
+ * Mirror of Tnzi.System.Dtos.ThemeSnapshotDto.
+ *
+ * `theme` is an opaque snapshot document owned by the FRONT-END of the scope it
+ * belongs to (the admin console stores layout mode and tab-bar visibility; the
+ * chat app stores its own surface tokens). The backend never interprets it,
+ * which is why one endpoint pair serves every product. null when that scope has
+ * no saved theme (clients fall back to local defaults).
  */
-export interface AdminGlobalThemeDto {
+export interface GlobalThemeSnapshotDto {
   theme: Record<string, unknown> | null;
   /** Last save time (UTC ISO string); null when unset */
   updatedAt?: string | null;
 }
 
-/** Mirror of Tnzi.System.Dtos.SaveAdminThemeDto */
-export interface SaveAdminGlobalThemeDto {
+/** Mirror of Tnzi.System.Dtos.SaveThemeSnapshotDto */
+export interface SaveGlobalThemeSnapshotDto {
   /** Theme snapshot document; must be a JSON object */
   theme: Record<string, unknown>;
 }
+
+/** @deprecated Renamed to {@link GlobalThemeSnapshotDto} when themes became scoped. */
+export type AdminGlobalThemeDto = GlobalThemeSnapshotDto;
+
+/** @deprecated Renamed to {@link SaveGlobalThemeSnapshotDto} when themes became scoped. */
+export type SaveAdminGlobalThemeDto = SaveGlobalThemeSnapshotDto;

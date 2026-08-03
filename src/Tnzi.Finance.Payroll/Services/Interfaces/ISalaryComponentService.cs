@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 薪资组件服务（保存期做语法校验 + 自引用拒绝；依赖序校验在结构保存时进行）

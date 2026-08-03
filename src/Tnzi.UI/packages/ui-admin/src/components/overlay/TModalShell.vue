@@ -189,10 +189,25 @@ const contentMaxHeight = computed(() =>
   display: flex;
   flex-direction: column;
 }
-.t-modal-shell--fullscreen .n-card__content {
+.t-modal-shell--fullscreen .n-card__content,
+.t-modal-shell--fullscreen .n-card-content {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* Fullscreen: size the body by what is actually left over, not by a viewport
+   guess. `contentMaxHeight` reserves ~64px for the footer, but on phones the
+   footer stacks its buttons full-width in a column - a two-button footer is
+   ~100px tall. The body's max-height then exceeded the space the card really
+   had, and the `overflow: hidden` above clipped the last fields of the form
+   with no way to scroll down to them. `!important` because `contentMaxHeight`
+   arrives as an inline style. */
+.t-modal-shell--fullscreen .t-modal-shell__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none !important;
 }
 /* Keep the footer action row clear of the iOS home indicator when fullscreen. */
 .t-modal-shell--fullscreen .n-card__footer {

@@ -4,7 +4,6 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
-using Tnzi.Domain.Entities;
 
 namespace Tnzi.EFCore.Tests.TestEntities;
 

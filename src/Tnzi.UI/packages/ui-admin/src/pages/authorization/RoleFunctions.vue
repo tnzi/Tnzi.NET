@@ -453,18 +453,26 @@ import { useRoute } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import {
-  NCard, NSpace, NButton, NInput, NSpin, NTag, NPopover,
-  NForm, NFormItem, NSelect, NDrawer, NDrawerContent,
+  NCard,
+  NSpace,
+  NButton,
+  NInput,
+  NSpin,
+  NTag,
+  NPopover,
+  NSelect,
+  NDrawer,
+  NDrawerContent,
 } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { isCodeRedundant } from '../../headless/codeLabel'
+import { isCodeRedundant } from '../../headless/code-label'
 import TPermissionMatrix from '../../components/forms/TPermissionMatrix.vue'
 import { ZH_SURFACE_LABELS } from './surface-labels'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { TOverlayTheme } from '../../components/overlay'
 import { useDetail } from '../../headless/useDetail'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'

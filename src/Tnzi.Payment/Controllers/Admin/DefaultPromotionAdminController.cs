@@ -104,4 +104,15 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
         var result = await _couponService.CreateRedemptionCodeAsync(request.PromotionId, request.Quantity);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 直接给用户发券（客服补偿/运营定向发放，不经兑换码）
+    /// </summary>
+    [HttpPost("{id:guid}/grant")]
+    [ApiAuthorize(PermissionName = "payment.promotion.create")]
+    public virtual async Task<ApiResult<UserCouponDto>> Grant(Guid id, [FromBody] GrantCouponDto request)
+    {
+        var result = await _couponService.GrantAsync(id, request.UserId);
+        return result.ToApiResult();
+    }
 }

@@ -85,7 +85,7 @@ import {
 } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { amountCell, fmtAmount, tsToIsoDate } from './money'
 import { buildRevaluationHistoryColumns, type RevaluationHistoryRow } from './revaluation-config'
 

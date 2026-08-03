@@ -277,7 +277,7 @@
       <div class="t-list-shell__footer">
         <div class="t-list-shell__footer-left">
           <template v-if="showBatch && !batchSelectionEmpty">
-            <slot name="batchActions" :selectedIds="props.state.batchActions.selectedIds.value" />
+            <slot name="batchActions" :selected-ids="props.state.batchActions.selectedIds.value" />
             <NPopconfirm v-if="props.state.canDelete !== false" @positive-click="onBatchDelete">
               <template #trigger>
                 <NButton type="error" size="small" ghost>
@@ -293,9 +293,12 @@
             </NButton>
           </template>
         </div>
-        <NPagination
+        <TListPager
           v-if="showPagination"
-          v-bind="paginationConfig"
+          :page="props.state.query.value.pageIndex"
+          :page-size="props.state.query.value.pageSize"
+          :item-count="props.state.total.value"
+          :translate="t"
           @update:page="props.state.setPage"
           @update:page-size="props.state.setPageSize"
         />
@@ -312,7 +315,7 @@
       @submit="props.state.submit"
     >
       <template #default="{ formData, mode: m }">
-        <slot name="form" :formData="castFormData(formData)" :mode="m" />
+        <slot name="form" :form-data="castFormData(formData)" :mode="m" />
       </template>
       <template #footer><slot name="formFooter" /></template>
     </TFormModal>
@@ -343,7 +346,8 @@
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed, nextTick, ref, useSlots, watch } from 'vue'
-import { NAlert, NButton, NCard, NInput, NPagination, NPopconfirm, NTooltip } from 'naive-ui'
+import { NAlert, NButton, NCard, NInput, NPopconfirm, NTooltip } from 'naive-ui'
+import TListPager from '../data/TListPager.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { downloadBlob } from '@tnzi/core/utils'
 import TFormModal from './TFormModal.vue'
@@ -353,7 +357,7 @@ import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import TPageHeader from '../layout/TPageHeader.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { UseFormModalReturn, FormModalMode } from '../../headless/useFormModal'
-import type { FormSchemaItem } from '../../pages/_shared/form-schema'
+import type { FormSchemaItem } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 
 export interface TListShellProps<T, TId extends string | number = string | number> {
@@ -563,21 +567,8 @@ const modalTitle = computed(() => {
   return mode ? t(`admin.crud.${mode}Title`) : ''
 })
 
-const paginationConfig = computed(() => {
-  const compact = bp.isSm.value
-  const base = {
-    page: props.state.query.value.pageIndex,
-    pageSize: props.state.query.value.pageSize,
-    itemCount: props.state.total.value,
-  }
-  if (compact) return { ...base, simple: true, showSizePicker: false }
-  return {
-    ...base,
-    showSizePicker: true,
-    pageSizes: [10, 20, 50, 100],
-    prefix: ({ itemCount }: { itemCount: number | undefined }) => `${t('admin.crud.total')} ${itemCount ?? 0}`,
-  }
-})
+// The footer pager itself lives in `TListPager` so pages that do not ride this
+// shell get the same one instead of reproducing it from a bare NPagination.
 </script>
 
 <style scoped>

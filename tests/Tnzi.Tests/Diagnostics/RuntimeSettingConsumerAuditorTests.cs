@@ -1,9 +1,4 @@
-using System.Reflection;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using Tnzi.Modules.Diagnostics;
 using Tnzi.Settings;
-using Xunit;
 
 namespace Tnzi.Tests.Diagnostics;
 

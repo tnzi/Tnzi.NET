@@ -23,11 +23,8 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/coverage/**',
-      '**/test-results/**',
-      '**/playwright-report/**',
       '**/*.d.ts',
       'packages/core/src/services/**/_generated*',
-      'e2e/**',
     ],
   },
 
@@ -100,7 +97,7 @@ export default tseslint.config(
       'vue/no-mutating-props': 'warn',
       'vue/valid-v-for': 'warn',
       'vue/no-reserved-component-names': 'off', // test stubs legitimately use Button/Form/etc
-      'vue/one-component-per-file': 'off', // playground + tests inline multiple stubs
+      'vue/one-component-per-file': 'off', // tests inline multiple stubs
       // Pre-existing violations in Phase 3/5 pages - surfaced by Phase 6.8
       // baseline install. Downgraded to warn so lint is green; fixing
       // belongs to a dedicated code-quality backlog item.
@@ -135,18 +132,29 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': 'off',
       'no-empty': 'off',
       'no-unused-expressions': 'off',
+      // Inline component stubs in specs are throwaway - a stub exists to
+      // satisfy a mount, not to ship, so prop-shape rules add noise with no
+      // reader to serve.
+      'vue/require-prop-types': 'off',
+      'vue/require-default-prop': 'off',
     },
   },
 
-  // 0.2.72+ (B4): pages in ui-admin must never import values directly
-  // from `@tnzi/core/services/*` - they go through the matching
-  // bridge under `services/bridges/*-bridge.ts`. Type-only imports
-  // are still allowed because they don't create a runtime dep edge.
+  // 0.2.72+ (B4): pages in ui-admin must never call service factories directly
+  // from `@tnzi/core/services/*` - they go through the matching bridge under
+  // `services/bridges/*-bridge.ts`.
   //
-  // Without this rule the dep-graph drifts back to pages → core for
-  // every quick enum or factory, defeating the bridge abstraction and
-  // making the page-level test mocks (`vi.mock('.../foo-bridge')`)
-  // fail to intercept the real call path.
+  // Without this rule the dep-graph drifts back to pages → core for every quick
+  // factory, defeating the bridge abstraction and making the page-level test
+  // mocks (`vi.mock('.../foo-bridge')`) fail to intercept the real call path.
+  //
+  // What the rule bans is the FACTORY (`useXxxApi`), not the module. Contract
+  // enums (`NotificationType`, `TwoFactorType`, `PermissionCategory`, …) are
+  // values a page legitimately compares against, and a TS enum used as a value
+  // CANNOT be written as `import type` - banning the whole module flagged 9
+  // such imports as violations with no reachable fix, which is how the rule
+  // ended up permanently red and therefore ignored. Type-only imports stay
+  // allowed for the same reason as before: no runtime dep edge.
   {
     files: [
       'packages/ui-admin/src/pages/**/*.vue',
@@ -160,8 +168,9 @@ export default tseslint.config(
           patterns: [
             {
               group: ['@tnzi/core/services/*'],
+              importNamePattern: '^use[A-Z].*Api$',
               message:
-                'Pages must not import services directly. Route through a bridge in `services/bridges/*-bridge.ts`. `import type { ... }` is allowed.',
+                'Pages must not call service factories directly. Route through a bridge in `services/bridges/*-bridge.ts`. Contract enums and `import type { ... }` are allowed.',
               allowTypeImports: true,
             },
           ],

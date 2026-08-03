@@ -1,4 +1,3 @@
-using Tnzi.Imaging.Options;
 
 namespace Tnzi.Imaging.Tests;
 

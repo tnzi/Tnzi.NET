@@ -14,8 +14,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TExceptionPage from '../../components/pages/TExceptionPage.vue'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import { en } from '../../locales/en'
-import { zhCn } from '../../locales/zh-cn'
+import { getLocaleMessages } from '../../i18n/messages'
 
 type ExceptionCode = '403' | '404' | '500'
 
@@ -34,7 +33,7 @@ const type = computed<ExceptionCode>(() => {
  * their own i18n stack still get sensible bundled defaults here.
  */
 function tr(key: string, fallback: string): string {
-  const messages = (appStore.locale === 'zh-cn' ? zhCn : en) as Record<string, unknown>
+  const messages = getLocaleMessages(appStore.locale) ?? {}
   const normalized = key.startsWith('tnzi.') ? key.slice(5) : key
   let node: unknown = messages
   for (const part of normalized.split('.')) {

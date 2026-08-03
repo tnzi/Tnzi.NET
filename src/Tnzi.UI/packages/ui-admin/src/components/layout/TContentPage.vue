@@ -27,7 +27,7 @@
 import { computed, useSlots } from 'vue'
 import { useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
 import TPageHeader from './TPageHeader.vue'
-import type { BackTarget } from './backTarget'
+import type { BackTarget } from './back-target'
 
 interface Props {
   title?: string

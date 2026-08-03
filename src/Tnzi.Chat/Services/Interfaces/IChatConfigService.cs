@@ -1,4 +1,4 @@
-namespace Tnzi.Chat.Services.Interfaces;
+namespace Tnzi.Chat.Services;
 
 /// <summary>
 /// 聊天客户端配置服务：把 <see cref="ChatOptions"/> 中与前端相关的开关

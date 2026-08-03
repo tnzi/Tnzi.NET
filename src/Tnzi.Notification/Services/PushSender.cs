@@ -70,12 +70,18 @@ public class PushSender : IPushSender
                     // 双重检查，避免在锁内重复初始化
                     if (!_firebaseInitialized && FirebaseApp.DefaultInstance == null)
                     {
+                        // 走 CredentialFactory 而不是已弃用的 GoogleCredential.FromJson/FromFile：
+                        // 后者按 JSON 内容动态挑凭据类型，Google 因安全风险弃用了它。这里的配置项
+                        // 语义就是「服务账号 JSON」，显式指定 ServiceAccountCredential 也让配置放错时
+                        // 在启动阶段报清楚，而不是拿一个错误类型的凭据去调 FCM 才失败。
                         if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJson))
                         {
                             // 从JSON字符串初始化
                             FirebaseApp.Create(new AppOptions
                             {
-                                Credential = GoogleCredential.FromJson(_options.PushSender.FirebaseServiceAccountJson),
+                                Credential = CredentialFactory
+                                    .FromJson<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJson)
+                                    .ToGoogleCredential(),
                                 ProjectId = projectId
                             });
                         }
@@ -84,7 +90,9 @@ public class PushSender : IPushSender
                             // 从文件路径初始化
                             FirebaseApp.Create(new AppOptions
                             {
-                                Credential = GoogleCredential.FromFile(_options.PushSender.FirebaseServiceAccountJsonPath),
+                                Credential = CredentialFactory
+                                    .FromFile<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJsonPath)
+                                    .ToGoogleCredential(),
                                 ProjectId = projectId
                             });
                         }

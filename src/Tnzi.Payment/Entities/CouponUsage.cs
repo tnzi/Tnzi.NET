@@ -41,4 +41,15 @@ public class CouponUsage : CreationAuditedEntity<Guid>, IMultiTenant
     /// 业务订单ID
     /// </summary>
     public Guid? OrderId { get; set; }
+
+    /// <summary>
+    /// 业务订单号。核销幂等键的一部分（同一促销 + 同一用户 + 同一业务单号只允许核销一次），
+    /// 支付/订阅的业务单号本来就是字符串，用它比 <see cref="OrderId"/> 更贴合真实调用方。
+    /// </summary>
+    public string? BusinessOrderNo { get; set; }
+
+    /// <summary>
+    /// 消耗掉的用户持券ID（通过兑换码领取的券在核销时被置为已使用）
+    /// </summary>
+    public Guid? UserCouponId { get; set; }
 }

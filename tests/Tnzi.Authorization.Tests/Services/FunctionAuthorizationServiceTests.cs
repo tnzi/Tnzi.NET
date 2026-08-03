@@ -5,7 +5,7 @@ namespace Tnzi.Authorization.Tests.Services;
 /// FunctionAuthorizationService 单元测试
 /// </summary>
 /// <remarks>
-/// 由于 IRepository 实现了 IQueryable<TEntity> 且服务内部使用了 LINQ 扩展方法，
+/// 由于 IRepository 实现了 IQueryable&lt;TEntity&gt; 且服务内部使用了 LINQ 扩展方法，
 /// 需要依赖 IQueryable 操作的测试将在集成测试中实现（使用 InMemory 数据库）。
 /// 这些测试主要验证服务的可用性和基于 FindAsync 的基础功能。
 /// </remarks>

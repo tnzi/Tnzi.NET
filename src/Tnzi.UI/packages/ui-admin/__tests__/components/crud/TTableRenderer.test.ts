@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed, nextTick } from 'vue'
 import TTableRenderer from '../../../src/components/crud/renderers/TTableRenderer.vue'
-import { estimateRowActionsWidth, type RowAction } from '../../../src/headless/rowActions'
+import { estimateRowActionsWidth, type RowAction } from '../../../src/headless/row-actions'
 
 const stubs = {
   DataTable: {
@@ -261,5 +261,92 @@ describe('TTableRenderer', () => {
       await cta.trigger('click')
       expect(state.openCreate).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+/**
+ * Server-side sorting. Before this the hook exposed `setSort` but nothing in
+ * the package ever called it: the table declared no `sorter` on any column and
+ * bound no `@update:sorter`, so the whole sort path was wired but dead.
+ */
+describe('TTableRenderer sorting', () => {
+  const sortStubs = {
+    DataTable: {
+      name: 'DataTable',
+      props: ['data', 'columns'],
+      template:
+        '<div class="n-data-table-stub"' +
+        ' :data-sorters="columns.map(c => c.key + \':\' + (c.sorter === true ? \'on\' : \'off\')).join(\',\')"' +
+        ' :data-orders="columns.map(c => c.key + \':\' + String(c.sortOrder)).join(\',\')" />',
+    },
+  }
+
+  function sortableState() {
+    const state = makeState()
+    state.columnSettings.visibleColumns = ref([
+      { key: 'name', title: 'Name', sortable: true },
+      { key: 'note', title: 'Note' },
+    ]) as never
+    return { ...state, setSort: vi.fn() }
+  }
+
+  function mountSortable(state: ReturnType<typeof sortableState>) {
+    return mount(TTableRenderer, {
+      props: { state: state as never, showSelection: false },
+      global: { stubs: sortStubs },
+    })
+  }
+
+  it('marks only the columns that opted in as sortable', () => {
+    const wrapper = mountSortable(sortableState())
+    const sorters = wrapper.find('.n-data-table-stub').attributes('data-sorters')
+    expect(sorters).toContain('name:on')
+    // Declaring every column sortable would let the reader sort by fields the
+    // backend silently ignores.
+    expect(sorters).toContain('note:off')
+  })
+
+  it('drives the header arrow from the query (controlled), not from naive internal state', () => {
+    const state = sortableState()
+    state.query.value = { ...state.query.value, sortField: 'name', sortOrder: 'desc' } as never
+    const wrapper = mountSortable(state)
+    expect(wrapper.find('.n-data-table-stub').attributes('data-orders')).toContain('name:descend')
+  })
+
+  it('shows no arrow when the query sorts by a different column', () => {
+    const state = sortableState()
+    state.query.value = { ...state.query.value, sortField: 'other', sortOrder: 'asc' } as never
+    const wrapper = mountSortable(state)
+    expect(wrapper.find('.n-data-table-stub').attributes('data-orders')).toContain('name:false')
+  })
+
+  it('forwards a header click to setSort with the mapped direction', () => {
+    const state = sortableState()
+    const wrapper = mountSortable(state)
+    const table = wrapper.findComponent({ name: 'DataTable' })
+
+    table.vm.$emit('update:sorter', { columnKey: 'name', order: 'ascend' })
+    expect(state.setSort).toHaveBeenCalledWith('name', 'asc')
+
+    table.vm.$emit('update:sorter', { columnKey: 'name', order: 'descend' })
+    expect(state.setSort).toHaveBeenLastCalledWith('name', 'desc')
+  })
+
+  it('clears the sort on the third click (order=false) and on a null payload', () => {
+    const state = sortableState()
+    const table = mountSortable(state).findComponent({ name: 'DataTable' })
+
+    table.vm.$emit('update:sorter', { columnKey: 'name', order: false })
+    expect(state.setSort).toHaveBeenLastCalledWith(undefined, null)
+
+    table.vm.$emit('update:sorter', null)
+    expect(state.setSort).toHaveBeenLastCalledWith(undefined, null)
+  })
+
+  it('takes the first entry when naive emits an array', () => {
+    const state = sortableState()
+    const table = mountSortable(state).findComponent({ name: 'DataTable' })
+    table.vm.$emit('update:sorter', [{ columnKey: 'name', order: 'descend' }])
+    expect(state.setSort).toHaveBeenCalledWith('name', 'desc')
   })
 })

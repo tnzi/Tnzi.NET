@@ -1,4 +1,4 @@
-namespace Tnzi.Chat.Services.Interfaces;
+namespace Tnzi.Chat.Services;
 
 /// <summary>
 /// 聊天使用权判定（白名单）：聊天默认关闭，仅被授予 <c>chat.use</c> 的角色/用户可用。

@@ -1,5 +1,3 @@
-using Tnzi.AI.Infrastructure.ContextProviders;
-using Tnzi.AI.Skills;
 
 namespace Tnzi.AI.Tests.Skills;
 

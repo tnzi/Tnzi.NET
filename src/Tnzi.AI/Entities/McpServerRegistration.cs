@@ -5,7 +5,7 @@ namespace Tnzi.AI.Entities;
 /// </summary>
 /// <remarks>
 /// 该实体用于编录 Tnzi 可连接的外部 MCP Server（client-side registration），
-/// 与 <see cref="Tnzi.AI.Mcp.Options.McpServerOptions"/> 描述的 server-hosting 配置无关。
+/// 与 <c>Tnzi.AI.Mcp.Options.McpServerOptions</c> 描述的 server-hosting 配置无关。
 /// 凭证（AuthToken/ApiKey）通过 <c>IDataProtectionProvider</c> 加密存储于
 /// <see cref="AuthTokenEncrypted"/>。
 ///

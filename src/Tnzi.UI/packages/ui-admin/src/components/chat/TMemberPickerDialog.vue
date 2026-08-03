@@ -42,7 +42,7 @@
         <NCheckbox :checked="selected.has(c.userId)" @click.stop @update:checked="toggle(c)" />
       </div>
       <div v-if="candidates.length === 0" class="t-member-picker__empty">
-        {{ loading ? t('window.loading') : t('window.empty') }}
+        {{ searching ? t('window.loading') : t('window.empty') }}
       </div>
     </NScrollbar>
 
@@ -51,7 +51,7 @@
       <NButton
         size="small"
         type="primary"
-        :loading="loading || confirming"
+        :loading="searching || confirming"
         :disabled="selected.size === 0"
         @click="onConfirm"
       >
@@ -67,7 +67,7 @@ import { NScrollbar, NCheckbox, NButton } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatDialog from './TChatDialog.vue'
 import TChatAvatar from './TChatAvatar.vue'
@@ -97,7 +97,7 @@ const { isSm } = useBreakpoint()
 const keyword = ref('')
 const focused = ref(false)
 const candidates = ref<ChatContactDto[]>([])
-const loading = ref(false)
+const searching = ref(false)
 // `loading` prop = parent's confirm-in-flight flag; mirror it locally so the
 // confirm button spinner reflects the add/create request too.
 const confirming = ref(false)
@@ -113,13 +113,13 @@ function reset() {
 }
 
 async function load(kw: string) {
-  loading.value = true
+  searching.value = true
   try {
     const results = await store.searchContacts(kw.trim())
     const exclude = new Set(props.excludeIds)
     candidates.value = results.filter((c) => !exclude.has(c.userId))
   } finally {
-    loading.value = false
+    searching.value = false
   }
 }
 

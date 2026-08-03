@@ -1,5 +1,4 @@
 using Tnzi.AI.Tools.Sql;
-using Xunit;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Tools.Sql;

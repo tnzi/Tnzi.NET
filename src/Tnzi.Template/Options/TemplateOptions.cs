@@ -1,4 +1,4 @@
-namespace Tnzi.Template;
+namespace Tnzi.Template.Options;
 
 /// <summary>
 /// 模板引擎配置选项

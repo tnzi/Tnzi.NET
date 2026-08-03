@@ -1,12 +1,14 @@
-namespace Tnzi.Storage.Controllers;
+﻿namespace Tnzi.Storage.Controllers;
 
 /// <summary>
 /// 存储控制器基类
 /// 提供文件上传、下载、版本、分享、分块上传等 API 的抽象基类
 /// </summary>
 /// <remarks>
-/// 四个读端点带 <c>[AllowAnonymous]</c>,是为了让 <c>FileRecord.IsPublic</c> 的文件
-/// (头像 / 站点素材)能被未登录访客取到 —— 类级 <c>[ApiAuthorize]</c> 会把它们一并挡掉。
+/// 几个读端点带 <c>[AllowAnonymous]</c>:
+/// 一是让 <c>FileRecord.IsPublic</c> 的文件(头像 / 站点素材)能被未登录访客取到,
+/// 二是让**对外分享链接**能被真正的外部收件人打开 —— 收件人没有账号才叫对外分享。
+/// 类级 <c>[ApiAuthorize]</c> 会把它们一并挡掉。
 ///
 /// **放行的是路由,不是数据**:真正的判定在 <see cref="IFileAccessAuthorizer"/>,由
 /// <see cref="IFileStorageService"/> 在每次按 id 取记录时执行(公开 / 部署级开关 /
@@ -66,8 +68,17 @@ public class DefaultStorageController : ApiControllerBase
     /// <summary>
     /// 上传文件
     /// </summary>
+    /// <param name="file">文件内容</param>
+    /// <param name="isPublic">
+    /// 标记为公开可读:该文件之后可被任何人(含未登录访客)按 id 取到,用于头像、站点素材这类
+    /// 以匿名 <c>&lt;img src&gt;</c> 消费的资源。默认 false。
+    ///
+    /// 注意这是**上传者自报**的意图,不是唯一的公开途径:文件 id 写进标了
+    /// <c>[FileField(Public = true)]</c> 的实体字段时,框架会自行补上公开标记,
+    /// 所以头像不会因为前端漏传这个参数而失效。
+    /// </param>
     [HttpPost("upload")]
-    public virtual async Task<ApiResult<FileRecordDto>> Upload(IFormFile file)
+    public virtual async Task<ApiResult<FileRecordDto>> Upload(IFormFile file, [FromForm] bool isPublic = false)
     {
         if (file == null || file.Length == 0)
         {
@@ -75,7 +86,7 @@ public class DefaultStorageController : ApiControllerBase
         }
 
         using var stream = file.OpenReadStream();
-        var result = await FileStorageService.SaveAsync(file.FileName, stream, isTemporary: true);
+        var result = await FileStorageService.SaveAsync(file.FileName, stream, isTemporary: true, isPublic: isPublic);
         return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
@@ -83,7 +94,7 @@ public class DefaultStorageController : ApiControllerBase
     /// 批量上传
     /// </summary>
     [HttpPost("upload/batch")]
-    public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> UploadMany(IEnumerable<IFormFile> files)
+    public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> UploadMany(IEnumerable<IFormFile> files, [FromForm] bool isPublic = false)
     {
         if (files == null || !files.Any())
         {
@@ -104,7 +115,7 @@ public class DefaultStorageController : ApiControllerBase
                 fileList.Add((file.FileName, memoryStream));
             }
 
-            var result = await FileStorageService.SaveManyAsync(fileList);
+            var result = await FileStorageService.SaveManyAsync(fileList, isPublic);
             return result.Map(items => items.Select(r => r.MapTo<FileRecordDto>())).ToApiResult();
         }
         finally
@@ -238,6 +249,43 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
+    /// Mint a short-lived access token so a browser can fetch this private file
+    /// without an Authorization header.
+    /// </summary>
+    /// <remarks>
+    /// Append the token to any read URL of the same file as the `sig` query
+    /// parameter: <c>/api/files/{id}/preview?sig={token}</c>. It exists because
+    /// `&lt;img&gt;`, `&lt;a download&gt;` and `&lt;video&gt;` cannot send a bearer
+    /// token, which otherwise makes every private file unrenderable - even for
+    /// the person who uploaded it.
+    ///
+    /// Minting runs the full read check, so a caller who cannot read the file
+    /// cannot mint a token for it (404, same as every other read path).
+    /// </remarks>
+    [HttpGet("{id:guid}/access-token")]
+    public virtual async Task<ApiResult<FileAccessTokenDto>> GetAccessToken(Guid id, [FromQuery] int? expiresInSeconds = null)
+    {
+        var result = await FileStorageService.CreateAccessTokenAsync(id, expiresInSeconds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Mint access tokens for several files at once. Files the caller cannot
+    /// read are omitted from the response instead of failing the batch.
+    /// </summary>
+    [HttpPost("access-tokens")]
+    public virtual async Task<ApiResult<IReadOnlyList<FileAccessTokenDto>>> GetAccessTokens([FromBody] FileAccessTokenRequest request)
+    {
+        if (request?.FileIds == null || request.FileIds.Count == 0)
+        {
+            return BadRequest<IReadOnlyList<FileAccessTokenDto>>("FileIds are required");
+        }
+
+        var result = await FileStorageService.CreateAccessTokensAsync(request.FileIds, request.ExpiresInSeconds);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 重命名文件
     /// </summary>
     [HttpPut("{id:guid}/rename")]
@@ -357,7 +405,25 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取分享信息
+    /// What a share-link recipient sees before downloading. Anonymous on purpose:
+    /// the recipient of an external share link has no account.
+    /// </summary>
+    /// <remarks>
+    /// Returns 404 for a link that is revoked, expired or exhausted - identical to
+    /// a token that never existed, so probing reveals nothing. Password-protected
+    /// links still preview (the recipient needs to know a password is coming);
+    /// the password only gates the bytes.
+    /// </remarks>
+    [HttpGet("share/{token}/info")]
+    [AllowAnonymous]
+    public virtual async Task<ApiResult<FileSharePreviewDto>> GetSharePreview(string token)
+    {
+        var result = await FileShareService.GetSharePreviewAsync(token);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 获取分享信息(管理视角,含令牌与计数)
     /// </summary>
     [HttpGet("share/{token}")]
     [ApiExplorerSettings(IgnoreApi = true)]
@@ -380,9 +446,35 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 通过分享 token 下载
+    /// 校验分享口令是否正确。**匿名**,且**不消耗访问配额**。
     /// </summary>
+    /// <remarks>
+    /// 收件人页面靠它在原地反馈口令不对,而不是让浏览器跳去一个 401 页面 ——
+    /// 跳走了他就再也回不到那一屏。
+    ///
+    /// 刻意独立于下载端点:拿下载端点探测会**消耗一次配额**,
+    /// 于是 `maxAccessCount = 1` 的链接在真正下载之前就已经用完了。
+    /// 口令连错仍照常计入自动停用的闸门(校验逻辑是同一份)。
+    /// </remarks>
+    [HttpPost("share/{token}/verify")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public virtual async Task<ApiResult<bool>> VerifyShareAccess(string token, [FromBody] VerifyShareRequest? request = null)
+    {
+        var result = await FileShareService.ValidateShareAccessAsync(token, request?.Password);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 通过分享 token 下载。**匿名**:对外分享的收件人没有账号,这正是它的用途。
+    /// </summary>
+    /// <remarks>
+    /// 令牌本身就是凭据。<c>ValidateShareAccessAsync</c> 校验通过后会把该文件记进请求
+    /// 作用域的授予表,后面的取记录 / 取流因此不再要求调用者本人有权 —— 判定仍然全在
+    /// 服务层,控制器只负责把请求送进去。
+    /// </remarks>
     [HttpGet("share/{token}/download")]
+    [AllowAnonymous]
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<IActionResult> DownloadByShareToken(string token, [FromQuery] string? password = null)
     {

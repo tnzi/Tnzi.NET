@@ -481,6 +481,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@tnzi/core'
 import { computed, reactive, ref, watch, onMounted } from 'vue'
 import type { CSSProperties } from 'vue'
 import {
@@ -488,7 +489,7 @@ import {
   NDrawer, NDrawerContent, NSelect,
 } from 'naive-ui'
 import type { EChartsOption } from 'echarts'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { useFormModal, type UseFormModalReturn } from '../../../headless/useFormModal'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import TContentPage from '../../../components/layout/TContentPage.vue'
@@ -785,14 +786,12 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
 }
 
-function formatTime(v?: string | Date | null): string {
-  if (!v) return ''
-  try {
-    return new Date(v).toLocaleString()
-  } catch {
-    return ''
-  }
-}
+// Routed through @tnzi/core rather than a local toLocaleString: one
+// implementation means one rendering of a timestamp across the whole admin.
+// It also handles the case the try/catch here was reaching for - building a
+// Date from unparseable input yields an Invalid Date, it does not throw, so
+// that catch block never ran and the cell rendered the text "Invalid Date".
+const formatTime = (v?: string | Date | null): string => formatDateTime(v, { fallback: '' })
 
 function formatJson(s: string | null | undefined): string {
   if (!s) return ''

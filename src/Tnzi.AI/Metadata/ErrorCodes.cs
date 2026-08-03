@@ -314,4 +314,65 @@ public static class ErrorCodes
     /// Agent memory entry not found.
     /// </summary>
     public const string MemoryNotFound = "AI_MEMORY_NOT_FOUND";
+
+    /// <summary>
+    /// Persisted tool permission rule not found.
+    /// </summary>
+    public const string PermissionRuleNotFound = "AI_PERMISSION_RULE_NOT_FOUND";
+
+    /// <summary>
+    /// Sub-agent type definition not found.
+    /// </summary>
+    public const string SubAgentTypeNotFound = "AI_SUB_AGENT_TYPE_NOT_FOUND";
+
+    /// <summary>
+    /// External CLI agent capability requested but the Tnzi.AI.Cli module is not loaded.
+    /// </summary>
+    public const string CliModuleNotLoaded = "AI_CLI_MODULE_NOT_LOADED";
+
+    /// <summary>
+    /// External CLI agent execution is disabled by configuration (AI:Cli:Enabled=false).
+    /// </summary>
+    public const string CliDisabled = "AI_CLI_DISABLED";
+
+    /// <summary>
+    /// External CLI runtime registration not found.
+    /// </summary>
+    public const string CliRuntimeNotFound = "AI_CLI_RUNTIME_NOT_FOUND";
+
+    /// <summary>
+    /// The agent has no external CLI runtime binding.
+    /// </summary>
+    public const string CliBindingNotFound = "AI_CLI_BINDING_NOT_FOUND";
+
+    /// <summary>
+    /// External CLI run record not found.
+    /// </summary>
+    public const string CliRunNotFound = "AI_CLI_RUN_NOT_FOUND";
+
+    /// <summary>
+    /// External CLI run is not in the expected state for the requested operation.
+    /// </summary>
+    public const string CliRunInvalidState = "AI_CLI_RUN_INVALID_STATE";
+
+    /// <summary>
+    /// The requested external agent provider is unknown or not enabled in this deployment.
+    /// </summary>
+    public const string CliProviderNotAvailable = "AI_CLI_PROVIDER_NOT_AVAILABLE";
+
+    /// <summary>
+    /// No protocol adapter is implemented for the provider's protocol family.
+    /// </summary>
+    public const string CliProtocolNotImplemented = "AI_CLI_PROTOCOL_NOT_IMPLEMENTED";
+
+    /// <summary>
+    /// The USD cost budget is exhausted, so no external CLI run may be started.
+    /// </summary>
+    /// <remarks>
+    /// External execution deliberately bypasses the middleware pipeline, and with it
+    /// <c>QuotaMiddleware</c> — the budget gate therefore has to be applied explicitly on this
+    /// path. Without it the external domain would be an unmetered way around the budget, and it
+    /// is the more expensive of the two: an external run lasts minutes to hours.
+    /// </remarks>
+    public const string CliBudgetExceeded = "AI_CLI_BUDGET_EXCEEDED";
 }

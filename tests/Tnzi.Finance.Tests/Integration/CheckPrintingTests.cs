@@ -2,7 +2,6 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using Tnzi.Finance.Events;
 using Tnzi.Finance.Banking.Events.Handlers;
-using Tnzi.Finance.Services.Internal;
 
 namespace Tnzi.Finance.Tests.Integration;
 
@@ -73,8 +72,8 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
             s => s.ExportPositivePayAsync(bank, new DateTime(2026, 1, 1), new DateTime(2026, 12, 31)));
         csv.Succeeded.ShouldBeTrue(csv.Message);
         csv.Data!.ShouldContain("CheckNumber,Amount,IssueDate,Payee,Status");
-        csv.Data.ShouldContain("Issued");
-        csv.Data.ShouldContain("Acme Supplies");
+        csv.Data!.ShouldContain("Issued");
+        csv.Data!.ShouldContain("Acme Supplies");
     }
 
     /// <summary>回归：Blank 票纸须现打 MICR 行，无 scheme 有效路由时打印须 fail-fast（否则打出空路由字段的

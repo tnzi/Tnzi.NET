@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Recurring.Services.Interfaces;
+namespace Tnzi.Finance.Recurring.Services;
 
 /// <summary>
 /// 后台扫描要覆盖哪些租户（可选契约）

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Payroll.Services.Interfaces;
+namespace Tnzi.Finance.Payroll.Services;
 
 /// <summary>
 /// 员工服务（含薪资分配子资源——分配按员工聚合管理，修正 = 删除重建）

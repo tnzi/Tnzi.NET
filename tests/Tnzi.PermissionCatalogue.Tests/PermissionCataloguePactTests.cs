@@ -1,6 +1,6 @@
 using System.Reflection;
-using Microsoft.AspNetCore.Mvc;
 using Tnzi.AI.Channels.Permissions;
+using Tnzi.Documents.Signing.Permissions;
 using Tnzi.AspNetCore.Mvc;
 using Tnzi.Authorization.Permissions;
 using Tnzi.Security.Authorization;
@@ -52,7 +52,12 @@ namespace Tnzi.PermissionCatalogue.Tests;
 public class PermissionCataloguePactTests
 {
     /// <summary>Every framework permission provider, keyed by owner name for diagnostics.</summary>
-    private static readonly IReadOnlyDictionary<string, IPermissionDefinitionProvider> AllProviders =
+    /// <summary>
+    /// 全部权限 provider（模块短名 → 实例）。<see cref="PermissionProviderRegistrationTests"/>
+    /// 拿它当"到底有哪些 provider"的单一真值源——否则那边只能靠扫程序集，而扫的范围
+    /// 又恰好由它自己的清单决定，删一行等于连带把那个程序集移出扫描范围。
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IPermissionDefinitionProvider> AllProviders =
         new Dictionary<string, IPermissionDefinitionProvider>
         {
             ["Identity"] = new IdentityPermissions(),
@@ -82,6 +87,7 @@ public class PermissionCataloguePactTests
             ["AI.Rag"] = new RagPermissions(),
             ["AI.Sandbox"] = new SandboxPermissions(),
             ["AI.Channels"] = new ChannelsPermissions(),
+            ["Documents.Signing"] = new SigningPermissions(),
         };
 
     private static PermissionDefinitionContext BuildContext()
@@ -132,8 +138,13 @@ public class PermissionCataloguePactTests
         // 能决定钱自动记进哪个科目，与"能看流水、能确认匹配"不是一回事。
         // 再加 finance.attachment 与 finance.comment 各 view/create/delete
         // （6 码，2026-07-25）——能看单据不等于该看得到内部讨论。
-        codes.Count.ShouldBe(280);
-        context.Groups.Count.ShouldBe(12);
+        // 又加 payment.refund.create（1 码，2026-07-31）——客服代客发起退款，
+        // 与"审批一笔已提交的退款申请"是两种不同的能力。
+        // 再加电子签署 9 码（1 组，2026-07-31）——signing.view + template/request 各一套
+        // crud。收件人签署面不在目录里：它是匿名的、凭一次性令牌进入，给客户和对家发
+        // 账号才能签字等于让电子签比纸笔更麻烦。
+        codes.Count.ShouldBe(290);
+        context.Groups.Count.ShouldBe(13);
     }
 
     [Fact]

@@ -38,7 +38,7 @@ import { ref, computed } from 'vue'
 import { NPopover } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import TChatAvatar from './TChatAvatar.vue'
 import TPresenceDot from './TPresenceDot.vue'
 

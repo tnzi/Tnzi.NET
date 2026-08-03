@@ -12,7 +12,7 @@ import {
   LOGIN_CONTEXT_KEY,
   DEFAULT_LOGIN_FEATURES,
   type LoginContext,
-} from '../../../src/pages/login/useLoginContext'
+} from '@tnzi/ui'
 
 function themeProvide() {
   const ctx = createThemeContext(mergeThemeSettings({}))

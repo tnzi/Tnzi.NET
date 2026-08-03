@@ -1,6 +1,3 @@
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Tnzi.Data;
 using Tnzi.Finance.Documents;
 using Tnzi.Finance.Documents.Services.Internal;
 using Tnzi.Modules;
@@ -37,16 +34,15 @@ public class FinanceDocumentsModuleTests
     }
 
     [Fact]
-    public void ConsumerRegisteredRenderer_WinsOverTheModuleDefault()
+    public async Task ConsumerRegisteredRenderer_WinsOverTheModuleDefault()
     {
         var services = new ServiceCollection();
         services.AddLogging();
         // 消费应用先注册（模块用 TryAddScoped，先注册者胜出）
         services.AddScoped<ICheckDocumentRenderer, PdfSharpCheckRenderer>();
 
-        new FinanceDocumentsModule()
-            .ConfigureServicesAsync(new ServiceConfigurationContext(services, EmptyConfiguration()))
-            .GetAwaiter().GetResult();
+        await new FinanceDocumentsModule()
+            .ConfigureServicesAsync(new ServiceConfigurationContext(services, EmptyConfiguration()));
 
         var renderer = services.Single(d => d.ServiceType == typeof(ICheckDocumentRenderer));
         renderer.ImplementationType.ShouldBe(typeof(PdfSharpCheckRenderer));

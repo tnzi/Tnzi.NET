@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Hosting;
-using Tnzi.Modules.Diagnostics;
 
 namespace Tnzi.Tests.Modules;
 

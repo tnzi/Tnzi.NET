@@ -15,11 +15,21 @@ import type {
   RefundQueryDto,
   ApproveRefundDto,
   SubscriptionDto,
+  SubscriptionCreateResultDto,
   CreateSubscriptionDto,
   SubscriptionQueryDto,
   SubscriptionPlanDto,
   CancelSubscriptionDto,
-  ChangeSubscriptionDto,
+  PauseSubscriptionDto,
+  ChangeSubscriptionPlanDto,
+  SubscriptionChangeDto,
+  AttachPaymentMethodDto,
+  ConfirmOfflinePaymentDto,
+  CreateSetupSessionDto,
+  SetupSessionDto,
+  BindPaymentMethodDto,
+  StoredPaymentMethodDto,
+  GrantCouponDto,
   InvoiceDto,
   InvoiceQueryDto,
   CreateInvoiceDto,
@@ -31,6 +41,8 @@ import type {
   UpdatePromotionDto,
   PromotionQueryDto,
   CouponValidationResultDto,
+  ValidateCouponDto,
+  CalculateDiscountDto,
   DiscountCalculationResultDto,
   UserCouponDto,
   CouponUsageDto,
@@ -48,6 +60,7 @@ import type {
 } from './types';
 
 const BASE = '/payments';
+const PAYMENT_METHOD_BASE = '/payment-methods';
 const REFUND_BASE = '/refunds';
 const SUBSCRIPTION_BASE = '/subscriptions';
 const INVOICE_BASE = '/invoices';
@@ -122,15 +135,15 @@ export function useRefundApi(client: HttpClient) {
  */
 export function useSubscriptionApi(client: HttpClient) {
   return {
-    /** Get subscription plans */
-    getPlans: (activeOnly = true) =>
+    /** Get subscription plans, optionally scoped to one product */
+    getPlans: (activeOnly = true, productCode?: string) =>
       client.get<SubscriptionPlanDto[]>(`${SUBSCRIPTION_BASE}/plans`, {
-        params: { activeOnly },
+        params: { activeOnly, productCode },
       }),
 
-    /** Create subscription */
+    /** Create subscription; returns the first payment's credentials when payment is due */
     create: (data: CreateSubscriptionDto) =>
-      client.post<SubscriptionDto>(SUBSCRIPTION_BASE, data),
+      client.post<SubscriptionCreateResultDto>(SUBSCRIPTION_BASE, data),
 
     /** Get subscription by ID */
     get: (id: string) =>
@@ -148,21 +161,76 @@ export function useSubscriptionApi(client: HttpClient) {
     cancel: (id: string, data: CancelSubscriptionDto) =>
       client.post<void>(`${SUBSCRIPTION_BASE}/${id}/cancel`, data),
 
+    /** Pause subscription (auto-resumes at `resumeAt`, or manually) */
+    pause: (id: string, data: PauseSubscriptionDto = {}) =>
+      client.post<void>(`${SUBSCRIPTION_BASE}/${id}/pause`, data),
+
     /** Resume subscription */
     resume: (id: string) =>
       client.post<void>(`${SUBSCRIPTION_BASE}/${id}/resume`),
 
-    /** Change subscription plan */
-    changePlan: (id: string, data: ChangeSubscriptionDto) =>
-      client.post<SubscriptionDto>(`${SUBSCRIPTION_BASE}/${id}/change-plan`, data),
+    /** Retry billing immediately (past-due subscription after a card change) */
+    retryBilling: (id: string) =>
+      client.post<void>(`${SUBSCRIPTION_BASE}/${id}/retry-billing`),
 
-    /** Update payment method */
-    updatePaymentMethod: (id: string, paymentMethodId: string) =>
-      client.post<void>(`${SUBSCRIPTION_BASE}/${id}/payment-method`, { paymentMethodId }),
+    /** Change subscription plan with proration */
+    changePlan: (id: string, data: ChangeSubscriptionPlanDto) =>
+      client.post<SubscriptionChangeDto>(`${SUBSCRIPTION_BASE}/${id}/change-plan`, data),
+
+    /** Preview a plan change (prorated amount, effective date) */
+    previewPlanChange: (id: string, newPlanId: string) =>
+      client.get<SubscriptionChangeDto>(`${SUBSCRIPTION_BASE}/${id}/change-plan-preview`, {
+        params: { newPlanId },
+      }),
+
+    /** Cancel a pending (not yet effective) plan change */
+    cancelPendingChange: (changeId: string) =>
+      client.post<void>(`/subscription-changes/${changeId}/cancel`),
+
+    /** Attach or replace the payment method used by this subscription */
+    updatePaymentMethod: (id: string, data: AttachPaymentMethodDto) =>
+      client.post<SubscriptionDto>(`${SUBSCRIPTION_BASE}/${id}/payment-method`, data),
 
     /** Update auto-renew setting */
     updateAutoRenew: (id: string, autoRenew: boolean) =>
       client.post<void>(`${SUBSCRIPTION_BASE}/${id}/auto-renew`, { autoRenew }),
+  };
+}
+
+/**
+ * Stored payment method (card-on-file) API (User).
+ *
+ * Binding a payment method is what makes unattended renewal charges possible;
+ * without it every renewal falls back to "no payment method" and goes past due.
+ */
+export function usePaymentMethodApi(client: HttpClient) {
+  return {
+    /**
+     * Step 1: open a setup session. Returns either a `clientSecret` (collect
+     * inline via the channel SDK) or an `approvalUrl` (send the payer there).
+     */
+    createSetupSession: (data: CreateSetupSessionDto = {}) =>
+      client.post<SetupSessionDto>(`${PAYMENT_METHOD_BASE}/setup`, data),
+
+    /**
+     * Step 3: register the collected payment method. Step 2 is the channel SDK
+     * for inline channels, or the payer's approval redirect for PayPal - where
+     * `paymentMethodToken` is the session's `setupId`.
+     */
+    bind: (data: BindPaymentMethodDto) =>
+      client.post<StoredPaymentMethodDto>(PAYMENT_METHOD_BASE, data),
+
+    /** List my saved payment methods */
+    getList: () =>
+      client.get<StoredPaymentMethodDto[]>(PAYMENT_METHOD_BASE),
+
+    /** Set the default payment method */
+    setDefault: (id: string) =>
+      client.post<void>(`${PAYMENT_METHOD_BASE}/${id}/default`),
+
+    /** Remove (detach) a payment method */
+    remove: (id: string) =>
+      client.delete<void>(`${PAYMENT_METHOD_BASE}/${id}`),
   };
 }
 
@@ -206,7 +274,13 @@ export function useCouponApi(client: HttpClient) {
     getUsedCoupons: () =>
       client.get<CouponUsageDto[]>(`${PROMOTION_BASE}/used-coupons`),
 
-    /** Apply coupon and calculate discount */
+    /**
+     * Preview a coupon's discount.
+     *
+     * NOTE: this only quotes the discount. Redemption happens server-side when
+     * the payment or subscription is created with `couponCode` - pass the code
+     * through to `createPayment` / `createSubscription` for it to take effect.
+     */
     apply: (data: ApplyCouponDto) =>
       client.post<CouponValidationDto>(`${PROMOTION_BASE}/calculate-discount`, {
         couponCode: data.code,
@@ -220,12 +294,12 @@ export function useCouponApi(client: HttpClient) {
         orderAmount: data.amount,
       }),
 
-    /** Validate coupon (typed) */
-    validateCoupon: (data: { couponCode: string; orderAmount: number; productId?: string }) =>
+    /** Validate coupon (typed, scope-aware) */
+    validateCoupon: (data: ValidateCouponDto) =>
       client.post<CouponValidationResultDto>(`${PROMOTION_BASE}/validate-coupon`, data),
 
-    /** Calculate discount (typed) */
-    calculateDiscount: (data: { couponCode: string; orderAmount: number }) =>
+    /** Calculate discount (typed, scope-aware) */
+    calculateDiscount: (data: CalculateDiscountDto) =>
       client.post<DiscountCalculationResultDto>(`${PROMOTION_BASE}/calculate-discount`, data),
 
     /** Redeem coupon code */
@@ -262,6 +336,13 @@ export function useAdminPaymentApi(client: HttpClient) {
     /** Sync order status */
     sync: (tradeNo: string) =>
       client.post<void>(`${ADMIN_BASE}/${tradeNo}/sync`),
+
+    /**
+     * Manually confirm an offline payment (bank transfer, wire, cheque).
+     * Rejected for online channels - those must settle through the callback.
+     */
+    confirm: (tradeNo: string, data: ConfirmOfflinePaymentDto) =>
+      client.post<PaymentDto>(`${ADMIN_BASE}/${tradeNo}/confirm`, data),
   };
 }
 
@@ -273,6 +354,10 @@ export function useAdminRefundApi(client: HttpClient) {
     /** Get refund list */
     getList: (params?: RefundQueryDto) =>
       client.get<PagedList<RefundDto>>(ADMIN_REFUND_BASE, { params }),
+
+    /** Raise a refund on the customer's behalf (the most common refund path) */
+    create: (data: CreateRefundDto) =>
+      client.post<RefundDto>(ADMIN_REFUND_BASE, data),
 
     /** Get refund details */
     get: (id: string) =>
@@ -309,10 +394,10 @@ export function useAdminSubscriptionApi(client: HttpClient) {
     getList: (params?: SubscriptionQueryDto) =>
       client.get<PagedList<SubscriptionDto>>(ADMIN_SUBSCRIPTION_BASE, { params }),
 
-    /** Get subscription plans */
-    getPlans: (activeOnly = false) =>
+    /** Get subscription plans, optionally scoped to one product */
+    getPlans: (activeOnly = false, productCode?: string) =>
       client.get<SubscriptionPlanDto[]>(`${ADMIN_SUBSCRIPTION_BASE}/plans`, {
-        params: { activeOnly },
+        params: { activeOnly, productCode },
       }),
 
     /** Create subscription plan */
@@ -330,6 +415,22 @@ export function useAdminSubscriptionApi(client: HttpClient) {
     /** Cancel subscription */
     cancel: (id: string, data: CancelSubscriptionDto) =>
       client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/${id}/cancel`, data),
+
+    /** Pause subscription on the customer's behalf */
+    pause: (id: string, data: PauseSubscriptionDto = {}) =>
+      client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/${id}/pause`, data),
+
+    /** Resume subscription on the customer's behalf */
+    resume: (id: string) =>
+      client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/${id}/resume`),
+
+    /** Retry billing now - the usual action when working a past-due ticket */
+    retryBilling: (id: string) =>
+      client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/${id}/retry-billing`),
+
+    /** Toggle auto-renew on the customer's behalf */
+    updateAutoRenew: (id: string, autoRenew: boolean) =>
+      client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/${id}/auto-renew`, { autoRenew }),
   };
 }
 
@@ -406,6 +507,10 @@ export function useAdminCouponApi(client: HttpClient) {
     /** Create redemption code(s) */
     createRedemptionCodes: (promotionId: string, quantity: number) =>
       client.post<string>(`${ADMIN_PROMOTION_BASE}/redemption-codes`, { promotionId, quantity }),
+
+    /** Grant a coupon directly to a user (no redemption code needed) */
+    grant: (promotionId: string, data: GrantCouponDto) =>
+      client.post<UserCouponDto>(`${ADMIN_PROMOTION_BASE}/${promotionId}/grant`, data),
   };
 }
 

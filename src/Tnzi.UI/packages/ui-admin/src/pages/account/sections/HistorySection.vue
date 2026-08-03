@@ -31,8 +31,8 @@ import { formatDateTime } from '@tnzi/core'
 import type { LoginLogDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
-import { createGuardedLoader } from '../guardedLoader'
-import { useUserCenterContext } from '../userCenterContext'
+import { createGuardedLoader } from '../guarded-loader'
+import { useUserCenterContext } from '../user-center-context'
 
 const ctx = useUserCenterContext()
 const t = ctx.t

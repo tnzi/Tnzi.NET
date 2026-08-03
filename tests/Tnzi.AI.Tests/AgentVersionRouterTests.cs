@@ -1,6 +1,3 @@
-using Mapster;
-using MapsterMapper;
-using Tnzi.Mapster;
 
 namespace Tnzi.AI.Tests;
 
@@ -819,7 +816,7 @@ public class AgentVersionRouterTests
         return new AgentService(
             agentRepo.Object,
             versionRepo.Object,
-            Mock.Of<IAgentRuntime>(),
+            TestDispatchFacade.Wrap(Mock.Of<IAgentRuntime>()),
             grantService.Object,
             new ServiceCollection()
                 .AddLogging()

@@ -2,12 +2,10 @@ using System.Linq.Expressions;
 using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
-using Tnzi.Caching;
 using Tnzi.Domain.Repositories;
 using Tnzi.Mapster;
 using Tnzi.Payment.Dtos;
+using Tnzi.Payment.Entities;
 using Tnzi.Payment.Metadata;
 using Tnzi.Payment.Options;
 using Tnzi.Payment.Providers;
@@ -52,9 +50,16 @@ public class PaymentServiceTests
         loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
 
+        // 税额计算器用默认实现（税务默认关闭 → 应付额 = 折后净额），保持原有断言语义
+        var taxOptionsMock = new Mock<IOptionsMonitor<TaxOptions>>();
+        taxOptionsMock.Setup(x => x.CurrentValue).Returns(new TaxOptions());
+
         _service = new PaymentService(
             _paymentRepositoryMock.Object,
+            new Mock<IRepository<CouponUsage, Guid>>().Object,
             _providerFactoryMock.Object,
+            new DefaultTaxCalculator(taxOptionsMock.Object),
+            new Mock<IPaymentMethodService>().Object,
             _optionsMock.Object,
             serviceProviderMock.Object
         );
@@ -165,30 +170,8 @@ public class PaymentServiceTests
 
     #region ClosePaymentAsync Tests
 
-    [Fact]
-    public async Task ClosePaymentAsync_WithPendingPayment_ReturnsSuccess()
-    {
-        // Arrange
-        var tradeNo = "PAY123";
-        var payment = new PaymentEntity
-        {
-            TradeNo = tradeNo,
-            Status = PaymentStatus.Pending
-        };
-
-        _paymentRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<PaymentEntity, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(payment);
-        _paymentRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<PaymentEntity>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _service.ClosePaymentAsync(tradeNo, "Test close");
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        payment.Status.ShouldBe(PaymentStatus.Closed);
-    }
+    // 关闭成功路径改用条件更新（CAS）落地，需要真实 EF Provider，
+    // 因此覆盖移到集成测试 PaymentLifecycleIntegrationTests.ClosePayment_*。
 
     [Fact]
     public async Task ClosePaymentAsync_WithSucceededPayment_ReturnsFailure()

@@ -39,7 +39,7 @@ import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
 import { TAvatar } from '@tnzi/ui'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { resolveChatAvatarUrl } from './avatar'
 import TPresenceDot from './TPresenceDot.vue'
 

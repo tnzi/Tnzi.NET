@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Tnzi.AspNetCore.Extensions;
-using Tnzi.Data;
 
 namespace Tnzi.AspNetCore.Tests;
 

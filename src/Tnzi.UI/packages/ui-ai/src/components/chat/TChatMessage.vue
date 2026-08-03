@@ -8,8 +8,8 @@
 
 import { computed } from 'vue';
 import { TAvatar } from '@tnzi/ui';
-import { useAiI18n } from '@/locale/index';
-import type { ChatMessage } from '@/composables/useChat';
+import { useAiI18n } from '../../i18n/index';
+import type { ChatMessage } from '../../headless/useChat';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import TMessageResponse from './TMessageResponse.vue';
 import TMessageAttachments from './TMessageAttachments.vue';

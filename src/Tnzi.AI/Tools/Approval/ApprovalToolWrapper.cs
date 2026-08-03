@@ -21,6 +21,13 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     /// <summary>
     /// 初始化包装器
     /// </summary>
+    /// <param name="innerFunction">被包装的原始工具</param>
+    /// <param name="approvalHandler">审批处理器；为空时不发起审批</param>
+    /// <param name="options">审批配置</param>
+    /// <param name="permissionEvaluator">可选工具权限规则评估器（allow/deny/ask）</param>
+    /// <param name="shellCommandAnalyzer">可选 shell 命令分析器（识别管道/破坏性命令）</param>
+    /// <param name="executionContextAccessor">可选执行上下文访问器（取当前 Agent/会话标识）</param>
+    /// <param name="logger">可选日志</param>
     /// <param name="toolGroup">工具所属组名（用于 AlwaysRequireApprovalGroups 判断及审批请求）</param>
     /// <param name="eventBus">可选事件总线，用于发布审批事件</param>
     public ApprovalToolWrapper(
@@ -51,8 +58,12 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     /// <param name="tools">原始工具列表</param>
     /// <param name="approvalHandler">审批处理器</param>
     /// <param name="options">审批配置</param>
+    /// <param name="permissionEvaluator">可选工具权限规则评估器（allow/deny/ask）</param>
+    /// <param name="shellCommandAnalyzer">可选 shell 命令分析器（识别管道/破坏性命令）</param>
+    /// <param name="executionContextAccessor">可选执行上下文访问器（取当前 Agent/会话标识）</param>
     /// <param name="logger">可选日志</param>
     /// <param name="toolNameToGroup">工具名到组名的映射（用于 AlwaysRequireApprovalGroups 及审批请求 ToolGroup）</param>
+    /// <param name="eventBus">可选事件总线，用于发布审批事件</param>
     /// <returns>包装后的工具列表（未启用审批或非 AIFunction 的保持原样）</returns>
     public static IList<AITool> Wrap(
         IList<AITool> tools,

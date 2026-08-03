@@ -45,7 +45,7 @@ import {
   type LoginUiStyle,
   type TwoFactorChallenge,
   type LoginCaptchaData,
-} from '../../pages/login/useLoginContext'
+} from '@tnzi/ui'
 
 interface Props {
   /** Active module. Defaults to `'pwd-login'`. */

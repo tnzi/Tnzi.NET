@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// MCP Server 注册表服务接口 - 管理外部 MCP Server 客户端注册条目的 CRUD

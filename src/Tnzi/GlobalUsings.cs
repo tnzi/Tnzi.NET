@@ -15,7 +15,6 @@ global using Polly.Registry;
 
 
 global using System;
-global using System.Collections;
 global using System.Collections.Concurrent;
 global using System.Collections.Generic;
 global using System.ComponentModel;
@@ -45,20 +44,16 @@ global using Tnzi.Application;
 global using Tnzi.Caching;
 global using Tnzi.Data;
 global using Tnzi.Data.Filtering;
-global using Tnzi.DataAnnotations;
-global using Tnzi.DependencyInjection;
 global using Tnzi.Domain.Entities;
 
 global using Tnzi.EventBus;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
-global using Tnzi.Http;
 global using Tnzi.Json;
-global using Tnzi.IO;
 global using Tnzi.Modules;
 global using Tnzi.Modules.Diagnostics;
 global using Tnzi.Options;
-global using Tnzi.Reflection;
+global using Tnzi.Resilience;
 global using Tnzi.Results;
 global using Tnzi.ScopedContext;
 global using Tnzi.Security;
@@ -70,11 +65,5 @@ global using Tnzi.Threading;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Utilities;
 
-global using Tnzi.AI.A2A;
-global using Tnzi.AI.Evaluation;
-global using Tnzi.AI.Memory;
-global using Tnzi.AI.Tools;
-global using Tnzi.AI.Tools.Approval;
 global using Tnzi.AI.Tools.Attributes;
 global using Tnzi.AI.Tools.Models;
-global using Tnzi.AI.Workflow;

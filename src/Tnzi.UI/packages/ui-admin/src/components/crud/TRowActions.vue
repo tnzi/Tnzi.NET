@@ -57,7 +57,7 @@
 import { computed } from 'vue'
 import { NButton, NDropdown, NPopconfirm, useDialog, type DropdownOption } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { splitRowActions, type RowAction } from '../../headless/rowActions'
+import { splitRowActions, type RowAction } from '../../headless/row-actions'
 
 export interface TRowActionsProps<T> {
   row: T

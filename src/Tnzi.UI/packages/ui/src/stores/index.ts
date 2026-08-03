@@ -4,7 +4,7 @@
  * Pinia store exports and initialization.
  */
 
-// Store composables
+// Store hooks
 export { useAuth, resetAuthRuntime } from './auth';
 export { useUser, resetUserRuntime } from './user';
 export { useApp, resetAppRuntime } from './app';

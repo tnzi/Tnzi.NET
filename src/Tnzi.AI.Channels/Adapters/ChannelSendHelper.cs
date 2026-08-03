@@ -38,7 +38,10 @@ internal static class ChannelSendHelper
                     await sendChunk(chunk, ct).ConfigureAwait(false);
                     break;
                 }
-                catch (Exception ex) when (retryCount < maxRetries)
+                // 取消不是"发送失败"：不重试、直接冒泡。此前 catch(Exception) 会把
+                // OperationCanceledException 也当成可重试失败，于是关停适配器时每个分块
+                // 还要先睡满一轮退避（最长 30s）才退出。
+                catch (Exception ex) when (ex is not OperationCanceledException && retryCount < maxRetries)
                 {
                     retryCount++;
                     var delay = TimeSpan.FromSeconds(Math.Min(Math.Pow(2, retryCount), 30));

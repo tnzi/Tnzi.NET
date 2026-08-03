@@ -1,7 +1,4 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.EFCore;
-using Tnzi.MultiTenancy;
-using Tnzi.Storage.Helpers;
 
 namespace Tnzi.Storage.Tests.Integration;
 

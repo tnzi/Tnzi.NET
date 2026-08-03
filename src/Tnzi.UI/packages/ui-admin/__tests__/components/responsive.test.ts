@@ -103,8 +103,8 @@ function installMatchMedia(width: number, coarse = false): void {
 const naiveStubs = {
   Modal: defineComponent({
     name: 'Modal',
-    props: ['show', 'style'],
     inheritAttrs: true,
+    props: ['show', 'style'],
     template: '<div class="n-modal-stub"><slot /></div>',
   }),
   Card: defineComponent({ template: '<div class="n-card-stub"><slot /></div>' }),

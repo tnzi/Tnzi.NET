@@ -1,4 +1,4 @@
-namespace Tnzi.Storage.Services;
+﻿namespace Tnzi.Storage.Services;
 
 /// <summary>
 /// 文件存储服务实现（核心文件操作）
@@ -10,6 +10,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private readonly IFileStorage _storage;
     private readonly IOptionsMonitor<StorageOptions> _optionsMonitor;
     private readonly IFileAccessAuthorizer _accessAuthorizer;
+    private readonly IPublicFileFieldResolver _publicFieldResolver;
+    private readonly IFileUrlSigner _urlSigner;
 
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
@@ -19,6 +21,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IFileStorage storage,
         IOptionsMonitor<StorageOptions> optionsMonitor,
         IFileAccessAuthorizer accessAuthorizer,
+        IPublicFileFieldResolver publicFieldResolver,
+        IFileUrlSigner urlSigner,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -27,9 +31,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
         _storage = Check.NotNull(storage);
         _optionsMonitor = Check.NotNull(optionsMonitor);
         _accessAuthorizer = Check.NotNull(accessAuthorizer);
+        _publicFieldResolver = Check.NotNull(publicFieldResolver);
+        _urlSigner = Check.NotNull(urlSigner);
     }
 
-    public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false)
+    public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
     {
         var validation = ValidateFileName<FileRecord>(originalFileName);
         if (validation != null)
@@ -47,11 +53,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
         string? md5Hash = null;
         if (Options.EnableMd5Validation)
         {
-            md5Hash = await Md5Helper.CalculateAsync(stream);
+            md5Hash = await HashHelper.GetMd5Async(stream);
             stream.Position = 0;
 
             // 检查是否已存在相同MD5的文件
-            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream);
+            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream, isPublic);
             if (existingResult != null)
             {
                 return existingResult;
@@ -62,8 +68,14 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var fileName = $"{SequentialGuid.NewGuid()}{extension}";
         var contentType = FileTypeHelper.GetContentType(extension);
 
+        // 长度必须在把流交给 provider **之前**取。流的生命周期归调用方，但 provider 读完
+        // 之后这个流还能不能读，不在本服务的控制之内（见 IFileStorage.UploadAsync 的所有权约定）；
+        // 上传后再读 Length 会被已关闭的流直接打成 ObjectDisposedException。
+        var knownSize = TryGetStreamLength(stream);
+
         // 1. 上传文件到存储
         var filePath = await _storage.UploadAsync(fileName, stream, contentType);
+        var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
         // 2. 如果是图片，生成缩略图
         string? thumbnailPath = null;
@@ -79,18 +91,19 @@ public class FileStorageService : ApplicationService, IFileStorageService
             FileName = fileName,
             OriginalName = originalFileName,
             Extension = extension,
-            Size = stream.Length,
+            Size = size,
             Path = filePath,
             Md5Hash = md5Hash,
             Provider = _storage.ProviderName,
             ContentType = contentType,
             ThumbnailPath = thumbnailPath,
             IsTemporary = isTemporary,
+            IsPublic = isPublic,
             ReferenceCount = isTemporary ? 0 : 1
         };
 
         await _repository.InsertAsync(fileRecord);
-        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", fileName, originalFileName, stream.Length);
+        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", fileName, originalFileName, size);
 
         await PublishFileUploadedEventAsync(fileRecord);
 
@@ -233,7 +246,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         }
 
         // 验证 MD5
-        var calculatedMd5 = await Md5Helper.CalculateAsync(stream);
+        var calculatedMd5 = await HashHelper.GetMd5Async(stream);
         stream.Position = 0;
         if (!string.IsNullOrEmpty(md5Hash) && calculatedMd5 != md5Hash)
         {
@@ -244,7 +257,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var newFileName = $"{SequentialGuid.NewGuid()}{extension}";
         var contentType = FileTypeHelper.GetContentType(extension);
 
+        // 与 SaveAsync 同理：长度在交给 provider 之前取。
+        var knownSize = TryGetStreamLength(stream);
         var filePath = await _storage.UploadAsync(newFileName, stream, contentType);
+        var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
         string? thumbnailPath = null;
         if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
@@ -257,7 +273,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             FileName = newFileName,
             OriginalName = fileName,
             Extension = extension,
-            Size = stream.Length,
+            Size = size,
             Path = filePath,
             Md5Hash = calculatedMd5,
             Provider = _storage.ProviderName,
@@ -267,18 +283,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
         };
 
         await _repository.InsertAsync(fileRecord);
-        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", newFileName, fileName, stream.Length);
+        LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", newFileName, fileName, size);
         return Ok(fileRecord, "File saved successfully");
     }
 
-    public async Task<Result<IEnumerable<FileRecord>>> SaveManyAsync(IEnumerable<(string fileName, Stream stream)> files)
+    public async Task<Result<IEnumerable<FileRecord>>> SaveManyAsync(IEnumerable<(string fileName, Stream stream)> files, bool isPublic = false)
     {
         return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
             var records = new List<FileRecord>();
             foreach (var (fileName, stream) in files)
             {
-                var result = await SaveAsync(fileName, stream);
+                var result = await SaveAsync(fileName, stream, isTemporary: false, isPublic: isPublic);
                 if (!result.Succeeded)
                 {
                     return Fail<IEnumerable<FileRecord>>(result.Message ?? "Failed to save file", result.Code ?? 500, result.ErrorCode);
@@ -414,10 +430,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(statistics);
     }
 
-    public async Task<Result<FileRecord>> SaveWithReferenceAsync(string fileName, Stream stream, string entityType, Guid entityId, string fieldName, bool isTemporary = false)
+    public async Task<Result<FileRecord>> SaveWithReferenceAsync(string fileName, Stream stream, string entityType, Guid entityId, string fieldName, bool isTemporary = false, bool isPublic = false)
     {
         // 保存文件
-        var saveResult = await SaveAsync(fileName, stream, isTemporary);
+        var saveResult = await SaveAsync(fileName, stream, isTemporary, isPublic);
         if (!saveResult.Succeeded)
         {
             return saveResult;
@@ -431,7 +447,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(fileRecord, "File saved with reference");
     }
 
-    public async Task<Result<FileRecord>> SaveFromBytesAsync(string fileName, byte[] content, string? contentType = null)
+    public async Task<Result<FileRecord>> SaveFromBytesAsync(string fileName, byte[] content, string? contentType = null, bool isPublic = false)
     {
         var validation = ValidateFileName<FileRecord>(fileName);
         if (validation != null)
@@ -440,7 +456,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<FileRecord>("Content cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
 
         using var stream = new MemoryStream(content);
-        return await SaveAsync(fileName, stream);
+        return await SaveAsync(fileName, stream, isTemporary: false, isPublic: isPublic);
     }
 
     public async Task<Result<FileRecord>> SaveFromPathAsync(string filePath, string? contentType = null)
@@ -618,20 +634,22 @@ public class FileStorageService : ApplicationService, IFileStorageService
                     }
                 }
 
+                // MD5 与大小都在交给 provider **之前**算完：上传之后这个流是否还可读
+                // 由 provider 决定（见 IFileStorage.UploadAsync 的所有权约定）。
                 zipFileStream.Position = 0;
+                var md5Hash = await HashHelper.GetMd5Async(zipFileStream);
+                var zipSize = zipFileStream.Length;
 
+                zipFileStream.Position = 0;
                 var zipName = zipFileName ?? $"archive_{DateTime.UtcNow:yyyyMMddHHmmss}.zip";
                 var zipPath = await _storage.UploadAsync(zipName, zipFileStream, "application/zip");
-
-                zipFileStream.Position = 0;
-                var md5Hash = await Md5Helper.CalculateAsync(zipFileStream);
 
                 var zipRecord = new FileRecord
                 {
                     FileName = zipName,
                     OriginalName = zipName,
                     Extension = ".zip",
-                    Size = zipFileStream.Length,
+                    Size = zipSize,
                     Path = zipPath,
                     Md5Hash = md5Hash,
                     Provider = _storage.ProviderName,
@@ -680,7 +698,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
                         await entryStream.CopyToAsync(tempStream, cancellationToken);
                         tempStream.Position = 0;
 
-                        var md5Hash = await Md5Helper.CalculateAsync(tempStream);
+                        var md5Hash = await HashHelper.GetMd5Async(tempStream);
+                        // 同上：大小在上传之前取。
+                        var entrySize = tempStream.Length;
                         tempStream.Position = 0;
 
                         var contentType = FileTypeHelper.GetContentType(Path.GetExtension(entry.Name));
@@ -691,7 +711,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
                             FileName = entry.Name,
                             OriginalName = entry.Name,
                             Extension = Path.GetExtension(entry.Name),
-                            Size = tempStream.Length,
+                            Size = entrySize,
                             Path = extractedPath,
                             Md5Hash = md5Hash,
                             Provider = _storage.ProviderName,
@@ -738,9 +758,95 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Ok<string>(presignedUrl);
         }
 
-        // Fallback: return controller-based URL for local storage
-        var fallbackUrl = $"/api/files/{id}/download";
-        return Ok<string>(fallbackUrl, "Presigned URL not supported by provider, returning controller URL");
+        // 本地存储没有对象存储那套预签名。此前这里回一个裸的控制器 URL —— 对私密文件
+        // 那是个**打不开的链接**(匿名请求拿不到)。改为带上签名令牌,语义与云端预签名对齐:
+        // 一个到期即失效、无需 Authorization 头的读链接。
+        // 同一条上限:本地回退签发的也是访问令牌,不该因为走了 presigned-url 这个入口
+        // 就能要到更长的有效期(云端 provider 的过期由对象存储自己约束,不经这里)。
+        var expiresAt = DateTimeOffset.UtcNow.AddSeconds(ResolveTokenTtl(expiresInSeconds));
+        var signature = _urlSigner.Sign(id, expiresAt, CurrentUser?.Id);
+        var fallbackUrl = $"/api/files/{id}/download?{IFileUrlSigner.QueryParameterName}={Uri.EscapeDataString(signature)}";
+        return Ok<string>(fallbackUrl, "Presigned URL not supported by provider, returning a signed controller URL");
+    }
+
+    public async Task<Result<FileAccessTokenDto>> CreateAccessTokenAsync(Guid fileId, int? expiresInSeconds = null, CancellationToken cancellationToken = default)
+    {
+        var ttl = ResolveTokenTtl(expiresInSeconds);
+        if (ttl <= 0)
+            return Fail<FileAccessTokenDto>("ExpiresInSeconds must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+
+        // 签发即授权:令牌绕过 Authorization 头,所以只有此刻确实读得了这个文件的人
+        // 才配拿到它。读不了同样返回 404,不泄露该 id 上是否有东西。
+        var check = await EnsureMintableAsync<FileAccessTokenDto>(record, cancellationToken);
+        if (check != null)
+            return check;
+
+        return Ok(MintToken(fileId, ttl));
+    }
+
+    public async Task<Result<IReadOnlyList<FileAccessTokenDto>>> CreateAccessTokensAsync(
+        IReadOnlyCollection<Guid> fileIds, int? expiresInSeconds = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(fileIds);
+
+        var ttl = ResolveTokenTtl(expiresInSeconds);
+        if (ttl <= 0)
+            return Fail<IReadOnlyList<FileAccessTokenDto>>("ExpiresInSeconds must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+
+        var ids = fileIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0)
+            return Ok<IReadOnlyList<FileAccessTokenDto>>([]);
+
+        // 上限而不是静默截断:截断会让调用方以为"这些 id 都不可读",而实际上只是没被处理。
+        // 每个 id 都可能触发一次引用表查询,所以这条上限同时是放大攻击的闸门。
+        if (ids.Count > MaxAccessTokenBatchSize)
+        {
+            return Fail<IReadOnlyList<FileAccessTokenDto>>(
+                $"At most {MaxAccessTokenBatchSize} file ids can be requested at once", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var records = await _repository.ToListAsync(f => ids.Contains(f.Id), cancellationToken);
+
+        var tokens = new List<FileAccessTokenDto>(records.Count);
+        foreach (var record in records)
+        {
+            // 越权 / 不存在的 id 静默省略而不是让整批失败:一页图片里混进一个不该看的 id
+            // 时,其余图片仍应正常显示;省略本身也不透露那个 id 上是否真有文件。
+            if (await _accessAuthorizer.CanMintAccessTokenAsync(record, cancellationToken))
+                tokens.Add(MintToken(record.Id, ttl));
+        }
+
+        return Ok<IReadOnlyList<FileAccessTokenDto>>(tokens);
+    }
+
+    /// <summary>
+    /// 一批最多能签发多少个令牌。前端一页最多要 100 个,这条上限只挡异常调用。
+    /// </summary>
+    private const int MaxAccessTokenBatchSize = 200;
+
+    /// <summary>
+    /// `SignedUrlTtlSeconds` 既是默认值**也是上限**:调用方只能要更短的,不能要更长的。
+    /// 否则 `?expiresInSeconds=999999999` 就能把一个几分钟的凭据变成几十年的 ——
+    /// 而 TTL 正是这套机制唯一的止损面(URL 会进浏览器历史、referrer 与访问日志,
+    /// 且签发之后即便用户失去权限,令牌仍然有效直到过期)。
+    /// </summary>
+    private int ResolveTokenTtl(int? expiresInSeconds)
+    {
+        var ceiling = Options.SignedUrlTtlSeconds;
+        return expiresInSeconds is { } requested ? Math.Min(requested, ceiling) : ceiling;
+    }
+
+    private FileAccessTokenDto MintToken(Guid fileId, int ttlSeconds)
+    {
+        var expiresAt = DateTimeOffset.UtcNow.AddSeconds(ttlSeconds);
+        return new FileAccessTokenDto
+        {
+            FileId = fileId,
+            Token = _urlSigner.Sign(fileId, expiresAt, CurrentUser?.Id),
+            ExpiresAt = expiresAt
+        };
     }
 
     public async Task<Result<UserStorageUsage>> GetUserStorageUsageAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -880,6 +986,75 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(record!.GetMetadata());
     }
 
+    public async Task<Result<FileRecord>> SetFileVisibilityAsync(Guid fileId, bool isPublic, CancellationToken cancellationToken = default)
+    {
+        var record = await _repository.GetAsync(fileId, cancellationToken);
+
+        // 变更权限而非读取权限：把私密文件改成人人可读是一次授权决策，
+        // 只有能改这个文件的人才有资格做（无权者同样以 404 掩盖存在性）。
+        var check = await EnsureWritableAsync<FileRecord>(record, cancellationToken);
+        if (check != null)
+            return check;
+
+        if (record!.IsPublic == isPublic)
+        {
+            return Ok(record, "File visibility unchanged");
+        }
+
+        record.IsPublic = isPublic;
+        await _repository.UpdateAsync(record, cancellationToken);
+
+        LogInformation("File visibility changed: {FileId}, IsPublic: {IsPublic}", fileId, isPublic);
+        return Ok(record, isPublic ? "File is now publicly readable" : "File is no longer publicly readable");
+    }
+
+    public async Task<Result<int>> SyncPublicFlagsFromReferencesAsync(CancellationToken cancellationToken = default)
+    {
+        var publicFields = _publicFieldResolver.GetPublicFileFields();
+        if (publicFields.Count == 0)
+        {
+            LogInformation("No [FileField(Public = true)] declarations found, nothing to backfill");
+            return Ok(0);
+        }
+
+        // 分成两个平行数组交给数据库：EF 不会把自定义 record struct 的集合翻译成 SQL。
+        // (EntityType, FieldName) 的笛卡尔积可能匹配到多余组合，故回读后再按真实声明精确过滤。
+        var entityTypes = publicFields.Select(f => f.EntityType).Distinct().ToList();
+        var fieldNames = publicFields.Select(f => f.FieldName).Distinct().ToList();
+
+        var candidates = await _referenceRepository.AsQueryable()
+            .Where(r => entityTypes.Contains(r.EntityType) && fieldNames.Contains(r.FieldName))
+            .Select(r => new { r.EntityType, r.FieldName, r.FileId })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var declared = publicFields.ToHashSet();
+        var fileIds = candidates
+            .Where(c => declared.Contains(new PublicFileField(c.EntityType, c.FieldName)))
+            .Select(c => c.FileId)
+            .Distinct()
+            .ToList();
+
+        if (fileIds.Count == 0)
+        {
+            return Ok(0);
+        }
+
+        // 只升不降：仅挑出仍为私密的记录改成公开，已公开的不重复写（幂等）。
+        var records = await _repository
+            .ToListAsync(f => fileIds.Contains(f.Id) && !f.IsPublic, cancellationToken);
+
+        foreach (var record in records)
+        {
+            record.IsPublic = true;
+            await _repository.UpdateAsync(record, cancellationToken);
+        }
+
+        LogInformation("Public flag backfill: {Count} files marked public from {FieldCount} declared public fields",
+            records.Count, publicFields.Count);
+        return Ok(records.Count, $"{records.Count} files marked publicly readable");
+    }
+
     public async Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(tag))
@@ -908,13 +1083,61 @@ public class FileStorageService : ApplicationService, IFileStorageService
     #region Private Methods
 
     /// <summary>
+    /// 取流的字节长度；流不可 seek（网络流）或已被关闭时返回 null，而不是抛异常。
+    /// 必须在把流交给 provider **之前**调用，见 <see cref="IFileStorage.UploadAsync"/> 的流所有权约定。
+    /// </summary>
+    private static long? TryGetStreamLength(Stream stream)
+    {
+        if (!stream.CanSeek)
+            return null;
+
+        try
+        {
+            return stream.Length;
+        }
+        catch (ObjectDisposedException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 文件记录里的 Size：优先用上传**之前**测得的长度；测不出来（不可 seek 的流）时
+    /// 回问 provider，由它按已落盘的对象报大小。两者都拿不到就记 0 并留一条 Warning：
+    /// 大小是描述性字段，不该在文件已经存好之后把整次保存变成一次失败。
+    /// </summary>
+    private async Task<long> ResolveStoredSizeAsync(long? knownSize, string filePath)
+    {
+        if (knownSize.HasValue)
+            return knownSize.Value;
+
+        try
+        {
+            return await _storage.GetFileSizeAsync(filePath);
+        }
+        catch (Exception ex)
+        {
+            LogWarning("Unable to resolve stored size for {FilePath}, recording 0: {Error}", filePath, ex.Message);
+            return 0L;
+        }
+    }
+
+    /// <summary>
     /// 验证文件（大小和类型）
     /// </summary>
     private Result<T>? ValidateFile<T>(string fileName, Stream stream)
     {
-        if (stream.Length > Options.MaxFileSize)
+        // 不可 seek 的流量不出大小，这里就不拦（拦不住也不该为此抛 NotSupportedException）。
+        // 这类请求的兜底在更外层：StorageModule 已按 MaxFileSize 放开并限制了请求体上限，
+        // 超限的 HTTP 上传由 Kestrel / IIS 先行截断。
+        var size = TryGetStreamLength(stream);
+        if (size > Options.MaxFileSize)
         {
-            return Fail<T>($"File size ({stream.Length} bytes) exceeds maximum allowed size ({Options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<T>($"File size ({size} bytes) exceeds maximum allowed size ({Options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var extension = Path.GetExtension(fileName);
@@ -930,11 +1153,20 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// <summary>
     /// 尝试通过 MD5 获取已存在的文件
     /// </summary>
-    private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(string md5Hash, string originalFileName, Stream stream)
+    private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(string md5Hash, string originalFileName, Stream stream, bool isPublic = false)
     {
         var existing = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
         if (existing == null)
         {
+            return null;
+        }
+
+        // 内容相同但可见性诉求不同：本次上传要公开，命中的记录却是私密的。
+        // 复用它等于把**别人的**私密文件一并改成人人可读 —— 上传者持有相同的字节
+        // 不代表他有权把那条记录对外开放。宁可多存一份，也不做这次提权。
+        if (isPublic && !existing.IsPublic)
+        {
+            LogInformation("Skipping MD5 reuse for a public upload: existing record {FileId} is private", existing.Id);
             return null;
         }
 
@@ -960,7 +1192,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
             if (FileTypeHelper.IsImage(existing.Extension ?? "") && Options.AutoGenerateThumbnail)
             {
-                stream.Position = 0;
+                // 缩略图是从 newFilePath 回读生成的，不碰 stream。上传之后这个流可能已经
+                // 被 provider 关掉，回退它的位置只会白白抛 ObjectDisposedException。
                 existing.ThumbnailPath = await GenerateThumbnailAsync(newFilePath, existing.FileName);
             }
 
@@ -1044,6 +1277,22 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return missing;
 
         if (await _accessAuthorizer.CanReadAsync(fileRecord!, cancellationToken))
+            return null;
+
+        return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+    }
+
+    /// <summary>
+    /// 存在性 + **签发**访问令牌的权限。与读取判据同源,但不认「签名令牌」那一条 ——
+    /// 渲染凭据不该能自我续期(见 <c>IFileAccessAuthorizer.CanMintAccessTokenAsync</c>)。
+    /// </summary>
+    private async Task<Result<T>?> EnsureMintableAsync<T>(FileRecord? fileRecord, CancellationToken cancellationToken = default)
+    {
+        var missing = EnsureFileRecordExists<T>(fileRecord);
+        if (missing != null)
+            return missing;
+
+        if (await _accessAuthorizer.CanMintAccessTokenAsync(fileRecord!, cancellationToken))
             return null;
 
         return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -1163,7 +1412,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             if (!string.IsNullOrEmpty(record.Md5Hash))
             {
                 using var stream = await _storage.DownloadAsync(GetSafePath(record.Path));
-                var actualMd5 = await Md5Helper.CalculateAsync(stream);
+                var actualMd5 = await HashHelper.GetMd5Async(stream);
                 result.ActualMd5 = actualMd5;
                 result.Md5Matches = string.Equals(record.Md5Hash, actualMd5, StringComparison.OrdinalIgnoreCase);
 

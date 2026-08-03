@@ -23,9 +23,9 @@
       "types": "./dist/adapters/*.d.ts",
       "import": "./dist/adapters/*.js"
     },
-    "./composables": {
-      "types": "./dist/composables/index.d.ts",
-      "import": "./dist/composables.js"
+    "./headless": {
+      "types": "./dist/headless/index.d.ts",
+      "import": "./dist/headless.js"
     },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
@@ -37,6 +37,10 @@
     },
     "./theme/presets/*": {
       "import": "./src/theme/presets/*.json"
+    },
+    "./vite": {
+      "types": "./vite.d.ts",
+      "import": "./vite.mjs"
     },
     "./style.css": "./dist/style.css"
   },
@@ -51,6 +55,8 @@
   },
   "files": [
     "dist",
+    "vite.mjs",
+    "vite.d.ts",
     "src/theme/presets",
     "README.md"
   ],

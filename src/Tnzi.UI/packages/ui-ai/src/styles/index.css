@@ -10,6 +10,34 @@
  *
  * To enable dark mode: toggle `.dark` (or `[data-theme="dark"]`) on the
  * documentElement; the existing dark block below also covers these tokens.
+ *
+ * ---------------------------------------------------------------------------
+ * THREE KINDS OF TOKEN LIVE HERE. The distinction decides whether a new one is
+ * written as a literal or derived from `@tnzi/ui`:
+ *
+ *   A. DERIVED - reads a `--tnzi-*` token so it follows the host theme. Only
+ *      the accent family qualifies today: recolouring the brand should recolour
+ *      the send button and focus ring, in this package as everywhere else.
+ *
+ *   B. IDENTITY - literal on purpose. The canvas / text / border / status
+ *      colours are a warm palette (#f8f8f7 canvas, #34322d ink); `@tnzi/ui` is
+ *      cool (rgb(247,250,252) canvas, rgb(51,54,57) ink). They are DIFFERENT
+ *      HUES, not different shades - `var(--tnzi-layout-bg, #f8f8f7)` would not
+ *      "inherit the theme", it would replace this product's look with the admin
+ *      one. Do not "unify" these; make them overridable instead (see below).
+ *      (Dark mode is the near-exception: the two palettes sit within a shade or
+ *      two of each other there. Not worth splitting the rule over.)
+ *
+ *   C. STRUCTURAL - radius / motion / metrics / font stacks. These SHOULD be
+ *      derived, but `@tnzi/ui` has no structural token layer to derive from
+ *      (it ships colours, shadows and two font stacks - no radius, duration or
+ *      easing). Until it grows one, they stay literal here. When it does, this
+ *      group is the first batch to migrate.
+ *
+ * Overridability is what makes B tolerable: every token an operator should be
+ * able to change is reachable through `theme/tokens.ts` (`applyAiTheme`), and
+ * `__tests__/theme/token-map.test.ts` fails if that map drifts from this file.
+ * Adding a token that an operator should control means adding it there too.
  * ========================================================================= */
 :root {
   /* Surfaces */
@@ -38,9 +66,18 @@
   --tnzi-ai-warning: #d97706;
   --tnzi-ai-danger:  #dc2626;
   --tnzi-ai-info:    #2563eb;
+  /* Hover wash behind a destructive row (sign out, delete). */
+  --tnzi-ai-danger-soft: rgba(220, 38, 38, 0.08);
 
   /* Foreground for text/icons sitting on an accent or status fill. */
   --tnzi-ai-on-accent: #ffffff;
+
+  /* High-contrast neutral fill for a primary action that must out-rank the
+     brand accent around it (an "Upgrade" pill inside an account menu). Kept
+     separate from --tnzi-ai-accent so tinting the brand never turns these
+     into low-contrast buttons. */
+  --tnzi-ai-accent-contrast:    #1a1a1a;
+  --tnzi-ai-on-accent-contrast: #ffffff;
 
   /* Brand monogram lockup (sidebar header + collapsed rail). Tokenised because
      a fixed near-black chip disappears against the dark sidebar canvas. */
@@ -104,6 +141,11 @@
   --tnzi-ai-warning: #f59e0b;
   --tnzi-ai-danger:  #ff453a;
   --tnzi-ai-info:    #60a5fa;
+  --tnzi-ai-danger-soft: rgba(255, 69, 58, 0.12);
+
+  /* Flipped: on a near-black canvas the high-contrast fill is the light one. */
+  --tnzi-ai-accent-contrast:    #f2f2f0;
+  --tnzi-ai-on-accent-contrast: #1b1b1a;
 
   /* Inverted so the monogram reads against the near-black sidebar. */
   --tnzi-ai-brand-mark-bg: linear-gradient(135deg, #efefed 0%, #b8b8b4 100%);
@@ -179,6 +221,20 @@
   --tnzi-ai-handoff-accent: hsl(262.1 83.3% 67.8%);
   --tnzi-ai-shimmer-from: rgba(255, 255, 255, 0.6);
   --tnzi-ai-shimmer-to: rgba(255, 255, 255, 1);
+}
+
+/* Responsive card grid for resource pages (Agents / Skills / Artifacts ...).
+ * A plain class rather than a component: the only thing it carries is column
+ * behaviour, and a wrapper component around one `display:grid` rule buys
+ * nothing but an extra element in the tree. */
+.t-resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.t-resource-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 
 /* Shared reasoning indent helper */

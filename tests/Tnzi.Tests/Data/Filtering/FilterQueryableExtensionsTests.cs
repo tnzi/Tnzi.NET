@@ -5,8 +5,6 @@
 // -----------------------------------------------------------------------
 
 using System.Text.Json;
-using Tnzi.Data;
-using Tnzi.Data.Filtering;
 
 namespace Tnzi.Tests.Data.Filtering;
 

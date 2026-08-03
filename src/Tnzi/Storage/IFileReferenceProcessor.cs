@@ -45,6 +45,13 @@ public class FileReferenceChange
     /// 文件ID
     /// </summary>
     public Guid FileId { get; set; }
+
+    /// <summary>
+    /// 来源字段是否声明为公开（<c>[FileField(Public = true)]</c>）。
+    /// 为 true 时处理器在写入引用的同一个事务里把该文件标记为公开可读。
+    /// 仅对 <see cref="FileReferenceChangeType.Create"/> 有意义：移除引用不收回公开标记。
+    /// </summary>
+    public bool IsPublicFile { get; set; }
 }
 
 /// <summary>

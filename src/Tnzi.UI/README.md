@@ -7,8 +7,8 @@ Frontend component monorepo for Tnzi.NET framework.
 | Package | Description | Status |
 |---------|-------------|--------|
 | @tnzi/core | Framework-agnostic business logic (services, state, headless controllers) | Stable |
-| @tnzi/ui | Base UI components (shadcn-vue + headless composables + Pinia stores) | Stable |
-| @tnzi/ui-admin | Admin extension (CRUD pages, admin template, module management pages) | New |
+| @tnzi/ui | Base UI components (Naive UI + UnoCSS + headless logic + Pinia stores) | Stable |
+| @tnzi/ui-admin | Admin extension (shell, CRUD engine, 90+ built-in admin pages) | Stable |
 | @tnzi/ui-ai | AI components (chat, workflow, agent, streaming) | Stable |
 | @tnzi/mobile | Mobile components (Vant 4, standalone) | Stable |
 
@@ -77,7 +77,7 @@ All Tnzi components use the `T` prefix:
 ```vue
 <template>
     <TLoginForm />
-    <TDataTable />
+    <TTable />
     <TUserCard />
     <TCrudPage />
 </template>
@@ -104,9 +104,28 @@ pnpm codegen:check
 
 ## Documentation
 
-- [USAGE.md](./USAGE.md) — Usage guide
-- [UI-PACKAGE-GUIDE.md](./UI-PACKAGE-GUIDE.md) — Package development guide
+**Consumer-facing docs live in [`docs/frontend/`](../../docs/frontend/index.md)** — that tree is
+registered in `docs/doc-manifest.yaml`, drift-checked by `/sync-docs`, and served by `Tnzi.Mcp`.
+Start there:
+
+- [快速开始](../../docs/frontend/getting-started.md) — install, Vite + UnoCSS setup, first component
+- [架构](../../docs/frontend/architecture.md) — five-package layering, dependency direction
+- [@tnzi/core 指南](../../docs/frontend/core-packages.md) — HTTP, state, adapters, service contracts
+- [CRUD 组件](../../docs/frontend/crud-components.md) — `TCrudPage` / `TCardPage` / `TListShell`
+- [组件覆盖](../../docs/frontend/component-override.md) · [排错](../../docs/frontend/troubleshooting.md)
+
+The authoritative source for each package is its own `packages/{name}/CLAUDE.md`; `docs/frontend/`
+is synced from those.
+
+Repo-local docs (contributors, not consumers):
+
+- [UI-PACKAGE-GUIDE.md](./UI-PACKAGE-GUIDE.md) — package development conventions
 - [PUBLISHING.md](./PUBLISHING.md) — npm publishing guide
+- [MIGRATION.md](./MIGRATION.md) · [CHANGELOG.md](./CHANGELOG.md) — historical, per-release
+
+> `USAGE.md` was deleted on 2026-08-01. It documented shadcn-vue + Tailwind (both replaced in
+> 2026-04) and referenced ten components that no longer exist, so following it produced code that
+> did not compile. `docs/frontend/` supersedes it.
 
 ## License
 

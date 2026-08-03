@@ -58,7 +58,7 @@ import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { buildProblemColumns } from './integrity-config'
 import type { BatchIntegrityResultDto, FileIntegrityResultDto } from '@tnzi/core/services/storage'
 

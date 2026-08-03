@@ -73,25 +73,23 @@
                     </NButton>
                   </div>
                   <div class="t-msg-body">
-                    <NImage
+<TFileImage
                       v-if="msg.contentType === MessageContentType.Image && msg.fileId"
-                      :src="previewUrl(msg.fileId)"
+                      :file-id="msg.fileId"
+                      lightbox
                       :width="140"
                       object-fit="cover"
                       class="t-msg-image"
                     />
-                    <a
+                    <TFileLink
                       v-else-if="msg.contentType === MessageContentType.File && msg.fileId"
-                      :href="downloadUrl(msg.fileId)"
+                      :file-id="msg.fileId"
                       class="t-msg-file"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
                     >
                       <TSvgIcon icon="mdi:file-download-outline" :size="18" />
                       <span class="t-msg-file__name">{{ msg.fileName || t('detail.fileMsg') }}</span>
                       <span v-if="msg.fileSize" class="t-msg-file__size">{{ formatFileSize(msg.fileSize) }}</span>
-                    </a>
+                    </TFileLink>
                     <span v-else>{{ msgPreview(msg) }}</span>
                   </div>
                 </div>
@@ -109,7 +107,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton, NDescriptions, NDescriptionsItem, NEmpty, NImage, NImageGroup, NSpin } from 'naive-ui'
+import { NButton, NDescriptions, NDescriptionsItem, NEmpty, NImageGroup, NSpin } from 'naive-ui'
 import { formatDateTime, formatFileSize } from '@tnzi/core'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
@@ -117,11 +115,13 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import BroadcastDialog from './components/BroadcastDialog.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import TFileImage from '../../components/display/TFileImage.vue'
+import TFileLink from '../../components/display/TFileLink.vue'
+import { deleteAction, type RowAction } from '../../headless/row-actions'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { conversationColumns, conversationSearchFields, typeKey, buildMemberColumns } from './conversations-config'
 import {
   MessageContentType,
@@ -160,14 +160,6 @@ const messages = ref<ChatMessageDto[]>([])
 const hasMoreMessages = ref(false)
 const loadingMore = ref(false)
 const MSG_PAGE = 20
-
-/** Inline preview / forced-download URLs (same routes the chat window uses). */
-function previewUrl(fileId: string): string {
-  return `/api/files/${fileId}/preview`
-}
-function downloadUrl(fileId: string): string {
-  return `/api/files/${fileId}/download`
-}
 
 // Loaded by `onView` when the CRUD `view` open-state opens (row click or a
 // deep-link cold reload) - the drawer chrome + open-state are the engine's.

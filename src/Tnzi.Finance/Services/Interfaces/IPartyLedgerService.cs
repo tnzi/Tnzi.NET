@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 单个往来方的账面视图：概览数字 + 跨单据类型的交易流水。
@@ -24,6 +24,7 @@ public interface IPartyLedgerService
     /// <param name="asOf">未清与账龄的时点（默认今天）</param>
     /// <param name="from">期间发生额的起始（默认本年年初）</param>
     /// <param name="to">期间发生额的截止（默认 <paramref name="asOf"/>）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<PartyLedgerSummaryDto>> GetSummaryAsync(
         FinancePartyType partyType,
         Guid partyId,

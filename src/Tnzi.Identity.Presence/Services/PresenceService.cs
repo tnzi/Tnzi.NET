@@ -137,7 +137,9 @@ public class PresenceService : ApplicationService, IPresenceService
     {
         var dto = (await ResolveEffectiveAsync(new[] { userId })).FirstOrDefault();
         if (dto == null) return;
-        await EventBus.PublishAsync(new UserPresenceChangedEvent
+        // 事件总线是本模块的扇出通道（Chat / 实时推送都订阅它），缺了 presence 就是哑的，
+        // 因此这里要的是"必需"语义而不是静默跳过。
+        await GetRequiredEventBus().PublishAsync(new UserPresenceChangedEvent
         {
             UserId = userId,
             Status = dto.Status,

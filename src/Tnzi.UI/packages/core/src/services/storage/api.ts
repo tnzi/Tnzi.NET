@@ -28,6 +28,10 @@ import type {
   FileShareSummaryDto,
   ActiveSharesQueryDto,
   SetFileTagsDto,
+  SetFileVisibilityDto,
+  FileAccessTokenDto,
+  FileSharePreviewDto,
+  FileUploadOptions,
   FileFolderDto,
   CreateFileFolderDto,
   UpdateFileFolderDto,
@@ -42,6 +46,16 @@ const PREVIEW_BASE = '/files/preview';
 const ADMIN_BASE = '/admin/files';
 // Aligned with DefaultFileFolderAdminController [Route("admin/storage/folders")]
 const ADMIN_FOLDER_BASE = '/admin/storage/folders';
+
+/**
+ * Accept either the new options object or a bare progress callback, so existing
+ * `upload(file, onProgress)` call sites keep compiling.
+ */
+function normalizeUploadOptions(
+  options?: FileUploadOptions | ((progress: number) => void),
+): FileUploadOptions {
+  return typeof options === 'function' ? { onProgress: options } : (options ?? {});
+}
 
 /**
  * File Storage API (User)
@@ -59,16 +73,29 @@ export function useStorageApi(client: HttpClient) {
     delete: (id: string) =>
       client.delete<void>(`${BASE}/${id}`),
 
-    /** Upload file. Backend `DefaultStorageController.Upload` returns the full file record. */
-    upload: (file: File, onProgress?: (progress: number) => void) =>
-      client.upload<FileRecordDto>(`${BASE}/upload`, file, { onProgress }),
+    /**
+     * Upload file. Backend `DefaultStorageController.Upload` returns the full file record.
+     *
+     * Pass `{ isPublic: true }` for site assets that must be reachable through an
+     * anonymous `<img src>`. Avatars do not need it - the backend flags the file
+     * public by itself once the id lands in a `[FileField(Public = true)]` field.
+     */
+    upload: (file: File, options?: FileUploadOptions | ((progress: number) => void)) => {
+      const { onProgress, isPublic } = normalizeUploadOptions(options);
+      return client.upload<FileRecordDto>(`${BASE}/upload`, file, {
+        onProgress,
+        additionalData: isPublic ? { isPublic: 'true' } : undefined,
+      });
+    },
 
     /** Batch upload files */
-    uploadMany: (files: File[], onProgress?: (progress: number) => void) => {
+    uploadMany: (files: File[], options?: FileUploadOptions | ((progress: number) => void)) => {
+      const { onProgress, isPublic } = normalizeUploadOptions(options);
       const formData = new FormData();
       for (const file of files) {
         formData.append('files', file);
       }
+      if (isPublic) formData.append('isPublic', 'true');
       return client.uploadFormData<FileRecordDto[]>(`${BASE}/upload/batch`, formData, { onProgress });
     },
 
@@ -96,6 +123,26 @@ export function useStorageApi(client: HttpClient) {
     /** Generate a presigned URL for temporary public access */
     getPresignedUrl: (id: string, expiresInSeconds: number = 3600) =>
       client.get<string>(`${BASE}/${id}/presigned-url`, { params: { expiresInSeconds } }),
+
+    /**
+     * Mint a short-lived token so the browser can fetch this private file
+     * without an Authorization header (see `FileAccessTokenDto`).
+     *
+     * Prefer `createFileUrlResolver`, which batches and caches these for you -
+     * call this directly only for one-off links.
+     */
+    getAccessToken: (id: string, expiresInSeconds?: number) =>
+      client.get<FileAccessTokenDto>(`${BASE}/${id}/access-token`, {
+        params: expiresInSeconds ? { expiresInSeconds } : undefined,
+      }),
+
+    /**
+     * Mint access tokens for several files in one round trip. Files the caller
+     * cannot read are omitted from the response rather than failing the batch,
+     * so one unreadable id never blanks a whole page of images.
+     */
+    getAccessTokens: (fileIds: string[], expiresInSeconds?: number) =>
+      client.post<FileAccessTokenDto[]>(`${BASE}/access-tokens`, { fileIds, expiresInSeconds }),
 
     /** Rename file */
     rename: (id: string, newFileName: string) =>
@@ -127,9 +174,38 @@ export function useStorageApi(client: HttpClient) {
     createShare: (id: string, data: CreateShareDto) =>
       client.post<FileShareDto>(`${BASE}/${id}/share`, data),
 
-    /** Get share info by token */
+    /** Get share info by token (management view; requires a signed-in caller) */
     getShare: (token: string) =>
       client.get<FileShareDto>(`${BASE}/share/${token}`),
+
+    /**
+     * What a share-link RECIPIENT sees before downloading. Anonymous: the whole
+     * point of an external share link is that the recipient has no account.
+     *
+     * Rejects with 404 for a link that is revoked, expired or exhausted -
+     * indistinguishable from a token that never existed, so probing tells the
+     * caller nothing.
+     */
+    getSharePreview: (token: string) =>
+      client.get<FileSharePreviewDto>(`${BASE}/share/${token}/info`),
+
+    /**
+     * Check a share link password WITHOUT consuming an access. Anonymous.
+     *
+     * Probing the download endpoint instead would burn one unit of the link's
+     * quota, so a `maxAccessCount: 1` link would be exhausted before the
+     * recipient ever got the file. Wrong passwords still count towards the
+     * link's auto-disable threshold.
+     */
+    verifyShareAccess: (token: string, password?: string) =>
+      client.post<boolean>(`${BASE}/share/${token}/verify`, { password }),
+
+    /**
+     * Direct download URL for a share link. Anonymous, so it can go straight
+     * into an `<a href>` - no Authorization header involved.
+     */
+    getShareDownloadUrl: (token: string, password?: string) =>
+      client.resolveUrl(`${BASE}/share/${token}/download`, password ? { password } : undefined),
 
     /** Revoke (delete) a share by token */
     revokeShare: (token: string) =>
@@ -332,6 +408,28 @@ export function useAdminFileApi(client: HttpClient) {
     /** Set (replace) metadata for a file */
     setMetadata: (id: string, metadata: Record<string, string>) =>
       client.put<FileRecordDto>(`${ADMIN_BASE}/${id}/metadata`, { metadata }),
+
+    // ---- Visibility ----
+
+    /**
+     * Make a file publicly readable, or take that back. Public means readable by
+     * anyone including unauthenticated callers - right for avatars and site
+     * assets, wrong for contracts, cheques and HR documents.
+     */
+    setFileVisibility: (id: string, data: SetFileVisibilityDto) =>
+      client.put<FileRecordDto>(`${ADMIN_BASE}/${id}/visibility`, data),
+
+    /**
+     * Backfill the public flag from the backend's `[FileField(Public = true)]`
+     * declarations: every file referenced by a field declared public becomes
+     * publicly readable. Returns the number of files changed.
+     *
+     * This is the one-shot repair for data written before those declarations
+     * existed (avatars uploaded earlier stay private and render as 404).
+     * Idempotent, and it never turns a file back into a private one.
+     */
+    syncPublicFlags: () =>
+      client.post<number>(`${ADMIN_BASE}/sync-public-flags`),
   };
 }
 

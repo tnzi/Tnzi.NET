@@ -195,7 +195,7 @@ import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vu
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
-import TEmpty from '../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TMoney from '../../components/finance/TMoney.vue'
 import TAgingBar from '../../components/finance/TAgingBar.vue'
 import TPartySelect from '../../components/finance/TPartySelect.vue'

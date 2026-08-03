@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Agent 记忆管理服务 - 管理端为某个 Agent 预置/管理其长期记忆（agent-bound scope）。

@@ -33,14 +33,16 @@ public class StorageSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasSevenFields()
+    public void Group_HasEightFields()
     {
         // MaxFileSize + ImageCompressionQuality（原始）+ EnableMd5Validation / EnableFileReference /
         // AutoGenerateThumbnail / UrlPrefix（新暴露，均已接热消费者：FileStorageService/FileChunkUploadService
         // 经 IOptionsMonitor.CurrentValue 热读，UrlPrefix 经 storage provider 可选 IOptionsMonitor 热读）
-        // + AllowAnonymousRead（部署级匿名读开关，FileAccessAuthorizer 经 IOptionsMonitor.CurrentValue 热读）。
+        // + AllowAnonymousRead（部署级匿名读开关，FileAccessAuthorizer 经 IOptionsMonitor.CurrentValue 热读）
+        // + SignedUrlTtlSeconds（访问令牌有效期，FileStorageService 经 IOptionsMonitor.CurrentValue 热读）。
         // 缩略图宽高在嵌套 ThumbnailSizeOptions（独立 ConfigSection），不属于本组直接字段。
-        Assert.Equal(7, _group.Fields.Count);
+        // UrlSigningKey 刻意**不**在此列：密钥是部署机密，不该经管理端下发或回显。
+        Assert.Equal(8, _group.Fields.Count);
     }
 
     [Fact]
@@ -54,6 +56,9 @@ public class StorageSettingDefinitionProviderTests
         Assert.Contains(fields, f => f.Key == "Storage:AutoGenerateThumbnail");
         Assert.Contains(fields, f => f.Key == "Storage:UrlPrefix");
         Assert.Contains(fields, f => f.Key == "Storage:AllowAnonymousRead");
+        Assert.Contains(fields, f => f.Key == "Storage:SignedUrlTtlSeconds");
+        // 签名密钥属于部署机密，不进配置中心。
+        Assert.DoesNotContain(fields, f => f.Key == "Storage:UrlSigningKey");
     }
 
     [Fact]

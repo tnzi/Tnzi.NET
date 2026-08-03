@@ -642,7 +642,6 @@ Tnzi.Caching.PatternBasedExpirationStrategy.PatternBasedExpirationStrategy(Syste
 Tnzi.Caching.SlidingExpirationStrategy
 Tnzi.Caching.SlidingExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
 Tnzi.Caching.SlidingExpirationStrategy.SlidingExpirationStrategy(int slidingExpirationSeconds) -> void
-Tnzi.ConfigurationKeys
 Tnzi.Data.AmbientUnitOfWork
 Tnzi.Data.FilterOperator
 Tnzi.Data.FilterOperator.Contains = 6 -> Tnzi.Data.FilterOperator
@@ -1982,7 +1981,6 @@ Tnzi.TnziOptions.UseGeneratedModuleRegistry.get -> bool
 Tnzi.TnziOptions.UseGeneratedModuleRegistry.set -> void
 Tnzi.TnziOptions.WriteStartupErrorLog.get -> bool
 Tnzi.TnziOptions.WriteStartupErrorLog.set -> void
-Tnzi.Utilities.AsyncHelper
 Tnzi.Utilities.Check
 Tnzi.Utilities.CollectionPropertySorter<T>
 Tnzi.Utilities.Compression
@@ -1997,8 +1995,6 @@ Tnzi.Utilities.DateTimeRange.Overlaps(Tnzi.Utilities.DateTimeRange! range) -> bo
 Tnzi.Utilities.DateTimeRange.StartTime.get -> System.DateTime
 Tnzi.Utilities.DateTimeRange.StartTime.set -> void
 Tnzi.Utilities.DateTimeRange.TimeSpan.get -> System.TimeSpan
-Tnzi.Utilities.FastInvokeHandler
-Tnzi.Utilities.MathHelper
 Tnzi.Utilities.RegexPatterns
 Tnzi.Utilities.SequentialGuid
 Tnzi.Utilities.SequentialGuid.SequentialGuidType
@@ -2014,20 +2010,6 @@ const Tnzi.AI.Tools.Approval.ToolApprovalRequest.DefaultTimeoutSeconds = 300 -> 
 const Tnzi.AI.Workflow.WorkflowExecutionSignalTypes.Cancel = "cancel" -> string!
 const Tnzi.AI.Workflow.WorkflowExecutionSignalTypes.ResumeInput = "resume_input" -> string!
 const Tnzi.Caching.CacheKeys.Identity.OrganizationTree = "organization:tree" -> string!
-const Tnzi.ConfigurationKeys.Audit = "Audit" -> string!
-const Tnzi.ConfigurationKeys.Authorization = "Authorization" -> string!
-const Tnzi.ConfigurationKeys.Caching = "Caching" -> string!
-const Tnzi.ConfigurationKeys.Database = "Database" -> string!
-const Tnzi.ConfigurationKeys.EFCore = "EFCore" -> string!
-const Tnzi.ConfigurationKeys.Hangfire = "Hangfire" -> string!
-const Tnzi.ConfigurationKeys.HealthChecks = "HealthChecks" -> string!
-const Tnzi.ConfigurationKeys.Identity = "Identity" -> string!
-const Tnzi.ConfigurationKeys.Kafka = "Kafka" -> string!
-const Tnzi.ConfigurationKeys.Notification = "Notification" -> string!
-const Tnzi.ConfigurationKeys.RabbitMQ = "RabbitMQ" -> string!
-const Tnzi.ConfigurationKeys.Redis = "Redis" -> string!
-const Tnzi.ConfigurationKeys.Storage = "Storage" -> string!
-const Tnzi.ConfigurationKeys.Swagger = "Swagger" -> string!
 const Tnzi.Exceptions.ErrorCodes.BUSINESS_ERROR = "BUSINESS_ERROR" -> string!
 const Tnzi.Exceptions.ErrorCodes.CACHE_CONNECTION_FAILED = "CACHE_CONNECTION_FAILED" -> string!
 const Tnzi.Exceptions.ErrorCodes.CACHE_ERROR = "CACHE_ERROR" -> string!
@@ -2533,8 +2515,6 @@ static Tnzi.Settings.ConfigSectionResolver.Resolve(System.Type! optionsType) -> 
 static Tnzi.Settings.RuntimeSettingMetadataExtractor.Extract(System.Type! optionsType) -> Tnzi.Settings.SettingDefinitionGroup?
 static Tnzi.TnziApplicationBuilderExtensions.AddTnzi(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Microsoft.Extensions.Configuration.IConfiguration! configuration) -> Tnzi.TnziApplicationBuilder!
 static Tnzi.TnziApplicationExtensions.IsModuleLoaded<T>(this Tnzi.ITnziApplication! app) -> bool
-static Tnzi.Utilities.AsyncHelper.AwaitTaskWithFinally(System.Threading.Tasks.Task! returnValueTask, System.Action<System.Exception!>? finalAction) -> System.Threading.Tasks.Task!
-static Tnzi.Utilities.AsyncHelper.AwaitTaskWithFinallyAndGetResult<T>(System.Threading.Tasks.Task<T>! actualReturnValue, System.Action<System.Exception!>? finalAction) -> System.Threading.Tasks.Task<T>!
 static Tnzi.Utilities.Check.Condition(bool condition, string! message) -> void
 static Tnzi.Utilities.Check.GreaterThan<T>(T value, T min, string? paramName = null) -> T
 static Tnzi.Utilities.Check.GreaterThanOrEqual<T>(T value, T min, string? paramName = null) -> T
@@ -2574,22 +2554,6 @@ static Tnzi.Utilities.DateTimeRange.ThisYear.get -> Tnzi.Utilities.DateTimeRange
 static Tnzi.Utilities.DateTimeRange.Today.get -> Tnzi.Utilities.DateTimeRange!
 static Tnzi.Utilities.DateTimeRange.Tomorrow.get -> Tnzi.Utilities.DateTimeRange!
 static Tnzi.Utilities.DateTimeRange.Yesterday.get -> Tnzi.Utilities.DateTimeRange!
-static Tnzi.Utilities.FastInvokeHandler.ClearCache() -> void
-static Tnzi.Utilities.FastInvokeHandler.FastGetField(object! instance, System.Reflection.FieldInfo! field) -> object?
-static Tnzi.Utilities.FastInvokeHandler.FastGetProperty(object! instance, System.Reflection.PropertyInfo! property) -> object?
-static Tnzi.Utilities.FastInvokeHandler.FastGetProperty<T, TProperty>(T instance, string! propertyName) -> TProperty?
-static Tnzi.Utilities.FastInvokeHandler.FastInvoke(object! instance, System.Reflection.MethodInfo! method, params object?[]? parameters) -> object?
-static Tnzi.Utilities.FastInvokeHandler.FastInvoke<T>(T instance, string! methodName, params object?[]? parameters) -> object?
-static Tnzi.Utilities.FastInvokeHandler.FastInvokeStatic(System.Reflection.MethodInfo! method, params object?[]? parameters) -> object?
-static Tnzi.Utilities.FastInvokeHandler.FastSetField(object! instance, System.Reflection.FieldInfo! field, object? value) -> void
-static Tnzi.Utilities.FastInvokeHandler.FastSetProperty(object! instance, System.Reflection.PropertyInfo! property, object? value) -> void
-static Tnzi.Utilities.FastInvokeHandler.FastSetProperty<T, TProperty>(T instance, string! propertyName, TProperty? value) -> void
-static Tnzi.Utilities.FastInvokeHandler.GetCacheStats() -> (int Methods, int PropertyGetters, int PropertySetters, int FieldGetters, int FieldSetters)
-static Tnzi.Utilities.MathHelper.Clamp<T>(T value, T min, T max) -> T
-static Tnzi.Utilities.MathHelper.GetDistance(double x1, double y1, double x2, double y2) -> double
-static Tnzi.Utilities.MathHelper.GetDistance3D(double x1, double y1, double z1, double x2, double y2, double z2) -> double
-static Tnzi.Utilities.MathHelper.ToDegrees(double radians) -> double
-static Tnzi.Utilities.MathHelper.ToRadians(double degrees) -> double
 static Tnzi.Utilities.SequentialGuid.GetDateFrom(System.Guid id) -> System.DateTime
 static Tnzi.Utilities.SequentialGuid.NewGuid() -> System.Guid
 static Tnzi.Utilities.SequentialGuid.NewGuid(Tnzi.Utilities.SequentialGuid.SequentialGuidType guidType) -> System.Guid

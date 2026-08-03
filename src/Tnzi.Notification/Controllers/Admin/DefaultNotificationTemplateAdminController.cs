@@ -1,5 +1,4 @@
 using Tnzi.Template.Dtos;
-using Tnzi.Template.Services;
 
 namespace Tnzi.Notification.Controllers.Admin;
 

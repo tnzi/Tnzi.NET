@@ -16,7 +16,7 @@ export default defineConfig({
         index: resolve(__dirname, 'src/index.ts'),
         components: resolve(__dirname, 'src/components/index.ts'),
         stores: resolve(__dirname, 'src/stores/index.ts'),
-        composables: resolve(__dirname, 'src/composables/index.ts'),
+        headless: resolve(__dirname, 'src/headless/index.ts'),
         resolvers: resolve(__dirname, 'src/resolvers/index.ts'),
         utils: resolve(__dirname, 'src/utils/index.ts'),
       },

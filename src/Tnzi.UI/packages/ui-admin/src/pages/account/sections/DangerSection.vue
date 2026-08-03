@@ -45,7 +45,7 @@ import { NAlert, NButton, NPopconfirm } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { downloadBlob } from '@tnzi/core'
 import TUserCenterSection from './TUserCenterSection.vue'
-import { useUserCenterContext } from '../userCenterContext'
+import { useUserCenterContext } from '../user-center-context'
 
 const ctx = useUserCenterContext()
 const t = ctx.t

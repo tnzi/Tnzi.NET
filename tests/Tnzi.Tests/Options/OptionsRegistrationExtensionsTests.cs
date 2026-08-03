@@ -1,9 +1,6 @@
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Tnzi.Options;
 using Tnzi.Settings;
-using Xunit;
 
 public class OptionsRegistrationExtensionsTests
 {

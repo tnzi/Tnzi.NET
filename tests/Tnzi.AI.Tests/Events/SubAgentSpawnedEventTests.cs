@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Options;
 
 namespace Tnzi.AI.Tests.Events;
 

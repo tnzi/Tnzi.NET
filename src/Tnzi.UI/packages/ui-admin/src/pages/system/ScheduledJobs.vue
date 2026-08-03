@@ -91,7 +91,7 @@ import TItemCard, { type ItemCardTag } from '../../components/data/TItemCard.vue
 import TRowActions from '../../components/crud/TRowActions.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { deleteAction, type RowAction } from '../../headless/rowActions'
+import { deleteAction, type RowAction } from '../../headless/row-actions'
 import { createSystemBridge, type ScheduledJobDto } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { EMPTY_DASH } from '../../utils/placeholders'
@@ -102,7 +102,7 @@ import {
   scheduledJobFormSections,
 } from './scheduled-job-config'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 
 const title = 'title'
 // Wired to Tnzi.Hangfire /admin/scheduled-jobs (2026-04-14). Client is

@@ -22,13 +22,21 @@ public class DefaultPromotionController : ApiControllerBase
     protected ICouponService CouponService => _couponService;
 
     /// <summary>
-    /// 验证优惠券
+    /// 验证优惠券（含适用产品/计划范围、首单限定与持券校验）
     /// </summary>
     [HttpPost("validate-coupon")]
     public virtual async Task<ApiResult<CouponValidationResultDto>> ValidateCoupon([FromBody] ValidateCouponDto request)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
-        var result = await _promotionService.ValidateCouponAsync(request.CouponCode, userId);
+        var result = await _promotionService.ValidateCouponAsync(new CouponApplyContext
+        {
+            CouponCode = request.CouponCode,
+            UserId = userId,
+            OrderAmount = request.OrderAmount,
+            Currency = request.Currency ?? PaymentConstants.DefaultCurrency,
+            ProductType = request.ProductType,
+            ScopeId = request.ProductId
+        });
         return result.ToApiResult();
     }
 
@@ -38,7 +46,16 @@ public class DefaultPromotionController : ApiControllerBase
     [HttpPost("calculate-discount")]
     public virtual async Task<ApiResult<DiscountCalculationResultDto>> CalculateDiscount([FromBody] CalculateDiscountDto request)
     {
-        var result = await _promotionService.CalculateDiscountAsync(request.CouponCode, request.OrderAmount);
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _promotionService.CalculateDiscountAsync(new CouponApplyContext
+        {
+            CouponCode = request.CouponCode,
+            UserId = userId,
+            OrderAmount = request.OrderAmount,
+            Currency = request.Currency ?? PaymentConstants.DefaultCurrency,
+            ProductType = request.ProductType,
+            ScopeId = request.ProductId
+        });
         return result.ToApiResult();
     }
 

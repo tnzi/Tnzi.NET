@@ -77,6 +77,9 @@ public class FinanceModule : TnziApplicationModule
         context.Services.TryAddScoped<IDunningPolicy, DefaultDunningPolicy>();
         context.Services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
         context.Services.AddScoped<IDocumentCommentService, DocumentCommentService>();
+        // 挂在单据上的凭据由别人上传，看它的会计既不是创建者也不该拿 storage.file.view。
+        // 让附件的可见性跟着它自己的权限码走。Storage 未加载时该注册无害。
+        context.Services.AddScoped<IFileReferenceAccessResolver, FinanceFileReferenceAccessResolver>();
         context.Services.AddScoped<OfferComposer>();
         context.Services.AddScoped<IEstimateService, EstimateService>();
         context.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();

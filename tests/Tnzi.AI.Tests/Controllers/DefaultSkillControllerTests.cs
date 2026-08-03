@@ -1,8 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Tnzi.AI.Controllers;
-using Tnzi.AspNetCore.Extensions;
-using Tnzi.AspNetCore.Models;
 
 namespace Tnzi.AI.Tests.Controllers;
 

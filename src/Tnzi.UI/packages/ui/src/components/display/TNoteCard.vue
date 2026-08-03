@@ -5,14 +5,21 @@
     with `TActivityFeed`. Pure props-driven; the caller resolves the avatar URL.
   -->
   <div class="t-note-card">
-    <TAvatar :src="avatarSrc" :name="author" :seed="authorSeed ?? author" :size="size" class="t-note-card__avatar" />
-    <div class="t-note-card__body">
+    <slot name="avatar">
+      <TAvatar :src="avatarSrc" :name="author" :seed="authorSeed ?? author" :size="size" class="t-note-card__avatar" />
+    </slot>
+    <div class="t-note-card__body" :class="bodyClass">
       <div class="t-note-card__head">
-        <span class="t-note-card__author">{{ author }}</span>
-        <span v-if="time" class="t-note-card__time">{{ time }}</span>
+        <slot name="header">
+          <span class="t-note-card__author">{{ author }}</span>
+          <!-- 作者与时间之间：职位、来源 chip、可见性标记这类随记录走的元信息。 -->
+          <slot name="meta" />
+          <span v-if="time" class="t-note-card__time">{{ time }}</span>
+        </slot>
         <div v-if="$slots.actions" class="t-note-card__actions"><slot name="actions" /></div>
       </div>
       <div class="t-note-card__content"><slot>{{ content }}</slot></div>
+      <div v-if="$slots.footer" class="t-note-card__footer"><slot name="footer" /></div>
     </div>
   </div>
 </template>
@@ -33,13 +40,33 @@ withDefaults(
     content?: string | null
     /** Avatar size. Default 32. */
     size?: number
+    /**
+     * Extra class(es) on the card body - the hook for per-record state
+     * (billable, referenced, pinned, muted …).
+     *
+     * ★ It exists so a consumer never has to reach through `:deep()` into
+     * `.t-note-card__body` to style a state. A private-selector coupling like
+     * that breaks silently the day this component renames a class, and the
+     * breakage shows up as "the highlight quietly stopped appearing".
+     */
+    bodyClass?: string | string[] | Record<string, boolean>
   }>(),
   { size: 32 },
 )
 
 defineSlots<{
+  /** Card body. Falls back to `content`. */
   default?: () => unknown
+  /** Replaces the avatar entirely (presence dots, group glyphs, badges). */
+  avatar?: () => unknown
+  /** Replaces the whole header line - the escape hatch when author+time is the wrong shape. */
+  header?: () => unknown
+  /** Appended inside the header, between author and time: job title, source chip, visibility. */
+  meta?: () => unknown
+  /** Right-aligned action strip in the header. */
   actions?: () => unknown
+  /** Below the body: attachments, reactions, a billing roll-up. */
+  footer?: () => unknown
 }>()
 </script>
 
@@ -83,5 +110,12 @@ defineSlots<{
   color: var(--tnzi-base-text-muted, rgba(0, 0, 0, 0.7));
   white-space: pre-wrap;
   word-break: break-word;
+}
+.t-note-card__footer {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

@@ -1,6 +1,5 @@
 packages:
   - 'packages/*'
-  - 'packages/*/playground'
 
 # Shared runtime/UI deps versioned in one place (pnpm catalog).
 # Packages reference these via "catalog:" in dependencies/devDependencies.

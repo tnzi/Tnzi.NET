@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using Tnzi.Security.Claims;
-using Xunit;
 
 namespace Tnzi.Tests.Security;
 

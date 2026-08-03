@@ -15,7 +15,7 @@
  */
 import { computed } from 'vue'
 import { TWorkbenchLayout as TWorkbenchLayoutBase, type WidgetDef, type WorkbenchConfig } from '@tnzi/ui'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 interface Props {
   widgets: WidgetDef[]

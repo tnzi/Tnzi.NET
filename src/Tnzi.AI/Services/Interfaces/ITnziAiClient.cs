@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 嵌入式 AI 客户端 - 绕过 HTTP，直接调用 IAgentRuntime。

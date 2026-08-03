@@ -8,6 +8,38 @@ public class AgentRunResult
     /// <summary>响应内容</summary>
     public required string Response { get; init; }
 
+    /// <summary>
+    /// 交付物：最后一次工具调用之后的文本，剔除过程叙述（「我先看一下日志」这类）。
+    /// </summary>
+    /// <remarks>
+    /// <b>为 null 表示「交付物就是 <see cref="Response"/> 本身」</b>，这是常态：非流式执行的
+    /// <see cref="Response"/> 取的是最后一次模型响应的文本，工具调用轮次之间的叙述根本不在里面。
+    /// 只有流式执行会把整轮的文本增量累积成一条完整回复，过程叙述与最终答案因此混在一起 ——
+    /// 那时本字段才会被填上。
+    /// <para>
+    /// 消费方一律用 <see cref="EffectiveDeliverable"/>，不要自己写 <c>?? Response</c>。
+    /// 对外出站（chat 回复、渠道推送）该用交付物；审计留痕、要展示推理过程的场景该用
+    /// <see cref="Response"/> 全文。
+    /// </para>
+    /// <para>
+    /// 判定边界只有工具调用一处 —— 模型把叙述和答案发成同一种文本增量，没有别的信号可用。
+    /// 因此「最后一次工具调用之后没有任何文本」时回落到上一个非空文本块，而不是给出空串：
+    /// 一个空的交付物会让出站消息变成空白，那比多一句过程话术糟得多。
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>改写 <see cref="Response"/> 会作废本字段</b>（<see cref="CloneWith"/> 自动置 null）：
+    /// 交付物是从<i>旧</i>全文里切出来的。输出防护脱敏或替换全文之后若还留着旧交付物，
+    /// 读 <see cref="EffectiveDeliverable"/> 的消费方就会拿到刚被拦下的原文，
+    /// 而防护看起来仍在正常工作。要在改写全文的同时保留交付物语义，必须显式传入新的交付物。
+    /// </para>
+    /// </remarks>
+    public string? Deliverable { get; init; }
+
+    /// <summary>
+    /// 实际应当发给用户的文本：有交付物用交付物，否则用全文。
+    /// </summary>
+    public string EffectiveDeliverable => Deliverable ?? Response;
+
     /// <summary>关联的 Run ID（启用追踪时非 null）</summary>
     public Guid? RunId { get; init; }
 
@@ -83,11 +115,19 @@ public class AgentRunResult
         List<AgentArtifactDto>? artifacts = null,
         string? clarificationQuestion = null,
         Guid? userMessageId = null,
-        Guid? assistantMessageId = null)
+        Guid? assistantMessageId = null,
+        string? deliverable = null)
     {
         return new AgentRunResult
         {
             Response = response ?? Response,
+
+            // Rewriting the response invalidates the deliverable, because the deliverable was cut
+            // out of the *old* response. Carrying it over would let a caller reading
+            // EffectiveDeliverable receive text the output guardrails just redacted or replaced -
+            // the guardrail would still look like it was working. Dropping it falls back to the
+            // new response, which is the safe direction.
+            Deliverable = deliverable ?? (response is null ? Deliverable : null),
             RunId = runId ?? RunId,
             ThreadId = threadId ?? ThreadId,
             Usage = usage ?? Usage,

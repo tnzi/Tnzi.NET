@@ -1,4 +1,3 @@
-using Tnzi.AI.Memory;
 
 namespace Tnzi.AI.Tests.Memory;
 

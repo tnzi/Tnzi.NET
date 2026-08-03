@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 账本封账锁：设定"账已封到某日"，该日及之前禁止过账与冲销。

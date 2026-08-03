@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Singleton registry that maps spawned background run IDs to their <see cref="CancellationTokenSource"/>.

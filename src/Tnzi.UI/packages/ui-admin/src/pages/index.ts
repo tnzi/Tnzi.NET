@@ -26,11 +26,25 @@ export type {
   SelectRendererOptions,
 } from './_shared/form-schema'
 
+// User Center - Profile extension-block contract. A block registered via
+// `userCenter.profile.extra` calls `useUserCenterProfileExtra({ save, reset?,
+// dirty? })` from its setup to join the built-in Profile section's single
+// Reset/Save pair (one form, one pair of buttons) instead of shipping its own
+// save button. The two writes are NOT atomic - read the module's contract.
+export {
+  useUserCenterProfileExtra,
+  provideUserCenterProfileExtra,
+  createUserCenterProfileExtraRegistry,
+  USER_CENTER_PROFILE_EXTRA_KEY,
+  type UserCenterProfileExtraHandler,
+  type UserCenterProfileExtraRegistry,
+} from './account/useUserCenterProfileExtra'
+
 // Phase I.7.1: login page route component + 5 modules + composable.
 // Consumers can import `{ TnziAdminLoginPage }` to register the route
 // themselves, or override individual modules via the `moduleComponents`
 // prop on `TLoginPage`.
-export { default as TnziAdminLoginPage } from './login/index.vue'
+export { default as TnziAdminLoginPage } from './login/LoginView.vue'
 export { default as PwdLoginModule } from './login/modules/PwdLogin.vue'
 export { default as CodeLoginModule } from './login/modules/CodeLogin.vue'
 export { default as RegisterModule } from './login/modules/Register.vue'
@@ -55,4 +69,4 @@ export {
   type SendCodePayload,
   type VerifyTwoFactorPayload,
   type TwoFactorChallenge,
-} from './login/useLoginContext'
+} from '@tnzi/ui'

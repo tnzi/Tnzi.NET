@@ -24,7 +24,7 @@ public class McpServerHttpSecurityMiddleware
         Check.NotNull(context);
 
         var apiKey = _security.ExtractApiKey(context.Request);
-        if (!_security.ValidateApiKey(apiKey))
+        if (!await _security.ValidateCallerAsync(apiKey, context.RequestAborted))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Unauthorized MCP request.");

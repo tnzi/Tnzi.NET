@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.AI.Channels.Adapters;
 
 namespace Tnzi.AI.Tests.Channels;
@@ -82,7 +81,7 @@ public class TokenRefresherTests
             {
                 callCount++;
                 await Task.Yield();
-                return ($"token-{callCount}", expireIn: 1);
+                return ($"token-{callCount}", ExpiresInSeconds: 1);
             },
             NullLogger.Instance,
             adapterName: "test",

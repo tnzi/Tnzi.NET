@@ -175,14 +175,14 @@ import { TSvgIcon } from '@tnzi/ui'
 import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
 import TKpiCard from '../../../components/data/TKpiCard.vue'
-import TEmpty from '../../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TAgingBar from '../../../components/finance/TAgingBar.vue'
 import TTransactionList from '../../../components/finance/TTransactionList.vue'
 import PartyBankAccountsPanel from './PartyBankAccountsPanel.vue'
 import { useAdminClient } from '../../../plugin/client'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { useTabTitle } from '../../../headless/useTabTitle'
-import { useBreadcrumbLabel } from '../../../headless/useBreadcrumb'
+import { useBreadcrumbLabel } from '../../../headless/use-breadcrumb'
 import { makePageTranslator } from '../../_shared/translate'
 import { financeSourceTypeLabel } from '../source-type'
 import { fmtDate, fmtMoney } from '../money'
@@ -213,7 +213,12 @@ const tFinance = makePageTranslator('finance')
 
 const isCustomer = computed(() => props.partyType === FinancePartyType.Customer)
 const api = computed(() => (isCustomer.value ? bridge.customers : bridge.vendors))
-const listPath = computed(() => (isCustomer.value ? '/admin/finance/sales/customers' : '/admin/finance/purchases/vendors'))
+// 经路由名解析而非拼路径：`defineAdminApp({ basePath })` 重写前缀后，
+// 写死的 `/admin/...` 只在冷深链（无站内历史，正好是刷新那一刻）才会被用到，
+// 也正是那一刻会落到 404。
+const listPath = computed(
+  () => router.resolve({ name: isCustomer.value ? 'finance.customers' : 'finance.vendors' }).path,
+)
 
 const party = ref<(CustomerDto & VendorDto) | null>(null)
 const summary = ref<PartyLedgerSummaryDto | null>(null)

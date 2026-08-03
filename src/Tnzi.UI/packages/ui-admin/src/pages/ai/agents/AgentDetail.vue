@@ -3,7 +3,7 @@
     :state="detail"
     layout="side"
     :sections="sections"
-    :back="'/admin/ai/agents'"
+    :back="backToList"
     :translate="t"
   >
     <template #title>
@@ -117,6 +117,21 @@
               :persona="agent?.persona ?? null"
               :saving="personaSaving"
               @save="savePersona"
+            />
+
+            <!-- Execution - built-in pipeline vs an external CLI runtime. The
+                 binding row IS the switch: creating it routes this agent to the
+                 external execution domain, deleting it returns it to built-in. -->
+            <AgentExecutionPanel
+              v-else-if="section === 'execution'"
+              :icon="sectionIcon"
+              :binding="cliBinding"
+              :runtimes="cliRuntimes"
+              :loading="cliLoading"
+              :saving="cliSaving"
+              :can-edit="can('ai.cliBinding.update')"
+              @save="saveCliBinding"
+              @unbind="unbindCli"
             />
 
             <!-- Tools - rich resource picker (assign / remove, immediate persist) -->
@@ -467,9 +482,10 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@tnzi/core'
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, h, reactive, ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NSpin, NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NTag, NButton,
   NSpace, NList, NListItem, NSlider, NPopconfirm, NModal, NDynamicTags, NProgress, useMessage,
@@ -482,11 +498,18 @@ import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import { TOverlayTheme } from '../../../components/overlay'
 import AgentResourcePicker, { type ResourcePickerItem } from './sections/AgentResourcePicker.vue'
 import AgentPersonaPanel from './sections/AgentPersonaPanel.vue'
+import AgentExecutionPanel from './sections/AgentExecutionPanel.vue'
 import { useDetail, type DetailSection } from '../../../headless/useDetail'
 import { useTabTitle } from '../../../headless/useTabTitle'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
+import {
+  createCliAgentBridge,
+  type CliAgentBindingDto,
+  type CliRuntimeDto,
+  type UpsertCliAgentBindingDto,
+} from '../../../services/bridges/cli-agent-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import type {
   AgentDto, UpdateAgentDto, AgentRunDto,
@@ -495,9 +518,17 @@ import type {
 } from '@tnzi/core/services/ai'
 
 const route = useRoute()
+const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
+const cliBridge = createCliAgentBridge({ client: useAdminClient() })
 const t = makePageTranslator('ai.agents')
 const { can } = usePermissionGuard()
+
+// Smart back: keep the list's own deep-link state (`?section=…`, filters) when
+// there IS in-app history, and resolve the fallback BY NAME - a literal
+// `/admin/ai/agents` dangles under `defineAdminApp({ basePath })`, which is
+// exactly the refresh / cold-deep-link case the fallback exists for.
+const backToList = computed(() => ({ fallback: router.resolve({ name: 'ai.agents' }).path }))
 
 // ui-admin shells don't always wrap with NMessageProvider, so `useMessage()`
 // may throw - guard and fall back to the inline status panels each section
@@ -526,6 +557,7 @@ const sections: DetailSection[] = [
   { key: 'tools', label: t('detail.panels.tools'), icon: 'mdi:wrench-outline', group: t('detail.groups.setup') },
   { key: 'knowledge', label: t('detail.panels.knowledge'), icon: 'mdi:book-open-variant', group: t('detail.groups.setup') },
   { key: 'memory', label: t('detail.panels.memory'), icon: 'mdi:database-outline', group: t('detail.groups.setup') },
+  { key: 'execution', label: t('detail.panels.execution'), icon: 'mdi:console', group: t('detail.groups.setup') },
   // Operations group - runtime + lifecycle
   { key: 'runs', label: t('detail.panels.runs'), icon: 'mdi:play-circle-outline', group: t('detail.groups.operations') },
   { key: 'versions', label: t('detail.versions.title'), icon: 'mdi:history', group: t('detail.groups.operations') },
@@ -564,6 +596,8 @@ function maybeLoadSection(k: string | null): void {
     void runValidation()
   } else if (k === 'memory' && !memoryLoaded.value && !memoryLoading.value) {
     void loadMemory(id)
+  } else if (k === 'execution' && !cliLoaded.value && !cliLoading.value) {
+    void loadCliExecution(id)
   }
 }
 
@@ -574,6 +608,14 @@ const agent = ref<AgentDto | null>(null)
 // the tab title so two open agent details are distinguishable (not both "Agent Detail").
 useTabTitle(() => agent.value?.name)
 const personaSaving = ref(false)
+// External CLI execution binding. Loaded lazily with the Execution section:
+// most agents run built-in, so two extra requests on every detail paint
+// would be paid by everyone to serve the minority.
+const cliBinding = ref<CliAgentBindingDto | null>(null)
+const cliRuntimes = ref<CliRuntimeDto[]>([])
+const cliLoading = ref(false)
+const cliLoaded = ref(false)
+const cliSaving = ref(false)
 const recentRuns = ref<AgentRunDto[]>([])
 
 // ---- Resource pickers (provider/model/knowledge/skills/tools catalogs) -----
@@ -1240,6 +1282,59 @@ async function handleSave(): Promise<void> {
   }
 }
 
+/**
+ * Load the agent's binding plus the runtimes it could bind to.
+ *
+ * Both reads tolerate the module being absent or switched off - the bridge maps
+ * a 501 to an empty result, and the panel renders "no runtimes registered"
+ * instead of an error toast.
+ */
+async function loadCliExecution(id: string): Promise<void> {
+  cliLoading.value = true
+  try {
+    const [binding, runtimes] = await Promise.all([
+      cliBridge.bindings.get(id),
+      cliBridge.runtimes.list(),
+    ])
+    cliBinding.value = binding
+    cliRuntimes.value = runtimes
+    cliLoaded.value = true
+  } finally {
+    cliLoading.value = false
+  }
+}
+
+async function saveCliBinding(input: UpsertCliAgentBindingDto): Promise<void> {
+  const id = currentRouteId()
+  if (!id) return
+
+  cliSaving.value = true
+  try {
+    cliBinding.value = await cliBridge.bindings.upsert(id, input)
+    toast('ok', t('detail.execution.saved'))
+  } catch (error) {
+    toast('err', error instanceof Error ? error.message : String(error))
+  } finally {
+    cliSaving.value = false
+  }
+}
+
+async function unbindCli(): Promise<void> {
+  const id = currentRouteId()
+  if (!id) return
+
+  cliSaving.value = true
+  try {
+    await cliBridge.bindings.remove(id)
+    cliBinding.value = null
+    toast('ok', t('detail.execution.unbound'))
+  } catch (error) {
+    toast('err', error instanceof Error ? error.message : String(error))
+  } finally {
+    cliSaving.value = false
+  }
+}
+
 async function savePersona(content: string): Promise<void> {
   // Persona persists immediately (like resource assignments), not via the Basic
   // Info save-bar. Empty string clears the inline soul content.
@@ -1275,10 +1370,12 @@ function runStatusLabel(status: unknown): string {
   return t(`runStatus.${s.charAt(0).toLowerCase()}${s.slice(1)}`)
 }
 
-function formatTime(v?: string | Date | null): string {
-  if (!v) return ''
-  try { return new Date(v).toLocaleString() } catch { return '' }
-}
+// Routed through @tnzi/core rather than a local toLocaleString: one
+// implementation means one rendering of a timestamp across the whole admin.
+// It also handles the case the try/catch here was reaching for - building a
+// Date from unparseable input yields an Invalid Date, it does not throw, so
+// that catch block never ran and the cell rendered the text "Invalid Date".
+const formatTime = (v?: string | Date | null): string => formatDateTime(v, { fallback: '' })
 
 function currentRouteId(): string | null {
   const raw = route.params?.id
@@ -1324,6 +1421,13 @@ watch(() => route.params?.id, async (next, prev) => {
   validation.value = null
   validationError.value = null
   abStatus.value = null
+  cliBinding.value = null
+  cliRuntimes.value = []
+  cliLoaded.value = false
+  // `memoryLoaded` was missing from this reset - the same defect class the
+  // comment above describes, just for a different section.
+  memoryRows.value = []
+  memoryLoaded.value = false
   await loadAgent(id)
   if (agent.value) {
     void loadRecentRuns(id)

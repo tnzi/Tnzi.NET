@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useFocusTrap } from '../../composables/feedback/useFocusTrap'
+import { useFocusTrap } from '../../headless/feedback/useFocusTrap'
 
 interface Props {
   show: boolean

@@ -41,6 +41,17 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     public decimal DiscountAmount { get; set; }
 
     /// <summary>
+    /// 税额（由 ITaxCalculator 计算；价内税时该额度已含在 <see cref="PayableAmount"/> 中）
+    /// </summary>
+    public decimal TaxAmount { get; set; }
+
+    /// <summary>
+    /// 应付金额：向渠道实际发起收款的金额，也是回调到账金额的校验基准。
+    /// 价外税 = OriginalAmount - DiscountAmount + TaxAmount；价内税 = OriginalAmount - DiscountAmount。
+    /// </summary>
+    public decimal PayableAmount { get; set; }
+
+    /// <summary>
     /// 币种（默认USD）
     /// </summary>
     public string Currency { get; set; } = "USD";
@@ -64,6 +75,23 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     /// 支付描述
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// 付款用户ID。
+    /// 与审计字段 CreatorId 分开：后台 off-session 扣款没有当前用户，CreatorId 为空，
+    /// 但账单归属仍必须可追溯（开票、对账、我的订单都依赖它）。
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 客户名称快照（开票与通知使用，避免跨模块回查 Identity）
+    /// </summary>
+    public string? CustomerName { get; set; }
+
+    /// <summary>
+    /// 客户邮箱快照（开票与通知使用，避免跨模块回查 Identity）
+    /// </summary>
+    public string? CustomerEmail { get; set; }
 
     /// <summary>
     /// 过期时间

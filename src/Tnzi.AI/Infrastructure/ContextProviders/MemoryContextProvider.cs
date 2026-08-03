@@ -27,6 +27,13 @@ public sealed class MemoryContextProvider : IContextProvider
     /// <summary>
     /// 初始化（含 MemoryScope + 可选自动沉淀 + 可选 Agent-bound 范围）
     /// </summary>
+    /// <param name="memoryStore">记忆存储</param>
+    /// <param name="scope">当前请求的记忆范围（用户/Agent/会话隔离键）</param>
+    /// <param name="logger">日志</param>
+    /// <param name="chatClientFactory">可选 ChatClient 工厂，用于 LLM 提炼记忆</param>
+    /// <param name="memoryOptions">可选记忆配置；为空时用默认值</param>
+    /// <param name="memoryConsolidator">可选记忆合并器（ADD/UPDATE/DELETE/NOOP 增量决策）</param>
+    /// <param name="executionContextAccessor">可选执行上下文访问器</param>
     /// <param name="agentBoundScope">
     /// 可选的 Agent-bound 记忆范围 - 绑定到当前 Agent（通过结构化 AgentId 列检索），
     /// 与当前用户无关，确保 headless 运行也能加载。为只读注入，不参与自动沉淀。

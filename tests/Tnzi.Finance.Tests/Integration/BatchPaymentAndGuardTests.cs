@@ -304,11 +304,11 @@ public class BatchPaymentAndGuardTests : FinanceIntegrationTestBase
         usdInvoice.Data!.Status.ShouldBe(FinanceDocumentStatus.Posted);
         usdInvoice.Data.AppliedTotal.ShouldBe(0m);
 
-        var paymentAfter = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.GetAsync(payment.Data.Id));
+        var paymentAfter = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.GetAsync(payment.Data!.Id));
         paymentAfter.Data!.AppliedTotal.ShouldBe(0m);
 
         var applications = await InScopeAsync<ISettlementService, Result<List<PaymentApplicationDto>>>(
-            s => s.GetApplicationsAsync(SettlementDocType.PaymentEntry, payment.Data.Id));
+            s => s.GetApplicationsAsync(SettlementDocType.PaymentEntry, payment.Data!.Id));
         applications.Data!.ShouldBeEmpty();
     }
 

@@ -148,7 +148,7 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   EftBatchStatus,
@@ -160,7 +160,7 @@ import {
 } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { fmtMoney, tsToIsoDate, fmtDate } from './money'
 import { buildEftSearchFields, buildEftBatchColumns, buildEftQueueColumns, buildEftLineColumns, EFT_FORMAT_LABEL, type EftBatchRow } from './eft-batch-config'
 

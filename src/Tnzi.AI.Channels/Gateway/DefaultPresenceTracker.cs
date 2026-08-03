@@ -1,5 +1,4 @@
 using Tnzi.AI.Channels.Gateway.Events;
-using Tnzi.EventBus;
 
 namespace Tnzi.AI.Channels.Gateway;
 

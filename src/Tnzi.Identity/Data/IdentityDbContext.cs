@@ -24,6 +24,7 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
     /// <param name="currentTenant">当前租户服务（可选）</param>
     /// <param name="dataFilterManager">数据过滤器管理器（可选）</param>
     /// <param name="timeProvider">时间提供者（可选）</param>
+    /// <param name="multiTenancyOptions">多租户配置（可选）</param>
     public IdentityDbContext(
         DbContextOptions<TDbContext> options,
         ICurrentUser currentUser,

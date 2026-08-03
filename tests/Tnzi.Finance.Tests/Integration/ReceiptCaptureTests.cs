@@ -1,4 +1,3 @@
-using Tnzi.Finance.Services.Interfaces;
 
 namespace Tnzi.Finance.Tests.Integration;
 

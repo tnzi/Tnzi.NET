@@ -62,7 +62,7 @@ public class BankAccountTests : FinanceIntegrationTestBase
         });
         invalid.Succeeded.ShouldBeFalse();
         invalid.Code.ShouldBe(400);
-        invalid.Message.ShouldContain("checksum");
+        invalid.Message!.ShouldContain("checksum");
 
         var valid = await CreateAsync(new CreateBankAccountDto
         {
@@ -114,7 +114,7 @@ public class BankAccountTests : FinanceIntegrationTestBase
         var result = await svc.CreateAsync(new CreateBankAccountDto { AccountId = bank, Name = "NoKey", AccountNumber = "123456789" });
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("EncryptionKey");
+        result.Message!.ShouldContain("EncryptionKey");
 
         // 能力面必须先说得出"存不了"，呈现端才能禁用账号字段并解释，
         // 而不是让用户填完账号再吃这个 400
@@ -142,7 +142,7 @@ public class BankAccountTests : FinanceIntegrationTestBase
 
         var result = await CreateAsync(new CreateBankAccountDto { AccountId = ar, Name = "Not funds" });
         result.Succeeded.ShouldBeFalse();
-        result.Message.ShouldContain("CashEquivalent");
+        result.Message!.ShouldContain("CashEquivalent");
     }
 
     [Fact]

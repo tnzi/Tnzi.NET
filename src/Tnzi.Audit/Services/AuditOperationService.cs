@@ -308,7 +308,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     public async Task<Result<List<AuditTrendPointDto>>> GetAuditTrendAsync(
         DateTime startDate,
         DateTime endDate,
-        AuditTrendGroupBy groupBy = AuditTrendGroupBy.Daily,
+        TrendInterval groupBy = TrendInterval.Daily,
         CancellationToken cancellationToken = default)
     {
         if (endDate <= startDate)
@@ -330,48 +330,27 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             .OrderBy(g => g.Date)
             .ToListAsync(cancellationToken);
 
-        // 按日直接返回；按周/月在已聚合的小数据集上二次分组
-        List<AuditTrendPointDto> trend;
-        if (groupBy == AuditTrendGroupBy.Daily)
-        {
-            trend = dailyAggregates.Select(g => new AuditTrendPointDto
+        // 分桶标签统一走核心 TimeBucket（周口径 = ISO 8601，标签用 ISO 周年而非日历年）。
+        // 按日也走同一条路径：此前按日与按周/月分两支实现，格式化各写一遍。
+        var trend = dailyAggregates
+            .GroupBy(g => TimeBucket.Label(g.Date, groupBy))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g =>
             {
-                Period = g.Date.ToString("yyyy-MM-dd"),
-                TotalCount = g.TotalCount,
-                SuccessCount = g.SuccessCount,
-                FailedCount = g.FailedCount,
-                WarningCount = g.WarningCount,
-                AverageElapsed = g.AverageElapsed
-            }).ToList();
-        }
-        else
-        {
-            trend = dailyAggregates
-                .GroupBy(g => groupBy switch
+                var totalCount = g.Sum(d => d.TotalCount);
+                return new AuditTrendPointDto
                 {
-                    AuditTrendGroupBy.Weekly =>
-                        $"{g.Date.Year}-W{CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(g.Date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday):D2}",
-                    AuditTrendGroupBy.Monthly => g.Date.ToString("yyyy-MM"),
-                    _ => g.Date.ToString("yyyy-MM-dd")
-                })
-                .OrderBy(g => g.Key)
-                .Select(g =>
-                {
-                    var totalCount = g.Sum(d => d.TotalCount);
-                    return new AuditTrendPointDto
-                    {
-                        Period = g.Key,
-                        TotalCount = totalCount,
-                        SuccessCount = g.Sum(d => d.SuccessCount),
-                        FailedCount = g.Sum(d => d.FailedCount),
-                        WarningCount = g.Sum(d => d.WarningCount),
-                        AverageElapsed = totalCount > 0
-                            ? g.Sum(d => d.AverageElapsed * d.TotalCount) / totalCount
-                            : 0
-                    };
-                })
-                .ToList();
-        }
+                    Period = g.Key,
+                    TotalCount = totalCount,
+                    SuccessCount = g.Sum(d => d.SuccessCount),
+                    FailedCount = g.Sum(d => d.FailedCount),
+                    WarningCount = g.Sum(d => d.WarningCount),
+                    AverageElapsed = totalCount > 0
+                        ? g.Sum(d => d.AverageElapsed * d.TotalCount) / totalCount
+                        : 0
+                };
+            })
+            .ToList();
 
         return Ok(trend);
     }

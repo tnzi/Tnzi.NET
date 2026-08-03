@@ -104,10 +104,12 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         memoryStream.Position = 0;
 
         // 计算分块MD5
-        var chunkMd5 = await Md5Helper.CalculateAsync(memoryStream);
+        var chunkMd5 = await HashHelper.GetMd5Async(memoryStream);
         memoryStream.Position = 0;
 
-        // 保存分块到临时存储
+        // 保存分块到临时存储。长度在交给 provider **之前**取：上传之后这个流是否还可读
+        // 由 provider 决定（见 IFileStorage.UploadAsync 的流所有权约定）。
+        var chunkByteSize = memoryStream.Length;
         var chunkFileName = $"chunk_{uploadSessionId}_{chunkIndex}";
         var chunkPath = await _storage.UploadAsync(chunkFileName, memoryStream, "application/octet-stream");
 
@@ -116,7 +118,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         {
             UploadSessionId = uploadSessionId,
             ChunkIndex = chunkIndex,
-            ChunkSize = memoryStream.Length,
+            ChunkSize = chunkByteSize,
             ChunkPath = chunkPath,
             Md5Hash = chunkMd5
         };
@@ -135,7 +137,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         session.UploadedSize = uploadedSize;
         await _uploadSessionRepository.UpdateAsync(session, cancellationToken);
 
-        LogInformation("Chunk uploaded: SessionId: {SessionId}, ChunkIndex: {ChunkIndex}, Size: {Size}", uploadSessionId, chunkIndex, memoryStream.Length);
+        LogInformation("Chunk uploaded: SessionId: {SessionId}, ChunkIndex: {ChunkIndex}, Size: {Size}", uploadSessionId, chunkIndex, chunkByteSize);
         return Ok(chunk, "Chunk uploaded successfully");
     }
 
@@ -175,7 +177,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                     if (_options.CurrentValue.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
                     {
                         using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath);
-                        var actualChunkMd5 = await Md5Helper.CalculateAsync(verifyStream);
+                        var actualChunkMd5 = await HashHelper.GetMd5Async(verifyStream);
                         if (!string.Equals(actualChunkMd5, chunk.Md5Hash, StringComparison.OrdinalIgnoreCase))
                         {
                             LogWarning("Chunk MD5 mismatch during merge: SessionId={SessionId}, ChunkIndex={ChunkIndex}, Expected={Expected}, Actual={Actual}",
@@ -199,7 +201,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 if (_options.CurrentValue.EnableMd5Validation)
                 {
                     mergedStream.Position = 0;
-                    md5Hash = await Md5Helper.CalculateAsync(mergedStream);
+                    md5Hash = await HashHelper.GetMd5Async(mergedStream);
 
                     if (!string.IsNullOrEmpty(session.Md5Hash) && md5Hash != session.Md5Hash)
                         return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.FILE_OPERATION_ERROR);

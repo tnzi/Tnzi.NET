@@ -1,4 +1,3 @@
-using Tnzi.OpenTelemetry;
 using Tnzi.OpenTelemetry.Options;
 
 namespace Tnzi.OpenTelemetry.Tests;

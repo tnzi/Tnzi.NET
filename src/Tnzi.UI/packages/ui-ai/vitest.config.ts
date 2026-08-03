@@ -17,18 +17,20 @@ export default defineConfig({
       exclude: [
         'src/**/index.ts',
         'src/**/*.d.ts',
-        'src/locale/**',
-        'src/chat/**',
+        'src/locales/**',
         'src/embed/**',
-        'src/themes/**',
+        'src/theme/**',
         'src/styles/**',
-        // The 61 SFCs under components/** need a real DOM plus user
-        // interaction to test meaningfully; unit tests target the composables
-        // and lib instead, and the SFCs are exercised through the playground
-        // and the Playwright chat-themes spec.
-        'src/components/**',
-        'src/shell/**',
-        'playground/**',
+        // Re-export-only entry for the `@tnzi/ui-ai/chat` subpath.
+        'src/chat-app.ts',
+        // The SFCs under components/** need a real DOM plus user interaction to
+        // test meaningfully; unit tests target the headless layer and utils instead,
+        // and the SFCs are exercised in the Acme chat app.
+        //
+        // Scoped to `.vue` on purpose: pure logic co-located with a component
+        // (parsers, grouping, formatting) is exactly what this comment says unit
+        // tests should cover, so excluding the whole directory would hide it.
+        'src/components/**/*.vue',
         '**/__tests__/**',
       ],
       thresholds: {
@@ -36,7 +38,7 @@ export default defineConfig({
         statements: 80,
         // Same rationale as ui-admin: mount-based unit tests can't reach 80%
         // function coverage for arrow-function handlers inside script setup.
-        // Real flows are covered by Playwright E2E (Task 6.6 chat-themes).
+        // Real flows are only exercised by hand in the Acme chat app.
         functions: 60,
         branches: 70,
       },

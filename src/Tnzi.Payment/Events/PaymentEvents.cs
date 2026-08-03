@@ -183,3 +183,44 @@ public class RefundProcessedEvent : EventBase
     /// </summary>
     public string? FailReason { get; set; }
 }
+
+/// <summary>
+/// 已保存的支付方式在渠道侧被撤销事件。
+/// </summary>
+/// <remarks>
+/// 由渠道 webhook 触发（付款人在 PayPal / Stripe 自己撤销了授权，或商户在渠道后台删除）。
+/// 框架已经把本地记录置失效并清掉订阅上的快照；这个事件是留给消费方"告诉用户"的钩子——
+/// 用户是在渠道那边操作的，多半没意识到自己顺手关掉了这里的自动续费。
+/// </remarks>
+public class PaymentMethodRevokedEvent : EventBase
+{
+    /// <summary>
+    /// 已保存支付方式ID
+    /// </summary>
+    public Guid PaymentMethodId { get; set; }
+
+    /// <summary>
+    /// 持有用户ID
+    /// </summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 支付渠道代码
+    /// </summary>
+    public string ChannelCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 卡组织 / 钱包类型（展示用）
+    /// </summary>
+    public string? Brand { get; set; }
+
+    /// <summary>
+    /// 卡号尾四位（展示用）
+    /// </summary>
+    public string? Last4 { get; set; }
+
+    /// <summary>
+    /// 因此失去支付方式的订阅数量。大于 0 意味着这些订阅的下次续费会失败。
+    /// </summary>
+    public int AffectedSubscriptionCount { get; set; }
+}

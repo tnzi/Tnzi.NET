@@ -32,6 +32,8 @@
     <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Feature\Tnzi.Feature.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Documents\Tnzi.Documents.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Documents.Signing\Tnzi.Documents.Signing.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Hangfire\Tnzi.Hangfire.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Chat\Tnzi.Chat.csproj" PrivateAssets="all" />
@@ -46,6 +48,7 @@
     <ProjectReference Include="..\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.AI.Cli\Tnzi.AI.Cli.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- 预制模板文件（作为内容文件复制到输出目录） -->

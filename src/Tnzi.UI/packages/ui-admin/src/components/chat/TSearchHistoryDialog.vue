@@ -55,7 +55,7 @@ import { NScrollbar } from 'naive-ui'
 import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import { formatDateTime } from '@tnzi/core'
 import { useChatStore } from '../../stores/useChatStore'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TChatDialog from './TChatDialog.vue'
 

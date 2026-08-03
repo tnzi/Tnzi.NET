@@ -18,7 +18,7 @@
  */
 import { TSvgIcon } from '@tnzi/ui'
 import LoginCharacters from './LoginCharacters.vue'
-import type { LoginSceneState } from '../../../pages/login/useLoginContext'
+import type { LoginSceneState } from '@tnzi/ui'
 
 interface Props {
   /** Brand title (e.g. "Tnzi Admin"). */

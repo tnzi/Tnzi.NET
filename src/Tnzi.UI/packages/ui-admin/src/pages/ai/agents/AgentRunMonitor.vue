@@ -127,6 +127,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatDateTime } from '@tnzi/core'
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -192,14 +193,13 @@ function shortId(id: string): string {
   return id.length > 8 ? `${id.slice(0, 8)}…` : id
 }
 
-function formatTime(s: string | null | undefined): string {
-  if (!s) return EMPTY_DASH
-  try {
-    return new Date(s).toLocaleString()
-  } catch {
-    return s
-  }
-}
+// Routed through @tnzi/core rather than a local toLocaleString: one
+// implementation means one rendering of a timestamp across the whole admin.
+// It also handles the case the try/catch here was reaching for - building a
+// Date from unparseable input yields an Invalid Date, it does not throw, so
+// that catch block never ran and the cell rendered the text "Invalid Date".
+const formatTime = (s: string | null | undefined): string =>
+  formatDateTime(s, { fallback: EMPTY_DASH })
 
 /** Non-terminal (cancellable / still-polling) run. */
 function isRunning(run: AgentRunDto): boolean {

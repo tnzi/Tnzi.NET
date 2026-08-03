@@ -7,7 +7,9 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 {
     protected override void ValidateOptions(AIOptions options, List<string> errors)
     {
-        var hasProviders = options.Providers != null && options.Providers.Count > 0;
+        // Providers 声明为非空且带默认实例，配置绑定不会把它置 null；多余的 != null 检查会让
+        // 编译器把后续读取标记为「可能为 null」（CS8602）。
+        var hasProviders = options.Providers.Count > 0;
 
         // 允许零 provider 配置（AI 功能降级为不可用，但模块正常加载），
         // 但仍需继续校验 Permissions / MCP / Guardrails 等其他子模块。
@@ -17,7 +19,7 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             {
                 errors.Add("DefaultProvider cannot be null or empty");
             }
-            else if (!options.Providers!.ContainsKey(options.DefaultProvider))
+            else if (!options.Providers.ContainsKey(options.DefaultProvider))
             {
                 errors.Add($"DefaultProvider '{options.DefaultProvider}' is not found in Providers");
             }

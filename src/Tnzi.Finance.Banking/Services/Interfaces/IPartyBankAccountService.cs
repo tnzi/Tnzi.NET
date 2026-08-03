@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 往来方银行账户服务（remit-to：客户/供应商结构化账户，EFT 输出的收款方来源）

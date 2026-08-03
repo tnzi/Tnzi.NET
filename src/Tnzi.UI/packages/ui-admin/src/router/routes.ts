@@ -42,8 +42,16 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     // matters - the path-param route must come before the bare `/login` redirect.
     path: '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
     name: 'login',
-    component: () => import('../pages/login/index.vue'),
+    component: () => import('../pages/login/LoginView.vue'),
     meta: { requiresAuth: false, title: 'Login' },
+  },
+  {
+    // 分享链接的收件人页面。`requiresAuth: false` 是关键 —— 收件人是客户 / 审计师 /
+    // 供应商，他们没有账号，这正是对外分享的定义。页面自绘一张居中卡片，不挂 admin 外壳。
+    path: '/share/:token',
+    name: 'share-link',
+    component: () => import('../pages/share/SharePage.vue'),
+    meta: { requiresAuth: false, title: 'Shared file' },
   },
   // Exception pages - top-level (so `applyBasePath` prefixes them uniformly with
   // every other route) and `requiresAuth: false` so the permission / module
@@ -1228,6 +1236,28 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               permission: 'ai.channels.view',
               keepAlive: true,
               moduleGate: 'AI.Channels',
+            },
+          },
+          {
+            path: 'cli-runtimes',
+            name: 'ai.cliRuntimes',
+            component: () => import('../pages/ai/cli/CliRuntimes.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.cliRuntimes.title',
+              permission: 'ai.cliRuntime.view',
+              keepAlive: true,
+              moduleGate: 'AI.Cli',
+            },
+          },
+          {
+            path: 'cli-runs',
+            name: 'ai.cliRuns',
+            component: () => import('../pages/ai/cli/CliRuns.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.ai.cliRuns.title',
+              permission: 'ai.cliRun.view',
+              keepAlive: true,
+              moduleGate: 'AI.Cli',
             },
           },
           {

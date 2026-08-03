@@ -10,7 +10,7 @@ import {
   type EftQueueItemDto,
 } from '../../services/bridges/finance-bridge'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { amountCell, fmtMoney, fmtDate } from './money'
+import { fmtDate } from './money'
 import TMoney from '../../components/finance/TMoney.vue'
 import type { SearchFieldItem } from '../../components/crud/TCrudSearchAdvanced.vue'
 

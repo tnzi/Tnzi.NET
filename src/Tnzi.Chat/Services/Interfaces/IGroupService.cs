@@ -1,4 +1,4 @@
-namespace Tnzi.Chat.Services.Interfaces;
+namespace Tnzi.Chat.Services;
 
 public interface IGroupService
 {

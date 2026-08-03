@@ -3,7 +3,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import type { TransferDto } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtMoney, fmtDate } from './money'
+import { fmtDate } from './money'
 
 import { docStatusBadge } from './document-config'
 import TMoney from '../../components/finance/TMoney.vue'

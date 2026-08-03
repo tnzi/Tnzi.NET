@@ -28,8 +28,8 @@ public class ResilienceModule : TnziInfrastructureModule
             return Task.CompletedTask;
         }
 
-        // 添加 Resilience Pipeline
-        context.Services.AddResiliencePipeline("default", builder =>
+        // 通用管线：框架自身不消费，供消费应用调外部服务时用（键见 ResiliencePipelineNames）
+        context.Services.AddResiliencePipeline(ResiliencePipelineNames.Default, builder =>
         {
             // 重试策略
             builder.AddRetry(new Polly.Retry.RetryStrategyOptions
@@ -52,7 +52,7 @@ public class ResilienceModule : TnziInfrastructureModule
 
         // 添加事件总线专用 Pipeline
         // 重试参数与 EventBusOptions 对齐(单一参数来源):LocalEventBus 在 EnableRetry 时优先消费此管线
-        context.Services.AddResiliencePipeline("eventbus", (builder, pipelineContext) =>
+        context.Services.AddResiliencePipeline(ResiliencePipelineNames.EventBus, (builder, pipelineContext) =>
         {
             var eventBusOptions = pipelineContext.ServiceProvider.GetService<IOptions<EventBusOptions>>()?.Value;
             var maxRetries = eventBusOptions?.RetryCount ?? 3;

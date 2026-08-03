@@ -21,7 +21,7 @@
  */
 import { computed, type ComputedRef } from 'vue'
 import type { StatusType } from '@tnzi/ui'
-import { translatePageKey } from '../pages/_shared/translate'
+import { translatePageKey } from '../i18n/translate'
 
 export interface EnumMetaSpec<V extends string | number> {
   value: V

@@ -44,10 +44,10 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NCheckbox, NSpin, NTag } from 'naive-ui'
 import TDetailSection from '../../../components/detail/TDetailSection.vue'
-import TEmpty from '../../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../../plugin/client'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import type { RoleDto } from '@tnzi/core/services/identity'
 
 const props = defineProps<{

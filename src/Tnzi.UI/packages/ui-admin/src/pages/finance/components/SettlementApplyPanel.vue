@@ -46,7 +46,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { NButton, NInputNumber } from 'naive-ui'
 
 import { makePageTranslator } from '../../_shared/translate'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import type { FinanceBridge, OpenDocumentDto, SettlementDocType, FinancePartyType } from '../../../services/bridges/finance-bridge'
 import { fmtAmount, fmtDate } from '../money'
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCrudPage } from '../../src/headless/useCrudPage'
-import { editAction, deleteAction, viewAction } from '../../src/headless/rowActions'
+import { editAction, deleteAction, viewAction } from '../../src/headless/row-actions'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import type { ColumnDef } from '../../src/headless/useColumnSettings'
 

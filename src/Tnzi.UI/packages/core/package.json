@@ -42,11 +42,6 @@
       "import": "./dist/adapters/i18n/index.js",
       "require": "./dist/adapters/i18n/index.cjs"
     },
-    "./adapters/icons": {
-      "types": "./dist/adapters/icons/index.d.ts",
-      "import": "./dist/adapters/icons/index.js",
-      "require": "./dist/adapters/icons/index.cjs"
-    },
     "./adapters/theme": {
       "types": "./dist/adapters/theme/index.d.ts",
       "import": "./dist/adapters/theme/index.js",
@@ -71,11 +66,6 @@
       "types": "./dist/headless/index.d.ts",
       "import": "./dist/headless/index.js",
       "require": "./dist/headless/index.cjs"
-    },
-    "./composables": {
-      "types": "./dist/composables/index.d.ts",
-      "import": "./dist/composables/index.js",
-      "require": "./dist/composables/index.cjs"
     },
     "./enums": {
       "types": "./dist/enums/index.d.ts",
@@ -111,6 +101,7 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",

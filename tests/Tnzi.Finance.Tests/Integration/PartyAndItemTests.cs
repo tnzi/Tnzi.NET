@@ -107,7 +107,7 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
         draft.Succeeded.ShouldBeTrue(draft.Message);
 
         // 被单据引用 → 拒删 409（引导停用），死注释修复的回归
-        var blocked = await InScopeAsync<ICustomerService, Result>(s => s.DeleteAsync(customer.Data.Id));
+        var blocked = await InScopeAsync<ICustomerService, Result>(s => s.DeleteAsync(customer.Data!.Id));
         blocked.Succeeded.ShouldBeFalse();
         blocked.Code.ShouldBe(409);
 
@@ -131,7 +131,7 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
         }));
         bill.Succeeded.ShouldBeTrue(bill.Message);
 
-        var blocked = await InScopeAsync<IVendorService, Result>(s => s.DeleteAsync(vendor.Data.Id));
+        var blocked = await InScopeAsync<IVendorService, Result>(s => s.DeleteAsync(vendor.Data!.Id));
         blocked.Succeeded.ShouldBeFalse();
         blocked.Code.ShouldBe(409);
 
@@ -243,7 +243,7 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
         draft.Succeeded.ShouldBeTrue(draft.Message);
 
         // 被单据行引用 → 拒删 409（引导停用）
-        var blocked = await InScopeAsync<IItemService, Result>(s => s.DeleteAsync(item.Data.Id));
+        var blocked = await InScopeAsync<IItemService, Result>(s => s.DeleteAsync(item.Data!.Id));
         blocked.Succeeded.ShouldBeFalse();
         blocked.Code.ShouldBe(409);
 
@@ -253,7 +253,7 @@ public class PartyAndItemTests : FinanceIntegrationTestBase
             Name = "Unused Item",
             Type = ItemType.Service,
             SalesPrice = 10m,
-            IncomeAccountId = incomeLeaf.Id
+            IncomeAccountId = incomeLeaf!.Id
         }));
         free.Succeeded.ShouldBeTrue(free.Message);
         (await InScopeAsync<IItemService, Result>(s => s.DeleteAsync(free.Data!.Id))).Succeeded.ShouldBeTrue();

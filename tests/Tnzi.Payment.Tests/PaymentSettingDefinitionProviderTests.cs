@@ -35,11 +35,12 @@ public class PaymentSettingDefinitionProviderTests
     }
 
     [Fact]
-    public void Group_HasSevenFields()
+    public void Group_HasExpectedFieldCount()
     {
-        // 原 5 个退款/通知字段 + 新增后台任务运营字段（AutoCloseExpireMinutes / BackgroundTaskIntervalMinutes，
-        // 经父 IOptionsMonitor<PaymentOptions> 热消费）。
-        Assert.Equal(7, _group.Fields.Count);
+        // 5 个退款/通知字段 + 后台任务运营字段（AutoCloseExpireMinutes / OfflineExpireDays /
+        // BackgroundTaskIntervalMinutes / RefundReconcileLookbackDays）+ 渠道与回跳字段
+        // （DefaultChannelCode / DefaultReturnUrl）。全部经父 IOptionsMonitor<PaymentOptions> 热消费。
+        Assert.Equal(11, _group.Fields.Count);
     }
 
     [Fact]
@@ -47,12 +48,32 @@ public class PaymentSettingDefinitionProviderTests
     {
         var fields = _group.Fields;
         Assert.Contains(fields, f => f.Key == "Payment:DefaultCurrency");
+        Assert.Contains(fields, f => f.Key == "Payment:DefaultChannelCode");
+        Assert.Contains(fields, f => f.Key == "Payment:DefaultReturnUrl");
         Assert.Contains(fields, f => f.Key == "Payment:DefaultNotifyUrl");
         Assert.Contains(fields, f => f.Key == "Payment:EnableRefundApproval");
         Assert.Contains(fields, f => f.Key == "Payment:RefundApprovalThreshold");
         Assert.Contains(fields, f => f.Key == "Payment:MaxRefundAmountPerDay");
         Assert.Contains(fields, f => f.Key == "Payment:AutoCloseExpireMinutes");
+        Assert.Contains(fields, f => f.Key == "Payment:OfflineExpireDays");
         Assert.Contains(fields, f => f.Key == "Payment:BackgroundTaskIntervalMinutes");
+        Assert.Contains(fields, f => f.Key == "Payment:RefundReconcileLookbackDays");
+    }
+
+    /// <summary>
+    /// 税务配置曾被标注 KEEP-STATIC（无运行时消费者）。接线 ITaxCalculator 后它才允许出现在配置中心，
+    /// 这条测试守住"暴露的配置必须真的生效"这个约定。
+    /// </summary>
+    [Fact]
+    public void TaxGroup_IsExposedWithConsumedFields()
+    {
+        var taxGroup = RuntimeSettingMetadataExtractor.Extract(typeof(TaxOptions));
+
+        Assert.NotNull(taxGroup);
+        Assert.Equal("payment-tax", taxGroup!.Key);
+        Assert.Contains(taxGroup.Fields, f => f.Key == "Payment:Tax:Enabled");
+        Assert.Contains(taxGroup.Fields, f => f.Key == "Payment:Tax:DefaultTaxRate");
+        Assert.Contains(taxGroup.Fields, f => f.Key == "Payment:Tax:TaxIncluded");
     }
 
     [Fact]

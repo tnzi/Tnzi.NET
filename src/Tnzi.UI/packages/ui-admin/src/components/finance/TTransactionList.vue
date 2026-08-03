@@ -2,7 +2,8 @@
   <div class="t-txn">
     <div v-if="showScope || $slots.toolbar" class="t-txn__toolbar">
       <NRadioGroup
-        v-if="showScope" :value="scope" size="small" @update:value="(v: 'all' | 'open') => emit('update:scope', v)">
+        v-if="showScope" :value="scope" size="small" @update:value="(v: 'all' | 'open') => emit('update:scope', v)"
+>
         <NRadioButton value="all">{{ label('all') }}</NRadioButton>
         <NRadioButton value="open">
           {{ label('open') }}<span v-if="openCount !== undefined"> ({{ openCount }})</span>
@@ -58,7 +59,7 @@ import { computed, h } from 'vue'
 import { NPagination, NRadioButton, NRadioGroup, NSpin, type DataTableColumns } from 'naive-ui'
 import TMoney from './TMoney.vue'
 import TDocStatusBadge from './TDocStatusBadge.vue'
-import TEmpty from '../data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TResponsiveTable from '../data/TResponsiveTable.vue'
 import { formatAccountingDate } from '../../utils/finance-format'
 import type { PartyLedgerEntryDto } from '../../services/bridges/finance-bridge'
@@ -117,7 +118,7 @@ function label(key: string): string {
 }
 
 /** Human name for a source token; unknown tokens fall back to the raw token. */
-function docTypeLabel(docType: string): string {
+function resolveDocTypeLabel(docType: string): string {
   return props.docTypeLabel?.(docType) ?? docType
 }
 
@@ -140,7 +141,7 @@ const columns = computed<DataTableColumns<PartyLedgerEntryDto>>(() => [
         title: label('document'),
       }, [
         h('span', { class: 't-txn__number' }, r.number ?? EMPTY_DASH),
-        h('span', { class: 't-txn__doctype' }, docTypeLabel(r.docType)),
+        h('span', { class: 't-txn__doctype' }, resolveDocTypeLabel(r.docType)),
       ]),
   },
   {

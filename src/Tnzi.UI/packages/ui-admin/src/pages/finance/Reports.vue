@@ -322,7 +322,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import { NAlert, NButton, NDropdown, NInput, NPagination, NSelect, NSpin, useDialog, type DataTableColumns } from 'naive-ui'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import TEmpty from '../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TModalShell from '../../components/overlay/TModalShell.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import {
@@ -356,9 +356,9 @@ import { formatAccountingDateRange, formatMoney, formatPercent, srMoney, varianc
 import { useAdminClient } from '../../plugin/client'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { downloadBlob } from '@tnzi/core'
-import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'
+import { amountCell, fmtAmount, fmtDate } from './money'
 import { financeSourceTypeLabel } from './source-type'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })

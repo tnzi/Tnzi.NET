@@ -11,6 +11,8 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Tnzi.AspNetCore/Tnzi.AspNetCore.csproj" />
+    <Project Path="src/Tnzi.Documents/Tnzi.Documents.csproj" />
+    <Project Path="src/Tnzi.Documents.Signing/Tnzi.Documents.Signing.csproj" />
     <Project Path="src/Tnzi.EFCore/Tnzi.EFCore.csproj" />
     <Project Path="src/Tnzi.Hangfire/Tnzi.Hangfire.csproj" />
     <Project Path="src/Tnzi.Hosting/Tnzi.Hosting.csproj" />
@@ -50,6 +52,7 @@
     <Project Path="src/Tnzi.AI.Rag/Tnzi.AI.Rag.csproj" />
     <Project Path="src/Tnzi.AI.Channels/Tnzi.AI.Channels.csproj" />
     <Project Path="src/Tnzi.AI.Sandbox/Tnzi.AI.Sandbox.csproj" />
+    <Project Path="src/Tnzi.AI.Cli/Tnzi.AI.Cli.csproj" />
   </Folder>
   <Folder Name="/src/modules/Tnzi.Finance/">
     <Project Path="src/Tnzi.Finance/Tnzi.Finance.csproj" />
@@ -67,10 +70,13 @@
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Rag.Tests/Tnzi.AI.Rag.Tests.csproj" />
     <Project Path="tests/Tnzi.AI.Tests/Tnzi.AI.Tests.csproj" />
+    <Project Path="tests/Tnzi.AI.Cli.Tests/Tnzi.AI.Cli.Tests.csproj" />
     <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />
     <Project Path="tests/Tnzi.Authorization.Tests/Tnzi.Authorization.Tests.csproj" />
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
+    <Project Path="tests/Tnzi.Documents.Tests/Tnzi.Documents.Tests.csproj" />
+    <Project Path="tests/Tnzi.Documents.Signing.Tests/Tnzi.Documents.Signing.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
     <Project Path="tests/Tnzi.Finance.Tests/Tnzi.Finance.Tests.csproj" />

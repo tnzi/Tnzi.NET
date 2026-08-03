@@ -58,4 +58,15 @@ public class DefaultPaymentAdminController : ApiAdminControllerBase
         var result = await _paymentService.SyncOrderAsync(tradeNo);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 手动确认线下收款（银行转账/汇款/支票等）。仅适用于线下渠道，需登记收款凭证。
+    /// </summary>
+    [HttpPost("{tradeNo}/confirm")]
+    [ApiAuthorize(PermissionName = "payment.order.update")]
+    public virtual async Task<ApiResult<PaymentDto>> Confirm(string tradeNo, [FromBody] ConfirmOfflinePaymentDto request)
+    {
+        var result = await _paymentService.ConfirmOfflinePaymentAsync(tradeNo, request);
+        return result.ToApiResult();
+    }
 }

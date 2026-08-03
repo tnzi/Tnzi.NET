@@ -30,7 +30,9 @@ public class OfferComposer
     /// <summary>
     /// 校验行、解析目录项默认描述、算行金额与税额。
     /// </summary>
+    /// <param name="lines">待定稿的单据行</param>
     /// <param name="isPurchase">true 走进项税口径（采购订单）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     public async Task<Result<Composition>> ComposeAsync(
         IReadOnlyList<CreateOfferLineDto>? lines, bool isPurchase, CancellationToken cancellationToken)
     {

@@ -1,4 +1,3 @@
-using System.Net.Http;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using MsOptions = Microsoft.Extensions.Options.Options;
@@ -11,12 +10,12 @@ namespace Tnzi.AI.Tests.Integration;
 /// 其 System 行（TenantId=null）<b>不会</b>被 EF Core 全局多租户查询过滤器隐藏。
 /// <para>
 /// 这是整个"共享资源 Scope 模式"的核心证明：因为 Provider 有意<b>不</b>实现
-/// <see cref="IMultiTenant"/>，全局过滤器 <c>e.TenantId == currentTenant</c> 根本不会附加到它的查询，
+/// <see cref="Tnzi.Domain.Entities.IMultiTenant"/>，全局过滤器 <c>e.TenantId == currentTenant</c> 根本不会附加到它的查询，
 /// 所以 System 行对所有真实租户都可见。可见性改由服务层（ProviderService）
 /// 通过 Scope + TenantId 联合过滤强制（System ∪ 当前租户）。
 /// </para>
 /// <para>
-/// 反证（对照组）：<see cref="Agent"/> 是真正的 <see cref="IMultiTenant"/> 实体。
+/// 反证（对照组）：<see cref="Agent"/> 是真正的 <see cref="Tnzi.Domain.Entities.IMultiTenant"/> 实体。
 /// 一条 TenantId=null 的 Agent 在当前租户 A 下被全局过滤器隐藏，证明过滤器确实在生效，
 /// 反衬出 Provider 正确地"退出"了多租户过滤。
 /// </para>

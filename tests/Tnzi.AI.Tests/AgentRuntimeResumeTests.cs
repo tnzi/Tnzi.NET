@@ -1,5 +1,4 @@
 
-using System.Runtime.CompilerServices;
 
 namespace Tnzi.AI.Tests;
 
@@ -181,7 +180,7 @@ public class AgentRuntimeResumeTests
 
         var workflowService = new Mock<IWorkflowService>();
         workflowService.Setup(x => x.ResumeWithInputAsync("wf-exec-003", "step-1",
-                It.Is<Dictionary<string, object?>>(d => d.Count == 1), It.IsAny<CancellationToken>()))
+                It.Is<Dictionary<string, object>>(d => d.Count == 1), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<WorkflowExecutionResultDto>.Success(new WorkflowExecutionResultDto
             {
                 ExecutionId = "wf-exec-003",

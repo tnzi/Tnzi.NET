@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 namespace Tnzi.AI.Tests;
 
 public class AgentRunServiceRetryTests
@@ -122,7 +121,7 @@ public class AgentRunServiceRetryTests
         result.Data.Status.ShouldBe(AgentRunStatus.RequiresClarification);
         result.Data.Provider.ShouldBe("openai");
         result.Data.ClarificationQuestion.ShouldBe("Which environment should I target?");
-        result.Data.Suggestions.ShouldContain("Option A");
+        result.Data.Suggestions!.ShouldContain("Option A");
         result.Data.Artifacts.ShouldNotBeNull();
     }
 }

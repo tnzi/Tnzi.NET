@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { maybeTranslateKey } from '../../../src/pages/_shared/translate'
+import { maybeTranslateKey } from '../../../src/i18n/translate'
 
 describe('maybeTranslateKey', () => {
   const t = (k: string) => (k === 'admin.crud.list' ? 'List' : `T:${k}`)

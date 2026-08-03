@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 财务报表服务（全部从总账行数据库级聚合，本位币口径）
@@ -36,7 +36,12 @@ public interface IFinancialReportService
     /// <paramref name="filter"/> 刻意不给默认值。
     /// </para>
     /// </remarks>
+    /// <param name="accountId">科目 ID</param>
+    /// <param name="from">起始日期（含）</param>
+    /// <param name="to">截止日期（含）</param>
+    /// <param name="paging">分页参数</param>
     /// <param name="filter">筛选条件（null = 不筛选）</param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<GeneralLedgerReportDto>> GetGeneralLedgerAsync(
         Guid accountId, DateTime from, DateTime to, PagedQueryDto paging, GeneralLedgerFilterDto? filter,
         CancellationToken cancellationToken = default)

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Recurring.Services.Interfaces;
+namespace Tnzi.Finance.Recurring.Services;
 
 /// <summary>
 /// 周期性单据模板管理

@@ -2,8 +2,6 @@ using System.Linq.Expressions;
 using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
 using Tnzi.Domain.Repositories;
 using Tnzi.Mapster;
 using Tnzi.Payment.Dtos;
@@ -12,7 +10,6 @@ using Tnzi.Payment.Metadata;
 using Tnzi.Payment.Options;
 using Tnzi.Payment.Providers;
 using Tnzi.Payment.Services;
-using Tnzi.Results;
 using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
 namespace Tnzi.Payment.Tests;

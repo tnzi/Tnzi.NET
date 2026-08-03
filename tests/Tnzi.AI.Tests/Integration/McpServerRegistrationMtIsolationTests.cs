@@ -5,7 +5,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace Tnzi.AI.Tests.Integration;
 
 /// <summary>
-/// P1 多租户隔离门禁 - 证明 <see cref="McpServerRegistration"/> 是真正的 <see cref="IMultiTenant"/> 实体，
+/// P1 多租户隔离门禁 - 证明 <see cref="McpServerRegistration"/> 是真正的 <see cref="Tnzi.Domain.Entities.IMultiTenant"/> 实体，
 /// 其凭证承载行（AuthTokenEncrypted）在多租户开启下被 EF Core 全局查询过滤器按租户隔离。
 /// <para>
 /// 与"共享资源 Scope 模式"（Provider 有意 <b>不</b> 实现 IMultiTenant）相反：

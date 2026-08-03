@@ -2,8 +2,6 @@ using System.Linq.Expressions;
 using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
 using Tnzi.Domain.Repositories;
 using Tnzi.Mapster;
 using Tnzi.Payment.Dtos;
@@ -12,8 +10,6 @@ using Tnzi.Payment.Metadata;
 using Tnzi.Payment.Options;
 using Tnzi.Payment.Providers;
 using Tnzi.Payment.Services;
-using Tnzi.Results;
-using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
 namespace Tnzi.Payment.Tests;
 
@@ -28,6 +24,7 @@ public class SubscriptionServiceTests
     private readonly Mock<IPaymentService> _paymentServiceMock;
     private readonly Mock<IPaymentProviderFactory> _providerFactoryMock;
     private readonly Mock<IOptionsMonitor<PaymentOptions>> _optionsMock;
+    private readonly Mock<IPaymentMethodService> _paymentMethodServiceMock;
     private readonly SubscriptionService _service;
 
     public SubscriptionServiceTests()
@@ -51,12 +48,15 @@ public class SubscriptionServiceTests
         loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
 
+        _paymentMethodServiceMock = new Mock<IPaymentMethodService>();
+
         _service = new SubscriptionService(
             _subscriptionRepositoryMock.Object,
             _planRepositoryMock.Object,
             _changeRepositoryMock.Object,
             _paymentServiceMock.Object,
             _providerFactoryMock.Object,
+            _paymentMethodServiceMock.Object,
             _optionsMock.Object,
             serviceProviderMock.Object
         );

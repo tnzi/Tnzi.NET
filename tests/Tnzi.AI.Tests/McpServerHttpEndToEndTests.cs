@@ -2,9 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -12,7 +9,6 @@ using Tnzi.AI.Infrastructure.Mcp;
 using Tnzi.Modules;
 using Tnzi.AI.Mcp.Server;
 using Tnzi.AI.Mcp;
-using Tnzi.AI.Mcp.Options;
 
 namespace Tnzi.AI.Tests;
 

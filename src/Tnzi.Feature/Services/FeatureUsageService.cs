@@ -93,45 +93,55 @@ public class FeatureUsageService : ApplicationService, IFeatureUsageService
     {
         Check.NotNullOrWhiteSpace(featureName);
 
-        if (period is not ("daily" or "weekly" or "monthly"))
+        if (!TryParsePeriod(period, out var interval))
         {
             return Fail<List<FeatureUsageTrendDto>>("Period must be 'daily', 'weekly', or 'monthly'", 400);
         }
 
         var query = BuildFilteredQuery(featureName, from, to);
 
-        // Group by period using database-side date truncation
-        var grouped = period switch
-        {
-            "daily" => query.GroupBy(r => r.CreationTime.Date),
-            "weekly" => query.GroupBy(r => r.CreationTime.Date.AddDays(-(int)r.CreationTime.DayOfWeek)),
-            "monthly" => query.GroupBy(r => new DateTime(r.CreationTime.Year, r.CreationTime.Month, 1)),
-            _ => query.GroupBy(r => r.CreationTime.Date)
-        };
-
-        // 聚合留在数据库端；只有 Period 的字符串格式化落到内存 ——
-        // DateTime.ToString(format) 无法翻译成 SQL，写在投影里会在运行时抛
-        // "could not be translated"（与 AuditOperationService.GetAuditTrendAsync 同一处理）。
-        var buckets = await grouped
+        // 数据库端只按天聚合（TimeBucket 是内存原语，翻译不成 SQL），周/月在这份按天的小结果集上
+        // 二次汇总——三个计数都是可加的，故与直接按周/月聚合等价。
+        // 同理 Period 的字符串格式化必须留在内存：DateTime.ToString(format) 写进投影会在运行时抛
+        // "could not be translated"。
+        var daily = await query
+            .GroupBy(r => r.CreationTime.Date)
             .Select(g => new
             {
-                Period = g.Key,
+                Date = g.Key,
                 CheckCount = g.LongCount(),
                 EnableCount = g.LongCount(r => r.IsEnabled),
                 DisableCount = g.LongCount(r => !r.IsEnabled)
             })
-            .OrderBy(b => b.Period)
             .ToListAsync();
 
-        var trend = buckets.Select(b => new FeatureUsageTrendDto
-        {
-            Period = b.Period.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            CheckCount = b.CheckCount,
-            EnableCount = b.EnableCount,
-            DisableCount = b.DisableCount
-        }).ToList();
+        var trend = daily
+            .GroupBy(d => TimeBucket.Label(d.Date, interval))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new FeatureUsageTrendDto
+            {
+                Period = g.Key,
+                CheckCount = g.Sum(d => d.CheckCount),
+                EnableCount = g.Sum(d => d.EnableCount),
+                DisableCount = g.Sum(d => d.DisableCount)
+            })
+            .ToList();
 
         return Ok(trend);
+    }
+
+    /// <summary>
+    /// 把对外的 period 字符串（线缆契约，保持小写）解析成核心 <see cref="TrendInterval"/>。
+    /// </summary>
+    private static bool TryParsePeriod(string? period, out TrendInterval interval)
+    {
+        switch (period)
+        {
+            case "daily": interval = TrendInterval.Daily; return true;
+            case "weekly": interval = TrendInterval.Weekly; return true;
+            case "monthly": interval = TrendInterval.Monthly; return true;
+            default: interval = TrendInterval.Daily; return false;
+        }
     }
 
     /// <inheritdoc />

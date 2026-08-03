@@ -18,6 +18,12 @@
     <AnalysisLevel>latest</AnalysisLevel>
     <AnalysisMode>Default</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- IDE0005（未使用的 using）只有在生成 XML 文档时才会在 build 阶段报出（dotnet/roslyn#41640）。
+         不开这一项，EnforceCodeStyleInBuild 对 using 清理就是哑的，而且缺 XML 文档也让 NuGet
+         消费者拿不到 IntelliSense。CS1591（公共成员缺注释）不作为门禁——注释该由需要的地方补，
+         不该靠一条把整个仓库刷红的警告来推动。 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- 暂不开启 TreatWarningsAsErrors，待存量警告清零后再逐步收紧（见 .editorconfig 中按规则提级为 error 的少数高价值项） -->
   </PropertyGroup>
 

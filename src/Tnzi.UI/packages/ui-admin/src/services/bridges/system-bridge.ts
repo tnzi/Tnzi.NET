@@ -323,10 +323,15 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     return unwrap(res as T)
   }
 
+  // Themes are stored per front-end product; this bridge always speaks for the
+  // admin console. The chat app addresses its own scope through the same
+  // endpoints - which is the whole point of scoping them.
+  const ADMIN_THEME_SCOPE = 'admin'
+
   const appearance: SystemBridge['appearance'] = {
     getGlobal: async () => {
       if (!appearanceApi) throw new Error('appearance.getGlobal: HttpClient required')
-      const dto = unwrap<AdminGlobalThemeDto>(await appearanceApi.getAdminTheme())
+      const dto = unwrap<AdminGlobalThemeDto>(await appearanceApi.getTheme(ADMIN_THEME_SCOPE))
       // Failure envelopes can resolve to undefined or to the envelope object
       // itself - only a shape with a `theme` key counts as a real payload.
       return dto && typeof dto === 'object' && 'theme' in dto ? dto : null
@@ -334,13 +339,16 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     saveGlobal: async (theme) => {
       if (!adminAppearanceApi) throw new Error('appearance.saveGlobal: HttpClient required')
       return unwrapOrThrow<AdminGlobalThemeDto>(
-        await adminAppearanceApi.saveTheme({ theme }),
+        await adminAppearanceApi.saveTheme(ADMIN_THEME_SCOPE, { theme }),
         'Failed to save the global theme',
       )
     },
     resetGlobal: async () => {
       if (!adminAppearanceApi) throw new Error('appearance.resetGlobal: HttpClient required')
-      unwrapOrThrow<void>(await adminAppearanceApi.resetTheme(), 'Failed to reset the global theme')
+      unwrapOrThrow<void>(
+        await adminAppearanceApi.resetTheme(ADMIN_THEME_SCOPE),
+        'Failed to reset the global theme',
+      )
     },
   }
 

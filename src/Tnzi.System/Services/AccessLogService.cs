@@ -181,7 +181,7 @@ public class AccessLogService : ApplicationService, IAccessLogService
 
     /// <inheritdoc />
     public async Task<Result<AccessLogTrendDto>> GetAccessLogTrendAsync(
-        AccessLogTrendInterval interval,
+        TrendInterval interval,
         DateTime startDate,
         DateTime endDate,
         CancellationToken cancellationToken = default)
@@ -211,32 +211,28 @@ public class AccessLogService : ApplicationService, IAccessLogService
             .Distinct()
             .ToListAsync(cancellationToken);
 
+        // 分桶与标签统一走核心 TimeBucket。桶起点对齐到自然日 / ISO 周（周一起）/ 自然月，
+        // 而不是「从 startDate 起每 N 天」—— 后者产出的"周"会随查询起点漂移（周三到周二算一周），
+        // 标签却写着 ISO 周序号，两者对不上。
         var dataPoints = new List<AccessLogTrendDataPoint>();
-        var current = startDate;
 
-        while (current < endDate)
+        foreach (var bucketStart in TimeBucket.Enumerate(startDate, endDate, interval, endInclusive: false))
         {
-            var (bucketEnd, label) = interval switch
-            {
-                AccessLogTrendInterval.Daily => (current.AddDays(1), current.ToString("yyyy-MM-dd")),
-                AccessLogTrendInterval.Weekly => (current.AddDays(7), $"{current:yyyy}-W{GetIsoWeekNumber(current):D2}"),
-                AccessLogTrendInterval.Monthly => (current.AddMonths(1), current.ToString("yyyy-MM")),
-                _ => (current.AddDays(1), current.ToString("yyyy-MM-dd"))
-            };
+            var bucketEnd = TimeBucket.Next(bucketStart, interval);
 
             // 从按天聚合结果中汇总当前区间的数据
-            var bucketDays = dailyStats.Where(d => d.Date >= current && d.Date < bucketEnd).ToList();
+            var bucketDays = dailyStats.Where(d => d.Date >= bucketStart && d.Date < bucketEnd).ToList();
 
             var totalRequests = bucketDays.Sum(d => d.TotalRequests);
             dataPoints.Add(new AccessLogTrendDataPoint
             {
-                Label = label,
-                StartTime = current,
+                Label = TimeBucket.Label(bucketStart, interval),
+                StartTime = bucketStart,
                 TotalRequests = totalRequests,
                 SuccessRequests = bucketDays.Sum(d => d.SuccessRequests),
                 ErrorRequests = bucketDays.Sum(d => d.ErrorRequests),
                 UniqueUsers = activeUserDays
-                    .Where(u => u.Date >= current && u.Date < bucketEnd)
+                    .Where(u => u.Date >= bucketStart && u.Date < bucketEnd)
                     .Select(u => u.UserId)
                     .Distinct()
                     .Count(),
@@ -244,8 +240,6 @@ public class AccessLogService : ApplicationService, IAccessLogService
                     ? bucketDays.Sum(d => d.AverageResponseTime * d.TotalRequests) / totalRequests
                     : 0
             });
-
-            current = bucketEnd;
         }
 
         return Ok(new AccessLogTrendDto
@@ -302,14 +296,5 @@ public class AccessLogService : ApplicationService, IAccessLogService
         };
 
         return Ok(sorted.Take(top).ToList());
-    }
-
-    private static int GetIsoWeekNumber(DateTime date)
-    {
-        var day = CultureInfo.InvariantCulture.Calendar.GetDayOfWeek(date);
-        if (day >= DayOfWeek.Monday && day <= DayOfWeek.Wednesday)
-            date = date.AddDays(3);
-        return CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(
-            date, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
     }
 }

@@ -1,11 +1,6 @@
-using System;
 using System.Data.Common;
-using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Tnzi.AI.Tools.Sql;
-using Xunit;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Tools.Sql;

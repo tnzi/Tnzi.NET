@@ -14,8 +14,8 @@
       :card-props="cardProps"
       :summary-rows="cardSummaryRows"
     >
-      <template v-if="actionColumns.length" #actions="{ row, index }">
-        <ActionCell :row="row" :index="index" />
+      <template v-if="actionColumns.length" #actions="{ row: actionRow, index: actionIndex }">
+        <ActionCell :row="actionRow" :index="actionIndex" />
       </template>
       <template v-if="$slots.empty" #empty><slot name="empty" /></template>
     </TDataCardList>
@@ -70,7 +70,7 @@ import {
   type DataTableCreateSummary,
 } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { estimateRowActionsWidth, type RowAction } from '../../headless/rowActions'
+import { estimateRowActionsWidth, type RowAction } from '../../headless/row-actions'
 import TRowActions from '../crud/TRowActions.vue'
 import TDataCardList, { type CardColumn } from './TDataCardList.vue'
 

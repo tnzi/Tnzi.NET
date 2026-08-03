@@ -7,15 +7,15 @@
  */
 
 import { computed } from 'vue';
-import type { ChatMessage as ChatMessageData } from '@/composables/useChat';
-import { groupMessages, type MessageGroup } from '@/composables/useMessageGroup';
+import type { ChatMessage } from '../../headless/useChat';
+import { groupMessages, type MessageGroup } from '../../headless/use-message-group';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import TChatMessage from './TChatMessage.vue';
 import TToolCallDisplay from '../reasoning/TToolCallDisplay.vue';
 import TStreamLoader from '../streaming/TStreamLoader.vue';
 
 const props = withDefaults(defineProps<{
-  messages: readonly ChatMessageData[];
+  messages: readonly ChatMessage[];
   /** Show loading skeleton when true and no messages. */
   loading?: boolean;
 }>(), {
@@ -53,13 +53,17 @@ const isLastMessageStreaming = computed(() => {
     <template v-else>
       <div v-for="group in groups" :key="group.id" class="flex flex-col gap-2">
         <template v-for="message in group.messages" :key="message.id">
-          <!-- Tool calls before assistant content -->
-          <TToolCallDisplay
-            v-if="group.type === 'assistant' && message.toolCalls?.length"
-            v-for="toolCall in message.toolCalls"
-            :key="toolCall.name"
-            :tool-call="toolCall"
-          />
+          <!-- Tool calls before assistant content. The condition sits on a
+               wrapper rather than beside `v-for` on the same element: Vue 3
+               evaluates `v-if` first, so co-locating them re-tests the same
+               group-level condition once per tool call. -->
+          <template v-if="group.type === 'assistant' && message.toolCalls?.length">
+            <TToolCallDisplay
+              v-for="toolCall in message.toolCalls"
+              :key="toolCall.name"
+              :tool-call="toolCall"
+            />
+          </template>
 
           <TChatMessage
             :message="message"

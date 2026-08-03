@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace Tnzi.AI.Tests.Skills;
 
@@ -7,7 +6,7 @@ namespace Tnzi.AI.Tests.Skills;
 /// P0 多租户隔离门禁 - 证明 <see cref="SkillService"/> 的 admin 路径在多租户上下文下
 /// 强制服务层可见性过滤（<c>ApplyTenantVisibility</c>）。
 /// <para>
-/// <see cref="SkillEntity"/> 是 <see cref="IScopedResource"/>（有意不实现 <see cref="IMultiTenant"/>，
+/// <see cref="SkillEntity"/> 是 <see cref="IScopedResource"/>（有意不实现 <see cref="Tnzi.Domain.Entities.IMultiTenant"/>，
 /// 以便 System 行 TenantId=null 对所有租户可见），因此没有 EF 全局多租户查询过滤器把别的租户行挡掉，
 /// 服务层 MUST 显式过滤。本测试证明：租户 A <b>看不到 / 改不了 / 删不了</b> 租户 B 的 Tenant-scope 技能，
 /// 且批量删除不会跨租户。

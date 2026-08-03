@@ -17,10 +17,10 @@ import { computed } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded } from 'vue-router'
 import TAdminBreadcrumb, { type TAdminBreadcrumbItem } from './TAdminBreadcrumb.vue'
 import { TSvgIcon } from '@tnzi/ui'
-import { DEFAULT_ROUTE_ICONS } from '../../router/routeIcons'
-import { humanise, translatePageKey } from '../../pages/_shared/translate'
+import { DEFAULT_ROUTE_ICONS } from '../../router/route-icons'
+import { humanise, translatePageKey } from '../../i18n/translate'
 import { useAdminBreadcrumbStore } from '../../stores/useAdminBreadcrumbStore'
-import { breadcrumbRouteKey } from '../../headless/useBreadcrumb'
+import { breadcrumbRouteKey } from '../../headless/use-breadcrumb'
 
 interface Props {
   /** Show the route icon beside each crumb label. Default `true`. */
@@ -83,6 +83,20 @@ function resolveLabel(r: RouteLocationNormalizedLoaded['matched'][number]): stri
 
 type MatchedRecord = RouteLocationNormalizedLoaded['matched'][number]
 
+/**
+ * The admin shell root renders the chrome (sidebar / header / content), not a
+ * page, so it is never a crumb.
+ *
+ * Matched by NAME first: `defineAdminApp({ basePath })` rewrites the root's
+ * path (`/console`, or `/` for a domain-root deployment), so the historical
+ * `path !== '/admin'` test silently stopped dropping it under any custom
+ * prefix and prepended a bogus "Admin" crumb to every page. The path check is
+ * kept as a fallback for route tables assembled without the plugin.
+ */
+function isShellRoot(r: MatchedRecord): boolean {
+  return r.name === 'admin-root' || r.path === '/admin'
+}
+
 function toCrumb(r: MatchedRecord): TAdminBreadcrumbItem {
   const name = typeof r.name === 'string' ? r.name : ''
   return {
@@ -119,7 +133,7 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
         // is a legitimate breadcrumb ancestor. Filtering it collapsed the whole
         // trail down to just the leaf ("Files") - the bug this branch fixes.
         const crumbs = (resolved.matched as readonly MatchedRecord[])
-          .filter((r) => r.path !== '/admin')
+          .filter((r) => !isShellRoot(r))
           .map(toCrumb)
         const self = route.matched[route.matched.length - 1]
         if (self) crumbs.push({ ...toCrumb(self), to: undefined })
@@ -130,9 +144,18 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
     }
   }
   // Plain matched walk: drop the shell root and intermediate hidden branch nodes.
-  return (route.matched as readonly MatchedRecord[])
+  const matched = route.matched as readonly MatchedRecord[]
+  const self = matched[matched.length - 1]
+  return matched
     .filter((r) => {
-      if (r.path === '/admin') return false
+      if (isShellRoot(r)) return false
+      // The CURRENT page survives `hideInMenu`. A leaf carries that flag
+      // because it isn't reached from the sidebar - the Settings Center and
+      // the User Center are opened from the shell's own chrome - not because
+      // it should be nameless. Filtering it out left those pages with an
+      // EMPTY breadcrumb (the bug this line fixes); only intermediate branch
+      // nodes are genuinely noise.
+      if (r === self) return true
       if (r.meta?.hideInMenu) return false
       return true
     })

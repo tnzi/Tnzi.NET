@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Tnzi.Security.Authorization;

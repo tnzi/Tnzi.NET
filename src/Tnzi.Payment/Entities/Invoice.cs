@@ -61,6 +61,13 @@ public class Invoice : MultiTenantAuditedEntity<Guid>
     public decimal PaidAmount { get; set; }
 
     /// <summary>
+    /// 账单归属用户ID。
+    /// 与审计字段 CreatorId 分开：自动开票发生在回调/后台任务里，CreatorId 为空，
+    /// 只靠它做归属判定会让用户在"我的发票"里看不到自己的发票。
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
     /// 客户名称
     /// </summary>
     public string CustomerName { get; set; } = string.Empty;

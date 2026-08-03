@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using Tnzi.EventBus;
-using Tnzi.RabbitMQ;
 using Tnzi.RabbitMQ.Options;
 
 namespace Tnzi.RabbitMQ.Tests;

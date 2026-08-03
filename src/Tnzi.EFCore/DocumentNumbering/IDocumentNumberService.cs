@@ -1,5 +1,5 @@
 
-namespace Tnzi.EFCore;
+namespace Tnzi.EFCore.DocumentNumbering;
 
 /// <summary>
 /// 单据连续编号服务（按租户 + 作用域，无缺口）
@@ -22,6 +22,8 @@ public interface IDocumentNumberService
     /// 分配下一个序列号
     /// </summary>
     /// <param name="scope">序列作用域（如 "JournalEntry"、"Invoice"）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>该作用域下的下一个连续号</returns>
     Task<long> NextAsync(string scope, CancellationToken cancellationToken = default);
 
     /// <summary>

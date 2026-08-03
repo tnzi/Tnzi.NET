@@ -57,3 +57,34 @@ export type {
 export { useSandboxAdminApi } from './sandbox';
 export type { SandboxStatusDto } from './sandbox';
 
+
+// External CLI agent runtime (admin/ai/cli-*, ai/cli-runs) - Tnzi.AI.Cli
+export {
+  useAdminCliRuntimeApi,
+  useAdminCliBindingApi,
+  useAdminCliRunApi,
+  useCliRunApi,
+  CliRunStatus,
+  CliAgentEventType,
+  CliRunFailureReason,
+  CliRuntimeMode,
+  CliRuntimeStatus,
+  CliWorkDirectoryMode,
+  CLI_RUN_TERMINAL_STATUSES,
+} from './cli';
+export type {
+  CliRuntimeDto,
+  UpdateCliRuntimeDto,
+  CliAgentBindingDto,
+  UpsertCliAgentBindingDto,
+  CliRunRequestDto,
+  CliRunDto,
+  CliRunMessageDto,
+  CliAgentEvent,
+  CliRunQueryDto,
+  CliProviderOptionDto,
+  CliRuntimeProbeResultDto,
+} from './cli';
+
+export { streamCliRun, lastCliRunSequence } from './cli-stream';
+export type { CliRunStreamOptions, CliRunStreamResult } from './cli-stream';

@@ -1,5 +1,5 @@
 
-namespace Tnzi.EFCore;
+namespace Tnzi.EFCore.DocumentNumbering;
 
 /// <summary>
 /// 单据序列配置（表名无模块前缀，映射为裸 <c>DocumentSequence</c>）

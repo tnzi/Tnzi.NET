@@ -1,7 +1,4 @@
-using System.Text;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Tnzi.AspNetCore.Mvc;
 
 namespace Tnzi.AI.Channels.Controllers;
 

@@ -16,8 +16,8 @@ import type {
   AccessLogTrendDto,
   TopEndpointDto,
   SettingsCenterGroupDto,
-  AdminGlobalThemeDto,
-  SaveAdminGlobalThemeDto,
+  GlobalThemeSnapshotDto,
+  SaveGlobalThemeSnapshotDto,
 } from './types';
 import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
@@ -91,34 +91,50 @@ const APPEARANCE_BASE = '/appearance';
 const ADMIN_APPEARANCE_BASE = '/admin/appearance';
 
 /**
- * Appearance API (any signed-in user) - read the global admin theme
- * snapshot the shell applies at boot.
+ * Appearance API (anonymous - the theme must apply on the login page too).
+ *
+ * A `scope` names the front-end product the snapshot dresses: `'admin'` for the
+ * admin console, `'chat'` for the conversational app. The backend treats the
+ * document as opaque, so one pair of endpoints serves every product rather than
+ * each growing its own.
  */
 export function useAppearanceApi(client: HttpClient) {
   return {
-    /** Global admin theme snapshot (theme = null when unset) */
+    /** Global theme snapshot for a scope (theme = null when unset) */
+    getTheme: (scope: string) =>
+      client.get<GlobalThemeSnapshotDto>(`${APPEARANCE_BASE}/theme/${encodeURIComponent(scope)}`),
+
+    /**
+     * The `admin` scope, spelled the pre-scope way.
+     * @deprecated Use `getTheme('admin')`.
+     */
     getAdminTheme: () =>
-      client.get<AdminGlobalThemeDto>(`${APPEARANCE_BASE}/admin-theme`),
+      client.get<GlobalThemeSnapshotDto>(`${APPEARANCE_BASE}/admin-theme`),
   };
 }
 
 /**
- * Admin Appearance API - maintain the global admin theme snapshot
+ * Admin Appearance API - maintain a scope's global theme snapshot
  * (super-admin by default; delegable via system.appearance.*).
+ *
+ * The permission codes are NOT split per scope: whoever may theme the console
+ * may theme the chat app, and slicing the catalogue per product would add codes
+ * without adding isolation.
  */
 export function useAdminAppearanceApi(client: HttpClient) {
+  const themeUrl = (scope: string) =>
+    `${ADMIN_APPEARANCE_BASE}/theme/${encodeURIComponent(scope)}`;
+
   return {
-    /** Global admin theme snapshot */
-    getTheme: () =>
-      client.get<AdminGlobalThemeDto>(`${ADMIN_APPEARANCE_BASE}/theme`),
+    /** Global theme snapshot for a scope */
+    getTheme: (scope: string) => client.get<GlobalThemeSnapshotDto>(themeUrl(scope)),
 
-    /** Save the snapshot (whole-document replace, applies to every user) */
-    saveTheme: (data: SaveAdminGlobalThemeDto) =>
-      client.put<AdminGlobalThemeDto>(`${ADMIN_APPEARANCE_BASE}/theme`, data),
+    /** Save the snapshot (whole-document replace, applies to every user in that scope) */
+    saveTheme: (scope: string, data: SaveGlobalThemeSnapshotDto) =>
+      client.put<GlobalThemeSnapshotDto>(themeUrl(scope), data),
 
-    /** Clear the global theme (all clients fall back to local defaults) */
-    resetTheme: () =>
-      client.delete<void>(`${ADMIN_APPEARANCE_BASE}/theme`),
+    /** Clear the scope's global theme (its clients fall back to local defaults) */
+    resetTheme: (scope: string) => client.delete<void>(themeUrl(scope)),
   };
 }
 

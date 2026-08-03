@@ -14,7 +14,6 @@ global using System.Text.Json;
 global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
-global using Tnzi.Localization.Controllers;
 global using Tnzi.Localization.Dtos;
 global using Tnzi.Localization.Json;
 global using Tnzi.Localization.Options;

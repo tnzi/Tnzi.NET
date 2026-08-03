@@ -1,5 +1,4 @@
 using System.IO.Pipes;
-using System.Net.Http;
 using System.Net.Sockets;
 
 namespace Tnzi.AI.Sandbox.Providers.Docker;

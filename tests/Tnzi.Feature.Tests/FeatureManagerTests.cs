@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MockQueryable;
-using MockQueryable.Moq;
 using Moq;
 using Tnzi.Domain.Repositories;
 using Tnzi.Feature.Entities;

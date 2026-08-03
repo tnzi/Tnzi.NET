@@ -3,16 +3,19 @@ description: Default email layout with modern design and full email client compa
 isDefault: true
 metadata:
   type: Email
-  version: "3.0"
+  version: "4.0"
 ---
 <!DOCTYPE html>
-<html lang="zh-CN" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="x-apple-disable-message-reformatting">
     <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no">
+    <!-- Declaring both schemes stops Outlook/Windows Mail from force-inverting the whole message -->
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
     <title>@Model.Subject</title>
     <!--[if mso]>
     <noscript>
@@ -33,220 +36,149 @@ metadata:
         body, table, td, p, a, li { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
         table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
         img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; display: block; }
-        
+
         body {
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
-            background-color: #f8f9fa;
+            background-color: #f4f5f7;
         }
-        
+
         a[x-apple-data-detectors] {
             color: inherit !important;
             text-decoration: none !important;
         }
-        
+
         @@media only screen and (max-width: 620px) {
             .wrapper { width: 100% !important; }
-            .mobile-padding { padding-left: 24px !important; padding-right: 24px !important; }
-            .mobile-padding-header { padding: 36px 24px !important; }
-            .mobile-stack { display: block !important; width: 100% !important; }
-            .mobile-center { text-align: center !important; }
-            .mobile-button a { display: block !important; width: 100% !important; text-align: center !important; }
-            .feature-cell { display: block !important; width: 100% !important; padding: 20px 0 !important; }
-            .mobile-spacer { height: 20px !important; }
-            .greeting { font-size: 22px !important; }
-            .footer-links-cell { display: block !important; padding: 6px 0 !important; }
-            .footer-divider { display: none !important; }
+            .pad { padding-left: 24px !important; padding-right: 24px !important; }
+            .greeting { font-size: 20px !important; }
+            /* Full-width tap target on phones - the button is the whole point of the message */
+            .btn { width: 100% !important; }
+            .btn a { display: block !important; }
+        }
+
+        /* Clients that honour prefers-color-scheme (Apple Mail, iOS, Outlook 2019+, Thunderbird).
+           Gmail ignores this and inverts on its own, which is why the palette stays high-contrast
+           and gradient-free: an inverted flat colour still reads, an inverted gradient does not. */
+        @@media (prefers-color-scheme: dark) {
+            /* body itself carries an inline background - without this the area below the
+               card stays light and the message shows a pale band under itself */
+            body { background-color: #14161a !important; }
+            .body-bg { background-color: #14161a !important; }
+            .card { background-color: #1c1f24 !important; border-color: #2d323a !important; }
+            .rule { background-color: #2d323a !important; }
+            .ink { color: #e8eaed !important; }
+            .ink-soft { color: #b6bcc4 !important; }
+            .ink-faint { color: #8b929b !important; }
+            .panel { background-color: #23272e !important; border-color: #343a43 !important; }
+            /* The light-mode navy sits at 1.3:1 against the dark card - the button stops
+               reading as a button. This blue clears 3:1 against the card (WCAG for UI
+               components) while white label text still clears 4.5:1 against the button. */
+            .btn td { background-color: #2563eb !important; }
+            .btn a { background-color: #2563eb !important; }
+            /* Quiet links (fallback URLs, footer) - the light-mode grey only reaches 3.3:1 here */
+            .ink-faint a { color: #9aa4b2 !important; }
         }
     </style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f8f9fa; width: 100% !important;">
-    
-    <!-- Preview Text -->
+<body style="margin: 0; padding: 0; background-color: #f4f5f7; width: 100% !important;">
+
+    <!-- Preview text -->
     @if (!string.IsNullOrEmpty(Model.PreviewText))
     {
         <div style="display: none; max-height: 0px; overflow: hidden; mso-hide: all;">
             @Model.PreviewText &zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
         </div>
     }
-    
-    <!-- Outer Wrapper -->
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f8f9fa;">
+
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" class="body-bg" style="background-color: #f4f5f7;">
         <tr>
-            <td align="center" style="padding: 40px 16px;">
-                
-                <!-- Email Container 600px -->
-                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="wrapper" style="max-width: 600px; width: 100%;">
+            <td align="center" style="padding: 32px 16px;">
+
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" class="wrapper card" style="max-width: 600px; width: 100%; background-color: #ffffff; border: 1px solid #e6e8eb; border-radius: 12px;">
+
+                    <!-- Brand line: a quiet mark, not a banner. The body never repeats it. -->
                     <tr>
-                        <td>
-                            <!--[if !mso]><!-->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.06);">
+                        <td class="pad" style="padding: 26px 40px 0 40px;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                                 <tr>
-                                    <td>
-                            <!--<![endif]-->
-                            
-                            <!-- Main Content Table -->
-                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #ffffff;">
-                                
-                                <!-- ========== HEADER with Gradient ========== -->
-                                <tr>
-                                    <td align="center" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
-                                        <!--[if mso]>
-                                        <v:rect xmlns:v="urn:schemas-microsoft-com:vml" fill="true" stroke="false" style="width:600px;">
-                                        <v:fill type="gradient" color="#0f3460" color2="#1a1a2e" angle="135"/>
-                                        <v:textbox inset="0,0,0,0">
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                        <tr>
-                                        <td align="center" style="padding: 48px 40px;">
-                                        <![endif]-->
-                                        <!--[if !mso]><!-->
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                            <tr>
-                                                <td align="center" class="mobile-padding-header" style="padding: 48px 40px;">
-                                        <!--<![endif]-->
-                                                    <!-- Logo -->
-                                                    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-                                                        <tr>
-                                                            <td align="center" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 28px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">
-                                                                @(Model.AppName ?? "Tnzi")<span style="display: inline-block; width: 8px; height: 8px; background-color: #e94560; border-radius: 50%; margin-left: 3px; vertical-align: super; font-size: 8px;">&#8203;</span>
-                                                            </td>
-                                                        </tr>
-                                                        @if (!string.IsNullOrEmpty(Model.Tagline))
-                                                        {
-                                                            <tr>
-                                                                <td align="center" style="padding-top: 10px; font-family: Arial, sans-serif; font-size: 12px; color: rgba(255,255,255,0.7); letter-spacing: 3px; text-transform: uppercase;">
-                                                                    @Model.Tagline
-                                                                </td>
-                                                            </tr>
-                                                        }
-                                                    </table>
-                                        <!--[if !mso]><!-->
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        <!--<![endif]-->
-                                        <!--[if mso]>
+                                    <td style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 15px; font-weight: 700; color: #1a1a2e; letter-spacing: 0.2px;" class="ink">
+                                        @(Model.AppName ?? "Tnzi")<span style="display: inline-block; width: 5px; height: 5px; background-color: #e94560; border-radius: 50%; margin-left: 4px; vertical-align: baseline; font-size: 5px;">&#8203;</span>
+                                    </td>
+                                    @if (!string.IsNullOrEmpty(Model.Tagline))
+                                    {
+                                        <td style="padding-left: 10px; font-family: Arial, sans-serif; font-size: 11px; color: #8b929b; letter-spacing: 1.5px; text-transform: uppercase;" class="ink-faint">
+                                            @Model.Tagline
                                         </td>
-                                        </tr>
-                                        </table>
-                                        </v:textbox>
-                                        </v:rect>
-                                        <![endif]-->
-                                    </td>
-                                </tr>
-                                
-                                <!-- ========== MAIN CONTENT ========== -->
-                                <tr>
-                                    <td class="mobile-padding" style="padding: 48px 48px 32px 48px; background-color: #ffffff;">
-                                        @Html.Raw(Model.Content)
-                                    </td>
-                                </tr>
-                                
-                                <!-- ========== FOOTER ========== -->
-                                <tr>
-                                    <td style="background-color: #1a1a2e;">
-                                        <!--[if mso]>
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" bgcolor="#1a1a2e">
-                                        <tr>
-                                        <td style="padding: 40px 48px;">
-                                        <![endif]-->
-                                        <!--[if !mso]><!-->
-                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #1a1a2e;">
-                                            <tr>
-                                                <td class="mobile-padding" style="padding: 40px 48px;">
-                                        <!--<![endif]-->
-                                        
-                                                    <!-- Company Info -->
-                                                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                                        <tr>
-                                                            <td align="center" style="font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; color: rgba(255,255,255,0.6); line-height: 1.8; padding-bottom: 20px;">
-                                                                @(Model.CompanyName ?? Model.AppName ?? "Tnzi")<br>
-                                                                @if (!string.IsNullOrEmpty(Model.Address))
-                                                                {
-                                                                    <text>@Model.Address<br></text>
-                                                                }
-                                                                @if (!string.IsNullOrEmpty(Model.Phone))
-                                                                {
-                                                                    <text>Tel: @Model.Phone</text>
-                                                                }
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-                                                    
-                                                    <!-- Footer Links -->
-                                                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                                        <tr>
-                                                            <td align="center" style="padding-bottom: 20px;">
-                                                                <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-                                                                    <tr>
-                                                                        @if (!string.IsNullOrEmpty(Model.WebsiteUrl))
-                                                                        {
-                                                                            <td class="footer-links-cell" style="padding: 0 12px;">
-                                                                                <a href="@Model.WebsiteUrl" style="font-family: Arial, sans-serif; font-size: 12px; color: rgba(255,255,255,0.6); text-decoration: none;">Website</a>
-                                                                            </td>
-                                                                            <td class="footer-divider" style="color: rgba(255,255,255,0.2);">|</td>
-                                                                        }
-                                                                        @if (!string.IsNullOrEmpty(Model.PrivacyUrl))
-                                                                        {
-                                                                            <td class="footer-links-cell" style="padding: 0 12px;">
-                                                                                <a href="@Model.PrivacyUrl" style="font-family: Arial, sans-serif; font-size: 12px; color: rgba(255,255,255,0.6); text-decoration: none;">Privacy Policy</a>
-                                                                            </td>
-                                                                            <td class="footer-divider" style="color: rgba(255,255,255,0.2);">|</td>
-                                                                        }
-                                                                        @if (!string.IsNullOrEmpty(Model.HelpUrl))
-                                                                        {
-                                                                            <td class="footer-links-cell" style="padding: 0 12px;">
-                                                                                <a href="@Model.HelpUrl" style="font-family: Arial, sans-serif; font-size: 12px; color: rgba(255,255,255,0.6); text-decoration: none;">Help Center</a>
-                                                                            </td>
-                                                                        }
-                                                                    </tr>
-                                                                </table>
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-                                                    
-                                                    <!-- Copyright & Unsubscribe -->
-                                                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-                                                        <tr>
-                                                            <td align="center" style="font-family: Arial, sans-serif; font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.7;">
-                                                                &copy; @DateTime.UtcNow.Year @(Model.AppName ?? "Tnzi"). All rights reserved.<br>
-                                                                @if (!string.IsNullOrEmpty(Model.UnsubscribeUrl))
-                                                                {
-                                                                    <text>If you no longer wish to receive these emails, <a href="@Model.UnsubscribeUrl" style="color: #e94560; text-decoration: underline;">unsubscribe here</a></text>
-                                                                }
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-                                        
-                                        <!--[if !mso]><!-->
-                                                </td>
-                                            </tr>
-                                        </table>
-                                        <!--<![endif]-->
-                                        <!--[if mso]>
-                                        </td>
-                                        </tr>
-                                        </table>
-                                        <![endif]-->
-                                    </td>
-                                </tr>
-                                
-                            </table>
-                            
-                            <!--[if !mso]><!-->
-                                    </td>
+                                    }
                                 </tr>
                             </table>
-                            <!--<![endif]-->
-                            
                         </td>
                     </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td class="pad" style="padding: 24px 40px 32px 40px;">
+                            @Html.Raw(Model.Content)
+                        </td>
+                    </tr>
+
+                    <!-- Hairline above the footer -->
+                    <tr>
+                        <td class="pad" style="padding: 0 40px;">
+                            <div class="rule" style="height: 1px; background-color: #eaecef; font-size: 1px; line-height: 1px;">&nbsp;</div>
+                        </td>
+                    </tr>
+
+                    <!-- Footer: two short lines. Optional rows render only when supplied,
+                         so an app that passes nothing gets a genuinely compact footer. -->
+                    <tr>
+                        <td class="pad" style="padding: 18px 40px 22px 40px;">
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                @if (!string.IsNullOrEmpty(Model.WebsiteUrl) || !string.IsNullOrEmpty(Model.PrivacyUrl) || !string.IsNullOrEmpty(Model.HelpUrl))
+                                {
+                                    <tr>
+                                        <td style="padding-bottom: 8px; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #8b929b;" class="ink-faint">
+                                            @if (!string.IsNullOrEmpty(Model.WebsiteUrl))
+                                            {
+                                                <a href="@Model.WebsiteUrl" style="color: #6b7280; text-decoration: none;">Website</a>
+                                            }
+                                            @if (!string.IsNullOrEmpty(Model.HelpUrl))
+                                            {
+                                                <text>&nbsp;&middot;&nbsp;</text>
+                                                <a href="@Model.HelpUrl" style="color: #6b7280; text-decoration: none;">Help</a>
+                                            }
+                                            @if (!string.IsNullOrEmpty(Model.PrivacyUrl))
+                                            {
+                                                <text>&nbsp;&middot;&nbsp;</text>
+                                                <a href="@Model.PrivacyUrl" style="color: #6b7280; text-decoration: none;">Privacy</a>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                                <tr>
+                                    <td style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #8b929b;" class="ink-faint">
+                                        &copy; @DateTime.UtcNow.Year @(Model.CompanyName ?? Model.AppName ?? "Tnzi")@if (!string.IsNullOrEmpty(Model.Address)) { <text> &middot; @Model.Address</text> }@if (!string.IsNullOrEmpty(Model.Phone)) { <text> &middot; @Model.Phone</text> }
+                                    </td>
+                                </tr>
+                                @if (!string.IsNullOrEmpty(Model.UnsubscribeUrl))
+                                {
+                                    <tr>
+                                        <td style="padding-top: 6px; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #8b929b;" class="ink-faint">
+                                            <a href="@Model.UnsubscribeUrl" style="color: #6b7280; text-decoration: underline;">Unsubscribe</a>
+                                        </td>
+                                    </tr>
+                                }
+                            </table>
+                        </td>
+                    </tr>
+
                 </table>
-                
+
             </td>
         </tr>
     </table>
-    
+
 </body>
 </html>

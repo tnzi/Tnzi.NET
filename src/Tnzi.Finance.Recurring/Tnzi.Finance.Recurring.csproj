@@ -5,8 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>Recurring finance documents for Tnzi.NET: schedule templates that generate invoices / bills / expenses on a calendar, with an explicit catch-up policy for downtime. Optional module - deployments that do not bill on a cycle never see these tables.</Description>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 银行对账服务（join 表方案：勾选行引用已过账总账行，不修改总账）

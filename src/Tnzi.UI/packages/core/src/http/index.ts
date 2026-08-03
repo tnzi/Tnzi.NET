@@ -39,5 +39,18 @@ export {
   emptyPaged,
 } from './response';
 
+// Cross-version capability negotiation
+export {
+  CAPABILITY_HEADER,
+  isValidCapabilityName,
+  declareClientCapability,
+  getClientCapabilities,
+  buildCapabilityHeaderValue,
+  resetClientCapabilities,
+  serverSupports,
+  fetchServerCapabilities,
+} from './capabilities';
+export type { ServerCapabilitiesDto, CapabilityHttpClient } from './capabilities';
+
 export { HttpError, isHttpError } from '../errors/api-error';
 export { TimeoutError, isTimeoutError } from '../errors/network-error';

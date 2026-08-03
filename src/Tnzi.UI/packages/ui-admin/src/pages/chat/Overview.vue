@@ -69,7 +69,7 @@ import TKpiCard from '../../components/data/TKpiCard.vue'
 import { createChatBridge } from '../../services/bridges/chat-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { buildPresenceColumns } from './presence-config'
 import type { ChatStatisticsDto, PresenceOverviewDto, PresenceUserDto } from '@tnzi/core/services/chat'
 

@@ -13,7 +13,9 @@ pnpm add @tnzi/core
 ```typescript
 import type { UserDto } from "@tnzi/core/services/identity";
 import type { ApiResult, PagedList } from "@tnzi/core/types";
-import type { ILoginFormProps, ILoginFormEmits } from "@tnzi/core/components";
+// UI 契约类型（ITableColumn / IMenuItem / IFormRule / IDynamicFormField …）
+// 注意：core 没有 `components` 子路径，UI 契约类型一律从 types/shared-ui 取
+import type { ITableColumn, IMenuItem } from "@tnzi/core/types/shared-ui";
 ```
 
 ### HTTP 客户端
@@ -25,16 +27,19 @@ import {
   createSchemaResolver,
   createSchemaValidationMiddleware,
 } from "@tnzi/core/http";
-import { useUserApi } from "@tnzi/core/services/identity";
-import { userDtoSchema } from "@tnzi/core/services/identity";
+import { useAdminUserApi } from "@tnzi/core/services/identity";
 import { createPagedQuery } from "@tnzi/core/types";
+import { z } from "zod";
+
+// Schema 由消费方自备（core 不内置 DTO schema），传给 resolver 做响应校验
+const userDtoSchema = z.object({ id: z.string(), userName: z.string() });
 
 const client = createHttpClient({
   baseUrl: "https://api.example.com",
   responseMiddlewares: [
     createSchemaValidationMiddleware({
       resolveSchema: createSchemaResolver([
-        { method: "GET", path: "/identity/users/{id}", schema: userDtoSchema },
+        { method: "GET", path: "/admin/users/{id}", schema: userDtoSchema },
       ]),
     }),
     createErrorMappingMiddleware({
@@ -44,7 +49,7 @@ const client = createHttpClient({
     }),
   ],
 });
-const userApi = useUserApi(client);
+const userApi = useAdminUserApi(client);
 const users = await userApi.getList({ ...createPagedQuery(1, 10) });
 ```
 
@@ -56,9 +61,8 @@ import { useMessage, useDialog } from "@tnzi/core/adapters";
 
 ### Schema 验证
 
-```typescript
-import { loginSchema } from "@tnzi/core/services/identity";
-```
+core 依赖 `zod` 但**不内置 DTO schema**，由消费方按需自备，再经
+`createSchemaResolver` + `createSchemaValidationMiddleware` 挂到响应管线上（见上方 HTTP 客户端示例）。
 
 ### 国际化
 
@@ -69,7 +73,7 @@ import { provideI18n, useI18n } from "@tnzi/core/adapters/i18n";
 ### 无头控制器 & 工具
 
 ```typescript
-import { PaginationController, SortController, FormController } from "@tnzi/core/headless";
+import { DataQueryController, PaginationController, SortController, SelectionController } from "@tnzi/core/headless";
 import { calculateTotalPages, clampPageIndex, updatePageQuery } from "@tnzi/core/headless";
 ```
 

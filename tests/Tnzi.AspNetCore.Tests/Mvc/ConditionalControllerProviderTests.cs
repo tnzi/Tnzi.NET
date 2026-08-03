@@ -1,8 +1,6 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.AspNetCore.Mvc.Conventions;
-using Tnzi.AspNetCore.Mvc.Diagnostics;
 
 namespace Tnzi.AspNetCore.Tests.Mvc;
 

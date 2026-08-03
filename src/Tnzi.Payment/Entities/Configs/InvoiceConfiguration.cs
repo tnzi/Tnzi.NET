@@ -45,5 +45,10 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
         builder.HasIndex(i => i.Status);
         builder.HasIndex(i => i.InvoiceDate);
         builder.HasIndex(i => i.CustomerEmail);
+        builder.HasIndex(i => i.UserId);
+        // 一笔支付至多一张发票：幂等最终由数据库唯一约束兜底，
+        // 应用层查重挡不住并发投递的同一个支付完成事件。
+        builder.HasIndex(i => i.PaymentId).IsUnique()
+            .HasFilter(IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(nameof(Invoice.PaymentId)));
     }
 }

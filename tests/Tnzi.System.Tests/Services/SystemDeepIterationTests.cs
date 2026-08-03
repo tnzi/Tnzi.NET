@@ -72,13 +72,13 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Daily, startDate, endDate);
+            TrendInterval.Daily, startDate, endDate);
 
         // Assert: 3 天应该返回 3 个数据点
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldNotBeNull();
         result.Data.DataPoints.Count.ShouldBe(3);
-        result.Data.Interval.ShouldBe(AccessLogTrendInterval.Daily);
+        result.Data.Interval.ShouldBe(TrendInterval.Daily);
         result.Data.StartDate.ShouldBe(startDate);
         result.Data.EndDate.ShouldBe(endDate);
     }
@@ -94,7 +94,7 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Daily, startDate, endDate);
+            TrendInterval.Daily, startDate, endDate);
 
         // Assert: 每个数据点的标签应为日期格式 yyyy-MM-dd
         result.Data.ShouldNotBeNull();
@@ -121,13 +121,13 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Weekly, startDate, endDate);
+            TrendInterval.Weekly, startDate, endDate);
 
         // Assert: 3 周的数据
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldNotBeNull();
         result.Data.DataPoints.Count.ShouldBe(3);
-        result.Data.Interval.ShouldBe(AccessLogTrendInterval.Weekly);
+        result.Data.Interval.ShouldBe(TrendInterval.Weekly);
 
         // 每个周桶应该有 1 条日志
         foreach (var dp in result.Data.DataPoints)
@@ -155,7 +155,7 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Monthly, startDate, endDate);
+            TrendInterval.Monthly, startDate, endDate);
 
         // Assert: 3 个月 → 3 个数据点
         result.Succeeded.ShouldBeTrue();
@@ -183,7 +183,7 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Daily, date, date);
+            TrendInterval.Daily, date, date);
 
         // Assert
         result.Succeeded.ShouldBeTrue();
@@ -214,7 +214,7 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Daily, startDate, endDate);
+            TrendInterval.Daily, startDate, endDate);
 
         // Assert
         result.Succeeded.ShouldBeTrue();
@@ -242,7 +242,7 @@ public class AccessLogTrendTests
 
         // Act
         var result = await _service.GetAccessLogTrendAsync(
-            AccessLogTrendInterval.Daily, startDate, endDate);
+            TrendInterval.Daily, startDate, endDate);
 
         // Assert: 2 个空数据点
         result.Succeeded.ShouldBeTrue();
@@ -332,11 +332,11 @@ public class AccessLogTrendTests
     #region AccessLogTrendDto 契约测试
 
     [Fact]
-    public void AccessLogTrendInterval_Enum_Should_Have_Expected_Values()
+    public void TrendInterval_Enum_Should_Have_Expected_Values()
     {
-        AccessLogTrendInterval.Daily.ShouldBe((AccessLogTrendInterval)0);
-        AccessLogTrendInterval.Weekly.ShouldBe((AccessLogTrendInterval)1);
-        AccessLogTrendInterval.Monthly.ShouldBe((AccessLogTrendInterval)2);
+        TrendInterval.Daily.ShouldBe((TrendInterval)0);
+        TrendInterval.Weekly.ShouldBe((TrendInterval)1);
+        TrendInterval.Monthly.ShouldBe((TrendInterval)2);
     }
 
     [Fact]

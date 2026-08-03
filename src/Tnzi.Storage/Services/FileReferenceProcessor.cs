@@ -73,21 +73,49 @@ public class FileReferenceProcessor : IFileReferenceProcessor
 
                     await _referenceRepository.InsertAsync(reference, cancellationToken);
 
-                    // 增加引用计数
-                    var fileRecord = await _fileRepository.GetAsync(change.FileId, cancellationToken);
-                    if (fileRecord != null)
-                    {
-                        fileRecord.ReferenceCount++;
-                        await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
-                        _logger.LogDebug("FileRecord.ReferenceCount updated to {Count}", fileRecord.ReferenceCount);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("FileRecord not found for FileId={FileId}", change.FileId);
-                    }
-
                     _logger.LogDebug("Created file reference: FileId={FileId}, Entity={EntityType}/{EntityId}, Field={FieldName}",
                         change.FileId, change.EntityType, change.EntityId, change.FieldName);
+                }
+
+                // 引用已在且字段没有声明公开 → 无需回读文件记录（SaveChanges 热路径）。
+                // 引用计数只在真正新建引用时递增；公开标记则每次都对齐 ——
+                // 后者是幂等的字段声明（见下），重存一次实体即可修好历史遗留的记录。
+                if (existing && !change.IsPublicFile)
+                    continue;
+
+                var fileRecord = await _fileRepository.GetAsync(change.FileId, cancellationToken);
+                if (fileRecord == null)
+                {
+                    if (!existing)
+                        _logger.LogWarning("FileRecord not found for FileId={FileId}", change.FileId);
+                    continue;
+                }
+
+                var recordChanged = false;
+
+                if (!existing)
+                {
+                    fileRecord.ReferenceCount++;
+                    recordChanged = true;
+                    _logger.LogDebug("FileRecord.ReferenceCount updated to {Count}", fileRecord.ReferenceCount);
+                }
+
+                // 字段声明为 [FileField(Public = true)]（头像 / 站点素材）→ 文件即刻公开可读。
+                // 意图挂在字段上而非调用方：写头像的路径有很多条，任何一条忘记传参都会让头像 404。
+                // 只升不降 —— 移除引用时不写回 false，因为同一个文件可能仍被别处公开引用；
+                // 收回公开须显式走 IFileStorageService.SetFileVisibilityAsync。
+                if (change.IsPublicFile && !fileRecord.IsPublic)
+                {
+                    fileRecord.IsPublic = true;
+                    recordChanged = true;
+                    _logger.LogInformation(
+                        "File marked public by declared field: FileId={FileId}, Entity={EntityType}, Field={FieldName}",
+                        change.FileId, change.EntityType, change.FieldName);
+                }
+
+                if (recordChanged)
+                {
+                    await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
                 }
             }
             catch (Exception ex)

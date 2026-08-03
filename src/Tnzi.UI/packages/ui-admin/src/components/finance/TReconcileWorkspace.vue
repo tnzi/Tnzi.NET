@@ -124,10 +124,10 @@ import {
 } from 'naive-ui'
 import TReconcileRow from './TReconcileRow.vue'
 import TMoney from './TMoney.vue'
-import TEmpty from '../data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import TResponsiveTable from '../data/TResponsiveTable.vue'
 import { formatAccountingDate } from '../../utils/finance-format'
-import type { RowAction } from '../../headless/rowActions'
+import type { RowAction } from '../../headless/row-actions'
 import {
   BankTransactionStatus,
   type BankFeedDocType,

@@ -3,7 +3,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import { ReconciliationStatus, type ReconciliationDto } from '../../services/bridges/finance-bridge'
-import { amountCell, fmtAmount, fmtDate } from './money'
+import { fmtDate } from './money'
 
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import TMoney from '../../components/finance/TMoney.vue'

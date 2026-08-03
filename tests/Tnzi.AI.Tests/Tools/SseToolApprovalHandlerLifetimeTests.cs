@@ -1,10 +1,4 @@
-using System;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Shouldly;
-using Tnzi.AI.Tools.Approval;
 using Tnzi.AI.Tools.Approval.Sse;
-using Xunit;
 
 namespace Tnzi.AI.Tests.Tools;
 

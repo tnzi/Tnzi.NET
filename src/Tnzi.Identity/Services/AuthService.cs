@@ -18,6 +18,7 @@ public class AuthService : ApplicationService, IAuthService
     private readonly ILoginSecurityService? _loginSecurityService;
     private readonly ITwoFactorService? _twoFactorService;
     private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
+    private readonly ILoginGuardEvaluator? _loginGuardEvaluator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -38,7 +39,8 @@ public class AuthService : ApplicationService, IAuthService
         ITwoFactorService? twoFactorService = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        ILoginSessionCoordinator? loginSessionCoordinator = null)
+        ILoginSessionCoordinator? loginSessionCoordinator = null,
+        ILoginGuardEvaluator? loginGuardEvaluator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -53,6 +55,7 @@ public class AuthService : ApplicationService, IAuthService
         _loginSecurityService = loginSecurityService;
         _twoFactorService = twoFactorService;
         _loginSessionCoordinator = loginSessionCoordinator;
+        _loginGuardEvaluator = loginGuardEvaluator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -148,6 +151,14 @@ public class AuthService : ApplicationService, IAuthService
 
         var (user, loginIdentifier) = validationResult.Data;
 
+        // 凭据之外的准入策略（IP 白名单 / 设备 / 时段）。在 2FA 挑战之前，
+        // 这样被拒的登录不会白发一条验证码短信，也不留任何登录成功的痕迹。
+        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.Password, loginIdentifier);
+        if (!guardResult.Allowed)
+        {
+            return Fail<string>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+        }
+
         // 检查是否需要 2FA:总开关开着 且 至少一种方式当前可用(渠道未被关闭)。
         // 若已启用的方式因部署渠道全部关闭而无一可用,则按"未开启 2FA"直接放行。
         if (await _userManager.GetTwoFactorEnabledAsync(user))
@@ -205,6 +216,14 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         var (user, loginIdentifier) = validationResult.Data;
+
+        // 凭据之外的准入策略（IP 白名单 / 设备 / 时段）。在 2FA 挑战之前，
+        // 这样被拒的登录不会白发一条验证码短信，也不留任何登录成功的痕迹。
+        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.PasswordWithRefreshToken, loginIdentifier);
+        if (!guardResult.Allowed)
+        {
+            return Fail<TokenResult>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+        }
 
         // 检查是否需要 2FA:总开关开着 且 至少一种方式当前可用(渠道未被关闭)。
         // 若已启用的方式因部署渠道全部关闭而无一可用,则按"未开启 2FA"直接放行。
@@ -606,6 +625,14 @@ public class AuthService : ApplicationService, IAuthService
         // 标记临时Token为已使用（核心业务逻辑，必须同步执行）
         await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
 
+        // 凭据之外的准入策略。密码路径已经跑过一次，这里再跑是因为 2FA 是独立请求：
+        // 中间可能换了网络，且 OAuth / 验证码登录并不经过密码路径。
+        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.TwoFactor, loginIdentifier: null);
+        if (!guardResult.Allowed)
+        {
+            return Fail<TokenResult>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+        }
+
         // 2FA 通过后才建立登录会话（应用多登录策略；Reject 达上限则拒绝）
         var sessionResult = await EstablishLoginSessionAsync(user);
         if (!sessionResult.Succeeded)
@@ -699,6 +726,48 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         return await _loginSessionCoordinator.EstablishAsync(user.Id);
+    }
+
+    /// <summary>
+    /// 跑一遍登录守卫（IP 白名单 / 设备 / 时段这类凭据之外的准入策略）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 调用点必须在**身份校验通过之后、2FA 挑战与会话建立之前**：那是最早的安全点。
+    /// 放在这里，被拒的登录既不会白发一条 2FA 短信，也不会建立会话（多设备策略据此
+    /// 踢掉其它设备）、清零失败计数或在登录日志里留下一条成功记录。
+    /// </para>
+    /// <para>
+    /// 拒绝时的副作用与「密码错误」完全一致：累加失败计数 + 记一条登录失败（带守卫给的
+    /// 真实原因，对外文案则同形），这样自适应验证码与锁定策略照常对被拒的尝试生效。
+    /// </para>
+    /// </remarks>
+    private async Task<LoginGuardResult> RunLoginGuardsAsync(User user, LoginMethod method, string? loginIdentifier)
+    {
+        if (_loginGuardEvaluator is not { HasGuards: true })
+        {
+            return LoginGuardResult.Allow();
+        }
+
+        var ipAddress = ScopedContext?.ClientIpAddress;
+        var userAgent = ScopedContext?.UserAgent;
+
+        var result = await _loginGuardEvaluator.EvaluateAsync(
+            new LoginGuardContext(user, method, ipAddress, userAgent));
+        if (result.Allowed)
+        {
+            return result;
+        }
+
+        if (_captchaService != null && !string.IsNullOrEmpty(loginIdentifier))
+        {
+            await _captchaService.RecordLoginFailureAsync(loginIdentifier);
+        }
+
+        await PublishLoginFailedEventAsync(
+            user.Id, user.UserName, result.AuditReason ?? "Denied by a login guard", ipAddress, userAgent);
+
+        return result;
     }
 
     private async Task<bool> VerifyCaptchaAsync(string? captchaId, string? captchaCode, string purpose)
@@ -1080,6 +1149,13 @@ public class AuthService : ApplicationService, IAuthService
                     setPasswordToken,
                     DateTime.UtcNow.AddMinutes(IdentityOptions.Registration.SetPasswordTokenExpirationMinutes));
             }
+        }
+
+        // 凭据之外的准入策略（免密的验证码登录同样要过）。
+        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.VerificationCode, loginIdentifier: null);
+        if (!guardResult.Allowed)
+        {
+            return Fail<CodeLoginResultDto>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
         }
 
         // 建立登录会话（应用多登录策略；Reject 达上限则拒绝本次登录）

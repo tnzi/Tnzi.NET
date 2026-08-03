@@ -42,7 +42,7 @@ import { streamChat } from '@tnzi/core/services/ai';
 import TFloatingChat from './TFloatingChat.vue';
 import TSidebarChat from './TSidebarChat.vue';
 import TInlineChat from './TInlineChat.vue';
-import type { ChatMessage, MessageRole } from '@/composables/useChat';
+import type { ChatMessage, MessageRole } from '../headless/useChat';
 
 /** Handle passed to `onSend` for pushing a reply back into the widget. */
 export interface TnziChatTransportApi {

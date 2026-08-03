@@ -5,7 +5,8 @@ import type { useChatStore } from '../stores/useChatStore'
 export interface UseChatRealtimeOptions {
   client: unknown            // reserved (token/base resolution); kept for symmetry
   store: ReturnType<typeof useChatStore>
-  hubUrl?: string            // default '/hubs/chat'
+  /** Hub URL, or a getter evaluated at `start()` time. Default '/hubs/chat'. */
+  hubUrl?: string | (() => string | undefined)
   getToken: () => string
   getUserId: () => string | undefined
   /** Called on an incoming message from another user (UI plays sound / shows toast). */
@@ -15,10 +16,14 @@ export interface UseChatRealtimeOptions {
 }
 
 export function useChatRealtime(opts: UseChatRealtimeOptions) {
-  const signal = createChatSignalRClient({
-    url: opts.hubUrl ?? '/hubs/chat',
-    accessTokenFactory: () => opts.getToken(),
-  })
+  // Built on first start() - see useSettingsRealtime for why the URL cannot be
+  // resolved at setup time.
+  let signal: ReturnType<typeof createChatSignalRClient> | null = null
+
+  function resolveUrl(): string {
+    const configured = typeof opts.hubUrl === 'function' ? opts.hubUrl() : opts.hubUrl
+    return configured ?? '/hubs/chat'
+  }
 
   const onNew = (raw: unknown) => {
     const p = raw as NewMessagePayload
@@ -34,6 +39,10 @@ export function useChatRealtime(opts: UseChatRealtimeOptions) {
   const onPresence = (raw: unknown) => opts.store.applyPresenceChange(raw as PresenceChangedPayload)
 
   async function start() {
+    signal ??= createChatSignalRClient({
+      url: resolveUrl(),
+      accessTokenFactory: () => opts.getToken(),
+    })
     signal.on('Chat.NewMessage', onNew)
     signal.on('Chat.MessageRead', onRead)
     signal.on('Chat.ConversationChanged', onChanged)
@@ -41,11 +50,16 @@ export function useChatRealtime(opts: UseChatRealtimeOptions) {
     await signal.start()
   }
   async function stop() {
+    if (!signal) return
     signal.off('Chat.NewMessage', onNew)
     signal.off('Chat.MessageRead', onRead)
     signal.off('Chat.ConversationChanged', onChanged)
     signal.off('Chat.PresenceChanged', onPresence)
     await signal.stop()
   }
-  return { start, stop, client: signal }
+  /** The underlying hub client, or `null` until the first `start()`. */
+  function client() {
+    return signal
+  }
+  return { start, stop, client }
 }

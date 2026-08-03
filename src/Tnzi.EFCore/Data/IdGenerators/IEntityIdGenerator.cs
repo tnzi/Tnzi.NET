@@ -1,5 +1,5 @@
 
-namespace Tnzi.Data.IdGenerators;
+namespace Tnzi.EFCore.Data;
 
 /// <summary>
 /// 实体 ID 生成器接口

@@ -1,6 +1,12 @@
 <template>
-  <TCrudPage :state="crud" :all-columns="columns"
-    :search-fields="searchFields" :title="title" :row-actions="rowActions" :translate="t">
+  <TCrudPage
+    :state="crud"
+    :all-columns="columns"
+    :search-fields="searchFields"
+    :title="title"
+    :row-actions="rowActions"
+    :translate="t"
+  >
     <template #form="{ formData, mode }">
       <TFormSchemaRenderer
         :schema="reconciliationFormSchema"
@@ -58,7 +64,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { deleteAction, editAction, type RowAction } from '../../headless/rowActions'
+import { deleteAction, editAction, type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   ReconciliationStatus,
@@ -69,7 +75,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
 import { fmtAmount, tsToIsoDate, fmtDate } from './money'
 import { moneyPairColumns } from '../../components/finance'

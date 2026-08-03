@@ -54,55 +54,52 @@ public class PaymentBackgroundService : BackgroundService
     {
         using var scope = _serviceProvider.CreateScope();
 
-        // 关闭过期支付
-        try
-        {
-            var paymentService = scope.ServiceProvider.GetRequiredService<IPaymentService>();
-            var closedResult = await paymentService.CloseExpiredPaymentsAsync(cancellationToken);
-            if (closedResult.Succeeded && closedResult.Data > 0)
-                _logger.LogInformation("Closed {Count} expired payments", closedResult.Data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to close expired payments");
-        }
-
+        var paymentService = scope.ServiceProvider.GetRequiredService<IPaymentService>();
+        var refundService = scope.ServiceProvider.GetRequiredService<IRefundService>();
         var subscriptionService = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
 
+        // 每个扫描独立隔离：任一环节失败不影响其余扫描本轮执行
+        await RunScanAsync("close expired payments",
+            () => paymentService.CloseExpiredPaymentsAsync(cancellationToken));
+
+        // 对账在途退款：把渠道侧已终结但本地仍是"退款中"的记录推进到终态
+        await RunScanAsync("reconcile pending refunds",
+            () => refundService.ReconcilePendingRefundsAsync(cancellationToken));
+
         // 续费到期订阅（off-session 扣款）
-        try
-        {
-            var renewedResult = await subscriptionService.RenewExpiredSubscriptionsAsync(cancellationToken);
-            if (renewedResult.Succeeded && renewedResult.Data > 0)
-                _logger.LogInformation("Processed renewal for {Count} due subscriptions", renewedResult.Data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to renew expired subscriptions");
-        }
+        await RunScanAsync("renew due subscriptions",
+            () => subscriptionService.RenewExpiredSubscriptionsAsync(cancellationToken));
 
         // 试用到期转正/过期
-        try
-        {
-            var trialResult = await subscriptionService.ConvertDueTrialsAsync(cancellationToken);
-            if (trialResult.Succeeded && trialResult.Data > 0)
-                _logger.LogInformation("Processed trial conversion for {Count} subscriptions", trialResult.Data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to process due trials");
-        }
+        await RunScanAsync("convert due trials",
+            () => subscriptionService.ConvertDueTrialsAsync(cancellationToken));
+
+        // 暂停到期自动恢复
+        await RunScanAsync("resume due paused subscriptions",
+            () => subscriptionService.ResumeDuePausedSubscriptionsAsync(cancellationToken));
 
         // 到期未续费 / 逾期超宽限期 → 过期
+        await RunScanAsync("expire overdue subscriptions",
+            () => subscriptionService.ExpireOverdueSubscriptionsAsync(cancellationToken));
+
+        // 续费提醒：在扣款前 N 天通知用户，尤其是尚未绑卡的
+        await RunScanAsync("send renewal reminders",
+            () => subscriptionService.SendRenewalRemindersAsync(cancellationToken));
+    }
+
+    private async Task RunScanAsync(string scanName, Func<Task<Result<int>>> scan)
+    {
         try
         {
-            var expiredResult = await subscriptionService.ExpireOverdueSubscriptionsAsync(cancellationToken);
-            if (expiredResult.Succeeded && expiredResult.Data > 0)
-                _logger.LogInformation("Expired {Count} overdue subscriptions", expiredResult.Data);
+            var result = await scan();
+            if (result.Succeeded && result.Data > 0)
+                _logger.LogInformation("Background scan '{Scan}' processed {Count} items", scanName, result.Data);
+            else if (!result.Succeeded)
+                _logger.LogWarning("Background scan '{Scan}' returned failure: {Error}", scanName, result.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to expire overdue subscriptions");
+            _logger.LogError(ex, "Background scan '{Scan}' failed", scanName);
         }
     }
 }

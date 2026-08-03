@@ -27,6 +27,23 @@
     <PackageReference Include="Tnzi.Template" Version="$(TnziVersion)" />
   </ItemGroup>
 
+  <!--
+    'Documents' is a substring of 'Finance.Documents', so strip that token before matching -
+    otherwise asking for the finance cheque renderer would silently drag in the PDF primitives too.
+  -->
+  <ItemGroup Condition="$(TnziModules.Replace('Finance.Documents', '').Contains('Documents'))">
+    <PackageReference Include="Tnzi.Documents" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <!--
+    'Documents.Signing' is specific enough to need no stripping, and asking for it SHOULD
+    also bring in Tnzi.Documents (the signing module [DependsOn] it) - which the condition
+    above already does, because 'Documents.Signing' contains 'Documents'.
+  -->
+  <ItemGroup Condition="$(TnziModules.Contains('Documents.Signing'))">
+    <PackageReference Include="Tnzi.Documents.Signing" Version="$(TnziVersion)" />
+  </ItemGroup>
+
   <ItemGroup Condition="$(TnziModules.Contains('Notification'))">
     <PackageReference Include="Tnzi.Notification" Version="$(TnziVersion)" />
   </ItemGroup>

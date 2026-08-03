@@ -19,6 +19,9 @@ import {
   DiscountType,
   ProductType,
   ApplyScope,
+  SubscriptionChangeType,
+  SubscriptionChangeStatus,
+  UserCouponStatus,
   TrendGranularity,
 } from './metadata';
 
@@ -36,6 +39,9 @@ export {
   DiscountType,
   ProductType,
   ApplyScope,
+  SubscriptionChangeType,
+  SubscriptionChangeStatus,
+  UserCouponStatus,
   TrendGranularity,
 };
 
@@ -59,7 +65,15 @@ export interface PaymentDto {
   originalAmount: number;
   paidAmount: number;
   discountAmount: number;
+  /** Tax amount; already included in `payableAmount` when tax is priced in. */
+  taxAmount: number;
+  /** Amount actually charged by the channel; the basis for callback amount checks. */
+  payableAmount: number;
   currency: string;
+  /** Paying user; set even for background charges where there is no request user. */
+  userId?: string | null;
+  customerName?: string | null;
+  customerEmail?: string | null;
   status: PaymentStatus;
   channelCode: string;
   paymentMethod: PaymentMethod;
@@ -90,6 +104,12 @@ export interface CreatePaymentDto {
   description?: string;
   expireMinutes?: number;
   couponCode?: string;
+  /**
+   * Target plan/product id for the coupon's apply scope.
+   * A promotion limited to one plan is rejected without it, so quoting and
+   * redeeming must pass the same value.
+   */
+  couponScopeId?: string;
   returnUrl?: string;
   extraData?: string;
 }
@@ -109,8 +129,28 @@ export interface PaymentOrderResultDto {
   payParams?: string | null;
   payUrl?: string | null;
   expireTime?: Date | string | null;
+  /** Payable amount: discount deducted and tax applied. */
   amount: number;
+  originalAmount: number;
+  discountAmount: number;
+  taxAmount: number;
+  /** Set when a coupon code was accepted and redeemed for this order. */
+  appliedCouponCode?: string | null;
   currency: string;
+}
+
+/**
+ * Manual confirmation of an offline payment (bank transfer, wire, cheque).
+ * Only valid for the `Offline` channel - online channels must go through the
+ * channel callback so nobody can mark an order paid without real settlement.
+ */
+export interface ConfirmOfflinePaymentDto {
+  /** Defaults to the order's payable amount when omitted. */
+  paidAmount?: number;
+  /** Bank reference / cheque number - the audit trail for a manual entry. */
+  reference: string;
+  paidTime?: Date | string;
+  remark?: string;
 }
 
 /**
@@ -209,6 +249,8 @@ export interface SubscriptionDto {
   userId: string;
   planId: string;
   planName?: string | null;
+  /** Product this subscription belongs to; null for single-product apps. */
+  productCode?: string | null;
   status: SubscriptionStatus;
   cycleType: BillingCycleType;
   cycleValue: number;
@@ -222,6 +264,16 @@ export interface SubscriptionDto {
   discountAmount: number;
   currency: string;
   autoRenew: boolean;
+  storedPaymentMethodId?: string | null;
+  paymentMethodBrand?: string | null;
+  paymentMethodLast4?: string | null;
+  /** False means auto-renewal will fail: warn before the charge date, not after. */
+  hasPaymentMethod: boolean;
+  /** When the pause started - the remaining period is credited back on resume. */
+  pausedAt?: Date | string | null;
+  pausedUntil?: Date | string | null;
+  pastDueSince?: Date | string | null;
+  renewalRetryCount: number;
   creationTime: Date | string;
 }
 
@@ -233,8 +285,54 @@ export interface CreateSubscriptionDto {
   channelCode?: string;
   couponCode?: string;
   enableTrial?: boolean;
+  /** Channel-side token from the setup session; binds a reusable payment method. */
+  paymentMethodToken?: string;
+  /** Existing stored payment method; falls back to the channel default when omitted. */
   paymentMethodId?: string;
   extraData?: string;
+}
+
+/**
+ * Create subscription result: the subscription plus the first payment's
+ * credentials, so the checkout can be opened without re-querying by order no.
+ */
+export interface SubscriptionCreateResultDto {
+  subscription: SubscriptionDto;
+  /** Absent for trial sign-ups and zero-cost subscriptions. */
+  payment?: PaymentOrderResultDto | null;
+  requiresPayment: boolean;
+}
+
+/**
+ * Subscription plan change record
+ */
+export interface SubscriptionChangeDto {
+  id: string;
+  subscriptionId: string;
+  fromPlanId: string;
+  fromPlanName?: string | null;
+  toPlanId: string;
+  toPlanName?: string | null;
+  changeType: SubscriptionChangeType;
+  /** Positive = amount to top up; negative = credit back to the customer. */
+  proratedAmount: number;
+  effectiveDate: Date | string;
+  status: SubscriptionChangeStatus;
+  /** Present when a top-up is due and no card is on file - open the checkout with it. */
+  payment?: PaymentOrderResultDto | null;
+  creationTime: Date | string;
+}
+
+/**
+ * Pause subscription request.
+ *
+ * Resuming credits the paused duration back onto the next billing date, so a
+ * pause never shortens or extends what the customer already paid for.
+ */
+export interface PauseSubscriptionDto {
+  /** Omit to pause until manually resumed (capped by Payment:Subscription:MaxPauseDays). */
+  resumeAt?: Date | string;
+  reason?: string;
 }
 
 /**
@@ -253,6 +351,8 @@ export interface SubscriptionQueryDto extends PagedQueryDto {
 export interface SubscriptionPlanDto {
   id: string;
   planCode: string;
+  /** Plans sharing a product code are upgrades/downgrades of each other. */
+  productCode?: string | null;
   planName: string;
   description?: string | null;
   price: number;
@@ -275,18 +375,93 @@ export interface CancelSubscriptionDto {
 }
 
 /**
- * Change subscription plan request
+ * Change subscription plan request (prorated).
+ *
+ * Replaces the former `ChangeSubscriptionDto`, whose backing service method
+ * switched plans without charging the difference at all.
  */
-export interface ChangeSubscriptionDto {
+export interface ChangeSubscriptionPlanDto {
   newPlanId: string;
-  effectiveTime?: string;
+  /** Upgrades take effect immediately; downgrades always wait for period end. */
+  effectiveImmediately?: boolean;
 }
 
 /**
- * Update payment method for subscription
+ * Attach a payment method to a subscription.
+ * Supply either a stored method id or a fresh channel token; omitting both
+ * uses the user's default method for the subscription's channel.
  */
-export interface UpdatePaymentMethodDto {
-  paymentMethodId: string;
+export interface AttachPaymentMethodDto {
+  paymentMethodId?: string;
+  paymentMethodToken?: string;
+}
+
+// ============================================
+// Stored Payment Method (card-on-file) Types
+// ============================================
+
+/**
+ * Setup session request - step 1 of binding a reusable payment method.
+ */
+export interface CreateSetupSessionDto {
+  channelCode?: string;
+  /**
+   * Where the channel sends the payer back after they approve (redirect
+   * channels such as PayPal). Falls back to the channel's configured URL.
+   */
+  returnUrl?: string;
+  /** Where the payer lands if they abandon the approval. */
+  cancelUrl?: string;
+}
+
+/**
+ * Setup session result. Exactly one of the two fields drives the flow:
+ *
+ * - `clientSecret` (Stripe): hand it to the channel SDK to collect the payment
+ *   method inline, including 3DS.
+ * - `approvalUrl` (PayPal): send the payer to that URL. They approve at PayPal
+ *   and come back to your `returnUrl`.
+ *
+ * Either way, `bind` is then called with `setupId` as the token.
+ */
+export interface SetupSessionDto {
+  channelCode: string;
+  setupId: string;
+  clientSecret?: string | null;
+  approvalUrl?: string | null;
+}
+
+/**
+ * Register a collected payment method - step 3 of binding.
+ */
+export interface BindPaymentMethodDto {
+  paymentMethodToken: string;
+  channelCode?: string;
+  setAsDefault?: boolean;
+}
+
+/**
+ * A saved payment method. The channel holds the card; this is only a reference
+ * plus display data used for off-session renewal charges.
+ */
+export interface StoredPaymentMethodDto {
+  id: string;
+  channelCode: string;
+  methodType: PaymentMethod;
+  brand?: string | null;
+  last4?: string | null;
+  /**
+   * Masked wallet account (e.g. a PayPal payer email). Wallets have no card
+   * digits - with two PayPal accounts bound this is the only thing telling
+   * them apart.
+   */
+  accountLabel?: string | null;
+  expiryMonth?: number | null;
+  expiryYear?: number | null;
+  isDefault: boolean;
+  isExpired: boolean;
+  lastUsedTime?: Date | string | null;
+  creationTime: Date | string;
 }
 
 /**
@@ -306,6 +481,9 @@ export interface UpdateAutoRenewDto {
 export interface InvoiceDto {
   id: string;
   invoiceNo: string;
+  /** Billing owner; drives "my invoices" (auto-created invoices have no creator). */
+  userId?: string | null;
+  paymentId?: string | null;
   type: InvoiceType;
   status: InvoiceStatus;
   amount: number;
@@ -358,18 +536,24 @@ export interface InvoiceQueryDto extends PagedQueryDto {
 export interface CreateInvoiceDto {
   type?: InvoiceType;
   paymentId?: string;
-  customerName: string;
-  customerEmail: string;
+  /** Billing owner - required for manual invoices to appear under "my invoices". */
+  userId?: string;
+  /** Required for manual invoices; filled from the payment snapshot otherwise. */
+  customerName?: string;
+  customerEmail?: string;
   customerCompany?: string;
   customerTaxId?: string;
   customerAddress?: string;
   billingAddress?: string;
+  /** Required for manual invoices; defaults to the global currency. */
+  currency?: string;
   invoiceDate?: Date | string;
   dueDate?: Date | string;
   templateName?: string;
   notes?: string;
   internalNotes?: string;
-  lineItems: InvoiceLineItemDto[];
+  /** Required for manual invoices; derived from the payment otherwise. */
+  lineItems?: InvoiceLineItemDto[];
 }
 
 /**
@@ -422,6 +606,12 @@ export interface PromotionDto {
   priority: number;
   isActive: boolean;
   firstSubscriptionOnly: boolean;
+  /** Currency the fixed-amount discount is denominated in. */
+  currency: string;
+  /** Public promotions work by entering the code; private ones must be redeemed first. */
+  isPublic: boolean;
+  /** Target plan/product ids when applyScope is Plan or Product. Empty on list responses. */
+  scopeIds: string[];
   isValid: boolean;
 }
 
@@ -447,6 +637,8 @@ export interface CreatePromotionDto {
   stackable?: boolean;
   priority?: number;
   firstSubscriptionOnly?: boolean;
+  currency?: string;
+  isPublic?: boolean;
 }
 
 /**
@@ -464,6 +656,14 @@ export interface UpdatePromotionDto {
   stackable?: boolean;
   priority?: number;
   isActive?: boolean;
+  isPublic?: boolean;
+}
+
+/**
+ * Grant a coupon directly to a user (admin compensation / targeted campaign)
+ */
+export interface GrantCouponDto {
+  userId: string;
 }
 
 /**
@@ -482,7 +682,11 @@ export interface PromotionQueryDto extends PagedQueryDto {
 export interface ValidateCouponDto {
   couponCode: string;
   orderAmount: number;
+  /** Target plan/product id - checked against the promotion's apply scope. */
   productId?: string;
+  productType?: ProductType;
+  /** Fixed-amount discounts are currency-bound; omit only in single-currency apps. */
+  currency?: string;
 }
 
 /**
@@ -502,6 +706,10 @@ export interface CouponValidationResultDto {
 export interface CalculateDiscountDto {
   couponCode: string;
   orderAmount: number;
+  productId?: string;
+  productType?: ProductType;
+  /** Fixed-amount discounts are currency-bound; omit only in single-currency apps. */
+  currency?: string;
 }
 
 /**
@@ -519,7 +727,12 @@ export interface DiscountCalculationResultDto {
  * User available coupon DTO
  */
 export interface UserCouponDto {
+  /** Promotion id. */
   id: string;
+  /** Set when the coupon was redeemed into the user's wallet; null for public promotions. */
+  userCouponId?: string | null;
+  /** True when the user actually holds this coupon (vs. a public promotion anyone can enter). */
+  isHeld: boolean;
   couponCode: string;
   name: string;
   description?: string | null;
@@ -540,6 +753,8 @@ export interface CouponUsageDto {
   discountAmount: number;
   usedTime: Date | string;
   orderId?: string | null;
+  businessOrderNo?: string | null;
+  paymentId?: string | null;
 }
 
 /**

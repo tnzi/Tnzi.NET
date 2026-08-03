@@ -51,7 +51,7 @@
 import { ref, nextTick } from 'vue'
 import { NInput, NButton } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 const props = withDefaults(
   defineProps<{

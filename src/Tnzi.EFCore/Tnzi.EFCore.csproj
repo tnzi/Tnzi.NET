@@ -22,6 +22,11 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
+    <!-- 统一 IdentityModel 版本：SqlClient 只要求 >= 8.16.0 并解析到 8.16.0，而 Tnzi.Identity 钉了 8.19.1。
+         EFCore 是这条链的共同底座，在此提升可让所有下游拿到同一版本，否则同时看到两个程序集版本的项目
+         （如 tests/Tnzi.Tests：经 Tnzi.Hosting 拿到 Tnzi.Identity.dll，但 NuGet 图里没有 Identity 的提升）
+         会报 MSB3277 冲突且无法解析。 -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.1" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

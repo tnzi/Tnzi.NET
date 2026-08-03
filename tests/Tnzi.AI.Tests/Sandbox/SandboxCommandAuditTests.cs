@@ -4,7 +4,6 @@ using Tnzi.AI.Sandbox.Tools;
 using Tnzi.Audit.Entities;
 using Tnzi.Audit.Metadata;
 using Tnzi.Audit.Services;
-using Tnzi.EventBus;
 
 namespace Tnzi.AI.Tests.Sandbox;
 
@@ -144,7 +143,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
         await handler.HandleAsync(NewEvent(exitCode: 5));
 
         sender.Captured.Single().ResultType.ShouldBe(AuditResultType.Failed);
-        sender.Captured.Single().Message.ShouldContain("Non-zero exit (5)");
+        sender.Captured.Single().Message!.ShouldContain("Non-zero exit (5)");
     }
 
     [Fact]
@@ -158,7 +157,7 @@ public class SandboxCommandAuditTests : IAsyncLifetime
 
         var op = sender.Captured.Single();
         op.ResultType.ShouldBe(AuditResultType.Warning);
-        op.Message.ShouldContain("Command denied");
+        op.Message!.ShouldContain("Command denied");
     }
 
     [Fact]

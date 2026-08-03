@@ -118,7 +118,7 @@ public class ReverseJournalEntryDto
 }
 
 /// <summary>
-/// 凭证可冲销性（<see cref="Services.Interfaces.ILedgerPostingService.GetReversibilityAsync"/> 的只读判定结果）
+/// 凭证可冲销性（<see cref="Services.ILedgerPostingService.GetReversibilityAsync"/> 的只读判定结果）
 /// </summary>
 /// <remarks>
 /// 判定口径与冲销实际执行的校验同源，因此 <see cref="CanReverse"/> 为 true 时冲销不会因本判定覆盖的

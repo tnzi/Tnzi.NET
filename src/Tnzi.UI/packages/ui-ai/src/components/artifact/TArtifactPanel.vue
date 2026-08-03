@@ -28,7 +28,7 @@
  */
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useCodeHighlight, detectLangFromFilename } from '@/composables/useCodeHighlight'
+import { useCodeHighlight, detectLangFromFilename } from '../../headless/useCodeHighlight'
 
 export type ArtifactView = 'preview' | 'code' | 'history'
 

@@ -1,19 +1,11 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
-using Shouldly;
-using Tnzi.AI.Tools.Approval;
 using Tnzi.AI.Tools.Approval.Sse;
-using Xunit;
 
 namespace Tnzi.AI.Tests.Tools;
 
 /// <summary>
 /// Verifies the full request → emit → resolve → return flow of <see cref="SseToolApprovalHandler"/>
-/// using the <see cref="ServiceCollectionExtensions.AddAIToolApprovalSse"/> extension method.
+/// using the <c>AddAIToolApprovalSse</c> extension method.
 /// </summary>
 public class SseToolApprovalHandlerFunctionalTests
 {

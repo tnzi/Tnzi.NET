@@ -36,6 +36,11 @@ indent_style = tab
 # ─────────────────────────────────────────────────────────────────────────────
 [*.cs]
 # 高价值：移除冗余 using（直接呼应"用 GlobalUsings、类文件不保留 redundant using"约定）
+# ⚠ 这一条只有在生成 XML 文档时才会在 build 阶段报出（dotnet/roslyn#41640）。GenerateDocumentationFile
+#   因此必须为 true——注意它有**两处**：根 Directory.Build.props 与 build/public.props，后者经
+#   src/Directory.Build.props 在根之后导入，是 src/ 下的最终值。任一处改回 false，本规则都会
+#   **静默失效**（IDE 里仍提示，构建输出里一条都不出）——2026-07-31 全仓一次性清理出的数百条存量，
+#   正是 public.props 长期写着 false 积压出来的。
 dotnet_diagnostic.IDE0005.severity = warning
 # 降噪：库代码是否 ConfigureAwait 由框架约定决定，不在此强制
 dotnet_diagnostic.CA2007.severity = none

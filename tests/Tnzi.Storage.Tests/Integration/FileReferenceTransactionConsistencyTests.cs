@@ -1,8 +1,5 @@
-using Microsoft.Extensions.DependencyInjection;
 using Tnzi.Domain.Entities;
 using Tnzi.EFCore;
-using Tnzi.Security.Claims;
-using Tnzi.Storage;
 using Tnzi.TestBase;
 
 namespace Tnzi.Storage.Tests.Integration;

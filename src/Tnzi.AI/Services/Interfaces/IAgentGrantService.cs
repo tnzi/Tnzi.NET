@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// 授权资源类别 - 标识一条 grant 属于哪种 junction 实体，供 per-grant CRUD 路由。

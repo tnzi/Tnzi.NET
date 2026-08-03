@@ -23,7 +23,7 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
-import { DETAIL_ACTIVE_SECTION_ICON } from '../../../components/detail/activeSectionIcon'
+import { DETAIL_ACTIVE_SECTION_ICON } from '../../../components/detail/active-section-icon'
 
 const props = withDefaults(
   defineProps<{

@@ -187,9 +187,9 @@ import {
   NSwitch, NSpin, NForm, NFormItem, NPopconfirm,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import { type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/row-actions'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createIdentityBridge, type OrganizationTreeNodeDto, type OrganizationDto } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'

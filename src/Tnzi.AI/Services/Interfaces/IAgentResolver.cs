@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// Agent 解析器 - 根据 agentId / provider / model / toolGroups 解析 AgentExecutor，

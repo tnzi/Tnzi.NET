@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 单据附件（**只记链接不碰 Storage**：文件由前端上传后把 fileId 交进来）

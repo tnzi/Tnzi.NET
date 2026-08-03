@@ -1,5 +1,3 @@
-using Tnzi.Settings;
-using Tnzi.Notification.Options;
 
 namespace Tnzi.Notification.Tests;
 

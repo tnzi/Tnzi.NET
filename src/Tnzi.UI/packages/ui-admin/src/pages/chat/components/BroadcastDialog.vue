@@ -113,7 +113,7 @@ import { createChatBridge } from '../../../services/bridges/chat-bridge'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
-import { useSafeMessage } from '../../_shared/safeMessage'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { buildBroadcastColumns } from '../broadcast-config'
 import type { BroadcastDto, BroadcastLogDto } from '@tnzi/core/services/chat'
 

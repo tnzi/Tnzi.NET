@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Reflection;
 using Tnzi.AI.Infrastructure.Mcp;
 
 namespace Tnzi.AI.Tests.Infrastructure.Mcp;

@@ -91,7 +91,11 @@ public class S3Storage : IFileStorage, IDisposable
             BucketName = _options.BucketName,
             Key = fileName,
             InputStream = stream,
-            ContentType = contentType ?? "application/octet-stream"
+            ContentType = contentType ?? "application/octet-stream",
+            // AWS SDK 默认读完即关掉 InputStream，而流的生命周期归调用方
+            // （见 IFileStorage.UploadAsync 的所有权约定）：上传之后调用方还要读它的
+            // Length 写文件记录，被 SDK 关掉就是 ObjectDisposedException。
+            AutoCloseStream = false
         };
 
         await _s3Client.PutObjectAsync(request);

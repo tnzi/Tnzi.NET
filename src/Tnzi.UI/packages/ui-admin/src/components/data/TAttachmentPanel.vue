@@ -22,19 +22,12 @@
 
     <ul v-if="items.length" class="t-attach__list">
       <li v-for="item in items" :key="item.id" class="t-attach__item">
-        <a
-          class="t-attach__link"
-          :href="downloadUrl(item.fileId)"
-          :title="item.fileName"
-          target="_blank"
-          rel="noopener"
-          download
-        >
+<TFileLink class="t-attach__link" :file-id="item.fileId" :title="item.fileName">
           <TSvgIcon :icon="iconFor(item.contentType, item.fileName)" :size="18" class="t-attach__icon" />
           <span class="t-attach__name">{{ item.fileName }}</span>
-        </a>
+        </TFileLink>
         <span class="t-attach__size">{{ formatFileSize(item.fileSize) }}</span>
-        <NPopconfirm v-if="canRemove" @positive-click="remove(item)">
+        <NPopconfirm v-if="canRemove" @positive-click="removeAttachment(item)">
           <template #trigger>
             <NButton quaternary circle size="tiny" :aria-label="label('remove')">
               <TSvgIcon icon="mdi:close" :size="14" />
@@ -66,8 +59,9 @@
 import { ref, watch } from 'vue'
 import { NAlert, NButton, NPopconfirm } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import TFileLink from '../display/TFileLink.vue'
 import { formatFileSize } from '@tnzi/core'
-import TEmpty from './TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 
 export interface AttachmentItem {
   id: string
@@ -90,8 +84,6 @@ const props = withDefaults(
     /** Link an uploaded file to the record. */
     attach?: (linked: { fileId: string; fileName: string; contentType?: string | null; fileSize: number }) => Promise<void>
     remove?: (item: AttachmentItem) => Promise<void>
-    /** Build a download href for a stored file id. */
-    downloadUrl?: (fileId: string) => string
     /** i18n lookup relative to `attachments.*`. */
     translate?: (key: string) => string
   }>(),
@@ -125,10 +117,6 @@ const dropping = ref(false)
 const dragDepth = ref(0)
 
 watch(() => props.items, () => { error.value = null })
-
-function downloadUrl(fileId: string): string {
-  return props.downloadUrl?.(fileId) ?? `/api/files/${fileId}/download`
-}
 
 /** A recognisable glyph beats a generic page icon when scanning a list. */
 function iconFor(contentType?: string | null, name?: string): string {
@@ -192,7 +180,7 @@ async function send(files: File[]) {
   }
 }
 
-async function remove(item: AttachmentItem) {
+async function removeAttachment(item: AttachmentItem) {
   if (!props.remove) return
   try {
     await props.remove(item)

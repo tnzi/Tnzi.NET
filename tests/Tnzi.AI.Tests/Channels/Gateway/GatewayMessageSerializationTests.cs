@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Tnzi.AI.Channels.Gateway.Models;
 
 namespace Tnzi.AI.Tests.Channels.Gateway;

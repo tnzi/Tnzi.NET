@@ -85,7 +85,7 @@ public class SettlementWorkflowTests : FinanceIntegrationTestBase
         (await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.VoidAsync(payment.Id))).Code.ShouldBe(409);
 
         // 撤销核销
-        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data.Single().Id));
+        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data!.Single().Id));
         unapply.Succeeded.ShouldBeTrue(unapply.Message);
 
         var invoiceRestored = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.GetAsync(invoice.Id));
@@ -237,7 +237,7 @@ public class SettlementWorkflowTests : FinanceIntegrationTestBase
         tb.Data.Rows.SingleOrDefault(r => r.AccountId == arId)?.ClosingBalance.ShouldBe(0m);
 
         // 撤销核销 → FX 凭证被冲销，AR 恢复残差前状态
-        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data.Single().Id));
+        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data!.Single().Id));
         unapply.Succeeded.ShouldBeTrue(unapply.Message);
 
         var fxAfter = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(fxEntryId!.Value));

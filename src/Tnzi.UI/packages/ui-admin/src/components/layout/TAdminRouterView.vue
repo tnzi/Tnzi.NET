@@ -23,7 +23,6 @@
 import { computed, watchEffect } from 'vue'
 import { RouterView, useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
 import { isMultiInstanceRoute, multiInstanceKey } from '../../stores/useAdminTabStore'
 
 interface Props {
@@ -49,13 +48,11 @@ const props = withDefaults(defineProps<Props>(), {
 
 const route = useRoute()
 const appStore = useAdminAppStore()
-const themeStore = useAdminThemeStore()
 
-const resolvedTransition = computed(() => {
-  const name = props.transitionName ?? themeStore.pageTransition
-  if (name === 'none' || !themeStore.pageAnimate) return ''
-  return `tnzi-${name}`
-})
+// NOTE: there is deliberately no page Transition here - see the long comment
+// above the template. The `transitionName` prop and the theme's page-transition
+// setting therefore have no effect in this component; re-introducing the
+// wrapper would bring back the permanent leave-pending navigation bug.
 
 // The cache include list - route names whose meta.keepAlive is not strictly
 // false, are not in `exclude`, and have a name we can use as the cache key.
@@ -73,11 +70,9 @@ const includedNames = computed<string[]>(() => {
   return list
 })
 
-// Force keep-alive remount when the reload flag drops. The wrapper key
-// includes the flag so a falsy → truthy transition rebuilds the tree.
-const wrapperKey = computed(() =>
-  appStore.reloadFlag ? `mounted-${route.fullPath}` : 'unmounted',
-)
+// Keep-alive remount on reload is driven by `v-if="appStore.reloadFlag"` in the
+// template (falsy → truthy rebuilds the tree); the superseded wrapper-key
+// approach that also lived here has been removed.
 
 /**
  * Component identity key. Single-instance routes key by name so re-visiting the

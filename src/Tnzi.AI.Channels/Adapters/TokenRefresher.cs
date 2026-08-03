@@ -2,7 +2,7 @@ namespace Tnzi.AI.Channels.Adapters;
 
 /// <summary>
 /// 通用 access-token 缓存刷新器。
-/// 使用双重检查锁（SemaphoreSlim）保证线程安全，到期前 <paramref name="earlyRenewSeconds"/> 秒触发预刷新。
+/// 使用双重检查锁（SemaphoreSlim）保证线程安全，到期前 <c>earlyRenewSeconds</c> 秒触发预刷新。
 /// </summary>
 public sealed class TokenRefresher : IAsyncDisposable
 {

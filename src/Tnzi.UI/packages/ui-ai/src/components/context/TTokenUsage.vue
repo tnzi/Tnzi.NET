@@ -8,9 +8,9 @@
 
 import { NPopover, NDivider } from 'naive-ui';
 import { computed } from 'vue';
-import { useAiI18n } from '@/locale/index';
-import { formatCompactNumber } from '@/lib/utils';
-import type { TokenUsage } from '@/composables/useChat';
+import { useAiI18n } from '../../i18n/index';
+import { formatCompactNumber } from '../../utils/format';
+import type { TokenUsage } from '../../headless/useChat';
 const props = withDefaults(defineProps<{
   usage: TokenUsage;
   /** Maximum token budget (for progress ring). */

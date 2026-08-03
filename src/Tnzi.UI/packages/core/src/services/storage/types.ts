@@ -48,6 +48,18 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
   /** True while the file is an unreferenced upload awaiting cleanup. */
   isTemporary: boolean;
   /**
+   * True when the file is readable by anyone, including unauthenticated
+   * callers - i.e. it can be rendered with a plain `<img src>` that carries no
+   * Authorization header. Avatars and site assets are public; everything else
+   * defaults to false and is readable only by its owner or an admin holding
+   * `storage.file.view`.
+   *
+   * The backend sets this automatically whenever a file id is written into an
+   * entity field declared `[FileField(Public = true)]` (user avatars, group
+   * avatars), so avatar uploads do NOT need to pass `isPublic` themselves.
+   */
+  isPublic: boolean;
+  /**
    * Custom tags. The backend stores + serializes these as a single
    * comma-separated string (e.g. `"invoice,2026,paid"`), not an array - split
    * on `,` (trimming + dropping blanks) to read individual tags. Null / empty
@@ -287,6 +299,8 @@ export interface FileShareSummaryDto {
   isExhausted: boolean;
   creationTime: Date | string;
   creatorId?: string | null;
+  /** When the link was last used successfully (null = never used). */
+  lastAccessedAt?: Date | string | null;
 }
 
 /**
@@ -402,6 +416,80 @@ export interface BatchIntegrityResultDto {
  */
 export interface SetFileTagsDto {
   tags: string[];
+}
+
+/**
+ * Set file visibility request
+ * Aligned with backend SetFileVisibilityRequest
+ */
+export interface SetFileVisibilityDto {
+  /**
+   * True makes the file readable by anyone (including unauthenticated
+   * callers); false restores the default owner/admin-only policy.
+   */
+  isPublic: boolean;
+}
+
+/**
+ * What a share-link RECIPIENT is shown before downloading. Aligned with backend
+ * `FileSharePreviewDto`.
+ *
+ * Deliberately narrower than `FileShareDto`: no file id (an anonymous visitor
+ * has no business learning internal ids), no access counts, no creator.
+ */
+export interface FileSharePreviewDto {
+  /** File name as uploaded, so the recipient can tell what they are about to open. */
+  fileName: string;
+  /** Size in bytes. */
+  size: number;
+  /** MIME type, for picking an icon. */
+  contentType?: string | null;
+  /** True when the link asks for a password before handing over the file. */
+  requirePassword: boolean;
+  /** ISO timestamp at which the link stops working (null = no expiry). */
+  expiresAt?: string | null;
+}
+
+/**
+ * A short-lived token that lets the browser fetch ONE private file without an
+ * Authorization header. Aligned with backend `FileAccessTokenDto`.
+ *
+ * It exists because `<img>`, `<a download>`, `<video>` and `<iframe>` cannot
+ * send a bearer token: without it, "private" would mean "unrenderable", even
+ * for the person who uploaded the file. Append it to any read URL of that file
+ * as the `sig` query parameter.
+ *
+ * Minting runs the full read check server-side, so holding a token proves the
+ * minting session was allowed to read that one file - nothing more. It is not
+ * an authorization credential: it never grants writes.
+ */
+export interface FileAccessTokenDto {
+  /** File this token is valid for. It never works for another file. */
+  fileId: string;
+  /** Opaque signed token; pass it as the `sig` query parameter. */
+  token: string;
+  /** ISO timestamp at which the token stops working. */
+  expiresAt: string;
+}
+
+/**
+ * Options for a file upload.
+ *
+ * A bare progress callback is still accepted in the `options` position for
+ * backwards compatibility - `upload(file, (p) => ...)` keeps working.
+ */
+export interface FileUploadOptions {
+  /** Upload progress callback (0-100). */
+  onProgress?: (progress: number) => void;
+  /**
+   * Mark the uploaded file publicly readable. Use it for site assets and other
+   * resources consumed through an anonymous `<img src>`.
+   *
+   * NOT needed for avatars: writing the returned id into a
+   * `[FileField(Public = true)]` field (user avatar, group avatar) makes the
+   * backend flag the file public on its own.
+   */
+  isPublic?: boolean;
 }
 
 // ============================================

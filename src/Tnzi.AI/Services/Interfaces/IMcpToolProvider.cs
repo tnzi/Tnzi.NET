@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Services.Interfaces;
+namespace Tnzi.AI.Services;
 
 /// <summary>
 /// MCP 工具提供者 - 从已配置的 MCP 服务器拉取工具列表，按 AllowedTools 过滤并按 McpServerConfig 做审批包装后返回。

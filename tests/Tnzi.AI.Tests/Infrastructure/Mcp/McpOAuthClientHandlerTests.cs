@@ -1,8 +1,6 @@
 using System.Net;
-using System.Net.Http;
 using System.Text;
 using Tnzi.AI.Infrastructure.Mcp;
-using Tnzi.AI.Options;
 
 namespace Tnzi.AI.Tests.Infrastructure.Mcp;
 

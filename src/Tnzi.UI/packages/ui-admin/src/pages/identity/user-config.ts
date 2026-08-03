@@ -100,9 +100,14 @@ export const userProfileSchema: FormSchemaItem[] = [
   { key: 'bio', labelKey: 'form.bio', label: 'Bio', type: 'textarea', section: 'about' },
 ]
 
+// `sortable` is set on exactly the three fields `UserService.GetPagedListAsync`
+// compares (`username` / `email` / `creationtime`; comparison is
+// case-insensitive, so these camelCase keys match). Everything else drops to
+// its `else` branch and re-sorts by CreationTime desc, which would look like
+// the header did something arbitrary.
 export const userColumns: ColumnDef<UserRow>[] = [
-  { key: 'userName', title: 'columns.userName', minWidth: 130 },
-  { key: 'email', title: 'columns.email', minWidth: 180 },
+  { key: 'userName', title: 'columns.userName', minWidth: 130, sortable: true },
+  { key: 'email', title: 'columns.email', minWidth: 180, sortable: true },
   { key: 'phoneNumber', title: 'columns.phoneNumber', minWidth: 130 },
   { key: 'organizationName', title: 'columns.organizationName', minWidth: 140 },
   {
@@ -144,6 +149,7 @@ export const userColumns: ColumnDef<UserRow>[] = [
     key: 'creationTime',
     title: 'columns.creationTime',
     width: 150,
+    sortable: true,
     render: (row) => h(TRelativeTime, { value: row.creationTime }),
   },
 ]

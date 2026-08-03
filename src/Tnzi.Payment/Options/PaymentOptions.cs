@@ -15,7 +15,15 @@ public class PaymentOptions
     /// </summary>
     [RuntimeSetting(Label = "Default Currency", I18n = "admin.modules.system.settings.fields.defaultCurrency",
         Type = SettingFieldType.String)]
-    public string DefaultCurrency { get; set; } = "USD";
+    public string DefaultCurrency { get; set; } = PaymentConstants.DefaultCurrency;
+
+    /// <summary>
+    /// 默认支付渠道代码
+    /// </summary>
+    [RuntimeSetting(Label = "Default Payment Channel", I18n = "admin.modules.system.settings.fields.paymentDefaultChannelCode",
+        Type = SettingFieldType.String,
+        Description = "Channel code used when a request does not specify one")]
+    public string DefaultChannelCode { get; set; } = PaymentConstants.DefaultPaymentChannel;
 
     /// <summary>
     /// 自动关闭过期支付（分钟）
@@ -26,10 +34,35 @@ public class PaymentOptions
     public int AutoCloseExpireMinutes { get; set; } = 30;
 
     /// <summary>
-    /// 默认回调URL
+    /// 线下支付的有效期（天）。
+    /// </summary>
+    /// <remarks>
+    /// 线下渠道必须与在线渠道分开计时：银行转账 / 汇款要几天才到账，
+    /// 套用在线渠道的分钟级过期，等于在钱到账之前就把订单关掉了。
+    /// </remarks>
+    [RuntimeSetting(Label = "Offline Payment Validity (days)", I18n = "admin.modules.system.settings.fields.paymentOfflineExpireDays",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Background",
+        Description = "Days an offline payment (bank transfer, wire, cheque) stays open awaiting manual confirmation")]
+    public int OfflineExpireDays { get; set; } = 7;
+
+    /// <summary>
+    /// 默认支付完成后的浏览器跳转地址。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="DefaultNotifyUrl"/> 是两回事：return 是付款人浏览器回到的页面，
+    /// notify 是渠道服务端回调本系统的地址。此前二者混用会把 webhook 地址塞进 ReturnUrl。
+    /// </remarks>
+    [RuntimeSetting(Label = "Default Return URL", I18n = "admin.modules.system.settings.fields.paymentDefaultReturnUrl",
+        Type = SettingFieldType.String,
+        Description = "Where the payer's browser lands after completing payment")]
+    public string? DefaultReturnUrl { get; set; }
+
+    /// <summary>
+    /// 默认异步通知（webhook）地址：渠道服务端回调本系统的地址，仅部分渠道（如 PayPal）需要在建单时告知。
     /// </summary>
     [RuntimeSetting(Label = "Default Notify URL", I18n = "admin.modules.system.settings.fields.defaultNotifyUrl",
-        Type = SettingFieldType.String)]
+        Type = SettingFieldType.String,
+        Description = "Server-to-server webhook address reported to channels that require it")]
     public string? DefaultNotifyUrl { get; set; }
 
     /// <summary>
@@ -96,6 +129,14 @@ public class PaymentOptions
     /// 后台计费抢占锁时长（分钟），多实例下避免重复扣款，默认 10 分钟
     /// </summary>
     public int BillingLockMinutes { get; set; } = 10;
+
+    /// <summary>
+    /// 退款对账扫描回溯天数：只回查这段时间内仍未终结的退款，避免全表扫描。默认 30 天
+    /// </summary>
+    [RuntimeSetting(Label = "Refund Reconcile Lookback (days)", I18n = "admin.modules.system.settings.fields.paymentRefundReconcileLookbackDays",
+        Type = SettingFieldType.Int, Min = 1, Subsection = "Background",
+        Description = "How far back the background scan re-queries refunds that are still in progress")]
+    public int RefundReconcileLookbackDays { get; set; } = 30;
 }
 
 /// <summary>
@@ -109,9 +150,9 @@ public class ChannelOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 币种
+    /// 该渠道的默认币种：请求未指定币种时优先于全局 <see cref="PaymentOptions.DefaultCurrency"/> 生效
     /// </summary>
-    public string Currency { get; set; } = "USD";
+    public string? Currency { get; set; }
 }
 
 /// <summary>
@@ -149,12 +190,20 @@ public class SubscriptionOptions
     public int MaxRetryCount { get; set; } = 3;
 
     /// <summary>
-    /// 默认试用天数
+    /// 默认试用天数：计划开启了试用但未设置天数时用它兜底
     /// </summary>
     [RuntimeSetting(Label = "Default Trial Days", I18n = "admin.modules.system.settings.fields.paymentDefaultTrialDays",
         Type = SettingFieldType.Int, Min = 0,
-        Description = "Default trial length when a plan does not specify one")]
+        Description = "Trial length used when a plan allows trials but does not specify days")]
     public int DefaultTrialDays { get; set; } = 14;
+
+    /// <summary>
+    /// 暂停订阅的最长天数（0 = 不限制）。超过上限的暂停请求会被拒绝。
+    /// </summary>
+    [RuntimeSetting(Label = "Max Pause Days", I18n = "admin.modules.system.settings.fields.paymentMaxPauseDays",
+        Type = SettingFieldType.Int, Min = 0,
+        Description = "Maximum number of days a subscription may stay paused (0 = unlimited)")]
+    public int MaxPauseDays { get; set; } = 90;
 }
 
 /// <summary>
@@ -223,30 +272,36 @@ public class InvoiceOptions
 /// <summary>
 /// 税务配置选项
 /// 配置路径：Payment:Tax
-/// KEEP-STATIC：当前无运行时消费者（仅 AddTnziOptions 注册、无服务注入读取），
-/// 暴露到配置中心会造成"假热配"（改了不生效）。待税务计算链路接线后再评估暴露。
+/// 由 <see cref="Services.DefaultTaxCalculator"/> 消费，参与支付应付额与发票税额的计算。
 /// </summary>
+[ConfigSection("Payment:Tax")]
+[RuntimeSettingGroup(Key = "payment-tax", Module = "Payment", DisplayName = "Tax",
+    I18nKey = "admin.modules.system.settings.groups.paymentTax",
+    Icon = "mdi:percent-outline", Order = 540)]
 public class TaxOptions
 {
     /// <summary>
-    /// 是否启用
+    /// 是否启用计税
     /// </summary>
+    [RuntimeSetting(Label = "Tax Enabled", I18n = "admin.modules.system.settings.fields.paymentTaxEnabled",
+        Type = SettingFieldType.Boolean,
+        Description = "Apply tax to payments and invoices")]
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 税务提供商
-    /// KEEP-STATIC：provider 选择 = 装配门（决定加载哪个税务计算装配），不做热改。
+    /// 默认税率（百分数，如 13 表示 13%）
     /// </summary>
-    public string Provider { get; set; } = "StripeTax";
-
-    /// <summary>
-    /// 默认税率
-    /// </summary>
+    [RuntimeSetting(Label = "Default Tax Rate (%)", I18n = "admin.modules.system.settings.fields.paymentDefaultTaxRate",
+        Type = SettingFieldType.Decimal, Min = 0, Max = 100,
+        Description = "Flat tax rate as a percentage, e.g. 13 means 13%")]
     public decimal DefaultTaxRate { get; set; }
 
     /// <summary>
-    /// 税额是否含在价格中
+    /// 税额是否含在价格中（价内税）。true 时标价即应付额，税额仅在发票上列示。
     /// </summary>
+    [RuntimeSetting(Label = "Tax Included In Price", I18n = "admin.modules.system.settings.fields.paymentTaxIncluded",
+        Type = SettingFieldType.Boolean,
+        Description = "When enabled the listed price already contains tax; tax is only itemised on the invoice")]
     public bool TaxIncluded { get; set; }
 }
 
@@ -261,19 +316,11 @@ public class TaxOptions
 public class PromotionOptions
 {
     /// <summary>
-    /// 默认首次订阅折扣
-    /// </summary>
-    [RuntimeSetting(Label = "Default First-Subscription Discount", I18n = "admin.modules.system.settings.fields.paymentDefaultFirstSubscriptionDiscount",
-        Type = SettingFieldType.Decimal, Min = 0, Max = 1,
-        Description = "Discount fraction for a user's first subscription (0-1, e.g. 0.2 = 20%)")]
-    public decimal DefaultFirstSubscriptionDiscount { get; set; } = 0.2m;
-
-    /// <summary>
-    /// 每用户最大优惠券使用次数
+    /// 每用户单张优惠券的默认使用次数上限：促销未单独设置 PerUserUsageLimit 时用它兜底。
     /// </summary>
     [RuntimeSetting(Label = "Max Coupon Usage Per User", I18n = "admin.modules.system.settings.fields.paymentMaxCouponUsagePerUser",
         Type = SettingFieldType.Int, Min = 1,
-        Description = "Maximum number of coupon redemptions allowed per user")]
+        Description = "Fallback per-user usage cap for promotions that do not set their own limit")]
     public int MaxCouponUsagePerUser { get; set; } = 5;
 
     /// <summary>

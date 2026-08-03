@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.DataProtection;
-using System.Net.Http;
 
 namespace Tnzi.AI.Tests.Services;
 
@@ -244,7 +243,7 @@ public class ProviderServiceConfigMergeTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("read-only");
+        result.Message!.ShouldContain("read-only");
     }
 
     [Fact]
@@ -257,7 +256,7 @@ public class ProviderServiceConfigMergeTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("read-only");
+        result.Message!.ShouldContain("read-only");
         _repository.Verify(r => r.DeleteAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

@@ -26,6 +26,8 @@ public class PaymentTestDbContext : TnziDbContext<PaymentTestDbContext>
         modelBuilder.ApplyConfiguration(new PromotionConfiguration());
         modelBuilder.ApplyConfiguration(new CouponUsageConfiguration());
         modelBuilder.ApplyConfiguration(new RedemptionCodeConfiguration());
+        modelBuilder.ApplyConfiguration(new UserCouponConfiguration());
+        modelBuilder.ApplyConfiguration(new StoredPaymentMethodConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceLineItemConfiguration());
 

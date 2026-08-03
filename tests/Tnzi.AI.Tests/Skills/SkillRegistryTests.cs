@@ -1,8 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
-using Tnzi.AI.Options;
-using Tnzi.AI.Skills;
-using Tnzi.AI.Skills.Models;
 
 namespace Tnzi.AI.Tests.Skills;
 

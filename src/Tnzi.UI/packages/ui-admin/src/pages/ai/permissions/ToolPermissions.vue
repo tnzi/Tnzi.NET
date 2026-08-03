@@ -200,7 +200,7 @@ import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { useCrudPage } from '../../../headless/useCrudPage'
-import { editAction, deleteAction, type RowAction } from '../../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../../headless/row-actions'
 import { useAdminClient } from '../../../plugin/client'
 import {
   createPermissionBridge,

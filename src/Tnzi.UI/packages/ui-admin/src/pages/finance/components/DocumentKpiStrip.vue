@@ -60,8 +60,10 @@ const currency = ref<string | undefined>(undefined)
 /** 逾期 = 合计 − 未到期。不写死桶名，账龄分桶已参数化。 */
 const overdue = computed(() => (totals.value ? totals.value.total - totals.value.current : 0))
 
+// 按路由名而非路径字面量：`defineAdminApp({ basePath })` 会重写前缀，
+// 写死 `/admin/...` 的目标在自定义前缀下会落到 404。
 const reportTarget = computed(() => ({
-  path: '/admin/finance/reports',
+  name: 'finance.reports',
   query: { section: props.kind === 'ar' ? 'ar-aging' : 'ap-aging' },
 }))
 

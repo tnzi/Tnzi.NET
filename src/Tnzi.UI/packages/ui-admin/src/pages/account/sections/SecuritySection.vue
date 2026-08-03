@@ -212,7 +212,7 @@ import { TwoFactorType } from '@tnzi/core/services/identity'
 import type { TwoFactorStatusDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
 import TModalShell from '../../../components/overlay/TModalShell.vue'
-import { useUserCenterContext } from '../userCenterContext'
+import { useUserCenterContext } from '../user-center-context'
 
 const ctx = useUserCenterContext()
 const t = ctx.t

@@ -8,8 +8,8 @@
  */
 
 import { watch, onBeforeUnmount } from 'vue';
-import { useStreamMarkdown } from '@/composables/useStreamMarkdown';
-import { useAiI18n } from '@/locale/index';
+import { useStreamMarkdown } from '../../headless/useStreamMarkdown';
+import { useAiI18n } from '../../i18n/index';
 
 const props = withDefaults(defineProps<{
   /** Markdown content string (accumulated, not delta). */

@@ -13,14 +13,14 @@ public class SubAgentRegistryTests
 
         general.ShouldNotBeNull();
         general.DefaultApprovalMode.ShouldBe(ToolApprovalMode.Specific);
-        general.CapabilityTags.ShouldContain("implementation");
+        general.CapabilityTags!.ShouldContain("implementation");
 
         bash.ShouldNotBeNull();
         bash.DefaultApprovalMode.ShouldBe(ToolApprovalMode.Specific);
-        bash.CapabilityTags.ShouldContain("sandbox");
+        bash.CapabilityTags!.ShouldContain("sandbox");
 
         researcher.ShouldNotBeNull();
         researcher.DefaultApprovalMode.ShouldBe(ToolApprovalMode.NeverRequire);
-        researcher.CapabilityTags.ShouldContain("research");
+        researcher.CapabilityTags!.ShouldContain("research");
     }
 }

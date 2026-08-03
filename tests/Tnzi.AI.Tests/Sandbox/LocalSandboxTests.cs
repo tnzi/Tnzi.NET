@@ -225,4 +225,53 @@ public class LocalSandboxTests : IAsyncLifetime
 
         Assert.Equal("b\nc", content);
     }
+
+    /// <summary>
+    /// A timeout is exactly when stderr matters most - it is the only evidence of where
+    /// the command hung. Replacing it with a fixed "timed out" string throws that away.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteCommand_TimedOut_KeepsStderrAlreadyCollected()
+    {
+        await using var sandbox = new LocalSandbox(
+            id: "timeout-stderr",
+            workspacePath: _workDir,
+            commandTimeout: TimeSpan.FromSeconds(2),
+            maxOutputSize: 4096,
+            deniedCommands: [],
+            environmentBlacklist: []);
+
+        var result = await sandbox.ExecuteCommandAsync(HangAfterWritingDiagnostics);
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("DIAG_MARKER", result.Error);
+    }
+
+    /// <summary>
+    /// Keeping stderr must not hide the timeout itself - callers branch on it.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteCommand_TimedOut_StillReportsTimeout()
+    {
+        await using var sandbox = new LocalSandbox(
+            id: "timeout-marker",
+            workspacePath: _workDir,
+            commandTimeout: TimeSpan.FromSeconds(2),
+            maxOutputSize: 4096,
+            deniedCommands: [],
+            environmentBlacklist: []);
+
+        var result = await sandbox.ExecuteCommandAsync(HangAfterWritingDiagnostics);
+
+        Assert.Equal(-1, result.ExitCode);
+        Assert.Contains("timed out", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Writes a marker to stderr, then hangs well past any test timeout so the
+    /// cancellation path is the one under test.
+    /// </summary>
+    private static string HangAfterWritingDiagnostics => OperatingSystem.IsWindows()
+        ? "echo DIAG_MARKER 1>&2 & ping -n 60 127.0.0.1 > nul"
+        : "echo DIAG_MARKER >&2; sleep 60";
 }

@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import { h, defineComponent, type VNodeChild } from 'vue'
 
 import { moneyPairColumns } from '../../../src/components/finance/money-columns'
-import { translatePageKey } from '../../../src/pages/_shared/translate'
+import { translatePageKey } from '../../../src/i18n/translate'
 import { en } from '../../../src/locales/en'
 import { zhCn } from '../../../src/locales/zh-cn'
 

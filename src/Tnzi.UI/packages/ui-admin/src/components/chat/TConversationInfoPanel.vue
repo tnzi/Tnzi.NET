@@ -82,7 +82,14 @@
 
       <!-- ── Action rows (search / mute / sticky) ─────────────────────────── -->
       <div class="t-conv-info__rows">
-        <div class="t-conv-info__row t-conv-info__row--nav" @click="searchHistoryOpen = true">
+        <div
+          class="t-conv-info__row t-conv-info__row--nav"
+          role="button"
+          tabindex="0"
+          @click="searchHistoryOpen = true"
+          @keydown.enter.prevent="searchHistoryOpen = true"
+          @keydown.space.prevent="searchHistoryOpen = true"
+        >
           <span class="t-conv-info__row-label">{{ t('window.searchHistory') }}</span>
           <Icon icon="mdi:chevron-right" :width="18" class="t-conv-info__row-chevron" />
         </div>
@@ -152,7 +159,7 @@ import { NPopconfirm, NSwitch } from 'naive-ui'
 import { MemberRole, ConversationType } from '@tnzi/core/services/chat'
 import type { ConversationDto, ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 import TMemberGrid from './TMemberGrid.vue'
 import TInfoField from './TInfoField.vue'
 import TMemberPickerDialog from './TMemberPickerDialog.vue'

@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging.Abstractions;
-using Tnzi.AI.Mcp.Services;
 
 namespace Tnzi.AI.Tests.Mcp;
 

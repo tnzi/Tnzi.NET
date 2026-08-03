@@ -33,7 +33,7 @@ import { computed } from 'vue'
 import { TAvatar } from '@tnzi/ui'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { resolveChatAvatarUrl } from './avatar'
-import { groupAvatarLayout } from './groupAvatar'
+import { groupAvatarLayout } from './group-avatar'
 
 const props = withDefaults(
   defineProps<{

@@ -32,7 +32,7 @@ public class FunctionModule : FullAuditedEntity<Guid>
 
     /// <summary>
     /// True when this row is owned by code (an
-    /// <see cref="Permissions.IPermissionDefinitionProvider"/> registered it
+    /// <see cref="Tnzi.Security.Authorization.IPermissionDefinitionProvider"/> registered it
     /// at startup). System-managed rows are protected from rename/delete
     /// through the admin UI - only the declaring module can change them.
     /// </summary>

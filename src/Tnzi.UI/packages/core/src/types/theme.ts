@@ -3,117 +3,36 @@
  */
 
 /**
- * Theme mode
+ * Theme mode.
+ *
+ * `'auto'` means "follow the OS colour scheme". It used to be spelled
+ * `'system'` here while every UI-side type (`@tnzi/ui`'s `useTheme`,
+ * `TThemeSchemaSwitch`, `@tnzi/ui-admin`'s `AdminThemeSchema`) spelled it
+ * `'auto'`, so the two halves of the ecosystem could not be assigned to each
+ * other. One spelling now: `'auto'`.
+ *
+ * Values persisted by an older build still say `'system'`; read them back
+ * through {@link normalizeThemeMode} rather than casting.
  */
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'light' | 'dark' | 'auto';
+
+/** Every valid {@link ThemeMode}, in the order `toggleTheme` cycles through. */
+export const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'auto'] as const;
 
 /**
- * Color format
+ * Coerce an untrusted value (persisted state, query string, backend payload)
+ * into a valid {@link ThemeMode}.
+ *
+ * Maps the legacy `'system'` spelling onto `'auto'` so a browser that stored a
+ * theme under an older build keeps its choice instead of silently falling back
+ * to light. Anything unrecognised yields `fallback`.
+ *
+ * @param value - Untrusted input.
+ * @param fallback - Returned when `value` is not a recognised mode. Defaults to `'light'`.
  */
-export type ColorFormat = 'hex' | 'rgb' | 'hsl';
-
-/**
- * RGB color components
- */
-export interface RgbColor {
-  r: number;
-  g: number;
-  b: number;
-  a?: number;
+export function normalizeThemeMode(value: unknown, fallback: ThemeMode = 'light'): ThemeMode {
+  if (value === 'light' || value === 'dark' || value === 'auto') return value;
+  // Legacy spelling written by builds before the 'system' → 'auto' unification.
+  if (value === 'system') return 'auto';
+  return fallback;
 }
-
-/**
- * HSL color components
- */
-export interface HslColor {
-  h: number;
-  s: number;
-  l: number;
-  a?: number;
-}
-
-/**
- * Theme color palette
- */
-export interface ThemeColors {
-  primary: string;
-  secondary: string;
-  success: string;
-  warning: string;
-  danger: string;
-  info: string;
-  background: string;
-  surface: string;
-  text: string;
-  textSecondary: string;
-  border: string;
-  divider: string;
-}
-
-/**
- * Theme configuration
- */
-export interface ThemeConfig {
-  /** Current theme mode */
-  mode: ThemeMode;
-  /** Color palette */
-  colors: ThemeColors;
-  /** Border radius (px) */
-  borderRadius: number;
-  /** Font family */
-  fontFamily: string;
-  /** Base font size (px) */
-  fontSize: number;
-  /** Spacing unit (px) */
-  spacing: number;
-}
-
-/**
- * naive-ui default light theme
- */
-export const lightThemeColors: ThemeColors = {
-  primary: '#18a058',
-  secondary: '#f5f5f7',
-  success: '#18a058',
-  warning: '#f0a020',
-  danger: '#d03050',
-  info: '#2080f0',
-
-  background: '#ffffff',
-  surface: '#fafafc',      // actionColor
-  text: '#333639',         // textColor2: rgb(51,54,57)
-  textSecondary: '#767c82',// textColor3: rgb(118,124,130)
-  border: '#e0e0e6',       // borderColor: rgb(224,224,230)
-  divider: '#efefF5',      // dividerColor: rgb(239,239,245)
-};
-
-/**
- * naive-ui default dark theme
- */
-export const darkThemeColors: ThemeColors = {
-  primary: '#63e2b7',
-  secondary: '#2a2a2e',
-  success: '#63e2b7',
-  warning: '#f2c97d',
-  danger: '#e88080',
-  info: '#70c0e8',
-
-  background: '#101014',   // bodyColor: rgb(16,16,20)
-  surface: '#18181c',      // cardColor: rgb(24,24,28)
-  text: '#e8e8e8',         // ~overlay(0.9)
-  textSecondary: '#8a8f98',// ~overlay(0.52)
-  border: '#3a3a40',       // ~overlay(0.24)
-  divider: '#232328',      // ~overlay(0.09)
-};
-
-/**
- * Default theme configuration
- */
-export const defaultThemeConfig: ThemeConfig = {
-  mode: 'light',
-  colors: lightThemeColors,
-  borderRadius: 3,         // naive-ui default: 3px
-  fontFamily: 'v-sans, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  fontSize: 14,
-  spacing: 8,
-};

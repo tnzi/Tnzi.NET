@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
@@ -43,6 +43,8 @@ public class ResumeDownloadUploadTests
             _mockStorage.Object,
             optionsMonitor.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            TestPublicFileFieldResolver.Empty(),
+            new TestFileUrlSigner(),
             _mockServiceProvider.Object);
     }
 

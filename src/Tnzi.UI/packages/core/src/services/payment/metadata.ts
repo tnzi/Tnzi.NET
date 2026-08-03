@@ -385,6 +385,34 @@ export enum ApplyScope {
 }
 
 /**
+ * Subscription plan change type - mirrors Tnzi.Payment.Metadata.SubscriptionChangeType.
+ */
+export enum SubscriptionChangeType {
+  Upgrade = 'Upgrade',
+  Downgrade = 'Downgrade',
+  CrossGrade = 'CrossGrade',
+}
+
+/**
+ * Subscription plan change status - mirrors Tnzi.Payment.Metadata.SubscriptionChangeStatus.
+ */
+export enum SubscriptionChangeStatus {
+  Pending = 'Pending',
+  Applied = 'Applied',
+  Cancelled = 'Cancelled',
+}
+
+/**
+ * Held coupon status - mirrors Tnzi.Payment.Metadata.UserCouponStatus.
+ */
+export enum UserCouponStatus {
+  Available = 'Available',
+  Used = 'Used',
+  Expired = 'Expired',
+  Revoked = 'Revoked',
+}
+
+/**
  * Trend granularity (for revenue trend queries). Sent as a query-string param
  * only - kept numeric because ASP.NET Core's enum model binder accepts the
  * number for `RevenueTrendQueryDto.Granularity`.

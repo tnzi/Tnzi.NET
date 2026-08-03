@@ -35,7 +35,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { editAction, deleteAction, type RowAction } from '../../headless/rowActions'
+import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import {
   createFinanceBridge,
   BankNumberScheme,
@@ -48,7 +48,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { selectRenderer, type FieldRenderContext } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
 import { buildBankAccountColumns, bankAccountFormSchema, type BankAccountRow } from './bank-account-config'
 

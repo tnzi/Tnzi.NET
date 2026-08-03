@@ -105,13 +105,13 @@ public class ForeignReconciliationTests : FinanceIntegrationTestBase
 
         // 勾选 EUR 行 → cleared 1000 EUR（交易币口径，不含 +200 本位币调整）→ 差额 0 可完成
         var cleared = await InScopeAsync<IReconciliationService, Result<ReconciliationWorksheetDto>>(
-            s => s.SetLinesAsync(draft.Data.Id, new SetReconciliationLinesDto
+            s => s.SetLinesAsync(draft.Data!.Id, new SetReconciliationLinesDto
             {
                 JournalLineIds = worksheet.Data.Lines.Select(l => l.JournalLineId).ToList()
             }));
         cleared.Data!.ClearedBalance.ShouldBe(1000m);
         cleared.Data.Difference.ShouldBe(0m);
-        (await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(s => s.CompleteAsync(draft.Data.Id)))
+        (await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(s => s.CompleteAsync(draft.Data!.Id)))
             .Succeeded.ShouldBeTrue();
     }
 

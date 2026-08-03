@@ -283,4 +283,38 @@ public class SalaryFormulaEvaluatorTests
 
         public PayrollOptions Get(string? name) => _value;
     }
+
+    [Fact]
+    public void Ytd_UnknownAggregateKey_Fails()
+    {
+        // `#` 是封闭命名空间：查不到只可能是拼错。静默返回 0 会让一个法定上限的
+        // 基数变成零 —— 上限永不触发，而且要到年终对账才看得出来。
+        var context = new SalaryFormulaContext { YtdResolver = _ => 0m };
+        var result = CreateEvaluator().Evaluate("Ytd('#GROSSS')", context);
+        result.Succeeded.ShouldBeFalse();
+        result.Message!.ShouldContain("#GROSS");
+    }
+
+    [Fact]
+    public void Ytd_KnownAggregateKey_ReachesTheResolver()
+    {
+        var context = new SalaryFormulaContext
+        {
+            YtdResolver = code => code == PayrollYtdAggregates.Gross ? 61500m : 0m
+        };
+        var result = CreateEvaluator().Evaluate("max(0, min(Ytd('#GROSS') + 5000, 73200) - 68500)", context);
+        result.Succeeded.ShouldBeTrue(result.Message);
+        // CPP2 形状：min(66500, 73200) - 68500 < 0 → 0
+        result.Data.ShouldBe(0m);
+    }
+
+    [Fact]
+    public void Ytd_ComponentCodeMiss_StillReturnsZero_NotAnError()
+    {
+        // 组件编码查不到是正常的：这个员工今年确实还没有过这一项。
+        var context = new SalaryFormulaContext { YtdResolver = _ => 0m };
+        var result = CreateEvaluator().Evaluate("Ytd('NEVER_PAID')", context);
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data.ShouldBe(0m);
+    }
 }

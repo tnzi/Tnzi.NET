@@ -13,11 +13,22 @@ public static class Check
     /// <summary>
     /// 检查参数是否为 null
     /// </summary>
+    /// <remarks>
+    /// 形参声明为 <c>T?</c> 且约束 <c>T : notnull</c>，因此传入可空<b>引用</b>表达式时 <c>T</c> 仍推断为非空类型，
+    /// 返回值可直接赋给非空目标而不触发 CS8604。若形参写成裸 <c>T</c>，<c>T</c> 会连同可空注解一起被推断，
+    /// 返回值仍是可空的，<see cref="System.Diagnostics.CodeAnalysis.NotNullAttribute"/> 只影响实参自身的后续流分析。
+    /// <para>
+    /// <b>适用范围</b>：引用类型与值类型本身。<b>可空值类型</b>（<c>int?</c> 等）不适用——无 <c>struct</c> 约束时
+    /// <c>T?</c> 对值类型只是可空注解而非 <c>Nullable&lt;T&gt;</c>，需要拆包请直接用
+    /// <c>ArgumentNullException.ThrowIfNull</c> 后取 <c>.Value</c>。
+    /// </para>
+    /// </remarks>
     /// <typeparam name="T">参数类型</typeparam>
     /// <param name="value">参数值</param>
     /// <param name="paramName">参数名（可选，不提供时由编译器从调用处推导）</param>
     /// <returns>参数值</returns>
-    public static T NotNull<T>([System.Diagnostics.CodeAnalysis.NotNull] T value,[CallerArgumentExpression(nameof(value))] string? paramName = null)
+    public static T NotNull<T>([System.Diagnostics.CodeAnalysis.NotNull] T? value, [CallerArgumentExpression(nameof(value))] string? paramName = null)
+        where T : notnull
     {
         if (value == null)
             throw new ArgumentNullException(paramName ?? FallbackParamName);

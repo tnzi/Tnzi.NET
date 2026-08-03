@@ -1,4 +1,4 @@
-global using Microsoft.AspNetCore.Mvc;
+﻿global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
 global using Microsoft.Extensions.Configuration;
@@ -10,11 +10,9 @@ global using System;
 global using System.Collections.Generic;
 global using System.Globalization;
 global using System.Linq;
-global using System.Linq.Expressions;
 global using System.Text;
 global using System.Threading;
 global using System.Threading.Tasks;
-global using Tnzi;
 global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
@@ -24,33 +22,28 @@ global using Tnzi.Data;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
+global using Tnzi.EFCore.DocumentNumbering;
 global using Tnzi.EFCore.Extensions;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.EventBus;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
-global using Tnzi.Mapping;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;
-global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Security;
-global using Tnzi.Security.Claims;
-global using Tnzi.Services;
 global using Tnzi.Settings;
+global using Tnzi.Storage;
 global using Tnzi.Utilities;
 
 // Finance 核心：单据范式、过账管线、往来方、共享枚举与选项，以及本模块要实现的两个解耦契约
 // （IJournalLineHoldProvider / IGeneralLedgerSearchContributor）。
-global using Tnzi.Finance;
 global using Tnzi.Finance.Dtos;
 global using Tnzi.Finance.Entities;
 global using Tnzi.Finance.Events;
-global using Tnzi.Finance.Extensions;
 global using Tnzi.Finance.Metadata;
 global using Tnzi.Finance.Options;
-global using Tnzi.Finance.Services.Interfaces;
 // 核心的过账协作类（FinanceDocumentHelper / LedgerPostingEngine / ReversalGuard / UnitOfWorkAbortException）
 global using Tnzi.Finance.Services.Internal;
 
@@ -62,6 +55,6 @@ global using Tnzi.Finance.Banking.Events.Handlers;
 global using Tnzi.Finance.Banking.Metadata;
 global using Tnzi.Finance.Banking.Options;
 global using Tnzi.Finance.Banking.Services;
-global using Tnzi.Finance.Banking.Services.Interfaces;
 global using Tnzi.Finance.Banking.Services.Internal;
 global using Tnzi.Finance.Banking.Permissions;
+global using Tnzi.Finance.Services;

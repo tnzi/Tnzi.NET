@@ -1,7 +1,5 @@
-using Tnzi.Logging.Dtos;
-using Tnzi.Results;
 
-namespace Tnzi.Logging.Services.Interfaces;
+namespace Tnzi.Logging.Services;
 
 /// <summary>
 /// Admin-facing read-only access to log files produced by the Serilog

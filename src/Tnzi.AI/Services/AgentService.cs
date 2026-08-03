@@ -13,13 +13,18 @@ public class AgentService : ApplicationService, IAgentService
 
     private readonly IRepository<Agent, Guid> _repository;
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
-    private readonly IAgentRuntime _runtime;
+
+    /// <summary>
+    /// 执行入口是路由门面而不是 <see cref="IAgentRuntime"/>：绑定了外部 CLI 运行时的 Agent
+    /// 由门面改道到外部执行域，本服务对此无感（签名逐字相同）。
+    /// </summary>
+    private readonly IAgentDispatchFacade _runtime;
     private readonly IAgentGrantService _grantService;
 
     public AgentService(
         IRepository<Agent, Guid> repository,
         IRepository<AgentVersion, Guid> versionRepository,
-        IAgentRuntime runtime,
+        IAgentDispatchFacade runtime,
         IAgentGrantService grantService,
         IServiceProvider serviceProvider)
         : base(serviceProvider)

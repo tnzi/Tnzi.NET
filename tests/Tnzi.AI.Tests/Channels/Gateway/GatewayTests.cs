@@ -1,4 +1,3 @@
-using Tnzi.AI.Channels.Abstractions;
 using Tnzi.AI.Channels.Gateway;
 using Tnzi.AI.Channels.Gateway.Models;
 using Tnzi.AI.Channels.Options;

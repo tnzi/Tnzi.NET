@@ -74,7 +74,7 @@ public class ReconciliationCandidateLineDto
     public bool IsSelected { get; set; }
 
     /// <summary>
-    /// 是否被已导入的银行流水行持有（该行是某笔 Matched <see cref="Entities.BankTransaction"/> 的清算记录）。
+    /// 是否被已导入的银行流水行持有（该行是某笔 Matched <c>BankTransaction</c>（Tnzi.Finance.Banking） 的清算记录）。
     /// 为真时勾选不可取消——解除须走银行流水页的 unmatch（那里会原子地同时释放流水与勾选行）；
     /// 直接从工作区丢弃会让流水指向一条不存在的勾选行。呈现端据此禁用复选框
     /// </summary>

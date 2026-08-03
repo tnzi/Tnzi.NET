@@ -10,8 +10,12 @@ public class Conversation : MultiTenantAuditedEntity<Guid>
     /// <summary>群名；Direct 为 null（前端派生为对方名）；System 语义为系统通知。</summary>
     public string? Title { get; set; }
 
-    /// <summary>群头像文件 id（可选，接 Storage）。</summary>
-    [FileField]
+    /// <summary>
+    /// 群头像文件 id（可选，接 Storage）。
+    /// <c>Public = true</c>：会话列表 / 聊天窗以匿名 <c>&lt;img src&gt;</c> 渲染它，
+    /// 故写入即由框架标记该文件公开可读（详见 <see cref="FileFieldAttribute.Public"/>）。
+    /// </summary>
+    [FileField(Public = true)]
     public string? AvatarFileId { get; set; }
 
     /// <summary>群主（Group）；Direct/System 为 null。</summary>

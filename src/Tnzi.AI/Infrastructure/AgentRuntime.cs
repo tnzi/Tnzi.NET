@@ -250,7 +250,7 @@ public partial class AgentRuntime : IAgentRuntime
                 request,
                 new AgentRunResult
                 {
-                    Response = lastChunk.Text,
+                    Response = lastChunk.Text ?? string.Empty,
                     FinishReason = lastChunk.FinishReason,
                     Status = AgentRunStatusResolver.Resolve(lastChunk.FinishReason)
                 },
@@ -285,6 +285,10 @@ public partial class AgentRuntime : IAgentRuntime
         var responseBuilder = new StringBuilder();
         var defaultModel = context.EffectiveModel ?? resolution.Model;
 
+        // Streaming glues narration and answer into one string (the non-streaming path does not
+        // - see DeliverableTracker); this pulls the answer back out.
+        var deliverableTracker = new DeliverableTracker();
+
         try
         {
             await foreach (var chunk in _cachedStreamingPipelineDelegate(context, cancellationToken)
@@ -302,6 +306,8 @@ public partial class AgentRuntime : IAgentRuntime
                 {
                     lastFinishReason = chunk.FinishReason;
                 }
+                deliverableTracker.Observe(chunk);
+
                 if (!string.IsNullOrEmpty(chunk.Text))
                 {
                     responseBuilder.Append(chunk.Text);
@@ -317,11 +323,14 @@ public partial class AgentRuntime : IAgentRuntime
         finally
         {
             sw.Stop();
+
+            var fullText = responseBuilder.ToString();
+
             await FinalizeStreamingAsync(
                 setup, request, sw.ElapsedMilliseconds,
                 completedNormally, cancellationToken.IsCancellationRequested,
                 totalInputTokens, totalOutputTokens, lastFinishReason, lastModel,
-                responseBuilder.ToString());
+                fullText, deliverableTracker.Resolve(fullText));
         }
     }
 
@@ -339,7 +348,8 @@ public partial class AgentRuntime : IAgentRuntime
         int totalOutputTokens,
         string? lastFinishReason,
         string? lastModel,
-        string response)
+        string response,
+        string? deliverable)
     {
         var resolution = setup.Resolution;
         var run = setup.Run;
@@ -356,6 +366,7 @@ public partial class AgentRuntime : IAgentRuntime
                     streamResult = AgentRunStatusResolver.EnsureStatus(new AgentRunResult
                     {
                         Response = response,
+                        Deliverable = deliverable,
                         Usage = new TokenUsageDto { InputTokens = totalInputTokens, OutputTokens = totalOutputTokens },
                         FinishReason = lastFinishReason,
                         Model = lastModel,

@@ -48,8 +48,8 @@ import { NButton, NDivider, NPopconfirm, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import type { UserLoginDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
-import { createGuardedLoader } from '../guardedLoader'
-import { useUserCenterContext } from '../userCenterContext'
+import { createGuardedLoader } from '../guarded-loader'
+import { useUserCenterContext } from '../user-center-context'
 
 const ctx = useUserCenterContext()
 const t = ctx.t

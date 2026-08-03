@@ -1,4 +1,4 @@
-namespace Tnzi.Logging.Options;
+﻿namespace Tnzi.Logging.Options;
 
 /// <summary>
 /// 日志模块配置选项
@@ -15,6 +15,20 @@ public class LoggingOptions
     /// 最低日志级别（默认: Information）
     /// </summary>
     public LogEventLevel MinimumLevel { get; set; } = LogEventLevel.Information;
+
+    /// <summary>
+    /// 按日志来源前缀覆盖最低级别。留空使用默认名单。
+    ///
+    /// **默认把 `Microsoft.AspNetCore` 压到 Warning**,与 ASP.NET Core 模板里
+    /// `Logging:LogLevel` 一贯写的东西一致 —— 此前 Serilog 走的是扁平 MinimumLevel,
+    /// 那份配置对它**完全无效**,于是 Hosting 的 "Request starting/finished" 诊断
+    /// 在 Information 级回显**完整 URL**。查询串里偶尔就是凭据(SignalR 的
+    /// `access_token`、文件签名令牌 `sig`、分享链接口令 `password`),
+    /// 框架的请求日志把它们脱敏了,这一条却在旁边把原文又写了一遍。
+    ///
+    /// 需要那些行做诊断时,配 `Logging:MinimumLevelOverrides` 单独调回来即可。
+    /// </summary>
+    public Dictionary<string, LogEventLevel>? MinimumLevelOverrides { get; set; }
 
     /// <summary>
     /// 是否启用控制台输出（默认: true）

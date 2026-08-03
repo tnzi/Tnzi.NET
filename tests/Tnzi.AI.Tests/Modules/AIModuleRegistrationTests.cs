@@ -1,8 +1,6 @@
-using Tnzi.AI.A2A;
 using Tnzi.AI.Infrastructure.Mcp;
 using Tnzi.AI.Infrastructure.Network;
 using Tnzi.AI.Infrastructure.Readability;
-using Tnzi.Modules;
 
 namespace Tnzi.AI.Tests.Modules;
 

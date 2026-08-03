@@ -1,7 +1,5 @@
 using System.Reflection;
 using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore.Metadata;
-using Moq;
 using Tnzi.AI.Channels.Entities;
 using Tnzi.Domain.Entities;
 

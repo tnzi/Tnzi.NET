@@ -1,5 +1,4 @@
 using System.Reflection;
-using Tnzi;
 using Tnzi.Authorization.Controllers.Admin;
 using Tnzi.Modules;
 

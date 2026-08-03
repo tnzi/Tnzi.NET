@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Tnzi.AI external CLI agent runtime - run Claude Code, Codex and every ACP-speaking coding CLI as a framework-scheduled agent</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
+  </ItemGroup>
+
+</Project>

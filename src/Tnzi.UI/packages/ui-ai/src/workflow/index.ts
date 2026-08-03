@@ -38,10 +38,10 @@ export type {
   EdgeChange,
 } from '@vue-flow/core';
 
-export { useWorkflowVisualization } from '../composables/useWorkflowVisualization';
+export { useWorkflowVisualization } from '../headless/useWorkflowVisualization';
 export type {
   WorkflowNodeDef,
   WorkflowEdgeDef,
   WorkflowDefinition,
   UseWorkflowVisualizationReturn,
-} from '../composables/useWorkflowVisualization';
+} from '../headless/useWorkflowVisualization';

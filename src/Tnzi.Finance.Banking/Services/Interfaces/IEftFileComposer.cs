@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// EFT 文件组装器（按 <see cref="EftFileFormat"/> 分发；可整体替换以适配银行方言）

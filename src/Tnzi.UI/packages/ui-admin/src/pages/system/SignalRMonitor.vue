@@ -62,7 +62,7 @@
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
-import { type RowAction } from '../../headless/rowActions'
+import { type RowAction } from '../../headless/row-actions'
 import {
   NButton,
   NCard,

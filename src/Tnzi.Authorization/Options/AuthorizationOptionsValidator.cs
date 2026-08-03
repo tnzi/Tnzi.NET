@@ -1,4 +1,3 @@
-using Tnzi.Options;
 
 namespace Tnzi.Authorization.Options;
 

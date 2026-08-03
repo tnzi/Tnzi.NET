@@ -1,9 +1,3 @@
-using Moq;
-using Tnzi.AI.Engine;
-using Tnzi.AI.Infrastructure.ContextProviders;
-using Tnzi.AI.Options;
-using Tnzi.AI.Skills;
-using Tnzi.AI.Skills.Models;
 
 namespace Tnzi.AI.Tests.Skills;
 

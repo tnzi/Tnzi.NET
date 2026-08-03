@@ -531,3 +531,86 @@ describe('useCrudPage', () => {
     )
   })
 })
+
+/**
+ * Regressions found by self-review of the 2026-08-01 delegation to
+ * `@tnzi/core`'s DataQueryController. Both are behaviours the previous
+ * hand-rolled implementation had and the first delegated version lost.
+ */
+describe('useCrudPage - delegation regressions', () => {
+  it('resetQuery must not wipe the loaded total', async () => {
+    const { crud } = makeCrud()
+    await crud.refresh()
+    expect(crud.total.value).toBe(3)
+    crud.resetQuery()
+    // The rows are still on screen; zeroing the total makes the pager claim
+    // "0 items" while the list shows three.
+    expect(crud.items.value).toHaveLength(3)
+    expect(crud.total.value).toBe(3)
+    expect(crud.query.value.pageIndex).toBe(1)
+    expect(crud.query.value.searchText).toBe('')
+  })
+
+  it('does not fire onRefresh for a superseded request', async () => {
+    const resolvers: Array<(v: unknown) => void> = []
+    const onRefresh = vi.fn()
+    const crud = useCrudPage<User>({
+      pageId: 'users-race',
+      columns,
+      rowKey: (row) => row.id,
+      fetchData: () => new Promise((resolve) => resolvers.push(resolve)) as never,
+      onRefresh,
+      retryFetch: 0,
+      autoLoad: false,
+    })
+
+    const first = crud.refresh()
+    const second = crud.refresh()
+
+    // Resolve the CURRENT request first, then let the stale one land.
+    resolvers[1]!({ items: sampleUsers, totalCount: 3, pageIndex: 1, pageSize: 20 })
+    await second
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+
+    resolvers[0]!({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })
+    await first
+    // The superseded request wrote nothing, so it must not announce a refresh.
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * End-to-end sort path: header → setSort → query → request payload → the wire
+ * names the backend actually reads. The renderer half is covered in
+ * `components/crud/TTableRenderer.test.ts`.
+ */
+describe('useCrudPage - server-side sort reaches the request', () => {
+  it('sends sortField/sortOrder on the next fetch', async () => {
+    const { crud, bridge } = makeCrud()
+    await crud.refresh()
+
+    crud.setSort('email', 'desc')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const sent = bridge.fetchData.mock.calls.at(-1)![0]
+    expect(sent.sortField).toBe('email')
+    expect(sent.sortOrder).toBe('desc')
+  })
+
+  it('clears both fields when the sort is removed', async () => {
+    const { crud, bridge } = makeCrud()
+    await crud.refresh()
+    crud.setSort('email', 'desc')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    crud.setSort(undefined, null)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const sent = bridge.fetchData.mock.calls.at(-1)![0]
+    expect(sent.sortField).toBeUndefined()
+    expect(sent.sortOrder).toBeNull()
+  })
+})

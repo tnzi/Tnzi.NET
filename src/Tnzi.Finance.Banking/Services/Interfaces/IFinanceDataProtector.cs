@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 财务敏感字段加密器（银行账号等 remit-to / EFT 明文的对称加密封装）

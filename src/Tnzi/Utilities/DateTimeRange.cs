@@ -4,6 +4,18 @@ namespace Tnzi.Utilities;
 /// <summary>
 /// 日期时间范围
 /// </summary>
+/// <remarks>
+/// ★静态预设（<see cref="Today"/>、<see cref="ThisMonth"/> 等）一律产出
+/// <see cref="DateTimeKind.Local"/> 的**本地时间**边界，因为"这个月"本身就是按用户所在时区
+/// 划定的。用于查询数据库前 MUST 经 <c>DateTimeRangeExtensions.ToUtc()</c> 换算成 UTC
+/// —— 框架的持久化层一律存 UTC。
+///
+/// ★Kind 必须显式指定：<c>new DateTime(y, m, d)</c> 产出 <see cref="DateTimeKind.Unspecified"/>，
+/// 而 <c>ToUtc()</c> 对 Unspecified 只改标签不换算（那是给 JSON 反序列化日期用的分支），
+/// 于是"本月"在 UTC+8 会被当成 UTC 时刻 —— 边界整体偏移 8 小时且不报错。
+/// 同一个坑在 <c>DateTimeExtensions.StartOfMonth</c> 上已有注释，此处三个按月/年的预设
+/// 曾经漏掉（2026-07-31 修复）。
+/// </remarks>
 public class DateTimeRange
 {
     /// <summary>
@@ -133,7 +145,7 @@ public class DateTimeRange
         get
         {
             DateTime now = DateTime.Now;
-            DateTime startTime = new DateTime(now.Year, now.Month, 1);
+            DateTime startTime = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Local);
             DateTime endTime = startTime.AddMonths(1).AddMilliseconds(-1);
             return new DateTimeRange(startTime, endTime);
         }
@@ -147,7 +159,7 @@ public class DateTimeRange
         get
         {
             DateTime now = DateTime.Now;
-            DateTime startTime = new DateTime(now.Year, now.Month, 1).AddMonths(-1);
+            DateTime startTime = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Local).AddMonths(-1);
             DateTime endTime = startTime.AddMonths(1).AddMilliseconds(-1);
             return new DateTimeRange(startTime, endTime);
         }
@@ -161,8 +173,8 @@ public class DateTimeRange
         get
         {
             DateTime now = DateTime.Now;
-            DateTime startTime = new DateTime(now.Year, 1, 1);
-            DateTime endTime = new DateTime(now.Year + 1, 1, 1).AddMilliseconds(-1);
+            DateTime startTime = new DateTime(now.Year, 1, 1, 0, 0, 0, DateTimeKind.Local);
+            DateTime endTime = new DateTime(now.Year + 1, 1, 1, 0, 0, 0, DateTimeKind.Local).AddMilliseconds(-1);
             return new DateTimeRange(startTime, endTime);
         }
     }

@@ -25,8 +25,8 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NDivider, NInputOtp, NSpace } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { useCaptcha } from '../../../headless/useCaptcha'
-import { useLoginContext, type TwoFactorMethodName } from '../useLoginContext'
+import { useCaptcha } from '@tnzi/ui'
+import { useLoginContext, type TwoFactorMethodName } from '@tnzi/ui'
 
 defineOptions({ name: 'TwoFactorChallenge' })
 

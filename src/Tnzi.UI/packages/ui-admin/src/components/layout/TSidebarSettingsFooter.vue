@@ -6,7 +6,7 @@ import { useAdminRouteStore, type AdminMenuItem } from '../../stores/useAdminRou
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { translatePageKey } from '../../pages/_shared/translate'
+import { translatePageKey } from '../../i18n/translate'
 
 /**
  * `TSidebarSettingsFooter` - the sidebar's built-in bottom actions (Settings

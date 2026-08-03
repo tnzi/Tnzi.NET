@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Tnzi.AspNetCore.Models;
-using Tnzi.AspNetCore.Mvc;
 
 namespace Tnzi.AI.Channels.Controllers.Admin;
 
@@ -71,16 +68,26 @@ public class DefaultGatewayAdminController : ApiAdminControllerBase
     /// <summary>
     /// 获取已配置的绑定规则列表
     /// </summary>
+    /// <remarks>
+    /// 投影成 DTO 而不是直出实体：实体带审计列与 <c>TenantId</c>，把它们发到管理端既泄漏
+    /// 内部结构，也让实体字段变成事实上的 API 契约（以后加一列就等于改了线缆形态）。
+    /// </remarks>
     [HttpGet("bindings")]
-    public virtual async Task<ApiResult<IReadOnlyList<SessionBindingRule>>> GetBindings()
+    public virtual async Task<ApiResult<IReadOnlyList<SessionBindingRuleDto>>> GetBindings()
     {
         if (_bindingRuleRepository == null)
         {
-            return ApiResult<IReadOnlyList<SessionBindingRule>>.Ok(Array.Empty<SessionBindingRule>());
+            return ApiResult<IReadOnlyList<SessionBindingRuleDto>>.Ok(Array.Empty<SessionBindingRuleDto>());
         }
 
-        var rules = await _bindingRuleRepository.ToListAsync();
-        return ApiResult<IReadOnlyList<SessionBindingRule>>.Ok(rules.AsReadOnly());
+        var rules = await _bindingRuleRepository
+            .AsQueryable()
+            .AsNoTracking()
+            .OrderByDescending(r => r.Priority)
+            .ProjectTo<SessionBindingRule, SessionBindingRuleDto>()
+            .ToListAsync();
+
+        return ApiResult<IReadOnlyList<SessionBindingRuleDto>>.Ok(rules.AsReadOnly());
     }
 }
 

@@ -49,9 +49,9 @@ import { computed } from 'vue'
 import { useRoute, useRouter, type RouteLocationNormalizedLoaded, type Router } from 'vue-router'
 import { NPopover } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { DEFAULT_ROUTE_ICONS } from '../../router/routeIcons'
-import { maybeTranslateKey } from '../../pages/_shared/translate'
-import { runBack } from './backTarget'
+import { DEFAULT_ROUTE_ICONS } from '../../router/route-icons'
+import { maybeTranslateKey } from '../../i18n/translate'
+import { runBack } from './back-target'
 
 interface Props {
   title?: string
@@ -150,7 +150,14 @@ function onBack(): void {
 .t-page-header__bar {
   display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; flex-wrap: wrap;
 }
-.t-page-header__left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+/* `flex: 1 1 auto` (not `1 1 0%`): the left group's base size must be its own
+   content, otherwise the flex line NEVER overflows - the group just shrinks and
+   the title ellipsises away to "…" while the actions keep their full width. With
+   an auto basis a title that genuinely doesn't fit beside the actions pushes the
+   actions onto a second line instead, where `justify-content: space-between`
+   leaves that single item flush left, aligned under the title. `min-width: 0` is
+   still needed so the title can ellipsis once it owns the whole row. */
+.t-page-header__left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 .t-page-header__icon { color: var(--tnzi-primary); flex-shrink: 0; }
 .t-page-header__title {
   font-size: 18px; font-weight: 600; color: var(--tnzi-base-text);
@@ -180,8 +187,11 @@ function onBack(): void {
   .t-page-header__title { font-size: 16px; }
 }
 /* Phone: stack wide action groups below the title - UNLESS the consumer
-   opted into inline actions (compact icon cluster fits beside the title). */
-@media (max-width: 640px) {
+   opted into inline actions (compact icon cluster fits beside the title).
+   767px, not 640px: `inlineActions` is driven by `useBreakpoint().isSm`
+   (< 768) at every call site, so a 640px cut-off left a 641-767px band where
+   the header called itself "not inline" yet never stacked. */
+@media (max-width: 767px) {
   .t-page-header:not(.t-page-header--inline-actions) .t-page-header__left { flex-basis: 100%; }
   .t-page-header:not(.t-page-header--inline-actions) .t-page-header__actions {
     flex-basis: 100%;

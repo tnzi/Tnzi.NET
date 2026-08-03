@@ -1,10 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Tnzi.AI.Controllers;
-using Tnzi.AspNetCore.Extensions;
-using Tnzi.AspNetCore.Models;
 using Tnzi.Exceptions;
-using Tnzi.Data;
 
 namespace Tnzi.AI.Tests.Controllers;
 

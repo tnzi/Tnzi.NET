@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 
 namespace Tnzi.AI.Channels.Gateway.Models;
 

@@ -12,6 +12,8 @@ public interface IPendingApprovalStore
     /// </summary>
     /// <param name="request">The request - <see cref="PendingApprovalRequest.UserId"/> MUST be non-empty.</param>
     /// <param name="ttl">Time after which the request is auto-resolved as a fail-closed timeout (default 5 minutes).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The registered request ID.</returns>
     Task<Guid> RegisterAsync(PendingApprovalRequest request, TimeSpan? ttl = null, CancellationToken ct = default);
 
     /// <summary>

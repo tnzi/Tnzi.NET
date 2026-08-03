@@ -5,6 +5,7 @@ public class SubscriptionPlanConfiguration : EntityTypeConfigurationBase<Subscri
     public override void Configure(EntityTypeBuilder<SubscriptionPlan> builder)
     {
         builder.Property(p => p.PlanCode).HasMaxLength(32).IsRequired();
+        builder.Property(p => p.ProductCode).HasMaxLength(64);
         builder.Property(p => p.PlanName).HasMaxLength(128).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
         builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
@@ -19,5 +20,6 @@ public class SubscriptionPlanConfiguration : EntityTypeConfigurationBase<Subscri
         builder.HasIndex(p => p.PlanCode).IsUnique();
         builder.HasIndex(p => p.IsActive);
         builder.HasIndex(p => p.SortOrder);
+        builder.HasIndex(p => p.ProductCode);
     }
 }

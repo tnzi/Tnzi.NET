@@ -1,6 +1,3 @@
-using Moq;
-using Tnzi.AI.Infrastructure.Providers;
-using Tnzi.AI.Infrastructure.Streaming;
 
 namespace Tnzi.AI.Tests.Infrastructure;
 

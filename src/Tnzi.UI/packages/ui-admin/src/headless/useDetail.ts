@@ -2,8 +2,8 @@ import { ref, computed, watch, toValue, getCurrentScope, onScopeDispose, type Ma
 import { useRouter, type Router } from 'vue-router'
 import { useFormModal, type FormModalMode, type UseFormModalReturn } from './useFormModal'
 import { useSectionRoute } from './useSectionRoute'
-import { useQueryScope, tryRoute } from './queryScope'
-import { tryInjectDeepLinkConfig } from '../plugin/deepLinkConfig'
+import { useQueryScope, tryRoute } from './query-scope'
+import { tryInjectDeepLinkConfig } from '../plugin/deep-link-config'
 
 // ── Dev-only duplicate-key guard ─────────────────────────────────────────────
 // Two engines on the SAME route claiming the SAME query key silently clobber

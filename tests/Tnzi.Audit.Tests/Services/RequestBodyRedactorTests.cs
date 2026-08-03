@@ -1,5 +1,4 @@
 
-using Tnzi.Audit.Options;
 
 namespace Tnzi.Audit.Tests.Services;
 

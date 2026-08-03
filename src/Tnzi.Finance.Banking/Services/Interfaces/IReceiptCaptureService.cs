@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 收据采集服务（上传登记 → 提取 → 修正 → 转换为费用/账单草稿）

@@ -73,7 +73,7 @@ public class WorkspaceAgentProviderTests : IDisposable
         result.Model.ShouldBe("claude-sonnet-4-20250514");
         result.Temperature.ShouldBe(0.5f);
         result.ToolGroups.ShouldBe(["web-search"]);
-        result.Instructions.ShouldContain("research specialist");
+        result.Instructions!.ShouldContain("research specialist");
         result.FilePath.ShouldNotBeNullOrWhiteSpace();
     }
 
@@ -104,7 +104,7 @@ public class WorkspaceAgentProviderTests : IDisposable
         // Assert
         result.ShouldNotBeNull();
         result.Name.ShouldBe("Persona Agent");
-        result.Instructions.ShouldContain("helpful things");
+        result.Instructions!.ShouldContain("helpful things");
         result.PersonaContent.ShouldNotBeNull();
         result.PersonaContent.ShouldContain("cheerful and encouraging");
     }

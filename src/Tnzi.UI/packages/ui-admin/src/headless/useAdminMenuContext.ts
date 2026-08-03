@@ -43,10 +43,13 @@ export interface AdminMenuContext {
   /** Switch the active 2nd level item by key. Mutates `activeSecondLevelMenuKey`. */
   handleSelectSecondLevelMenu: (key: string) => void
   /**
-   * Locate the route's nearest matching 1st level item. If the route doesn't
-   * match any item (e.g. Workbench has no children), and `autoSelectFirstWith`
-   * is true, fall back to the first 1st level item that has children - so the
-   * vertical-mix drawer / hybrid sider has something to render on initial load.
+   * Locate the route's nearest matching 1st level item.
+   *
+   * A named route that matches nothing is OFF-MENU (a `hideInMenu` page such
+   * as the Settings Center) and resolves to `''` - no highlight, no sub-menu.
+   * `autoSelectFirstWith` only applies when there is no route name at all
+   * (cold load), so the vertical-mix drawer / hybrid sider still has something
+   * to render on initial load.
    */
   resolveFirstLevelKeyForRoute: (routeName: string) => string
 }
@@ -60,9 +63,11 @@ export interface UseAdminMenuContextOptions {
   /** Reactive route name (typically `() => useRoute().name`). */
   routeName: ComputedRef<string>
   /**
-   * When true (default), if no menu item matches the current route, fall back
-   * to the first 1st level item that has children. Mirrors soybean's
-   * `getActiveFirstLevelMenuKey` / `autoSelectFirstMenu`.
+   * When true (default), fall back to the first 1st level item that has
+   * children while the route name is still empty (cold load). Mirrors
+   * soybean's `getActiveFirstLevelMenuKey` / `autoSelectFirstMenu`. A named
+   * route that matches no menu item is off-menu and resolves to `''`
+   * regardless of this flag.
    */
   autoSelectFirstWith?: boolean
   /**
@@ -115,8 +120,18 @@ export function useAdminMenuContext(opts: UseAdminMenuContextOptions): AdminMenu
     // 2. Descendant match - find the 1st level ancestor of a nested route.
     const match = findFirstLevelByDescendantKey(name)
     if (match) return match.key
-    // 3. Optional fallback to the first item with children, so vertical-mix
-    //    drawers / hybrid siders have something to render on cold load.
+    // 2b. A NAMED route that matches nothing lives outside the menu tree -
+    //     the Settings Center and the User Center are `hideInMenu` and reached
+    //     from the shell's own chrome, not a menu row. Report "no active
+    //     module" instead of guessing: falling through to step 3 highlighted
+    //     the first module with children (Identity) and made the hybrid sider
+    //     render ITS sub-menu while the user was on Settings - a confidently
+    //     wrong answer, worse than none. Off-menu pages get no highlight and
+    //     no sub-menu, exactly like the top-level leaf `dashboard`.
+    if (name) return ''
+    // 3. No route signal at all (cold load before the router settles): fall
+    //    back to the first item with children so the vertical-mix drawer /
+    //    hybrid sider has something to render.
     if (autoSelectFirstWith) {
       const firstWithChildren = menus.value.find((m) => (m.children?.length ?? 0) > 0)
       if (firstWithChildren) return firstWithChildren.key

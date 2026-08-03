@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
 
 namespace Tnzi.AI.Tests;

@@ -14,7 +14,12 @@ public class CreateNotificationRequest
     [MinLength(1, ErrorMessage = "At least one recipient is required.")]
     public List<RecipientInput> Recipients { get; set; } = null!;
 
-    public List<FileInfoDto> Attachments { get; set; } = null!;
+    /// <summary>
+    /// 附件（可选）。必须声明为可空：不可空的引用类型会被 ASP.NET Core 的模型验证
+    /// 隐式当成必填，调用方即使不带附件也得传一个空数组，而服务端本就按可空处理
+    /// （CreateAsync 里是 request.Attachments?.Select(...)）。
+    /// </summary>
+    public List<FileInfoDto>? Attachments { get; set; }
     public bool SendImmediately { get; set; } = false;
     public int MaxRetryCount { get; set; } = 3;
     public string? TemplateName { get; set; }

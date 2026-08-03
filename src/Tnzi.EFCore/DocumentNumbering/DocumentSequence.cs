@@ -1,5 +1,5 @@
 
-namespace Tnzi.EFCore;
+namespace Tnzi.EFCore.DocumentNumbering;
 
 /// <summary>
 /// 单据连续编号序列（按租户 + 作用域）

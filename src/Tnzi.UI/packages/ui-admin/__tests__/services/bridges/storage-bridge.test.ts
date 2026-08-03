@@ -34,6 +34,8 @@ function mockFileApi() {
     batchRevokeShares: vi.fn(async () => 0),
     setFileTags: vi.fn(async (id: string) => ({ id })),
     getFilesByTag: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
+    setFileVisibility: vi.fn(async (id: string, data: { isPublic: boolean }) => ({ id, isPublic: data.isPublic })),
+    syncPublicFlags: vi.fn(async () => 7),
   }
 }
 
@@ -210,5 +212,68 @@ describe('storage-bridge', () => {
     const result = await bridge.versions.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: { fileId: 'f1' } })
     expect(mockClient.get).toHaveBeenCalledWith(expect.stringContaining('fileId=f1'))
     expect(result.items[0].fileId).toBe('f1')
+  })
+
+  it('visibility.set posts the flag and returns the updated record', async () => {
+    const fileApi = mockFileApi()
+    const bridge = createStorageBridge({
+      fileApi: fileApi as never,
+      storageApi: mockStorageApi() as never,
+    })
+    const updated = await bridge.visibility.set('f1', true)
+    expect(fileApi.setFileVisibility).toHaveBeenCalledWith('f1', { isPublic: true })
+    expect(updated.isPublic).toBe(true)
+  })
+
+  it('visibility.syncFromDeclarations returns the number of files repaired', async () => {
+    const fileApi = mockFileApi()
+    const bridge = createStorageBridge({
+      fileApi: fileApi as never,
+      storageApi: mockStorageApi() as never,
+    })
+    expect(await bridge.visibility.syncFromDeclarations()).toBe(7)
+    expect(fileApi.syncPublicFlags).toHaveBeenCalled()
+  })
+
+  it('signedUrl mints a token and appends it, batching the whole list into one call', async () => {
+    // Private files cannot render through a plain URL - an <img> sends no
+    // Authorization header - so the bridge has to hand back a signed one.
+    const post = vi.fn(async (_url: string, body: unknown) => ({
+      succeeded: true,
+      code: 200,
+      data: (body as { fileIds: string[] }).fileIds.map((id) => ({
+        fileId: id,
+        token: `tok-${id}`,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      })),
+    }))
+    const client = { get: vi.fn(), post, resolveUrl: (p: string) => `/api${p}` }
+    const bridge = createStorageBridge({ client: client as never })
+
+    const [one, two] = await Promise.all([
+      bridge.files.signedUrl('f1'),
+      bridge.files.signedUrl('f2', 'download'),
+    ])
+
+    expect(one).toBe('/api/files/f1/preview?sig=tok-f1')
+    expect(two).toBe('/api/files/f2/download?sig=tok-f2')
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('signedUrls resolves a batch and omits ids the caller cannot read', async () => {
+    const post = vi.fn(async (_url: string, body: unknown) => ({
+      succeeded: true,
+      code: 200,
+      data: (body as { fileIds: string[] })
+        .fileIds.filter((id) => id !== 'denied')
+        .map((id) => ({ fileId: id, token: `tok-${id}`, expiresAt: new Date(Date.now() + 600_000).toISOString() })),
+    }))
+    const client = { get: vi.fn(), post, resolveUrl: (p: string) => `/api${p}` }
+    const bridge = createStorageBridge({ client: client as never })
+
+    const map = await bridge.files.signedUrls(['f9', 'denied'])
+
+    expect(map.get('f9')).toContain('sig=tok-f9')
+    expect(map.has('denied')).toBe(false)
   })
 })

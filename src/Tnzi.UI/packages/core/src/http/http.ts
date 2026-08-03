@@ -7,6 +7,7 @@ import { createFailedApiResult, createFailedApiResultFromError } from '../errors
 import { TimeoutError } from '../errors/network-error';
 import { useLogger } from '../adapters/logger';
 import { normalizeApiResult } from './response';
+import { buildCapabilityHeaderValue, CAPABILITY_HEADER } from './capabilities';
 import type { HttpResponseContext, HttpResponseMiddleware } from './middleware';
 
 /**
@@ -328,6 +329,14 @@ export class HttpClient {
         for (const [key, value] of Object.entries(options.headers)) {
           xhr.setRequestHeader(key, value);
         }
+      }
+
+      // Uploads bypass buildHeaders (XHR, for progress events), so the capability declaration
+      // has to be repeated here. Omitting it would make uploads the one request kind that
+      // silently negotiates as an old client.
+      const capabilities = buildCapabilityHeaderValue();
+      if (capabilities && !options?.headers?.[CAPABILITY_HEADER]) {
+        xhr.setRequestHeader(CAPABILITY_HEADER, capabilities);
       }
 
       if (timeoutMs > 0) {
@@ -846,6 +855,14 @@ export class HttpClient {
 
     if (this.accessToken) {
       headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    // Capability declaration must travel on every request: the server decides per request which
+    // protocol path is safe, and silence there means "old client, use the old path".
+    // Absent entirely when nothing is declared, which is the default.
+    const capabilities = buildCapabilityHeaderValue();
+    if (capabilities && !headers[CAPABILITY_HEADER]) {
+      headers[CAPABILITY_HEADER] = capabilities;
     }
 
     return headers;

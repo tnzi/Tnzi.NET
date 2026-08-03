@@ -2,7 +2,6 @@ using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
 using MockQueryable;
-using MockQueryable.Moq;
 using Moq;
 using Tnzi.Domain.Repositories;
 using Tnzi.EventBus;

@@ -1,4 +1,5 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
+import type { ThemeMode } from '@tnzi/core/types'
 import type { ThemeSettings } from './types'
 
 /**
@@ -76,7 +77,7 @@ export function buildNaiveThemeOverrides(settings: ThemeSettings): GlobalThemeOv
  * function that removes the media query listener.
  */
 export function resolveThemeMode(
-  mode: 'light' | 'dark' | 'auto',
+  mode: ThemeMode,
   onChange?: (resolved: 'light' | 'dark') => void,
 ): { resolved: 'light' | 'dark'; cleanup?: () => void } {
   if (mode !== 'auto') {

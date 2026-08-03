@@ -14,6 +14,7 @@ public class OAuthService : ApplicationService, IOAuthService
     private readonly IUserDetailService? _userDetailService;
     private readonly IdentityOptions _identityOptions;
     private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
+    private readonly ILoginGuardEvaluator? _loginGuardEvaluator;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -29,7 +30,8 @@ public class OAuthService : ApplicationService, IOAuthService
         IUserDetailService? userDetailService = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        ILoginSessionCoordinator? loginSessionCoordinator = null)
+        ILoginSessionCoordinator? loginSessionCoordinator = null,
+        ILoginGuardEvaluator? loginGuardEvaluator = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -41,6 +43,7 @@ public class OAuthService : ApplicationService, IOAuthService
         _eventBus = eventBus;
         _userDetailService = userDetailService;
         _loginSessionCoordinator = loginSessionCoordinator;
+        _loginGuardEvaluator = loginGuardEvaluator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -282,6 +285,18 @@ public class OAuthService : ApplicationService, IOAuthService
     /// </summary>
     private async Task<Result<OAuthCallbackResultDto>> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
     {
+        // 凭据之外的准入策略（IP 白名单 / 设备 / 时段）。第三方登录同样要过：
+        // 否则 OAuth 就成了绕开这些策略的旁路。
+        if (_loginGuardEvaluator is { HasGuards: true })
+        {
+            var guardResult = await _loginGuardEvaluator.EvaluateAsync(new LoginGuardContext(
+                user, LoginMethod.OAuth, ScopedContext?.ClientIpAddress, ScopedContext?.UserAgent));
+            if (!guardResult.Allowed)
+            {
+                return Fail<OAuthCallbackResultDto>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+            }
+        }
+
         // 建立登录会话（Reject 达上限则拒绝本次登录）
         var sessionId = Guid.Empty;
         if (_loginSessionCoordinator != null)

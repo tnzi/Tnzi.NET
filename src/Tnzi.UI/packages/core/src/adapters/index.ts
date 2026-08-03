@@ -29,9 +29,6 @@ export * from './storage';
 // Internationalization
 export * from './i18n';
 
-// Icons
-export * from './icons';
-
 // Store adapters (state management)
 export * from './store';
 

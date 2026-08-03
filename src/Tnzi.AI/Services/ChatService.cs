@@ -1,15 +1,21 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 聊天服务实现 - 委托给 IAgentRuntime 执行，Quota/Guardrails/History/UsageLogging 全部由中间件处理
+/// 聊天服务实现 - 委托给 <see cref="IAgentDispatchFacade"/> 执行，
+/// Quota/Guardrails/History/UsageLogging 全部由中间件处理
 /// </summary>
+/// <remarks>
+/// 注入的是路由门面而不是 <see cref="IAgentRuntime"/>：门面签名与 Runtime 逐字相同，
+/// 但会在 Agent 绑定了外部 CLI 运行时时改走外部执行域。本类因此**不知道**、也不需要知道
+/// 底下走了哪条路 —— 这正是把分支收在门面里的目的。
+/// </remarks>
 public class ChatService : ApplicationService, IChatService
 {
-    private readonly IAgentRuntime _runtime;
+    private readonly IAgentDispatchFacade _runtime;
     private readonly IOptionsMonitor<AIOptions> _options;
 
     public ChatService(
-        IAgentRuntime runtime,
+        IAgentDispatchFacade runtime,
         IOptionsMonitor<AIOptions> options,
         IServiceProvider serviceProvider)
         : base(serviceProvider)

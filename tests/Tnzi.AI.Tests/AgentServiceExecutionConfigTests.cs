@@ -1,6 +1,3 @@
-using Mapster;
-using MapsterMapper;
-using Tnzi.Mapster;
 
 namespace Tnzi.AI.Tests;
 
@@ -46,7 +43,7 @@ public class AgentServiceExecutionConfigTests
         var service = new AgentService(
             repository.Object,
             Mock.Of<IRepository<AgentVersion, Guid>>(),
-            Mock.Of<IAgentRuntime>(),
+            TestDispatchFacade.Wrap(Mock.Of<IAgentRuntime>()),
             EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()
@@ -114,7 +111,7 @@ public class AgentServiceExecutionConfigTests
         var service = new AgentService(
             repository.Object,
             versionRepository.Object,
-            Mock.Of<IAgentRuntime>(),
+            TestDispatchFacade.Wrap(Mock.Of<IAgentRuntime>()),
             EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()
@@ -149,7 +146,7 @@ public class AgentServiceExecutionConfigTests
         var service = new AgentService(
             repository.Object,
             Mock.Of<IRepository<AgentVersion, Guid>>(),
-            Mock.Of<IAgentRuntime>(),
+            TestDispatchFacade.Wrap(Mock.Of<IAgentRuntime>()),
             EmptyGrantService(),
             new ServiceCollection()
                 .AddLogging()

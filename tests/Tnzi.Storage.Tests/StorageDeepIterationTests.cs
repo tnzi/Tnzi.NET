@@ -1,4 +1,4 @@
-using Mapster;
+﻿using Mapster;
 using MapsterMapper;
 using Tnzi.Mapster;
 
@@ -56,6 +56,8 @@ public class StorageDeepIterationTests
             _mockStorage.Object,
             optionsMonitor.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            TestPublicFileFieldResolver.Empty(),
+            new TestFileUrlSigner(),
             _mockServiceProvider.Object);
     }
 
@@ -65,6 +67,8 @@ public class StorageDeepIterationTests
             _mockShareRepository.Object,
             _mockFileRepository.Object,
             TestFileAccessAuthorizer.AllowAll(),
+            new FileAccessGrantContext(),
+            new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object);
     }
 

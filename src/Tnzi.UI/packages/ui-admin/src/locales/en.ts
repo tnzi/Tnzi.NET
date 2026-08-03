@@ -441,6 +441,15 @@ export const en = {
        * and is translated everywhere, instead of every module re-declaring (and
        * re-translating) the same six words under its own namespace.
        */
+      /**
+       * Write-confirmation toasts fired by `useCrudPage` after a successful
+       * create / update / delete (see its `successToast` option).
+       */
+      toasts: {
+        created: 'Created',
+        updated: 'Saved',
+        deleted: 'Deleted',
+      },
       formSections: {
         basics: 'Basics',
         identity: 'Identity',
@@ -846,7 +855,6 @@ export const en = {
             },
           },
           profile: {
-            avatar: 'Avatar',
             avatarHint: 'Click to upload a new avatar. JPG/PNG, up to 5 MB.',
             avatarUpdated: 'Avatar updated',
             avatarUploadFailed: 'Avatar upload failed',
@@ -877,6 +885,12 @@ export const en = {
             website: 'Website',
             websitePlaceholder: 'https://example.com',
             saved: 'Profile saved',
+            unsaved: 'Unsaved changes',
+            // Two backends, no shared transaction - a failed save must name
+            // which half survived (see useUserCenterProfileExtra.ts).
+            saveFailedProfile: 'Your account profile was not saved: {error}',
+            saveFailedExtra:
+              'Your account profile was saved, but the additional details were not: {error}',
             change: 'Change…',
           },
           changeModal: {
@@ -1954,6 +1968,16 @@ export const en = {
       },
       storage: {
         label: 'Storage',
+        share: {
+          download: 'Download',
+          passwordPlaceholder: 'Enter the password for this link',
+          wrongPassword: 'That password does not match this link.',
+          expiresOn: 'Available until {date}',
+          unavailable: {
+            title: 'This link is no longer available',
+            hint: 'It may have expired, been revoked, or reached its download limit. Ask the sender for a new one.',
+          },
+        },
         files: {
           title: 'Files',
           refresh: 'Refresh',
@@ -2042,6 +2066,14 @@ export const en = {
             entityId: 'Entity ID',
             field: 'Field',
             download: 'Download',
+            visibility: 'Visibility',
+            public: 'Public - anyone can read',
+            private: 'Private - owner and admins only',
+            madePublic: 'File is now publicly readable',
+            madePrivate: 'File is no longer publicly readable',
+          },
+          errors: {
+            downloadDenied: 'You are not allowed to download this file.',
           },
           preview: {
             unsupported: 'This file type does not support preview.',
@@ -2086,6 +2118,7 @@ export const en = {
           },
           columns: {
             originalName: 'File', shareToken: 'Token', accessCount: 'Access',
+            lastAccessedAt: 'Last used',
             requirePassword: 'Password', status: 'Status', expiresAt: 'Expires', creationTime: 'Created',
           },
           status: { active: 'Active', disabled: 'Disabled', expired: 'Expired', exhausted: 'Exhausted' },
@@ -2095,6 +2128,8 @@ export const en = {
             includeExpired: 'Include expired', includeDisabled: 'Include disabled',
           },
           actions: {
+            copyLink: 'Copy link',
+            copyLinkSuccess: 'Link copied',
             revoke: 'Revoke',
             confirmRevoke: 'Revoke this share link? The token will stop working immediately.',
             revokeSuccess: 'Share revoked',
@@ -2143,6 +2178,12 @@ export const en = {
             provider: 'Storage', creationTime: 'Created',
           },
           list: { title: 'Temporary files', empty: 'No temporary files match the threshold.' },
+          publicFlags: {
+            title: 'Public file flags',
+            hint: 'Files referenced from a field declared public (avatars, site assets) must be readable without signing in. New references are flagged automatically; run this once to repair files stored before that. It never makes a file private.',
+            action: 'Backfill public flags',
+            done: 'Marked {n} file(s) publicly readable',
+          },
         },
       },
       audit: {
@@ -2236,6 +2277,7 @@ export const en = {
             subject: 'Subject',
             loading: 'Rendering…',
             empty: '(rendered content is empty)',
+            frameLabel: 'Rendered template preview',
           },
           send: {
             title: 'Send Test · {name}',
@@ -3305,7 +3347,7 @@ export const en = {
             seedSuccess: 'Pack {code} seeded: {components} component(s), {brackets} bracket table(s).',
           },
           columns: { code: 'Code', name: 'Name', type: 'Type', formula: 'Formula', fixedAmount: 'Fixed amount', status: 'Status', frequency: 'Frequency', description: 'Description', effectiveFrom: 'Effective From' },
-          componentType: { earning: 'Earning', deduction: 'Deduction', employerContribution: 'Employer Contribution' },
+          componentType: { earning: 'Earning', deduction: 'Deduction', employerContribution: 'Employer Contribution', informational: 'Informational' },
           frequency: { monthly: 'Monthly', semiMonthly: 'Semi-monthly', biWeekly: 'Bi-weekly', weekly: 'Weekly' },
           status: { active: 'Active', inactive: 'Inactive' },
           form: { code: 'Code', name: 'Name', type: 'Type', formula: 'Formula', condition: 'Condition', defaultAmount: 'Default Amount', expenseAccount: 'Expense Account', liabilityAccount: 'Liability Account', description: 'Description', isActive: 'Active', accountPlaceholder: 'Select account', frequency: 'Frequency', lines: 'Structure Lines', effectiveFrom: 'Effective From', rows: 'Bracket Rows' },
@@ -3319,7 +3361,7 @@ export const en = {
           status: { draft: 'Draft', calculated: 'Calculated', posted: 'Posted', partiallyPaid: 'Partially Paid', paid: 'Paid', voided: 'Voided' },
           source: { internal: 'Internal', external: 'External', openingBalance: 'Opening Balance' },
           frequency: { monthly: 'Monthly', semiMonthly: 'Semi-monthly', biWeekly: 'Bi-weekly', weekly: 'Weekly' },
-          componentType: { earning: 'Earning', deduction: 'Deduction', employerContribution: 'Employer Contribution' },
+          componentType: { earning: 'Earning', deduction: 'Deduction', employerContribution: 'Employer Contribution', informational: 'Informational' },
           form: { periodStart: 'Period Start', periodEnd: 'Period End', payDate: 'Pay Date', frequency: 'Frequency', structure: 'Structure Filter', structurePlaceholder: 'All employees with an assignment', memo: 'Memo' },
           detail: { grossTotal: 'Gross Total', deductionTotal: 'Deduction Total', employerCostTotal: 'Employer Cost', payslips: 'Payslips', errorCount: '{count} payslip(s) failed to calculate - fix before posting.' },
           payslip: { title: 'Payslip', view: 'Detail', employee: 'Employee', baseAmount: 'Base Amount', grossPay: 'Gross Pay', totalDeductions: 'Deductions', netPay: 'Net Pay', paymentStatus: 'Payment', workedDays: 'Worked Days', recalc: 'Recalculate', recalcSuccess: 'Payslip recalculated.', lines: 'Lines', error: 'Error', seq: 'Seq', component: 'Component', type: 'Type', amount: 'Amount', ytd: 'YTD', status: { unpaid: 'Unpaid', paid: 'Paid' } },
@@ -3350,12 +3392,17 @@ export const en = {
           title: 'Paid Subscriptions',
           cancelAtPeriodEnd: 'Cancel at Period End',
           confirmCancelPrompt: 'Cancel subscription at end of current billing period?',
-          columns: { subscriptionNo: 'Subscription No', userId: 'Customer', planName: 'Plan', status: 'Status', cycleType: 'Cycle', startTime: 'Start', nextBillingTime: 'Next Billing', paidAmount: 'Paid Amount', currency: 'Currency', autoRenew: 'Auto Renew' },
-          form: { subscriptionNo: 'Subscription No', userId: 'Customer', planName: 'Plan', status: 'Status', cycleType: 'Cycle Type', cycleValue: 'Cycle Value', originalPrice: 'Original Price', paidAmount: 'Paid Amount', currency: 'Currency' },
+          retryBilling: 'Retry Charge',
+          pause: 'Pause',
+          confirmPausePrompt: 'Pause this subscription? Billing stops until it is resumed.',
+          resume: 'Resume',
+          columns: { subscriptionNo: 'Subscription No', userId: 'Customer', planName: 'Plan', status: 'Status', cycleType: 'Cycle', startTime: 'Start', nextBillingTime: 'Next Billing', paymentMethod: 'Payment Method', paidAmount: 'Paid Amount', currency: 'Currency', autoRenew: 'Auto Renew' },
+          form: { subscriptionNo: 'Subscription No', userId: 'Customer', planName: 'Plan', status: 'Status', cycleType: 'Cycle Type', cycleValue: 'Cycle Value', originalPrice: 'Original Price', paidAmount: 'Paid Amount', currency: 'Currency', productCode: 'Product', paymentMethodBrand: 'Card Brand', paymentMethodLast4: 'Card Last 4', renewalRetryCount: 'Failed Attempts', pastDueSince: 'Past Due Since', pausedAt: 'Paused Since', pausedUntil: 'Paused Until' },
           status: { pending: 'Pending', trial: 'Trial', active: 'Active', pendingRenewal: 'Pending Renewal', paused: 'Paused', cancelled: 'Cancelled', expired: 'Expired', pastDue: 'Past Due' },
           cycleType: { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly', oneTime: 'One Time' },
+          paymentMethod: { missing: 'No card on file', card: 'Card', onFile: 'On file' },
           autoRenew: { on: 'On', off: 'Off' },
-          toast: { cancelled: 'Subscription will be cancelled at period end.' },
+          toast: { cancelled: 'Subscription will be cancelled at period end.', billingRetried: 'Charge retried.', paused: 'Subscription paused.', resumed: 'Subscription resumed.' },
         },
         refunds: {
           title: 'Refunds',
@@ -3536,6 +3583,48 @@ export const en = {
               hint: "The agent's core configuration - who it is, which model it runs on, and how it's routed.",
               identity: 'Identity', model: 'Model & Sampling', capabilities: 'Routing & Capabilities',
             },
+            execution: {
+              hint: 'Choose whether this agent runs on the built-in middleware pipeline or on an external coding CLI. Binding it to a runtime is what routes it to the external execution domain; removing the binding returns it to built-in.',
+              modeBuiltIn: 'Built-in',
+              modeExternal: 'External CLI',
+              builtInLead: 'The framework drives the tool loop, context injection, guardrails and RAG for this agent.',
+              externalLead: 'The CLI owns the tool loop and its own context. The framework prepares the workspace, delivers the prompt and collects the result - the middleware pipeline does not run.',
+              noRuntimes: 'No external runtimes registered',
+              noRuntimesHint: 'Load the Tnzi.AI.Cli module, set AI:Cli:Enabled=true, then probe for installed CLIs on the CLI Runtimes page.',
+              runtime: 'Runtime',
+              runtimePlaceholder: 'Select a registered runtime...',
+              model: 'Model override',
+              modelPlaceholder: 'Leave empty to use the CLI own default',
+              thinkingLevel: 'Reasoning effort',
+              thinkingLevelPlaceholder: 'Leave empty to use the CLI own default',
+              thinkingLevelHint: 'Runtime-native value, passed through verbatim. Each CLI has its own vocabulary, so it is deliberately not normalised.',
+              contextGroup: 'Context delivery',
+              injectInstructions: 'Inject instructions',
+              injectInstructionsHint: 'Write the agent persona and instructions into the provider own memory file (CLAUDE.md / AGENTS.md).',
+              materializeSkills: 'Materialize skills',
+              materializeSkillsHint: 'Write the skills granted to this agent into the provider native skills directory.',
+              workDirectoryMode: 'Working directory',
+              workDirectoryPerThread: 'Per conversation',
+              workDirectoryUserProvided: 'User-provided path',
+              workDirectoryPerThreadHint: 'One directory per conversation, created and reclaimed by the framework. The only managed mode where the agent remembers earlier turns - a coding CLI can only resume a session if it lands in the same directory.',
+              workDirectoryPerRun: 'Per run (no memory)',
+              workDirectoryPerRunHint: 'A fresh directory every run. The agent starts from nothing each time: no earlier turns, and none of its own notes. For work that must start clean - batch jobs, evaluations, mutually untrusted tasks.',
+              workDirectoryUserProvidedHint: 'The agent runs in your own directory. The framework never deletes it, and every managed write is rolled back byte for byte afterwards.',
+              userWorkDirectory: 'Directory path',
+              userWorkDirectoryPlaceholder: 'Absolute path on the runtime host',
+              advancedGroup: 'Advanced',
+              customArgs: 'Custom arguments',
+              customArgsHint: 'Appended to the launch command. Protocol-critical flags are dropped with a warning.',
+              idleWatchdog: 'Idle watchdog (min)',
+              idleWatchdogHint: 'Kill the run after this long with no events at all. Can only tighten the deployment-wide value, never loosen it.',
+              mcpConfig: 'Managed MCP config',
+              mcpConfigHint: 'Claude-style mcpServers object. Leave empty to inherit the runtime host own MCP configuration.',
+              mcpConfigInvalid: 'This is not valid JSON. Fix it here - the backend fails closed to no MCP servers at all.',
+              unbind: 'Unbind',
+              unbindConfirm: 'Remove the binding? This agent returns to built-in execution.',
+              saved: 'Execution binding saved',
+              unbound: 'Unbound - this agent runs built-in again',
+            },
             persona: {
               hint: 'The persona (soul) content is injected as a <soul> block ahead of the system prompt. A single agent has a single persona.',
               lead: "Describe the agent's persona / role. Leave empty for no soul injection.",
@@ -3629,6 +3718,7 @@ export const en = {
               skills: 'Skills',
               memory: 'Memory',
               runs: 'Runs',
+              execution: 'Execution',
             },
             // Legacy keys retained - they were the tabs nav before the quadrant
             // redesign and still appear in some downstream locale-key sweeps.
@@ -4104,6 +4194,73 @@ export const en = {
             instructions: 'Instructions (AGENT.md body)',
             persona: 'Persona (PERSONA.md)',
             noInstructions: '(No instructions in this AGENT.md)',
+          },
+        },
+        cliRuntimes: {
+          title: 'CLI Runtimes',
+          actions: { probe: 'Probe now' },
+          columns: {
+            name: 'Name',
+            status: 'Status',
+            maxConcurrentRuns: 'Max concurrent',
+            lastSeenAt: 'Last seen',
+          },
+          status: { online: 'Online', offline: 'Offline', disabled: 'Disabled' },
+          probe: { done: 'Registered {found} runtime(s); {missing} provider(s) were not on PATH.' },
+          unimplemented: {
+            title: 'Some enabled providers cannot run',
+            body: 'This backend version has no protocol adapter for: ',
+          },
+        },
+        cliRuns: {
+              search: {
+                status: 'Status',
+                statusPlaceholder: 'Any status',
+                startTime: 'From',
+                endTime: 'To',
+              },
+          title: 'CLI Runs',
+          actions: {
+            refresh: 'Refresh',
+            cancel: 'Cancel run',
+            cancelConfirm: 'Cancel this run? The whole process tree is terminated.',
+            cancelled: 'Cancellation requested.',
+          },
+          columns: {
+            creationTime: 'Queued at',
+            provider: 'Provider',
+            status: 'Status',
+            prompt: 'Prompt',
+            duration: 'Duration',
+            cost: 'Cost',
+          },
+          runStatus: {
+            queued: 'Queued',
+            dispatched: 'Dispatched',
+            running: 'Running',
+            completed: 'Completed',
+            failed: 'Failed',
+            cancelled: 'Cancelled',
+            timedOut: 'Timed out',
+          },
+          eventType: {
+            text: 'Text',
+            thinking: 'Thinking',
+            toolUse: 'Tool call',
+            toolResult: 'Tool result',
+            status: 'Status',
+            error: 'Error',
+            log: 'Log',
+          },
+          detail: {
+            timeline: 'Event timeline',
+            noEvents: 'No events recorded for this run.',
+            failureReason: 'Failure reason',
+            sessionId: 'Provider session',
+            workDirectory: 'Working directory',
+            startedAt: 'Started at',
+            completedAt: 'Completed at',
+            output: 'Deliverable',
           },
         },
         sandbox: {

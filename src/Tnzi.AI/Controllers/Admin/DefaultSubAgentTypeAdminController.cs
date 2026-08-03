@@ -8,15 +8,11 @@ namespace Tnzi.AI.Controllers.Admin;
 [ApiAuthorize(PermissionName = "ai.agent.view")]
 public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
 {
-    protected readonly IRepository<SubAgentType, Guid> Repository;
-    protected readonly ISubAgentRegistry SubAgentRegistry;
+    protected readonly ISubAgentTypeService SubAgentTypeService;
 
-    public DefaultSubAgentTypeAdminController(
-        IRepository<SubAgentType, Guid> repository,
-        ISubAgentRegistry subAgentRegistry)
+    public DefaultSubAgentTypeAdminController(ISubAgentTypeService subAgentTypeService)
     {
-        Repository = Check.NotNull(repository);
-        SubAgentRegistry = Check.NotNull(subAgentRegistry);
+        SubAgentTypeService = Check.NotNull(subAgentTypeService);
     }
 
     /// <summary>
@@ -25,11 +21,8 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     [HttpGet]
     public virtual async Task<ApiResult<List<SubAgentTypeDto>>> GetAll(CancellationToken ct = default)
     {
-        var entities = await Repository.AsQueryable()
-            .OrderBy(e => e.Name)
-            .ToListAsync(ct);
-
-        return ApiResult<List<SubAgentTypeDto>>.Ok(entities.MapToList<SubAgentTypeDto>());
+        var result = await SubAgentTypeService.GetListAsync(ct);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -39,13 +32,8 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.agent.create")]
     public virtual async Task<ApiResult<SubAgentTypeDto>> Create([FromBody] SubAgentTypeInputDto input, CancellationToken ct = default)
     {
-        Check.NotNull(input);
-
-        var entity = input.MapTo<SubAgentType>();
-        await Repository.InsertAsync(entity, ct);
-        await ReloadRegistryAsync(ct);
-
-        return ApiResult<SubAgentTypeDto>.Ok(entity.MapTo<SubAgentTypeDto>());
+        var result = await SubAgentTypeService.CreateAsync(input, ct);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -55,27 +43,8 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.agent.update")]
     public virtual async Task<ApiResult<SubAgentTypeDto>> Update(Guid id, [FromBody] SubAgentTypeInputDto input, CancellationToken ct = default)
     {
-        Check.NotNull(input);
-
-        var entity = await Repository.GetAsync(id, ct);
-        if (entity == null)
-            return ApiResult<SubAgentTypeDto>.Error("Sub-agent type not found.", 404);
-
-        entity.Name = input.Name;
-        entity.Description = input.Description;
-        entity.ToolGroups = input.ToolGroups;
-        entity.ExcludedToolGroups = input.ExcludedToolGroups;
-        entity.MaxTurns = input.MaxTurns;
-        entity.Instructions = input.Instructions;
-        entity.DefaultModel = input.DefaultModel;
-        entity.DefaultApprovalMode = input.DefaultApprovalMode;
-        entity.CapabilityTags = input.CapabilityTags;
-        entity.IsEnabled = input.IsEnabled;
-
-        await Repository.UpdateAsync(entity, ct);
-        await ReloadRegistryAsync(ct);
-
-        return ApiResult<SubAgentTypeDto>.Ok(entity.MapTo<SubAgentTypeDto>());
+        var result = await SubAgentTypeService.UpdateAsync(id, input, ct);
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -85,24 +54,7 @@ public class DefaultSubAgentTypeAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.agent.delete")]
     public virtual async Task<ApiResult> Delete(Guid id, CancellationToken ct = default)
     {
-        var entity = await Repository.GetAsync(id, ct);
-        if (entity == null)
-            return ApiResult.Error("Sub-agent type not found.", 404);
-
-        await Repository.DeleteAsync(entity, ct);
-        // 必须整表重载而非 Unregister(entity.Name)：注册表按名称（大小写不敏感）单键存放，
-        // 一条覆盖内置名（general-purpose/bash/researcher）的 DB 定义被删除时，
-        // Unregister 会连内置定义一起摘掉；重载则重新注册内置 + 剩余启用行。
-        await ReloadRegistryAsync(ct);
-
-        return ApiResult.Ok();
-    }
-
-    /// <summary>
-    /// 从数据库重新加载所有已启用的类型到注册表
-    /// </summary>
-    private async Task ReloadRegistryAsync(CancellationToken ct)
-    {
-        await SubAgentRegistry.LoadFromStoreAsync(Repository, ct);
+        var result = await SubAgentTypeService.DeleteAsync(id, ct);
+        return result.ToApiResult();
     }
 }

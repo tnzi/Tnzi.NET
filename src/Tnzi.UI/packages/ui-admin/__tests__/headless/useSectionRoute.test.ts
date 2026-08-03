@@ -3,7 +3,7 @@ import { defineComponent, ref, type Ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory, type Router } from 'vue-router'
 import { useSectionRoute, type UseSectionRouteOptions } from '../../src/headless/useSectionRoute'
-import { ADMIN_DEEP_LINK_KEY } from '../../src/plugin/deepLinkConfig'
+import { ADMIN_DEEP_LINK_KEY } from '../../src/plugin/deep-link-config'
 
 const sections = [{ key: 'a' }, { key: 'b' }, { key: 'c' }]
 

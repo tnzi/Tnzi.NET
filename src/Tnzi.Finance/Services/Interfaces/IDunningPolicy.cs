@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Interfaces;
+namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 催收强度判定（<c>TryAddScoped</c> 默认实现，消费应用可整体替换）

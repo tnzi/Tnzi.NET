@@ -16,13 +16,13 @@ import type { ThemeMode } from '../../types/theme';
  */
 export interface ThemeAdapter {
   /**
-   * Apply theme mode (light/dark/system) to the document.
+   * Apply theme mode (light/dark/auto) to the document.
    * @param mode - Theme mode to apply
    */
   applyTheme(mode: ThemeMode): void;
 
   /**
-   * Get the resolved theme (resolves 'system' to actual value).
+   * Get the resolved theme (resolves 'auto' to the actual OS colour scheme).
    */
   getResolvedTheme(): 'light' | 'dark';
 

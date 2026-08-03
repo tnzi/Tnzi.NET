@@ -259,50 +259,26 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             .Select(n => new { n.CreationTime, n.Status })
             .ToListAsync(cancellationToken);
 
+        // 分桶与标签统一走核心 TimeBucket：桶对齐到自然日 / ISO 周（周一起）/ 自然月，
+        // 而不是「从 startDate 起每 N 天」—— 后者会让"本周"随查询起点漂移，而标签却写着周序号。
         var dataPoints = new List<TrendDataPoint>();
-        var current = startDate;
 
-        while (current < endDate)
+        foreach (var bucketStart in TimeBucket.Enumerate(startDate, endDate, interval, endInclusive: false))
         {
-            DateTime periodEnd;
-            string label;
-
-            switch (interval)
-            {
-                case TrendInterval.Daily:
-                    periodEnd = current.AddDays(1);
-                    label = current.ToString("yyyy-MM-dd");
-                    break;
-                case TrendInterval.Weekly:
-                    periodEnd = current.AddDays(7);
-                    var weekOfYear = System.Globalization.CultureInfo.InvariantCulture.Calendar
-                        .GetWeekOfYear(current, System.Globalization.CalendarWeekRule.FirstDay, DayOfWeek.Monday);
-                    label = $"{current:yyyy}-W{weekOfYear:D2}";
-                    break;
-                case TrendInterval.Monthly:
-                    periodEnd = current.AddMonths(1);
-                    label = current.ToString("yyyy-MM");
-                    break;
-                default:
-                    periodEnd = current.AddDays(1);
-                    label = current.ToString("yyyy-MM-dd");
-                    break;
-            }
+            var bucketEnd = TimeBucket.Next(bucketStart, interval);
 
             var periodNotifications = notifications
-                .Where(n => n.CreationTime >= current && n.CreationTime < periodEnd)
+                .Where(n => n.CreationTime >= bucketStart && n.CreationTime < bucketEnd)
                 .ToList();
 
             dataPoints.Add(new TrendDataPoint
             {
-                Label = label,
-                StartTime = current,
+                Label = TimeBucket.Label(bucketStart, interval),
+                StartTime = bucketStart,
                 TotalCount = periodNotifications.Count,
                 SentCount = periodNotifications.Count(n => n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.PartiallySent),
                 FailedCount = periodNotifications.Count(n => n.Status == NotificationStatus.Failed)
             });
-
-            current = periodEnd;
         }
 
         var trend = new NotificationTrendDto

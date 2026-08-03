@@ -117,7 +117,7 @@ import {
 import type { DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateOnly as formatDate } from '@tnzi/core'
-import TWidgetLineChart from '../../widgets/builtin/TWidgetLineChart.vue'
+import TWidgetLineChart from '../../components/widgets/TWidgetLineChart.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import { useAdminClient } from '../../plugin/client'
 import {

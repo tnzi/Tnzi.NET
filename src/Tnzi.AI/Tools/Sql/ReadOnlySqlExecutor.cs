@@ -1,6 +1,5 @@
 using System.Data;
 using System.Data.Common;
-using Microsoft.Extensions.Options;
 
 namespace Tnzi.AI.Tools.Sql;
 

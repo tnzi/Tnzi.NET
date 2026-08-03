@@ -9,12 +9,10 @@
 import { NButton } from 'naive-ui';
 import { watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
-import { useEmbedMode } from '@/composables/useEmbedMode';
-import TChatBox from '@/components/chat/TChatBox.vue';
-import type { ChatMessage } from '@/composables/useChat';
+import { useEmbedMode } from '../headless/useEmbedMode';
+import TChatBox from '../components/chat/TChatBox.vue';
+import type { ChatMessage } from '../headless/useChat';
 
-const t = useAiI18n();
 const { isOpen, toggle, minimize, isMinimized, expand } = useEmbedMode('floating');
 
 const props = defineProps<{

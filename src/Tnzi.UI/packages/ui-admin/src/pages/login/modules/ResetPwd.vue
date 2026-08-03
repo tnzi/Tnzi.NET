@@ -16,12 +16,12 @@
 import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { useFormRules } from '../../../headless/useFormRules'
+import { useFormRules } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
-import { useCaptcha } from '../../../headless/useCaptcha'
-import { useLoginAccountField } from '../../../headless/useLoginAccountField'
-import { detectAccountType } from '../../../headless/accountType'
-import { useLoginContext } from '../useLoginContext'
+import { useCaptcha } from '@tnzi/ui'
+import { useLoginAccountField } from '@tnzi/ui'
+import { detectAccountType } from '../../../headless/account-type'
+import { useLoginContext } from '@tnzi/ui'
 
 defineOptions({ name: 'ResetPwd' })
 

@@ -1,7 +1,3 @@
-using System.Net.Http;
-using System.Text.Json;
-using Microsoft.AspNetCore.DataProtection;
-using Tnzi.AI.Infrastructure.Providers;
 
 namespace Tnzi.AI.Services;
 

@@ -38,11 +38,16 @@
  */
 
 import type { App, Component } from 'vue'
-import { inject } from 'vue'
+import { inject, watch } from 'vue'
 import type { Pinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
 import type { HttpClient } from '@tnzi/core/http'
-import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
+import {
+  THEME_CONTEXT_KEY,
+  buildDefaultLoginCallbacks,
+  type ThemeContext,
+  type AdminAuthRuntime,
+} from '@tnzi/ui'
 import { useAdminFunctionAuthorizationApi } from '@tnzi/core/services/authorization'
 import { createIdentityBridge } from '../services/bridges/identity-bridge'
 import { defaultAdminRoutes } from '../router/routes'
@@ -51,27 +56,43 @@ import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminTabStore } from '../stores/useAdminTabStore'
 import {
+  appendUnderAdmin,
+  applyBasePath,
+  applyHideRoutes,
+  applyOverrides,
+  applyPlaceholders,
+  applyRouteOrders,
+  filterModules,
+  markBuiltInModules,
+  normalizeBasePath,
+  normalizeName,
+  toAdminRouteRecords,
+} from './route-transforms'
+// Re-exported because `normalizeBasePath` was part of this module's public
+// surface before the transforms moved out; keeping the name resolving from here
+// means the split is invisible to `createAdminApp`, `plugin/index` and any
+// consumer that imported it.
+export { normalizeBasePath } from './route-transforms'
+import { loadLocaleMessages } from '../i18n/messages'
+import {
   createTnziUiAdmin,
   type TnziUiAdminInstance,
   type TnziUiAdminOptions,
 } from './index'
-import type { AdminLoginConfig } from './loginConfig'
-import { buildDefaultLoginCallbacks, type AdminAuthRuntime } from './defaultAuth'
-import type { AdminDashboardConfig } from './dashboardConfig'
-import type { AdminSettingsConfig } from './settingsConfig'
-import type { AdminUserCenterConfig } from './userCenterConfig'
-import { resolveHubConfigs } from './hubConfig'
-import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deepLinkConfig'
-import type { AdminThemeConfig } from './themeConfig'
-import {
-  useAdminRouteStore,
-  type AdminRouteRecord,
-} from '../stores/useAdminRouteStore'
+import type { AdminLoginConfig } from './login-config'
+import type { AdminDashboardConfig } from './dashboard-config'
+import type { AdminSettingsConfig } from './settings-config'
+import type { AdminUserCenterConfig } from './user-center-config'
+import { resolveHubConfigs } from './hub-config'
+import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deep-link-config'
+import type { AdminThemeConfig } from './theme-config'
+import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useRouteProgress } from '../headless/useRouteProgress'
 import { waitForClientToken } from '../headless/waitForClientToken'
 import { useGlobalTheme } from '../headless/useGlobalTheme'
-import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearancePresets'
-import { fetchAdminShellModules } from '../services/admin-shell-modules'
+import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearance-presets'
+import { fetchAdminShellSignal } from '../services/admin-shell-modules'
+import { resetAllFileUrlResolvers } from '../services/file-url-resolver'
 
 export interface DefineAdminAppOptions {
   /**
@@ -385,8 +406,18 @@ export interface DefineAdminAppOptions {
    * settings hub URLs default to `${apiBase}/hubs/chat` / `${apiBase}/hubs/settings`
    * instead of the root-relative '/hubs/*' - one knob instead of overriding each
    * hub URL individually. An explicit `chat.hubUrl` / `settings.hubUrl` still
-   * wins. Opt-in: omit it to keep the root-relative defaults (e.g. dev setups
-   * that proxy '/hubs' separately). Match it to your HttpClient's REST baseUrl.
+   * wins.
+   *
+   * ⚠️ This option affects the SignalR hub URLs and NOTHING else - in
+   * particular it does NOT set the REST base URL (that is your HttpClient's
+   * `baseUrl`, e.g. `createTnziClient({ baseUrl: '/api' })`).
+   *
+   * Usually unnecessary now: the backend reports each mapped hub's path in
+   * `GET admin/shell/modules` with its own `PathBase` applied, so an app served
+   * under an IIS sub-application resolves the right hub URL on its own. Reach
+   * for `apiBase` only when the browser must reach the hubs at a prefix the API
+   * process cannot know (a reverse proxy that rewrites paths, or a separate
+   * origin).
    */
   apiBase?: string
 
@@ -607,307 +638,22 @@ export interface DefineAdminAppResult {
    * ignore the promise. No-op when `moduleGating` is disabled.
    */
   loadAvailableModules(): Promise<void>
-}
 
-function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/\./g, '-')
-}
-
-/**
- * Normalize the `basePath` option to the canonical form used internally:
- * leading slash, no trailing slash (except for the domain-root sentinel `'/'`).
- *
- *   `undefined` / `null` / `''`     → `'/admin'`
- *   `'admin'` / `'admin/'`           → `'/admin'`
- *   `'/admin/'` / `'/admin'`         → `'/admin'`
- *   `'/console/'` / `'console'`     → `'/console'`
- *   `'/'`                            → `'/'`
- */
-export function normalizeBasePath(basePath?: string | null): string {
-  if (basePath == null) return '/admin'
-  let bp = String(basePath).trim()
-  if (bp === '') return '/admin'
-  if (bp === '/') return '/'
-  if (!bp.startsWith('/')) bp = '/' + bp
-  while (bp.length > 1 && bp.endsWith('/')) bp = bp.slice(0, -1)
-  return bp
-}
-
-/**
- * Rewrite every **top-level** route's path so it sits under `basePath`.
- *
- *   `/admin`              → `basePath`
- *   `/login/:module(...)` → `${basePath}/login/:module(...)`
- *                            (no leading `//` when `basePath === '/'`)
- *   `/403`                → `${basePath}/403`
- *
- * This applies to the DEFAULT `/admin` basePath too (since 0.2.71): every
- * route in the table, login and 403 included, lives under the single
- * basePath prefix. Before that, login/403 stayed at the domain root under
- * the default: 99% of URLs happened to work when the SPA was mounted as
- * an IIS sub-application (the internal `/admin` prefix coincided with the
- * deployment prefix), but any login/403 redirect escaped the
- * sub-application (e.g. `https://host/login` instead of
- * `https://host/admin/login`) and 404'd.
- *
- * `admin-root.children` use relative paths and are not touched - they
- * inherit the new parent automatically when vue-router resolves the tree.
- *
- * Returns a new array; input is not mutated.
- */
-function applyBasePath(
-  routes: RouteRecordRaw[],
-  basePath: string,
-): RouteRecordRaw[] {
-  // Domain-root deployment: only rewrite `/admin` (→ `/`); leave `/login`,
-  // `/403`, and other top-level siblings on their existing paths.
-  if (basePath === '/') {
-    return routes.map((route) => {
-      if (route.path === '/admin') {
-        return { ...route, path: '/' } as RouteRecordRaw
-      }
-      return route
-    })
-  }
-  return routes.map((route) => {
-    if (typeof route.path !== 'string') return route
-    if (route.path === '/admin') {
-      return { ...route, path: basePath } as RouteRecordRaw
-    }
-    // Only rewrite top-level absolute paths; relative child paths (none
-    // exist at top level in the preset, but defend in depth) stay as-is.
-    if (route.path.startsWith('/')) {
-      return { ...route, path: basePath + route.path } as RouteRecordRaw
-    }
-    return route
-  })
-}
-
-/**
- * Stamp `meta.builtIn: true` on the top-level module groups under `/admin`
- * - the framework's preset admin pages. Runs against the ORIGINAL preset
- * before `addModules` appends consumer routes, so consumer menus stay
- * unstamped and survive the sidebar's built-in-menus toggle. Clones the
- * touched nodes instead of mutating `defaultAdminRoutes` (a shared module
- * constant reused across `defineAdminApp` calls).
- */
-function markBuiltInModules(routes: RouteRecordRaw[]): RouteRecordRaw[] {
-  return routes.map((route) => {
-    if (route.path !== '/admin' || !route.children) return route
-    return {
-      ...route,
-      children: route.children.map((child) => ({
-        ...child,
-        meta: { ...child.meta, builtIn: true },
-      })),
-    } as RouteRecordRaw
-  })
-}
-
-/** Walk the route tree and return a new tree with the named module subtrees removed. */
-function filterModules(
-  routes: RouteRecordRaw[],
-  hideSet: Set<string>,
-  showOnlySet: Set<string> | null,
-): RouteRecordRaw[] {
-  return routes.map((route) => {
-    // Only filter at the level beneath `/admin`. Modules are second-level
-    // children (e.g. `/admin/identity`, `/admin/ai`).
-    if (route.path !== '/admin') return route
-    if (!route.children) return route
-    const filteredChildren = route.children.filter((child) => {
-      const key = normalizeName(typeof child.name === 'string' ? child.name : '')
-      if (showOnlySet && !showOnlySet.has(key)) return false
-      if (hideSet.has(key)) return false
-      return true
-    })
-    return { ...route, children: filteredChildren }
-  })
-}
-
-/**
- * Walk the children (and grandchildren) of every `/admin` route and set
- * `meta.hideInMenu = true` on any route whose `name` (string, exact
- * match - case-sensitive) appears in `hideSet`. Returns a new route tree;
- * the input is not mutated.
- *
- * Top-level routes (`/login`, `/403`, `/admin`) are never considered for
- * matching - `hideRoutes` is intended for sub-menu entries only.
- */
-function applyHideRoutes(
-  routes: RouteRecordRaw[],
-  hideSet: Set<string>,
-): RouteRecordRaw[] {
-  if (hideSet.size === 0) return routes
-  function walk(route: RouteRecordRaw): RouteRecordRaw {
-    let next: RouteRecordRaw = route
-    const name = typeof route.name === 'string' ? route.name : ''
-    if (name && hideSet.has(name)) {
-      const nextMeta = { ...(route.meta as Record<string, unknown> | undefined), hideInMenu: true }
-      next = { ...route, meta: nextMeta } as RouteRecordRaw
-    }
-    if (next.children && next.children.length > 0) {
-      next = { ...next, children: next.children.map(walk) } as RouteRecordRaw
-    }
-    return next
-  }
-  return routes.map((route) => {
-    if (route.path !== '/admin') return route
-    if (!route.children) return route
-    return { ...route, children: route.children.map(walk) }
-  })
-}
-
-/**
- * Walk the children (and grandchildren) of every `/admin` route and
- * override `meta.order` on any route whose `name` (string, exact
- * match - case-sensitive) is a key in `orders`. Returns a new route
- * tree; the input is not mutated.
- *
- * Top-level routes (`/login`, `/403`, `/admin`) are never considered for
- * matching - `routeOrders` is intended for sub-route ordering only
- * (the menu builder in `useAdminRouteStore` sorts by `meta.order` on
- * each level).
- */
-function applyRouteOrders(
-  routes: RouteRecordRaw[],
-  orders: Record<string, number>,
-): RouteRecordRaw[] {
-  const keys = Object.keys(orders)
-  if (keys.length === 0) return routes
-  function walk(route: RouteRecordRaw): RouteRecordRaw {
-    let next: RouteRecordRaw = route
-    const name = typeof route.name === 'string' ? route.name : ''
-    if (name && Object.prototype.hasOwnProperty.call(orders, name)) {
-      const nextMeta = { ...(route.meta as Record<string, unknown> | undefined), order: orders[name] }
-      next = { ...route, meta: nextMeta } as RouteRecordRaw
-    }
-    if (next.children && next.children.length > 0) {
-      next = { ...next, children: next.children.map(walk) } as RouteRecordRaw
-    }
-    return next
-  }
-  return routes.map((route) => {
-    if (route.path !== '/admin') return route
-    if (!route.children) return route
-    return { ...route, children: route.children.map(walk) }
-  })
-}
-
-/** Walk the route tree and apply component overrides by route name. */
-function applyOverrides(
-  routes: RouteRecordRaw[],
-  overrides: Record<string, Component | (() => Promise<unknown>)>,
-): RouteRecordRaw[] {
-  function walk(route: RouteRecordRaw): RouteRecordRaw {
-    const name = typeof route.name === 'string' ? route.name : ''
-    const override = name ? overrides[name] : undefined
-    const next: RouteRecordRaw = override
-      ? ({ ...route, component: override as Component } as RouteRecordRaw)
-      : route
-    if (next.children && next.children.length > 0) {
-      return { ...next, children: next.children.map(walk) } as RouteRecordRaw
-    }
-    return next
-  }
-  return routes.map(walk)
-}
-
-/** Append consumer-supplied child routes under `/admin`. */
-function appendUnderAdmin(
-  routes: RouteRecordRaw[],
-  extras: RouteRecordRaw[],
-): RouteRecordRaw[] {
-  if (extras.length === 0) return routes
-  return routes.map((route) => {
-    if (route.path !== '/admin') return route
-    return {
-      ...route,
-      children: [...(route.children ?? []), ...extras],
-    }
-  })
-}
-
-/** Replace placeholder login / forbidden components when consumer provides their own. */
-function applyPlaceholders(
-  routes: RouteRecordRaw[],
-  login?: Component,
-  forbidden?: Component,
-): RouteRecordRaw[] {
-  return routes.map((route) => {
-    // After Phase I.7.1 the default login route is
-    // `/login/:module(pwd-login|...)?` - match by name instead of literal
-    // path so consumer overrides keep working.
-    if (login && route.name === 'login') {
-      return { ...route, component: login } as RouteRecordRaw
-    }
-    if (forbidden && route.path === '/403') {
-      return { ...route, component: forbidden } as RouteRecordRaw
-    }
-    return route
-  })
-}
-
-/**
- * Convert vue-router `RouteRecordRaw` into the `AdminRouteRecord` shape that
- * `useAdminRouteStore` expects. Drops `component` (which the store doesn't
- * care about) and preserves children + meta.
- */
-function toAdminRouteRecords(
-  routes: RouteRecordRaw[],
-  pathPrefix = '',
-): AdminRouteRecord[] {
-  function joinPath(parent: string, child: string): string {
-    if (child.startsWith('/')) return child
-    const left = parent.endsWith('/') ? parent.slice(0, -1) : parent
-    const right = child.startsWith('/') ? child.slice(1) : child
-    return left ? `${left}/${right}` : `/${right}`
-  }
-  function walk(route: RouteRecordRaw, parentPath: string): AdminRouteRecord {
-    const absolutePath = joinPath(parentPath, route.path)
-    const rawMeta = route.meta as Record<string, unknown> | undefined
-    const meta: AdminRouteRecord['meta'] = {
-      title: (rawMeta?.title as string | undefined) ?? (
-        typeof route.name === 'string' ? route.name : route.path
-      ),
-      i18nKey: rawMeta?.i18nKey as string | undefined,
-      icon: rawMeta?.icon as string | undefined,
-      order: rawMeta?.order as number | undefined,
-      constant: rawMeta?.constant as boolean | undefined,
-      keepAlive: rawMeta?.keepAlive as boolean | undefined,
-      hideInMenu: rawMeta?.hideInMenu as boolean | undefined,
-      // Carry BOTH the singular `permission` (what the real route table uses, 71×)
-      // and plural `permissions`. Dropping the singular one was the root of the
-      // silently-disabled menu permission filter.
-      permission: rawMeta?.permission as string | undefined,
-      permissions: rawMeta?.permissions as string[] | undefined,
-      roles: rawMeta?.roles as string[] | undefined,
-      activeMenu: rawMeta?.activeMenu as string | undefined,
-      fixedIndexInTab: rawMeta?.fixedIndexInTab as number | undefined,
-      multiTab: rawMeta?.multiTab as boolean | undefined,
-      // Module-availability gate marker. Like `permission` above, this MUST be
-      // copied through the vue-router-record → AdminRouteRecord round-trip, or
-      // the store's `moduleGateKey` sees `undefined` and never gates the node
-      // (the sidebar keeps showing menus for modules the backend never loaded).
-      moduleGate: rawMeta?.moduleGate as boolean | string | undefined,
-      // Built-in marker (stamped by markBuiltInModules) - same round-trip
-      // rule as `permission`/`moduleGate`: dropped here = the built-in-menus
-      // toggle silently never filters anything.
-      builtIn: rawMeta?.builtIn as boolean | undefined,
-    }
-    const record: AdminRouteRecord = {
-      name: typeof route.name === 'string' ? route.name : route.path,
-      // Store absolute paths so the menu builder can navigate directly
-      // (avoids "/identity/users" relative-path silent failure).
-      path: absolutePath,
-      meta,
-    }
-    if (route.children && route.children.length > 0) {
-      record.children = route.children.map((c) => walk(c, absolutePath))
-    }
-    return record
-  }
-  return routes.map((r) => walk(r, pathPrefix))
+  /**
+   * Resolves once the ACTIVE locale's dictionary chunk has loaded.
+   *
+   * The two bundled packs (~57 kB / ~62 kB gzipped) are async chunks rather
+   * than static imports, so a consumer only downloads the language it renders.
+   * `install()` starts the fetch before first paint and the registry is
+   * reactive, so labels resolved in the gap show the humanised key and repaint
+   * on arrival - normally invisible, since route components are themselves
+   * async chunks fetched in parallel.
+   *
+   * Await it before `mount()` if you would rather hold the first paint than
+   * risk that repaint. Never rejects: a failed fetch degrades to humanised
+   * keys rather than taking the shell down.
+   */
+  readonly localeReady: Promise<void>
 }
 
 export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppResult {
@@ -918,6 +664,11 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
 
   const hideRoutesSet = new Set(options.hideRoutes ?? [])
   const basePath = normalizeBasePath(options.basePath)
+
+  // Resolves once the active locale's dictionary chunk has landed. Assigned in
+  // `install()` (and re-assigned on a locale switch); until then nothing has
+  // been requested, so an un-installed app reports "ready" rather than hanging.
+  let localeReady: Promise<void> = Promise.resolve()
 
   // Resolve the HttpClient from an explicit `client` or a wired `runtime`
   // (`createTnziClient().http`). Everything below talks to the backend through
@@ -1044,6 +795,10 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
               await consumerOnLogout()
             } finally {
               useAdminAuthStore().logout()
+              // Signed file URLs outlive the request that minted them; keeping
+              // them across an identity switch would let the next user render
+              // the previous one's files until they expire.
+              resetAllFileUrlResolvers()
             }
           },
         },
@@ -1145,6 +900,27 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     if (options.locales) {
       useAdminAppStore().extendLocaleMessages(options.locales)
     }
+
+    // Start fetching the ACTIVE locale's dictionary. The two bundled packs are
+    // ~57 kB and ~62 kB gzipped and used to be statically imported by the
+    // translate helper, so every consumer shipped both regardless of which one
+    // it rendered; they are async chunks now and only the one in use is
+    // fetched. See i18n/messages.ts.
+    //
+    // Kicked off here - before first paint - so the dictionary is normally
+    // resolved by the time any page renders. Labels resolved before it lands
+    // fall back to the humanised key and repaint when it arrives (the registry
+    // is reactive); `createAdminApp` surfaces this promise as `localeReady` for
+    // apps that would rather await it than repaint. Also reloaded whenever the
+    // user switches locale.
+    const appStore = useAdminAppStore()
+    localeReady = loadLocaleMessages(appStore.locale)
+    watch(
+      () => appStore.locale,
+      (locale) => {
+        localeReady = loadLocaleMessages(locale)
+      },
+    )
 
     // Apply the GLOBAL admin theme snapshot app-wide, at bootstrap - BEFORE
     // and independent of login. `GET /appearance/admin-theme` is anonymous
@@ -1274,6 +1050,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       // Optional call: tolerates HttpClient builds predating addUnauthorizedListener.
       resolvedClient.addUnauthorizedListener?.(() => {
         useAdminAuthStore().logout()
+        resetAllFileUrlResolvers()
         const current = router.currentRoute.value
         const onLogin =
           current.name === 'login' ||
@@ -1523,13 +1300,28 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
 
   async function loadAvailableModules(): Promise<void> {
     if (!moduleGatingEnabled) return
-    const names = await fetchAdminShellModules(resolvedClient)
+    const signal = await fetchAdminShellSignal(resolvedClient)
+    const store = useAdminRouteStore()
     // null = endpoint unavailable / failed → fail-open: keep the prior signal
     // (null on the first run = gating off = show everything). A real Set (even
-    // empty) turns gating on.
-    if (names === null) return
-    useAdminRouteStore().setAvailableModules(names)
+    // empty) turns gating on. Same rule for the realtime half: only a reported
+    // capability replaces the prior one, so a failed refresh never silently
+    // kills a working realtime channel.
+    if (signal.realtime !== null) store.setRealtime(signal.realtime)
+    if (signal.modules === null) return
+    store.setAvailableModules(signal.modules)
   }
 
-  return { routes, install, loadPermissions, loadAvailableModules }
+  return {
+    routes,
+    install,
+    loadPermissions,
+    loadAvailableModules,
+    // Getter, not a snapshot: `install()` assigns the real promise, and a
+    // locale switch replaces it, so reading through the property always gives
+    // the load currently in flight.
+    get localeReady() {
+      return localeReady
+    },
+  }
 }

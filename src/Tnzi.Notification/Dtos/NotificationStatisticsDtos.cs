@@ -1,5 +1,3 @@
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Dtos;
 
 /// <summary>
@@ -97,27 +95,9 @@ public class StatusStatisticsDto
     public double Percentage { get; set; }
 }
 
-/// <summary>
-/// 统计趋势时间间隔
-/// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum TrendInterval
-{
-    /// <summary>
-    /// 按天
-    /// </summary>
-    Daily = 0,
-
-    /// <summary>
-    /// 按周
-    /// </summary>
-    Weekly = 1,
-
-    /// <summary>
-    /// 按月
-    /// </summary>
-    Monthly = 2
-}
+// 统计趋势时间间隔已收口到核心 Tnzi.Utilities.TrendInterval（成员名与序号完全一致，
+// 线缆形态不变——框架在 AspNetCore 全局注册 JsonStringEnumConverter，仍序列化为
+// "Daily"/"Weekly"/"Monthly"）。分桶与标签走 Tnzi.Utilities.TimeBucket。
 
 /// <summary>
 /// 趋势数据点

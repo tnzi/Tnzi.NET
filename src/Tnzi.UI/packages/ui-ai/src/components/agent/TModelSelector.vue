@@ -6,7 +6,7 @@
 import { NModal, NInput, NButton } from 'naive-ui';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '@/locale/index';
+import { useAiI18n } from '../../i18n/index';
 const t = useAiI18n();
 
 export interface ModelOption {
@@ -108,12 +108,12 @@ function getProviderLogoUrl(provider: string): string {
           </div>
         </template>
         <template v-else>
-          <template v-for="[group, models] in grouped" :key="group">
+          <template v-for="[group, groupModels] in grouped" :key="group">
             <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
               {{ group }}
             </div>
             <div
-              v-for="model in models"
+              v-for="model in groupModels"
               :key="model.id"
               class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
               @click="selectModel(model.id)"

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Banking.Services.Interfaces;
+namespace Tnzi.Finance.Banking.Services;
 
 /// <summary>
 /// 银行账户档案服务（1:1 挂在资金科目上；流水/支票/EFT 共用）

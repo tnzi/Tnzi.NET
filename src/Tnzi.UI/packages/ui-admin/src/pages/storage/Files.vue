@@ -152,7 +152,6 @@
           :selected-file-ids="selectedIds"
           :loading="filesLoading"
           :translate="t"
-          :preview-url="bridge.files.previewUrl"
           @open-folder="openFolder"
           @preview-file="openPreview"
           @context-folder="onContextFolder"
@@ -223,8 +222,8 @@
       v-model:show="preview.show"
       :file="preview.file"
       :translate="t"
-      :preview-url="bridge.files.previewUrl"
-      :download-url="bridge.files.downloadUrl"
+      :preview-src="previewSrc"
+      :download-src="previewDownloadSrc"
     />
 
     <!-- Create / rename folder overlay - useDetail(modal) + TDetailHost
@@ -312,7 +311,26 @@
               {{ viewedFile.creatorName || viewedFile.creatorId || EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.createdAt')">
-              {{ viewedFile.creationTime ? new Date(viewedFile.creationTime).toLocaleString() : EMPTY_DASH }}
+              {{ formatDateTime(viewedFile.creationTime, { fallback: EMPTY_DASH }) }}
+            </NDescriptionsItem>
+            <!--
+              Public = readable by anyone, including logged-out visitors, which is
+              what an anonymous `<img src>` needs. Editable only with
+              storage.file.update; the backend gates it on write permission too.
+            -->
+            <NDescriptionsItem :label="t('detail.visibility')">
+              <div class="flex items-center gap-8px">
+                <NSwitch
+                  v-if="can('storage.file.update')"
+                  size="small"
+                  :value="viewedFile.isPublic === true"
+                  :loading="savingVisibility"
+                  @update:value="setVisibility"
+                />
+                <span class="text-12px" :class="viewedFile.isPublic ? 'text-warning' : 'text-muted'">
+                  {{ viewedFile.isPublic ? t('detail.public') : t('detail.private') }}
+                </span>
+              </div>
             </NDescriptionsItem>
             <!-- MD5 已从对外 FileRecordDto 收窄剔除(内部字段);按需完整性校验走 More → Verify(bridge.integrity.verifyOne)。 -->
           </NDescriptions>
@@ -334,10 +352,10 @@
                 class="my-8px"
               />
               <div v-else class="t-storage-file-page__refs">
-                <div v-for="ref in fileReferences" :key="ref.id" class="t-storage-file-page__ref">
-                  <div class="text-13px font-500">{{ ref.entityType }}</div>
-                  <div class="text-12px text-muted">{{ t('detail.field') }}: {{ ref.fieldName }}</div>
-                  <div class="text-12px text-muted break-all">{{ t('detail.entityId') }}: {{ ref.entityId }}</div>
+                <div v-for="fileRef in fileReferences" :key="fileRef.id" class="t-storage-file-page__ref">
+                  <div class="text-13px font-500">{{ fileRef.entityType }}</div>
+                  <div class="text-12px text-muted">{{ t('detail.field') }}: {{ fileRef.fieldName }}</div>
+                  <div class="text-12px text-muted break-all">{{ t('detail.entityId') }}: {{ fileRef.entityId }}</div>
                 </div>
               </div>
             </NSpin>
@@ -362,10 +380,10 @@ import type { DataTableColumns, DropdownOption } from 'naive-ui'
 import {
   NButton, NButtonGroup, NInput, NSelect, NSpin, NPagination,
   NForm, NFormItem, NInputNumber, NPopconfirm,
-  NDropdown, NDynamicTags, NEmpty, NSpace,
+  NDropdown, NDynamicTags, NEmpty, NSpace, NSwitch,
   NDescriptions, NDescriptionsItem, NTag,
 } from 'naive-ui'
-import { useSafeMessage } from '../_shared/safeMessage'
+import { useSafeMessage } from '../_shared/safe-message'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
@@ -373,12 +391,13 @@ import TRowActions from '../../components/crud/TRowActions.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useDetail } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import type { RowAction } from '../../headless/rowActions'
+import type { RowAction } from '../../headless/row-actions'
 import { TSvgIcon } from '@tnzi/ui'
-import { formatFileSize } from '@tnzi/core'
+import { formatFileSize, formatDateTime } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import { useFileUrl } from '../../headless/useFileUrl'
 import TFileExplorer from './components/TFileExplorer.vue'
 import TFilePreviewModal from './components/TFilePreviewModal.vue'
 import { FOLDER_GLYPH, fileGlyph } from './file-icons'
@@ -460,6 +479,29 @@ const fileDetail = useDetail<FileRecordDto>({
 const viewedFile = computed(() => fileDetail.data.value)
 const fileReferences = ref<FileReferenceDto[]>([])
 const loadingRefs = ref(false)
+const savingVisibility = ref(false)
+
+/**
+ * Flip a file between public-read and owner-only. Writes through the bridge and
+ * mirrors the result onto both the drawer record and the listing row, so the
+ * label updates without a refetch.
+ */
+async function setVisibility(isPublic: boolean): Promise<void> {
+  const file = viewedFile.value
+  if (!file || !can('storage.file.update')) return
+  savingVisibility.value = true
+  try {
+    const updated = await bridge.visibility.set(file.id, isPublic)
+    file.isPublic = updated.isPublic
+    const row = files.value.find((f) => f.id === file.id)
+    if (row) row.isPublic = updated.isPublic
+    message.success(t(isPublic ? 'detail.madePublic' : 'detail.madePrivate'))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    savingVisibility.value = false
+  }
+}
 // Backend serializes `tags` as a single comma-separated string - split it into
 // individual tags for the detail chips (was reading it as an array → always empty).
 const detailFileTags = computed<string[]>(() => splitTags(viewedFile.value?.tags))
@@ -704,7 +746,7 @@ const columns = computed<DataTableColumns<ExplorerRow>>(() => [
     render: (row) =>
       row.kind === 'folder'
         ? ''
-        : (row.file.creationTime ? new Date(row.file.creationTime).toLocaleString() : ''),
+        : formatDateTime(row.file.creationTime, { fallback: '' }),
   },
   {
     key: 'actions', title: t('columns.actions'), width: 188, align: 'center',
@@ -877,9 +919,17 @@ function onPageSizeChange(next: number): void {
 }
 
 // ---- file actions ----
-function downloadFile(row: FileRecordDto): void {
-  // Deployment-prefix-aware URL via the bridge (resolveUrl) - no hardcoded /api.
-  window.open(bridge.files.downloadUrl(row.id), '_blank')
+async function downloadFile(row: FileRecordDto): Promise<void> {
+  // Private files need a signed URL: a new tab is a fresh browser request with
+  // no Authorization header, so the plain download route would 404.
+  const href = row.isPublic
+    ? bridge.files.downloadUrl(row.id)
+    : await bridge.files.signedUrl(row.id, 'download')
+  if (!href) {
+    message.error(t('errors.downloadDenied'))
+    return
+  }
+  window.open(href, '_blank')
 }
 
 /** Verify a single file's integrity (Files → More → Verify). */
@@ -896,6 +946,15 @@ function openPreview(row: FileRecordDto): void {
   preview.file = row
   preview.show = true
 }
+
+// 灯箱要的是签名 URL（私密文件的 <img> 带不了 Authorization 头）。网格缩略图
+// 不在这里算 —— TFileImage 每块瓦片自己解析，请求仍在 resolver 层合并成一次。
+const previewedIsPublic = computed(() => preview.file?.isPublic === true)
+const { url: previewSrc } = useFileUrl(() => preview.file?.id, { isPublic: previewedIsPublic })
+const { url: previewDownloadSrc } = useFileUrl(() => preview.file?.id, {
+  kind: 'download',
+  isPublic: previewedIsPublic,
+})
 /** Open the right-side detail drawer and lazily load the file's references. */
 function openDetail(row: FileRecordDto): void {
   // Open the `view` open-state; the `watch(viewedFile)` above loads references.

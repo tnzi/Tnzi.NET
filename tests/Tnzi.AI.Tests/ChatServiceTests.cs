@@ -213,7 +213,7 @@ public class ChatServiceTests
     private static ChatService CreateService(IAgentRuntime runtime)
     {
         return new ChatService(
-            runtime,
+            TestDispatchFacade.Wrap(runtime),
             new StaticOptionsMonitor<AIOptions>(new AIOptions { DefaultProvider = "test" }),
             new ServiceCollection()
                 .AddLogging()

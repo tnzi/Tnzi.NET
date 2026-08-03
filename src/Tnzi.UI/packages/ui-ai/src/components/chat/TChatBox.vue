@@ -7,8 +7,8 @@
  */
 
 import { computed } from 'vue';
-import type { ChatMessage } from '@/composables/useChat';
-import { useAutoScroll } from '@/composables/useAutoScroll';
+import type { ChatMessage } from '../../headless/useChat';
+import { useAutoScroll } from '../../headless/useAutoScroll';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import type { SuggestionItem } from './TSuggestions.vue';
 import TMessageList from './TMessageList.vue';

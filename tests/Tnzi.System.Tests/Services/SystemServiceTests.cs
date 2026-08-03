@@ -206,7 +206,7 @@ public class SettingServiceTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("settings center");
+        result.Message!.ShouldContain("settings center");
         _settingRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Setting>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

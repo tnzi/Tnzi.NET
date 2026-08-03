@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TRowActions from '../../../src/components/crud/TRowActions.vue'
-import type { RowAction } from '../../../src/headless/rowActions'
+import type { RowAction } from '../../../src/headless/row-actions'
 
 type Row = { id: string; locked?: boolean }
 

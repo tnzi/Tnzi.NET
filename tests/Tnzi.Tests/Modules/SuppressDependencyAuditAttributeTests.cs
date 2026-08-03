@@ -1,4 +1,3 @@
-using Tnzi.Modules.Diagnostics;
 
 namespace Tnzi.Tests.Modules;
 

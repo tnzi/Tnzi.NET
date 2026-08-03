@@ -7,7 +7,7 @@
     :fullscreen="fullscreen"
     @update:show="onUpdateShow"
   >
-    <slot :formData="state.formData.value" :mode="state.mode.value" />
+    <slot :form-data="state.formData.value" :mode="state.mode.value" />
     <template #footer>
       <slot name="footer">
         <div class="t-form-modal__footer">

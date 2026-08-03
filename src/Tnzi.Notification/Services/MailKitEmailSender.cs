@@ -1,4 +1,3 @@
-using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
 using ContentType = MimeKit.ContentType;

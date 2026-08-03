@@ -1,6 +1,3 @@
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using Tnzi.Imaging;
 
 namespace Tnzi.Imaging.Tests;
 

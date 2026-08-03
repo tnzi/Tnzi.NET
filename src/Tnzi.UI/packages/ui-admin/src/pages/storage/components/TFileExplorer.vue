@@ -17,8 +17,9 @@ import { ref, computed } from 'vue'
 import { NCheckbox, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatFileSize } from '@tnzi/core'
-import TEmpty from '../../../components/data/TEmpty.vue'
+import { TEmpty } from '@tnzi/ui'
 import { fileGlyph, isImageType, FOLDER_GLYPH } from '../file-icons'
+import TFileImage from '../../../components/display/TFileImage.vue'
 import type { FileFolderDto, FileRecordDto } from '@tnzi/core/services/storage'
 
 const props = defineProps<{
@@ -27,12 +28,6 @@ const props = defineProps<{
   selectedFileIds: string[]
   loading?: boolean
   translate: (key: string, params?: Record<string, unknown>) => string
-  /**
-   * Resolve a file's inline preview URL (deployment-prefix aware). Supplied by
-   * the parent (from the storage bridge) so the component never hardcodes
-   * `/api/...`. Omitted → no image thumbnails (glyph fallback only).
-   */
-  previewUrl?: (id: string) => string
 }>()
 
 const emit = defineEmits<{
@@ -53,14 +48,9 @@ const rootDropActive = ref(false)
 const selectedSet = computed(() => new Set(props.selectedFileIds))
 const isEmpty = computed(() => !props.folders.length && !props.files.length)
 
-function thumbUrl(file: FileRecordDto): string | null {
-  // There is no `thumbnailUrl` on the wire: the backend's FileRecordDto never
-  // carried one, so the branch that used to check it here could never be taken
-  // and thumbnails silently never rendered. The preview endpoint is the only
-  // real source.
-  if (isImageType(file.contentType) && props.previewUrl) return props.previewUrl(file.id)
-  return null
-}
+// 缩略图走 `TFileImage`,它自己换签名令牌 —— 父组件不必再算一张 id → URL 的表
+// 传下来。同一 tick 内所有瓦片的请求仍然合并成一次往返(合并在 resolver 层)。
+// 没有 `thumbnailUrl` 这种线上字段:预览端点是唯一来源。
 
 function toggleFile(file: FileRecordDto): void {
   const set = new Set(props.selectedFileIds)
@@ -179,14 +169,23 @@ function onRootDrop(e: DragEvent): void {
           @update:checked="toggleFile(file)"
           @click.stop
         />
-        <span class="t-file-tile__thumb">
-          <img
-            v-if="thumbUrl(file)"
-            :src="thumbUrl(file)!"
+<span class="t-file-tile__thumb">
+          <TFileImage
+            v-if="isImageType(file.contentType)"
+            :file-id="file.id"
+            :is-public="file.isPublic"
             class="t-file-tile__img"
             loading="lazy"
-            alt=""
-          />
+          >
+            <!-- 令牌还没到 / 读不了：退回类型字形，瓦片尺寸不跳。 -->
+            <template #fallback>
+              <TSvgIcon
+                :icon="fileGlyph(file.contentType, file.extension).icon"
+                :size="42"
+                :style="{ color: fileGlyph(file.contentType, file.extension).color }"
+              />
+            </template>
+          </TFileImage>
           <TSvgIcon
             v-else
             :icon="fileGlyph(file.contentType, file.extension).icon"

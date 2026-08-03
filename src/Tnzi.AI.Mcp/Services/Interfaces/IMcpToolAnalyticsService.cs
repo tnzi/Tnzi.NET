@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Mcp.Services.Interfaces;
+namespace Tnzi.AI.Mcp.Services;
 
 /// <summary>
 /// MCP 工具使用分析服务

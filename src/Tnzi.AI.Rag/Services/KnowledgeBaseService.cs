@@ -656,11 +656,8 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     }
 
     /// <summary>
-    /// 计算流内容的 SHA256 哈希
+    /// 计算流内容的 SHA256 哈希（统一走核心 <see cref="HashHelper"/>，小写十六进制）
     /// </summary>
-    private static async Task<string> ComputeContentHashAsync(Stream content, CancellationToken ct)
-    {
-        var hashBytes = await SHA256.HashDataAsync(content, ct);
-        return Convert.ToHexString(hashBytes).ToLower();
-    }
+    private static Task<string> ComputeContentHashAsync(Stream content, CancellationToken ct)
+        => HashHelper.GetSha256Async(content, ct);
 }

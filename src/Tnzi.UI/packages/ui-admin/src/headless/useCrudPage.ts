@@ -1,5 +1,6 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, watch, type ComputedRef, type Ref } from 'vue'
 import type { PagedList } from '@tnzi/core'
+import { DataQueryController } from '@tnzi/core/headless'
 import {
   useColumnSettings,
   type ColumnDef,
@@ -8,7 +9,8 @@ import {
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
 import type { UseFormModalReturn } from './useFormModal'
 import { useDetail, type DetailMode } from './useDetail'
-import { normalizeCrudPermission, canAction, type CrudActionPermissions } from './permissionGates'
+import { normalizeCrudPermission, canAction, type CrudActionPermissions } from './permission-gates'
+import { translatePageKey } from '../i18n'
 
 /**
  * Search/sort/page query shape used by all `useCrudPage`-backed bridges.
@@ -89,6 +91,22 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    * catch at the call site.
    */
   onError?: (err: Error, op: CrudPageOp) => boolean | void
+  /**
+   * Toast a confirmation after a successful create / update / delete.
+   * Default `true`.
+   *
+   * A list-form save gives no other feedback: the modal closes and the row
+   * appears somewhere in a refreshed list, which on page 3 of a sorted list
+   * is indistinguishable from "nothing happened". Detail surfaces that toast
+   * their own save should pass `false` here rather than let both fire.
+   *
+   * Per-op form for the mixed case, e.g. `{ delete: false }` when a page
+   * already renders its own removal confirmation.
+   *
+   * Uses the same `window.$message` handle as the error path, so it silently
+   * no-ops in apps that do not mount `TAdminAppRoot`.
+   */
+  successToast?: boolean | Partial<Record<'create' | 'update' | 'delete', boolean>>
   /**
    * Retry attempts for `fetchData` on transient failures. Default `3` -
    * three retries with exponential backoff, then surface the error. Set
@@ -227,6 +245,7 @@ export interface UseCrudPageReturn<T, TId = string | number> {
  */
 interface ToastApi {
   error: (content: string) => void
+  success?: (content: string) => void
 }
 function getGlobalMessage(): ToastApi | null {
   if (typeof window === 'undefined') return null
@@ -237,10 +256,33 @@ function getGlobalMessage(): ToastApi | null {
   return null
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
+/** i18n keys for the write-confirmation toasts, keyed by operation. */
+const SUCCESS_TOAST_KEYS = {
+  create: 'admin.shared.toasts.created',
+  update: 'admin.shared.toasts.updated',
+  delete: 'admin.shared.toasts.deleted',
+} as const
+
+type WriteOp = keyof typeof SUCCESS_TOAST_KEYS
+
+/**
+ * The filter half of the controller's state. Kept as two named fields rather
+ * than a flat bag so `buildQuery` can emit the legacy `searchText` / `filters`
+ * split that {@link CrudPageQuery} publishes.
+ */
+interface CrudFilterState extends Record<string, unknown> {
+  searchText: string
+  filters: Record<string, unknown>
+}
+
+/**
+ * `@tnzi/core`'s `SortDirection` also admits the long spellings
+ * (`'ascending'` / `'descending'`) because some backends emit them.
+ * {@link CrudPageQuery} publishes only the short pair, so narrow here rather
+ * than widening a contract 60+ pages read.
+ */
+function toShortDirection(direction: string): 'asc' | 'desc' {
+  return direction === 'desc' || direction === 'descending' ? 'desc' : 'asc'
 }
 
 // `normalizeCrudPermission` + `canAction` moved to `./permissionGates` (shared
@@ -253,20 +295,97 @@ export function useCrudPage<T, TId = string | number>(
   const retryAttempts = Math.max(0, options.retryFetch ?? 3)
   const retryBaseMs = Math.max(0, options.retryDelayMs ?? 300)
 
-  const makeInitialQuery = (): CrudPageQuery => ({
-    pageIndex: 1,
-    pageSize: initialPageSize,
-    searchText: '',
-    sortField: undefined,
-    sortOrder: null,
-    filters: {},
+  /**
+   * The list state lives in `@tnzi/core`'s `DataQueryController`, not in local
+   * refs. This hook used to re-implement the same loop (page/sort/filter state,
+   * fetch orchestration, staleness token, retry with backoff) alongside it,
+   * which is how the two drifted apart.
+   *
+   * The three behaviours that differ from the controller's defaults are stated
+   * as options rather than worked around:
+   *  - `resetPageOnSort: false` - a new sort keeps you on the current page.
+   *  - `clearSelectionOnPageChange: false` - batch selection survives paging.
+   *  - `buildQuery` - emits the legacy {@link CrudPageQuery} field names that
+   *    30+ bridges and 60+ pages are written against.
+   *
+   * `fetchData` returns a bare `PagedList` and signals failure by rejecting;
+   * the controller accepts that shape directly.
+   */
+  const controller = new DataQueryController<T, CrudFilterState>({
+    pagination: { initialPageSize },
+    defaultFilter: { searchText: '', filters: {} },
+    fetchFn: (q) => options.fetchData(q as unknown as CrudPageQuery),
+    resetPageOnSort: false,
+    clearSelectionOnPageChange: false,
+    clampPageToTotal: false,
+    retry: { attempts: retryAttempts, delayMs: retryBaseMs },
+    buildQuery: ({ pagination, sort, filter }) => ({
+      pageIndex: pagination.pageIndex,
+      pageSize: pagination.pageSize,
+      searchText: filter.searchText,
+      sortField: sort.sortBy ?? undefined,
+      sortOrder: sort.hasSorting ? toShortDirection(sort.sortDirection) : null,
+      filters: filter.filters,
+    } satisfies CrudPageQuery),
+    onError: (err) => {
+      const suppressed = options.onError?.(err, 'fetch') === false
+      if (!suppressed) getGlobalMessage()?.error(err.message)
+    },
   })
 
-  const query = ref<CrudPageQuery>(makeInitialQuery()) as Ref<CrudPageQuery>
-  const items = ref<T[]>([]) as Ref<T[]>
-  const total = ref(0)
-  const loading = ref(false)
-  const error = ref<Error | null>(null)
+  /**
+   * Writable views onto the controller, so the published `Ref<T>` surface is
+   * unchanged for the 60+ consuming pages while there is only one copy of the
+   * state underneath. (`WritableComputedRef` extends `Ref`, so the exported
+   * types below did not have to change.)
+   */
+  const query = computed<CrudPageQuery>({
+    get: (): CrudPageQuery => ({
+      pageIndex: controller.pagination.pageIndex,
+      pageSize: controller.pagination.pageSize,
+      searchText: controller.filter.searchText,
+      sortField: controller.sort.sortBy ?? undefined,
+      sortOrder: controller.sort.hasSorting ? toShortDirection(controller.sort.sortDirection) : null,
+      filters: controller.filter.filters,
+    }),
+    set: (next: CrudPageQuery) => {
+      controller.pagination.pageIndex = next.pageIndex
+      controller.pagination.pageSize = next.pageSize
+      controller.filter = { searchText: next.searchText, filters: next.filters }
+      if (next.sortField && next.sortOrder) {
+        controller.sort.setSort(next.sortField, next.sortOrder)
+      } else {
+        controller.sort.clear()
+      }
+    },
+  })
+
+  const items = computed<T[]>({
+    get: () => controller.items,
+    set: (next) => {
+      controller.items = next
+    },
+  })
+  const total = computed<number>({
+    get: () => controller.pagination.totalCount,
+    set: (next) => {
+      controller.pagination.totalCount = next
+    },
+  })
+  const loading = computed<boolean>({
+    get: () => controller.isLoading,
+    set: (next) => {
+      controller.status = next ? 'loading' : 'idle'
+    },
+  })
+  const error = computed<Error | null>({
+    get: () => controller.errorObject,
+    set: (next) => {
+      controller.errorObject = next
+      controller.error = next?.message ?? null
+      if (!next && controller.status === 'error') controller.status = 'idle'
+    },
+  })
 
   const hasData = computed(() => items.value.length > 0)
 
@@ -327,20 +446,23 @@ export function useCrudPage<T, TId = string | number>(
     }
   }
 
-  /**
-   * Request sequence token.
-   *
-   * Type a keyword, hit Search, then immediately page: two loads are in flight.
-   * If the first is slower it resolves last and paints page 1's rows while the
-   * pager still reads "2". Every entry point here is fire-and-forget
-   * (`void refresh()` from setPage / setPageSize / the shell's toolbar), so
-   * nothing else serialises them. Only the newest request may write
-   * `items` / `total` / `error` / `loading`.
-   *
-   * The same defect was fixed in `useGlDrilldown` first; this is the base every
-   * list page rides on, so it belongs here rather than in one page's hook.
-   */
-  let seq = 0
+  /** Whether a write confirmation should fire for `op` (default on). */
+  function shouldToast(op: WriteOp): boolean {
+    const cfg = options.successToast
+    if (cfg === undefined) return true
+    if (typeof cfg === 'boolean') return cfg
+    return cfg[op] !== false
+  }
+
+  function notifyWritten(op: WriteOp): void {
+    if (!shouldToast(op)) return
+    const toast = getGlobalMessage()
+    // `success` is optional on the duck-typed handle - an app may register a
+    // minimal one carrying only `error`.
+    // Empty namespace: these are absolute `admin.*` keys, which
+    // `translatePageKey` resolves at the locale root without prefixing.
+    toast?.success?.(translatePageKey('', SUCCESS_TOAST_KEYS[op]))
+  }
 
   /**
    * Reload the current page.
@@ -348,48 +470,16 @@ export function useCrudPage<T, TId = string | number>(
    * **Never rejects.** Failures land in `error` (and the toast) instead, because
    * every call site is `void refresh()` - a rejected promise there becomes an
    * unhandled rejection, which in Vite dev throws a full-screen overlay over an
-   * error the page has already reported properly.
+   * error the page has already reported properly. The controller upholds that
+   * contract, along with the retry/backoff and the staleness guard that keeps a
+   * slow earlier request from painting over a newer one.
    */
   async function refresh(): Promise<void> {
-    const token = ++seq
-    loading.value = true
-    error.value = null
-    let lastErr: Error | null = null
-
-    for (let attempt = 0; attempt <= retryAttempts; attempt++) {
-      try {
-        const result = await options.fetchData({ ...query.value })
-        if (token !== seq) return
-        items.value = result.items
-        total.value = result.totalCount
-        options.onRefresh?.()
-        loading.value = false
-        return
-      } catch (rawErr) {
-        if (token !== seq) return
-        lastErr = rawErr instanceof Error ? rawErr : new Error(String(rawErr))
-        if (attempt < retryAttempts) {
-          // Exponential backoff. Skip the wait entirely when base = 0
-          // (typical in tests) so unit assertions can race the loop
-          // without faking timers.
-          if (retryBaseMs > 0) {
-            await sleep(retryBaseMs * 2 ** attempt)
-          }
-          continue
-        }
-      }
-    }
-
-    if (token !== seq) return
-
-    // All attempts exhausted. Record it and tell the user; do not rethrow.
-    const finalErr = lastErr ?? new Error('Unknown fetch error')
-    error.value = finalErr
-    const suppressed = options.onError?.(finalErr, 'fetch') === false
-    if (!suppressed) {
-      getGlobalMessage()?.error(finalErr.message)
-    }
-    loading.value = false
+    // Gate on the controller's "was THIS call applied" answer, not on
+    // `isSuccess`: a superseded call also resolves, and by then `isSuccess`
+    // may reflect the newer request - announcing a reload this call never did.
+    const applied = await controller.fetch()
+    if (applied) options.onRefresh?.()
   }
 
   function dismissError(): void {
@@ -397,36 +487,44 @@ export function useCrudPage<T, TId = string | number>(
   }
 
   function setPage(pageIndex: number): void {
-    query.value = { ...query.value, pageIndex }
-    void refresh()
+    void controller.changePage(pageIndex)
   }
 
   function setPageSize(pageSize: number): void {
-    query.value = { ...query.value, pageSize, pageIndex: 1 }
-    void refresh()
+    // `changePageSize` returns to page 1 itself.
+    void controller.changePageSize(pageSize)
   }
 
   function setSearch(text: string): void {
-    query.value = { ...query.value, searchText: text, pageIndex: 1 }
+    // Deliberately does NOT refetch - the shell's Search button (or Enter)
+    // drives that, so typing does not fire a request per keystroke.
+    controller.filter = { ...controller.filter, searchText: text }
+    controller.pagination.goTo(1)
   }
 
   function setSort(field: string | undefined, order: 'asc' | 'desc' | null): void {
-    // Sorting is server-side, so a new sort has to refetch. Without this the
-    // function only mutated `query` and nothing ever happened, which is why the
-    // whole sort path read as wired but dead.
-    // The page index is deliberately kept: "page 3 of the new ordering" is a
-    // well-defined place to be, and jumping the reader back to the top on every
-    // header click is more disruptive than useful.
-    query.value = { ...query.value, sortField: field, sortOrder: order }
-    void refresh()
+    // Sorting is server-side, so a new sort has to refetch. The page index is
+    // deliberately kept (`resetPageOnSort: false`): "page 3 of the new
+    // ordering" is a well-defined place to be, and jumping the reader back to
+    // the top on every header click is more disruptive than useful.
+    void controller.setSort(order ? field : null, order ?? 'asc')
   }
 
   function setFilters(filters: Record<string, unknown>): void {
-    query.value = { ...query.value, filters, pageIndex: 1 }
+    // Same no-refetch contract as `setSearch`.
+    controller.filter = { ...controller.filter, filters }
+    controller.pagination.goTo(1)
   }
 
   function resetQuery(): void {
-    query.value = makeInitialQuery()
+    // Deliberately NOT `pagination.reset()` - that also zeroes `totalCount`,
+    // and this only resets the QUERY. The rows stay on screen until the next
+    // fetch, so a zeroed total would leave the pager claiming "0 items" over a
+    // list that is still showing three.
+    controller.pagination.pageIndex = 1
+    controller.pagination.pageSize = initialPageSize
+    controller.sort.clear()
+    controller.filter = { searchText: '', filters: {} }
   }
 
   function openCreate(seed?: Partial<T> | MouseEvent): void {
@@ -467,6 +565,7 @@ export function useCrudPage<T, TId = string | number>(
       const created = await runWithErrorHandling('create', () =>
         options.createData!(data as Partial<T>),
       )
+      notifyWritten('create')
       formModal.close()
       await refresh()
       return created
@@ -480,6 +579,7 @@ export function useCrudPage<T, TId = string | number>(
     const updated = await runWithErrorHandling('update', () =>
       options.updateData!(id, data as Partial<T>),
     )
+    notifyWritten('update')
     formModal.close()
     await refresh()
     return updated
@@ -490,6 +590,7 @@ export function useCrudPage<T, TId = string | number>(
     const target = ids ?? batchActions.selectedIds.value
     if (target.length === 0) return
     await runWithErrorHandling('delete', () => options.deleteData!(target))
+    notifyWritten('delete')
     batchActions.clear()
     await refresh()
   }

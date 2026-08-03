@@ -88,6 +88,9 @@ public class FinanceBankingModule : TnziApplicationModule
         // ── 块 4：收据采集（IReceiptExtractor 契约在本模块，默认实现由 Tnzi.Finance.Ai 提供；
         //    未注册时 ExtractAsync 返回 501 引导）──
         context.Services.AddScoped<IReceiptCaptureService, ReceiptCaptureService>();
+        // 审收据的人通常不是拍照上传的人：让收据图片的可见性跟着 finance.receipt.view 走，
+        // 而不是逼着会计去拿整个文件库的管理权限。Storage 未加载时该注册无害。
+        context.Services.AddScoped<IFileReferenceAccessResolver, ReceiptFileReferenceAccessResolver>();
 
         return base.ConfigureServicesAsync(context);
     }

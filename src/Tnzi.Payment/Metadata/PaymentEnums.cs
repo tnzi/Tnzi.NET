@@ -531,4 +531,52 @@ public enum RedemptionCodeStatus
     Expired = 3
 }
 
+/// <summary>
+/// 用户持有的优惠券状态
+/// </summary>
+public enum UserCouponStatus
+{
+    /// <summary>
+    /// 可用
+    /// </summary>
+    Available = 0,
+
+    /// <summary>
+    /// 已使用
+    /// </summary>
+    Used = 1,
+
+    /// <summary>
+    /// 已过期
+    /// </summary>
+    Expired = 2,
+
+    /// <summary>
+    /// 已作废（管理员回收）
+    /// </summary>
+    Revoked = 3
+}
+
+#endregion
+
+#region 回调
+
+/// <summary>
+/// 渠道回调事件的种类。渠道 webhook 上推的不只有支付状态，
+/// 把它们全部当成支付事件解析会让"支付方式被撤销"这类通知无处安放。
+/// </summary>
+public enum PaymentCallbackKind
+{
+    /// <summary>
+    /// 支付状态变更（建单成功 / 收款完成 / 收款被拒）
+    /// </summary>
+    Payment = 0,
+
+    /// <summary>
+    /// 已保存的支付方式在渠道侧被移除：付款人自己撤销了授权，或商户在渠道后台删掉了它。
+    /// 本地必须跟着失效，否则后台会拿一个已经作废的凭据反复扣款失败。
+    /// </summary>
+    PaymentMethodRevoked = 1
+}
+
 #endregion

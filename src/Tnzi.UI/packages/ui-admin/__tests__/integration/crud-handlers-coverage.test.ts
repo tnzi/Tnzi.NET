@@ -14,7 +14,7 @@
  * raising the function-coverage metric for the corresponding .vue file.
  *
  * NOTE: this is a coverage booster, not a replacement for E2E tests. Real
- * user flows are covered by Playwright specs in Tasks 6.3-6.6.
+ * user flows are currently only exercised by hand in Acme.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

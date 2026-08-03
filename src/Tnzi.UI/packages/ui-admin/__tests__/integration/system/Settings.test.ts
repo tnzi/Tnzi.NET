@@ -3,7 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { NPopconfirm } from 'naive-ui'
 import type { SettingsCenterGroupDto } from '@tnzi/core/services/system'
-import type { AdminSettingsConfig } from '../../../src/plugin/settingsConfig'
+import type { AdminSettingsConfig } from '../../../src/plugin/settings-config'
 
 const getDefinitions = vi.fn()
 const saveGroup = vi.fn()
@@ -33,7 +33,7 @@ vi.mock('../../../src/services/bridges/system-bridge', () => ({
 // factories see initialised spies (same ordering as AgentDetail.test.ts).
 import TSettingsPage from '../../../src/components/settings/TSettingsPage.vue'
 import TDetailLayout from '../../../src/components/detail/TDetailLayout.vue'
-import { ADMIN_SETTINGS_CONFIG_KEY } from '../../../src/plugin/settingsConfig'
+import { ADMIN_SETTINGS_CONFIG_KEY } from '../../../src/plugin/settings-config'
 import { useAdminRouteStore } from '../../../src/stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
 import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'

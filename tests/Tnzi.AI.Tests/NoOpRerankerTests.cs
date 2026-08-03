@@ -1,4 +1,3 @@
-using Tnzi.AI.Services.Interfaces;
 
 namespace Tnzi.AI.Tests;
 

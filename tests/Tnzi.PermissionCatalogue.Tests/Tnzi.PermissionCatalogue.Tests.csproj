@@ -51,6 +51,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Documents.Signing\Tnzi.Documents.Signing.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
