@@ -40,7 +40,7 @@ function getFileIcon(attachment: MessageAttachment): string {
       <!-- Image thumbnail -->
       <div
         v-if="isImage(attachment)"
-        class="relative overflow-hidden rounded-lg border border-border"
+        class="relative overflow-hidden rounded-lg border border-tnzi-border"
       >
         <img
           :src="getImageSrc(attachment)"
@@ -53,9 +53,9 @@ function getFileIcon(attachment: MessageAttachment): string {
       <!-- File badge -->
       <div
         v-else
-        class="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2"
+        class="flex items-center gap-2 rounded-lg border border-tnzi-border bg-tnzi-layout/50 px-3 py-2"
       >
-        <Icon :icon="getFileIcon(attachment)" class="size-4 shrink-0 text-muted-foreground" />
+        <Icon :icon="getFileIcon(attachment)" class="size-4 shrink-0 text-tnzi-muted" />
         <div class="min-w-0">
           <div class="truncate text-sm font-medium">
             {{ attachment.fileName ?? 'File' }}

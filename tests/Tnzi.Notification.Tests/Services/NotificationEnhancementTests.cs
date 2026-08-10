@@ -43,7 +43,39 @@ public class NotificationEnhancementTests
             _unitOfWorkMock.Object,
             optionsMock.Object,
             serviceProviderMock.Object,
+            PassThroughOptOut(),
+            PassThroughPreferences(),
             new Mock<INotificationQueueService>().Object);
+    }
+
+    /// <summary>
+    /// 放行一切的退订服务替身。退订本身的行为由 <c>OptOutEnforcementTests</c> 覆盖；
+    /// 这里只是让其余用例保持"没有人退订过"这个前提。
+    /// ★ 必须显式配置：未配置的 mock 会返回空集合，那等于"所有人都退订了"，
+    /// 会让一批与退订无关的用例以极其费解的方式变红。
+    /// </summary>
+    private static INotificationOptOutService PassThroughOptOut()
+    {
+        var mock = new Mock<INotificationOptOutService>();
+        mock.Setup(x => x.FilterAllowedAsync(
+                It.IsAny<IEnumerable<string>>(), It.IsAny<NotificationType>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<string> addresses, NotificationType _, string? _, CancellationToken _)
+                => addresses.ToList());
+        return mock.Object;
+    }
+
+    /// <summary>
+    /// 放行一切的偏好服务替身。偏好本身的行为由 <c>PreferenceEnforcementTests</c> 覆盖；
+    /// 这些用例关心的是别的事，不该因为多了一道过滤而改变结论。
+    /// </summary>
+    private static INotificationPreferenceService PassThroughPreferences()
+    {
+        var mock = new Mock<INotificationPreferenceService>();
+        mock.Setup(p => p.FilterEnabledUsersAsync(
+                It.IsAny<IEnumerable<Guid>>(), It.IsAny<NotificationType>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, NotificationType _, string? __, CancellationToken ___) => ids.ToList());
+        return mock.Object;
     }
 
     [Fact]

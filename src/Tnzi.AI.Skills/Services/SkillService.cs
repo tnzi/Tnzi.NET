@@ -33,6 +33,44 @@ public partial class SkillService : ApplicationService, ISkillService
         _currentTenant = currentTenant;
     }
 
+    /// <summary>管理端更新/删除技能所需的权限码（与 admin 控制器上的方法级码同源）。</summary>
+    private const string SkillUpdatePermission = "ai.skill.update";
+
+    /// <inheritdoc cref="SkillUpdatePermission"/>
+    private const string SkillDeletePermission = "ai.skill.delete";
+
+    private const string SharedSkillDeniedMessage =
+        "Access denied: shared skills are managed by administrators.";
+
+    /// <summary>
+    /// 当前调用者是否持有管理面的技能维护码。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>为什么需要它</b>：<c>ISkillService</c> 同时被自服务控制器
+    /// （<c>DefaultSkillController</c>，只有 <c>[ApiAuthorize]</c>）与管理端控制器
+    /// （带 <c>ai.skill.update</c>/<c>.delete</c>）注入，服务本身<b>无从知道谁在问</b>。
+    /// <para>
+    /// ★★ <b>此前的判据是「有没有租户」，而多租户默认关闭</b> —— 于是
+    /// <c>if (tenantId != null)</c> 那整段守卫在**默认配置下恒不执行**，
+    /// 任何已登录用户都能经自服务端点 <c>PUT/DELETE /api/skills/{id}</c> 改掉或删掉
+    /// <c>System</c> 作用域的技能。而 System 技能是随框架分发、会被注入进 agent 提示词的，
+    /// 改一条等于对所有用到它的 agent 做提示注入。
+    /// </para>
+    /// <para>
+    /// 多租户开启时的分支<b>一字不动</b>：那里 System 一律 403（含租户管理员 —— System 属宿主，
+    /// 不属任何租户），跨租户行一律 404。本判定只补上「单租户 / 宿主上下文」这一半。
+    /// </para>
+    /// <para>
+    /// 未注册 <c>IPermissionChecker</c> 时返回 false（fail-closed）：那说明宿主没装授权能力，
+    /// 此时「不能动共享技能」是正确答案而不是降级。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> HasManagePermissionAsync(string permissionName)
+    {
+        var checker = PermissionChecker;
+        return checker is not null && await checker.IsGrantedAsync(permissionName);
+    }
+
     /// <summary>
     /// Applies tenant visibility filtering to a SkillEntity query.
     /// <para>
@@ -231,6 +269,10 @@ public partial class SkillService : ApplicationService, ISkillService
             if (entity.TenantId != tenantId)
                 return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
         }
+        else if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillUpdatePermission))
+        {
+            return Fail<SkillDetailDto>(SharedSkillDeniedMessage, 403, ErrorCodes.SkillUnauthorized);
+        }
 
         // Ownership check for user-scoped skills
         if (entity.Scope == SkillScope.User)
@@ -278,6 +320,10 @@ public partial class SkillService : ApplicationService, ISkillService
                 return Fail("Access denied: system skills are managed by administrators.", 403, ErrorCodes.SkillUnauthorized);
             if (entity.TenantId != tenantId)
                 return Fail("Skill not found.", 404, ErrorCodes.SkillNotFound);
+        }
+        else if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillDeletePermission))
+        {
+            return Fail(SharedSkillDeniedMessage, 403, ErrorCodes.SkillUnauthorized);
         }
 
         // Ownership check for user-scoped skills

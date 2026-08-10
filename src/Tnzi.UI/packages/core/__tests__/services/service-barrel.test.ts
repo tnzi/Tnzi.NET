@@ -29,6 +29,7 @@ const EXPECTED_NAMESPACES = [
   'System',
   'Audit',
   'Template',
+  'Signing',
   'Logging',
   'Diagnostics',
   'Performance',

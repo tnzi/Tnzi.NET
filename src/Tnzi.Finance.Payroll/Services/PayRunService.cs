@@ -147,12 +147,23 @@ public partial class PayRunService : ApplicationService, IPayRunService
         var payslips = await _payslipRepo.AsQueryable(true).Include(p => p.Lines)
             .Where(p => p.PayRunId == id).ToListAsync(cancellationToken);
 
-        await ExecuteInUnitOfWorkAsync<Result>(async ct =>
+        try
         {
-            await DeletePayslipsAsync(payslips, ct);
-            await _runRepo.DeleteAsync(run, ct);
-            return Result.Success();
-        }, cancellationToken);
+            await ExecuteInUnitOfWorkAsync<Result>(async ct =>
+            {
+                await DeletePayslipsAsync(payslips, ct);
+                await _runRepo.DeleteAsync(run, ct);
+                return Result.Success();
+            }, cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 「只有草稿能删」是 check-then-act：读到 Draft 之后、删除落库之前，
+            // 另一个请求可能已经把它过账了。`PayRun` 的并发戳会让 DELETE 影响 0 行，
+            // 于是删除被正确挡住 —— 但不接住这个异常就成 500，而它其实是 409。
+            // Post/Pay/Void/UpdatePayslipInputs 四处都接了，这里漏了。
+            return Fail("The pay run was modified concurrently. Reload and try again.", 409);
+        }
 
         return Ok();
     }
@@ -183,17 +194,26 @@ public partial class PayRunService : ApplicationService, IPayRunService
         ApplyAggregates(run, payslips);
         run.Status = PayRunStatus.Calculated;
 
-        await ExecuteInUnitOfWorkAsync<Result>(async ct =>
+        try
         {
-            // 先删旧（含 flush）再插新，避免软删旧行与新行在过滤唯一索引上的瞬时冲突
-            await DeletePayslipsAsync(oldPayslips, ct);
-            await _payslipRepo.SaveChangesAsync(ct);
+            await ExecuteInUnitOfWorkAsync<Result>(async ct =>
+            {
+                // 先删旧（含 flush）再插新，避免软删旧行与新行在过滤唯一索引上的瞬时冲突
+                await DeletePayslipsAsync(oldPayslips, ct);
+                await _payslipRepo.SaveChangesAsync(ct);
 
-            await _payslipRepo.InsertManyAsync(payslips, ct);
-            await _runRepo.UpdateAsync(run, ct);
-            await _runRepo.SaveChangesAsync(ct);
-            return Result.Success();
-        }, cancellationToken);
+                await _payslipRepo.InsertManyAsync(payslips, ct);
+                await _runRepo.UpdateAsync(run, ct);
+                await _runRepo.SaveChangesAsync(ct);
+                return Result.Success();
+            }, cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 与 DeleteAsync 同一形态：状态门是 check-then-act，两个并发 calculate
+            // （或 calculate 撞上 post）由并发戳挡住 —— 但那是 409 不是 500。
+            return Fail<PayRunDto>("The pay run was modified concurrently. Reload and try again.", 409);
+        }
 
         await PublishEventAsync(new PayRunCalculatedEvent
         {

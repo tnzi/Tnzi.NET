@@ -28,14 +28,14 @@ public class PresenceService : ApplicationService, IPresenceService
 
         var me = GetRequiredCurrentUser().Id!.Value;
 
-        await UpsertAsync(me, p =>
-        {
-            p.Status = status;
-            // 手动切换即视为活动，清除 auto-away 标记。
-            p.IsAutoAway = false;
-            p.LastActivityAt = DateTime.UtcNow;
-            p.LastChangedAt = DateTime.UtcNow;
-        });
+        // 从「看得见」切到隐身时，把最后可见时刻定在此刻 —— 对旁观者而言，隐身就是下线。
+        // 判定要拿切换**之前**旁观者看到的状态说话（见 IsGoingDark 的 remarks：只看新意图会
+        // 在隐身期间反复盖章，也会把本来就离线的人往后推），因此这里先解析一次有效状态。
+        var effectiveBefore = (await ResolveEffectiveAsync(new[] { me })).FirstOrDefault()?.Status
+            ?? UserPresenceStatus.Offline;
+        var goingDark = PresenceDisclosure.IsGoingDark(status, effectiveBefore);
+
+        await UpsertAsync(me, p => PresenceDisclosure.ApplyIntent(p, status, DateTime.UtcNow, goingDark));
 
         await NotifyChangedAsync(me);
         return Ok();
@@ -112,25 +112,23 @@ public class PresenceService : ApplicationService, IPresenceService
         return false;
     }
 
-    public async Task MarkActiveAsync(Guid userId)
+    public async Task<bool> MarkActiveAsync(Guid userId)
     {
-        // 上线（offline→online）是有效状态变化 → 同步 LastChangedAt。
-        await UpsertAsync(userId, p =>
-        {
-            p.IsAutoAway = false;
-            p.LastActivityAt = DateTime.UtcNow;
-            p.LastChangedAt = DateTime.UtcNow;
-        });
+        // 判定与落笔都在 PresenceDisclosure（隐身泄露是从时间戳与广播时机漏出去的，
+        // 散在各写路径上迟早漏判一处）。UpsertAsync 的 race 重试会对真正落库的行再跑一次
+        // mutate，故 changed 反映最终结果 —— 与 ReportActivityAsync 同款。
+        var allowInvisible = _options.Value.AllowInvisible;
+        var changed = false;
+        await UpsertAsync(userId, p => changed = PresenceDisclosure.ApplyConnected(p, DateTime.UtcNow, allowInvisible));
+        return changed;
     }
 
-    public async Task MarkOfflineAsync(Guid userId)
+    public async Task<bool> MarkOfflineAsync(Guid userId)
     {
-        // 下线（online→offline）是有效状态变化 → 同步 LastSeenAt + LastChangedAt。
-        await UpsertAsync(userId, p =>
-        {
-            p.LastSeenAt = DateTime.UtcNow;
-            p.LastChangedAt = DateTime.UtcNow;
-        });
+        var allowInvisible = _options.Value.AllowInvisible;
+        var changed = false;
+        await UpsertAsync(userId, p => changed = PresenceDisclosure.ApplyDisconnected(p, DateTime.UtcNow, allowInvisible));
+        return changed;
     }
 
     public async Task NotifyChangedAsync(Guid userId)

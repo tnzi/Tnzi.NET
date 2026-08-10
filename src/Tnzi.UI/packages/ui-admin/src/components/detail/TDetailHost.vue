@@ -14,6 +14,7 @@
   >
     <template v-if="$slots.title" #title><slot name="title" :data="state.data.value" /></template>
     <template v-if="$slots.actions" #actions><slot name="actions" :data="state.data.value" :action="state.action.value" /></template>
+    <template v-if="$slots.extra" #extra><slot name="extra" :data="state.data.value" /></template>
     <template v-if="$slots['nav-header']" #nav-header><slot name="nav-header" /></template>
     <template v-if="$slots.footer" #footer><slot name="footer" :submit="state.submit" :close="state.close" /></template>
     <template #default="{ section, sectionIcon }">
@@ -85,8 +86,8 @@
 <script setup lang="ts" generic="T">
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import TModalShell from '../overlay/TModalShell.vue'
-import TDrawerShell from '../overlay/TDrawerShell.vue'
+import { TModalShell } from '@tnzi/ui'
+import { TDrawerShell } from '@tnzi/ui'
 import TDetailLayout from './TDetailLayout.vue'
 import type { UseDetailReturn, DetailSection, DetailLayout } from '../../headless/useDetail'
 
@@ -133,6 +134,10 @@ defineSlots<{
   default?: (props: { data: T | null; action: string | null; section: string | null; sectionIcon?: string }) => unknown
   title?: (props: { data: T | null }) => unknown
   actions?: (props: { data: T | null; action: string | null }) => unknown
+  /** Page-mode only: the record's secondary particulars on their own row under
+   *  the title bar (forwarded to `TDetailLayout`'s `#extra` - see its doc for why
+   *  a meta line belongs here rather than in `#title`). */
+  extra?: (props: { data: T | null }) => unknown
   /** Page-mode only: rendered inside the side-layout nav card, above the menu (forwarded to TDetailLayout). */
   'nav-header'?: () => unknown
   footer?: (props: { submit: () => Promise<void>; close: () => void }) => unknown

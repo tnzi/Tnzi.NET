@@ -20,6 +20,14 @@ public class AuditModule : TnziApplicationModule
     {
         context.Services.AddTnziOptions<AuditOptions, AuditOptionsValidator>(context.Configuration);
 
+        // 记录级读取审计选项（可选能力，Enabled 默认 false）。
+        // 必须在 PreConfigure 阶段注册：实体配置在模型构建期读它来决定是否建表。
+        context.Services.AddTnziOptions<RecordAccessAuditOptions>(context.Configuration);
+
+        // 策略驱动数据销毁选项（可选能力，Enabled 默认 false）。同上，条件建表要在模型构建期读它。
+        context.Services
+            .AddTnziOptions<DataDestructionOptions, DataDestructionOptionsValidator>(context.Configuration);
+
         return Task.CompletedTask;
     }
 
@@ -47,6 +55,17 @@ public class AuditModule : TnziApplicationModule
 
         // 注册操作审计服务
         context.Services.AddScoped<IAuditOperationService, AuditOperationService>();
+
+        // 记录级读取审计（可选能力）。服务始终注册，未启用时其方法是空操作——
+        // 这样业务代码可以无条件注入并调用，不必自己判断开关。
+        context.Services.AddScoped<IRecordAccessAuditor, RecordAccessAuditor>();
+
+        // 策略驱动数据销毁（可选能力）。销毁动作用 TryAdd 注册默认实现：消费应用在自己的模块里
+        // Add 一个 IDataDestroyer（如匿名化）即可胜出——同一服务的多条注册，DI 解析取最后一条。
+        // 后台服务始终注册，未启用时它立刻退出，不占任何资源。
+        context.Services.TryAddScoped<IDataDestroyer, HardDeleteDataDestroyer>();
+        context.Services.AddScoped<IDataDestructionService, DataDestructionService>();
+        context.Services.AddHostedService<DataDestructionBackgroundService>();
 
         // 注册异步审计发送者与消费者（单例）
         context.Services.AddSingleton<AuditSender>();

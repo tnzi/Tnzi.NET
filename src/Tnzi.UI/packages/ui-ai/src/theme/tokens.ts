@@ -18,8 +18,11 @@
  * resetAiTheme() // drop the overrides, fall back to the stylesheet
  * ```
  *
- * Values are full CSS values (`#7c3aed`, `hsl(262 83% 58%)`, `rgb(0 0 0 / 8%)`,
- * a font stack, a length), not bare HSL triplets.
+ * Values are full CSS values (`#7c3aed`, `rgb(0 0 0 / 8%)`, a `color-mix(...)`
+ * expression, a font stack, a length) - never a bare HSL triplet. That caveat
+ * is aimed at one specific habit: shadcn stores `262.1 83.3% 57.8%` and wraps
+ * it in `hsl(...)` at each use site, so a value copied from a shadcn theme
+ * would be handed to `setProperty` here and silently dropped as invalid.
  */
 
 /**

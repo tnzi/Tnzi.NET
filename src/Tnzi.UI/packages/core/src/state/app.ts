@@ -4,7 +4,7 @@
  * Application state manager - pure logic layer.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 import type {
   AppState,
   AppNotification,

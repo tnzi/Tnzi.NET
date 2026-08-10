@@ -7,12 +7,12 @@ namespace Tnzi.Payment.Events.Handlers;
 public class PaymentCompletedEventHandler : IEventHandler<PaymentCompletedEvent>
 {
     private readonly ILogger<PaymentCompletedEventHandler> _logger;
-    private readonly IInvoiceService? _invoiceService;
+    private readonly IPaymentInvoiceService? _invoiceService;
     private readonly IOptionsMonitor<InvoiceOptions>? _invoiceOptions;
 
     public PaymentCompletedEventHandler(
         ILogger<PaymentCompletedEventHandler> logger,
-        IInvoiceService? invoiceService = null,
+        IPaymentInvoiceService? invoiceService = null,
         IOptionsMonitor<InvoiceOptions>? invoiceOptions = null)
     {
         _logger = Check.NotNull(logger);

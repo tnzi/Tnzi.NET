@@ -50,6 +50,8 @@ global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Data;
+// IDocumentConverter 的契约在核心；实现在可选包 Tnzi.Documents，本模块不引用它。
+global using Tnzi.Documents;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.Imaging.Extensions;
@@ -78,3 +80,4 @@ global using Tnzi.Storage.Providers;
 global using Tnzi.Storage.Services;
 global using Tnzi.Utilities;
 global using Tnzi.Storage.Permissions;
+global using Tnzi.Storage.Sanitization;

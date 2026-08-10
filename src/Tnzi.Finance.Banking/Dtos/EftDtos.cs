@@ -21,6 +21,16 @@ public class EftBatchDto
     public decimal TotalAmount { get; set; }
     public string? FileName { get; set; }
     public DateTime? GeneratedTime { get; set; }
+
+    /// <summary>
+    /// 文件首次被交出去的时间（<c>null</c> = 从未下载）。前端据此在作废前警告
+    /// 「这个批次的文件已经交出去过，作废会把 N 笔付款放回待付队列」。
+    /// </summary>
+    public DateTime? FirstDownloadedTime { get; set; }
+
+    /// <summary>文件被下载的次数。</summary>
+    public int DownloadCount { get; set; }
+
     public string? VoidReason { get; set; }
     public string ConcurrencyStamp { get; set; } = string.Empty;
     public DateTime CreationTime { get; set; }
@@ -82,6 +92,17 @@ public class CreateEftBatchDto
 public class VoidEftBatchDto
 {
     public string? Reason { get; set; }
+
+    /// <summary>
+    /// 确认「文件虽已下载但从未提交给银行」，用于作废一个已交出过文件的批次。
+    /// </summary>
+    /// <remarks>
+    /// ★ 默认 <c>false</c> 是刻意的 fail-closed：作废会把批内付款放回待付队列，
+    /// 已提交给银行的批次这么一放就会被付第二次，而第二笔看上去完全正常。
+    /// 调用方必须显式声明「没提交过」才放行 —— 忘记设这个标志的后果是多一次 409，
+    /// 反过来（默认放行）的后果是一笔静默的重复付款。
+    /// </remarks>
+    public bool AcknowledgeFileNotSubmitted { get; set; }
 }
 
 /// <summary>

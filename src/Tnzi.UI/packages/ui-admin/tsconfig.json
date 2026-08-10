@@ -26,7 +26,13 @@
     "src/env.d.ts",
     "src/pages/index.ts",
     "src/pages/identity/UserManagement.vue",
-    "src/pages/identity/user-config.ts"
+    "src/pages/identity/user-config.ts",
+    // Type-level fixtures. A widened type signature cannot regress in a way a
+    // runtime test would see - the only guard is compiling a consumer-shaped
+    // file. `**/*.test.ts` stays excluded below, so these must NOT be named
+    // `*.test.ts`; `tsconfig.build.json` drops `**/__tests__/**` so they never
+    // reach the emitted `.d.ts`.
+    "__tests__/types/**/*"
   ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

@@ -21,10 +21,6 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <!-- T-SQL AST parser for AI SQL tools (validator hardening) -->
     <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.37.3" />
-    <!-- Document conversion: Office formats -->
-    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
-    <!-- Document conversion: PDF text extraction -->
-    <PackageReference Include="PdfPig" Version="0.1.15" />
     <!-- Readability: HTML article extraction（0.11.1 起要求 AngleSharp >= 1.5.2，含 mXSS 修复 GHSA-pgww-w46g-26qg） -->
     <PackageReference Include="SmartReader" Version="0.11.1" />
   </ItemGroup>

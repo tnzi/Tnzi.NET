@@ -14,3 +14,6 @@ export * from './card'
 export * from './list'
 export * from './display'
 export * from './utility'
+
+// Overlay chrome (modal / drawer shells + the renderless theme reset)
+export * from './overlay/index'

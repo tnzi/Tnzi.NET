@@ -6,7 +6,6 @@ using Tnzi.Finance.Banking.Permissions;
 using Tnzi.Finance.Recurring.Permissions;
 using Tnzi.Finance.Payroll.Permissions;
 using Tnzi.Security.Authorization;
-using Tnzi.TestBase;
 
 namespace Tnzi.PermissionCatalogue.Tests;
 

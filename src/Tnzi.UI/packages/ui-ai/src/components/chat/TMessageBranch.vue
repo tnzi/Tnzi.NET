@@ -23,7 +23,7 @@ const emit = defineEmits<{
 <template>
   <div
     v-if="totalBranches > 1"
-    class="flex items-center gap-1 text-xs text-muted-foreground"
+    class="flex items-center gap-1 text-xs text-tnzi-muted"
   >
     <NButton quaternary size="tiny" aria-label="Previous branch" @click="emit('prev')">
       <template #icon><Icon icon="lucide:chevron-left" /></template>

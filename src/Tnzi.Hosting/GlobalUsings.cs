@@ -11,7 +11,7 @@ global using Tnzi.AI.Skills;
 global using Tnzi.AI.Workflow;
 global using Tnzi.Chat;
 global using Tnzi.Documents;
-global using Tnzi.Documents.Signing;
+global using Tnzi.Signing;
 global using Tnzi.Payment;
 global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Mvc.Conventions;

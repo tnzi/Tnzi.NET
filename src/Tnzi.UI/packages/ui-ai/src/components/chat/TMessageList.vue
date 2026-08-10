@@ -43,9 +43,9 @@ const isLastMessageStreaming = computed(() => {
     <!-- Loading skeleton -->
     <template v-if="loading && messages.length === 0">
       <div class="space-y-4 animate-pulse">
-        <div class="h-4 w-3/4 rounded bg-muted" />
-        <div class="h-4 w-1/2 rounded bg-muted" />
-        <div class="h-4 w-2/3 rounded bg-muted" />
+        <div class="h-4 w-3/4 rounded bg-tnzi-layout" />
+        <div class="h-4 w-1/2 rounded bg-tnzi-layout" />
+        <div class="h-4 w-2/3 rounded bg-tnzi-layout" />
       </div>
     </template>
 
@@ -77,7 +77,7 @@ const isLastMessageStreaming = computed(() => {
       </div>
 
       <!-- Streaming indicator -->
-      <div v-if="isLastMessageStreaming" class="flex items-center gap-2 text-sm text-muted-foreground">
+      <div v-if="isLastMessageStreaming" class="flex items-center gap-2 text-sm text-tnzi-muted">
         <TStreamLoader :size="14" />
         <span>Generating...</span>
       </div>

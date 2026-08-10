@@ -276,12 +276,7 @@ function onMarkdownClick(e: MouseEvent): void {
   background: transparent !important;
   box-shadow: none;
 }
-/* shiki dual-theme: switch to dark token colors under .dark */
-.dark .t-stream-markdown :deep(.shiki),
-.dark .t-stream-markdown :deep(.shiki span) {
-  color: var(--shiki-dark) !important;
-  background-color: var(--shiki-dark-bg) !important;
-  font-style: var(--shiki-dark-font-style) !important;
-  font-weight: var(--shiki-dark-font-weight) !important;
-}
+/* The shiki dual-theme dark swap is NOT here any more: it is a single unscoped
+   rule in styles/index.css, so the other components that render highlighted
+   code get it too. See the comment there before adding a copy back. */
 </style>

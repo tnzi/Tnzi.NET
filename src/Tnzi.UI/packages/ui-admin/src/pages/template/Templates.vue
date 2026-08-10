@@ -7,6 +7,12 @@
     preview, so there is no separate Preview button. Clone / Edit / Delete are the
     row actions; FileSystem-source templates ship with the binaries and the
     backend rejects edit + delete on them, so those two hide themselves.
+
+    Preview needs `template.template.update`, not a read code: rendering compiles
+    and RUNS the Razor source on the server, so the backend gates it as authoring
+    rather than reading. Cards therefore stop being clickable without it - the
+    body excerpt below already shows what the template says, and a card that
+    silently produced an empty modal would read as a broken page.
   -->
   <TCardPage
     :state="crud"
@@ -23,7 +29,7 @@
          the rendered preview, which is what anyone browsing this library is
          actually after. -->
     <template #card="{ item }">
-      <TEntityCard class="tpl-card" clickable @click="openPreview(item as TemplateRow)">
+      <TEntityCard class="tpl-card" :clickable="canPreview" @click="openPreview(item as TemplateRow)">
         <div class="tpl-card__head">
           <div class="tpl-card__glyph">
             <TSvgIcon :icon="categoryIcon(item.category)" :size="18" />
@@ -78,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { TSvgIcon, TSourceBadge } from '@tnzi/ui'
 import TCardPage from '../../components/crud/TCardPage.vue'
 import TEntityCard from '../../components/data/TEntityCard.vue'
@@ -133,11 +139,20 @@ const rowActions: RowAction<TemplateRow>[] = [
   deleteAction(crud, { show: (row) => !(row as TemplateRow).isReadOnly }),
 ]
 
-// Preview overlay state
+// Preview overlay state.
+// Rendering executes the template's Razor on the server, so the backend gates
+// `POST admin/templates/preview` behind the authoring code rather than the view
+// code. Mirror that here instead of letting every click 403 into a blank modal.
+// computed, not a setup-time snapshot: `can()` reads the auth store, which
+// fails OPEN while `userInfo` is still null (the pre-permission-load window).
+// Capturing it once would freeze that `true` forever and put us right back to
+// every click 403-ing into a blank modal.
+const canPreview = computed(() => can('template.template.update'))
 const previewDetail = useDetail<TemplateInfoDto>({ mode: 'modal', url: 'preview' })
 const previewContent = ref('')
 
 async function openPreview(row: TemplateRow): Promise<void> {
+  if (!canPreview.value) return
   previewContent.value = ''
   await previewDetail.open('view', row)
   try {

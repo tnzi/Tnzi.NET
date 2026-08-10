@@ -28,6 +28,9 @@ public class EFCoreModule : TnziInfrastructureModule
         // 注册多租户开关
         context.Services.AddTnziOptions<MultiTenancyOptions>(configuration);
 
+        // 字段级加密选项（可选能力，Enabled 默认 false）
+        context.Services.AddTnziOptions<FieldEncryptionOptions, FieldEncryptionOptionsValidator>(configuration);
+
         return Task.CompletedTask;
     }
 
@@ -38,6 +41,27 @@ public class EFCoreModule : TnziInfrastructureModule
 
         // 注册 EntityManager
         services.AddSingleton<IEntityManager, EntityManager>();
+
+        // 字段级加密器（可选能力）。
+        // ★单例：值转换器在模型构建期捕获这个实例，而 EF 会缓存并长期复用模型，
+        //   捕获一个 Scoped 实例会让它逃逸出自己的作用域。
+        // ★未启用时刻意注册一个"解析即抛"的工厂，而不是什么都不注册：
+        //   什么都不注册时，实体里调用 IsEncrypted() 只会得到一句含糊的 DI 错误；
+        //   这样能给出"去哪里打开这个开关"的确切指引。
+        //   两种情况下，都不会静默降级成明文落库。
+        services.TryAddSingleton<IFieldEncryptor>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptionsMonitor<FieldEncryptionOptions>>();
+            if (!options.CurrentValue.Enabled)
+            {
+                throw new InvalidOperationException(
+                    "An entity is configured with IsEncrypted() but EFCore:FieldEncryption:Enabled is false. "
+                    + "Enable field encryption and configure a key ring, or register a custom IFieldEncryptor. "
+                    + "Encrypted properties are never silently stored as plaintext.");
+            }
+
+            return new AesGcmFieldEncryptor(options);
+        });
 
         // 注册 TableNamePrefixConfiguration（使用工厂方式，以便获取 IModuleContainer）
         services.AddSingleton<IEntityBatchConfiguration>(serviceProvider =>

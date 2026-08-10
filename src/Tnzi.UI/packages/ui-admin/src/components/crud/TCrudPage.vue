@@ -67,7 +67,7 @@
       <template #toolbar>
         <TCrudColumnSetting
           :settings="props.state.columnSettings"
-          :all-columns="allColumns"
+          :all-columns="settingColumns"
           :show="showColumnSetting"
           :translate="props.translate"
           @update:show="(v: boolean) => (showColumnSetting = v)"
@@ -108,21 +108,32 @@
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { NButton, NTooltip } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TListShell from './TListShell.vue'
 import TTableRenderer from './renderers/TTableRenderer.vue'
 import TCrudColumnSetting from './TCrudColumnSetting.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
-import type { ColumnDef } from '../../headless/useColumnSettings'
+import type { ColumnDef, ColumnDefs } from '../../headless/useColumnSettings'
 import type { FormModalMode } from '../../headless/useFormModal'
 import type { FormSchemaItem } from '@tnzi/ui'
 import type { RowAction } from '../../headless/row-actions'
 
 export interface TCrudPageProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
-  allColumns: ColumnDef[]
+  /**
+   * The page's full column list (the Columns popover shows the hidden ones
+   * too). Declare it against the row type (`ColumnDef<FooDto>[]`) for checked
+   * `render` bodies, or pass the loose shape - see {@link ColumnDefs}.
+   *
+   * `NoInfer` is load-bearing: without it this becomes a second inference site
+   * for `T` and a config typed against a narrower row alias than the state's
+   * DTO (`ColumnDef<LoginLogRow>[]` next to `useCrudPage<LoginLogDto>`) makes
+   * TS pick the alias and then reject `:state`. The row type is decided by the
+   * CRUD state; columns are checked against it, never define it.
+   */
+  allColumns: ColumnDefs<NoInfer<T>>
   title?: string
   /** Optional row-key override (defaults to `state.rowKey`). Preserved from
       the legacy TCrudPage public API. */
@@ -223,6 +234,13 @@ defineSlots<{
 }>()
 
 const showColumnSetting = ref(false)
+
+// The Columns popover reads key / title / visibility only - it never calls a
+// column's `render` - so it takes the loose shape. Normalising here (rather
+// than widening its prop) keeps the row-typed contract at this component's
+// boundary, where the page declares it. Vue templates cannot carry a cast, so
+// the seam is this computed rather than the `:all-columns` binding.
+const settingColumns = computed<ColumnDef[]>(() => props.allColumns as ColumnDef[])
 
 function t(key: string): string {
   return props.translate ? props.translate(key) : key

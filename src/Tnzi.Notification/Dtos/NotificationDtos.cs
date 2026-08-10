@@ -30,6 +30,16 @@ public class CreateNotificationRequest
     public Guid? SenderId { get; set; }
 
     /// <summary>
+    /// 事务性消息（与商业/群发消息相对）：本条消息不受退订名单约束。默认 <c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// 密码重置、二次验证码、账单与订阅通知设为 <c>true</c> —— 退订按钮管的是营销邮件，
+    /// 不该让人再也收不到验证码。**拿不准就别设**：默认按商业消息处理，宁可少发一条，
+    /// 也不要让收件人点过的退订形同虚设。
+    /// </remarks>
+    public bool IsTransactional { get; set; }
+
+    /// <summary>
     /// Scheduled send time (null = send immediately or as queued).
     /// When set, notification will be held until this UTC time.
     /// </summary>
@@ -85,6 +95,10 @@ public class NotificationInfo
     public NotificationPriority Priority { get; set; }
     public Guid? SenderId { get; set; }
     public string Category { get; set; } = "General";
+
+    /// <summary>事务性消息：不受退订名单约束。见 <see cref="CreateNotificationRequest.IsTransactional"/>。</summary>
+    public bool IsTransactional { get; set; }
+
     public string? TemplateName { get; set; }
     public DateTime? ScheduledTime { get; set; }
     public List<RecipientOutput> Recipients { get; set; } = new();

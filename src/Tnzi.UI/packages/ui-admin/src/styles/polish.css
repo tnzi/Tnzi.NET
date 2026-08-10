@@ -653,9 +653,9 @@ body *::-webkit-scrollbar-thumb:active {
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 
-/* ===== Naive UI button restoration (Tailwind / UnoCSS preflight override) =====
+/* ===== Naive UI button restoration (UnoCSS preflight override) =====
  *
- * Tailwind / UnoCSS preflight emits
+ * UnoCSS's presetWind4 preflight emits
  *   `button, [type="submit"], … { background-color: transparent }`
  * with selector specificity (0,1,0). Naive UI's `.n-button { background-color:
  * var(--n-color) }` is also (0,1,0) - they tie, so cascade order decides, and

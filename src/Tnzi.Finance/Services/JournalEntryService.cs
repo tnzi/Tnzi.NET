@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 会计凭证服务（草稿工作流 + 过账 + 冲销）
@@ -214,6 +214,31 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         return await GetAsync(entry.Id, cancellationToken);
     }
 
+    /// <summary>
+    /// 有单据级作废端点的来源令牌 —— 它们的凭证只能经单据 void 撤销。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>刻意不用 <see cref="FinanceSourceTypes.All"/></b>：那份清单还含
+    /// <see cref="FinanceSourceTypes.Revaluation"/> 与 <see cref="FinanceSourceTypes.PaymentApplication"/>，
+    /// 而这两者<b>没有</b>单据级作废端点 —— 期末重估的唯一撤销路径恰恰就是从总账冲销
+    /// （<c>RevaluationService</c> 自己的错误消息写着「Reverse it before revaluing an earlier or equal date」）。
+    /// 把它们一起拦下会堵死一条既定流程。
+    /// </para>
+    /// <para>
+    /// 新增带 <c>VoidAsync</c> 的单据类型时要同步加进来，否则它的凭证又可以从总账绕过去。
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> DocumentProjectedSourceTypes = new(StringComparer.Ordinal)
+    {
+        FinanceSourceTypes.Invoice,
+        FinanceSourceTypes.Bill,
+        FinanceSourceTypes.CreditMemo,
+        FinanceSourceTypes.Expense,
+        FinanceSourceTypes.PaymentEntry,
+        FinanceSourceTypes.Transfer,
+    };
+
     public async Task<Result<JournalEntryDto>> ReverseAsync(Guid id, ReverseJournalEntryDto input, CancellationToken cancellationToken = default)
     {
         Check.NotNull(input);
@@ -228,6 +253,24 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
             return Fail<JournalEntryDto>("Draft entries cannot be reversed. Delete the draft instead.", 409);
         if (original.Status == JournalEntryStatus.Reversed || original.ReversedByEntryId.HasValue)
             return Fail<JournalEntryDto>("The entry has already been reversed.", 409);
+
+        // ★ 单据投影出来的凭证必须经**单据自己的**作废端点撤销，不得从总账直接冲销。
+        //
+        // 从这里冲销一张发票的凭证，总账被抵消了而发票自身仍是 Posted、仍进账龄 ——
+        // 控制科目与子账从此对不上，且两侧各自看起来都正常。单据 void 端点会同时冲销凭证、
+        // 置单据为 Voided、回填 VoidJournalEntryId，那才是完整的一次撤销。
+        //
+        // ★ 判据用 SourceType 而不是「是不是冲销凭证」：冲销凭证继承原凭证的 SourceType，
+        // 所以「冲销一张发票冲销凭证」同样被拦下（那正是绕过单据状态门的第二条路）。
+        // ★ **刻意不做成「一律禁止冲销冲销凭证」**：消费应用经 ILedgerPostingService 写的
+        // 自定义单据带自己的 SourceType（不在本清单里），对它们而言冲销冲销是合法的撤销作废。
+        if (!string.IsNullOrEmpty(original.SourceType)
+            && DocumentProjectedSourceTypes.Contains(original.SourceType))
+        {
+            return Fail<JournalEntryDto>(
+                $"This entry was posted from a {original.SourceType}. Void that document instead so its status and the ledger stay in sync.",
+                409);
+        }
 
         var guardResult = await _guards.CheckAsync(nameof(JournalEntry), original.Id.ToString(), FinancePostingOperation.Reverse, original, cancellationToken);
         if (!guardResult.Succeeded)

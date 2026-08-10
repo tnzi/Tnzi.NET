@@ -4,7 +4,7 @@
  * Data query orchestrator - combines pagination + sort + selection for complete data query logic.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 import { PaginationController } from './pagination';
 import { SelectionController } from './selection';
 import { SortController } from './sort';

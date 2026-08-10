@@ -102,7 +102,6 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(IAiUtility))]
     [InlineData(typeof(ITnziAiClient))]
     [InlineData(typeof(ITokenEstimator))]
-    [InlineData(typeof(IDocumentConverter))]
     [InlineData(typeof(IConfigChangeDetector))]
     [InlineData(typeof(IA2AClient))]
     [InlineData(typeof(IAgentEvaluator))]

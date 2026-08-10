@@ -65,7 +65,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
 
         // 排队前先问预算：让调用方当场知道，而不是排完队再失败。
         // 这不是唯一的门 —— 队列可能积压很久，真正的执法在认领之后（见 CliRunExecutor）。
-        var budget = await CheckBudgetAsync(request.AgentId, cancellationToken);
+        var budget = await CheckBudgetAsync(request, cancellationToken);
         if (budget is { IsAllowed: false })
         {
             return Fail<Guid>(
@@ -123,15 +123,25 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     /// 真的没有它，就是宿主根本没装预算能力，此时「允许」是正确答案而不是降级。
     /// 预算本身关着（<c>AI:Budget:Enabled=false</c>，默认）时该服务恒返回允许。
     /// </para>
+    /// <para>
+    /// ★ <b>归属口径必须与内建路径一致</b>：<c>QuotaMiddleware</c> 按
+    /// <c>context.Request.UserId</c>（即 <c>AgentRunRequest.UserId</c>）算，而
+    /// <c>AgentDispatchFacade</c> 把同一个值原样传进了 <c>CliRunRequestDto.UserId</c>。
+    /// 这里若只读环境上下文里的 <c>CurrentUser</c>，那么任何「代某人执行」的场景
+    /// （后台派发、父 agent 派子任务）在外部路径上都会算到另一个人（或没人）头上 ——
+    /// 而外部路径恰恰是两条里更贵的那条。今天两者取值相同，所以这是<b>潜在</b>而非
+    /// 已发生的偏差；写成显式优先级是为了它不要在某天悄悄成立。
+    /// </para>
     /// </remarks>
-    private async Task<BudgetCheckResult?> CheckBudgetAsync(Guid agentId, CancellationToken cancellationToken)
+    private async Task<BudgetCheckResult?> CheckBudgetAsync(CliRunRequestDto request, CancellationToken cancellationToken)
     {
         if (_budgetService is null) return null;
 
         var currentUser = CurrentUser;
         var tenantId = ServiceProvider.GetService<ICurrentTenant>()?.Id ?? currentUser?.TenantId;
+        var userId = request.UserId ?? currentUser?.Id;
 
-        return await _budgetService.CheckBudgetAsync(currentUser?.Id, tenantId, agentId, cancellationToken);
+        return await _budgetService.CheckBudgetAsync(userId, tenantId, request.AgentId, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -139,6 +149,15 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         Guid runId, int fromSequence = 0,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        // ★ 订阅同样要过归属判定。这里只能 yield break 而不是回 404 ——
+        // 控制器在开始迭代之前已经写了 SSE 响应头。不可见与「运行不存在」表现一致
+        // （都是一条事件都收不到），所以探测者仍然分不出这个 id 是不是真的。
+        var subject = await _runRepository.GetAsync(runId, cancellationToken);
+        if (subject is null || !await CanSeeAsync(subject))
+        {
+            yield break;
+        }
+
         var lastSequence = fromSequence;
 
         while (!cancellationToken.IsCancellationRequested)
@@ -193,11 +212,51 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         }
     }
 
+    /// <summary>
+    /// 这一条运行该不该让当前调用者看到。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>为什么判定必须在这里而不在控制器里</b>：用户端与管理端两个控制器调用的是
+    /// <b>同一批</b>方法（<c>Get</c>/<c>Stream</c>/<c>GetMessages</c>/<c>Cancel</c> 逐个对应），
+    /// 而它们都是 <c>[DefaultController]</c>、消费应用可整体替换。把判定放控制器 =
+    /// 换一个控制器就没有了。
+    /// </para>
+    /// <para>
+    /// 判据沿 AI 模块既有的 house 模式（<c>AgentThreadService</c> / <c>MessageFeedbackService</c> /
+    /// <c>AgentArtifactService</c> 一律用 <c>CreatorId == 当前用户</c>）：
+    /// </para>
+    /// <list type="number">
+    /// <item>是自己派出的（<c>CreatorId</c> 匹配）→ 放行。</item>
+    /// <item>否则要有管理端查看码 <c>ai.cliRun.view</c> → 管理台照常看全部。</item>
+    /// </list>
+    /// <para>
+    /// ★ <c>CreatorId</c> 为空的运行（后台/系统派出）对<b>任何</b>已认证用户都不可见，
+    /// 只有管理端能看 —— 与 <c>AgentThreadService</c> 对无主线程的处理逐字一致，
+    /// 也是唯一安全的缺省方向。
+    /// </para>
+    /// <para>
+    /// ★ 拒绝一律按 <b>404</b> 出（框架铁律）：把「不存在」与「不是你的」区分开，
+    /// 等于告诉试探者哪些 id 是真的。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> CanSeeAsync(CliRun run)
+    {
+        var currentUserId = CurrentUser?.Id;
+        if (currentUserId.HasValue && run.CreatorId == currentUserId)
+        {
+            return true;
+        }
+
+        var checker = PermissionChecker;
+        return checker is not null && await checker.IsGrantedAsync(CliPermissions.CliRunView);
+    }
+
     /// <inheritdoc />
     public async Task<Result<CliRunDto>> GetAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         var run = await _runRepository.GetAsync(runId, cancellationToken);
-        if (run is null)
+        if (run is null || !await CanSeeAsync(run))
         {
             return Fail<CliRunDto>("CLI run not found.", 404, ErrorCodes.CliRunNotFound);
         }
@@ -217,7 +276,15 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     {
         Check.NotNull(query);
 
+        // 列表今天只挂在管理端控制器上，但把范围收紧写在服务里而不是「靠调用方只从管理端调」：
+        // 控制器可被消费应用整体替换，也随时可能长出一个用户端「我的运行」列表。
+        // 无管理码 → 只看自己派出的；CreatorId 为空的（后台派出）对任何用户都不出现。
+        var checker = PermissionChecker;
+        var canSeeAll = checker is not null && await checker.IsGrantedAsync(CliPermissions.CliRunView);
+        var currentUserId = CurrentUser?.Id;
+
         var queryable = _runRepository
+            .WhereIf(r => r.CreatorId == currentUserId && currentUserId != null, !canSeeAll)
             .WhereIf(r => r.AgentId == query.AgentId, query.AgentId.HasValue)
             .WhereIf(r => r.CliRuntimeId == query.CliRuntimeId, query.CliRuntimeId.HasValue)
             .WhereIf(r => r.Status == query.Status!.Value, query.Status.HasValue)
@@ -234,8 +301,8 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     public async Task<Result<List<CliRunMessageDto>>> GetMessagesAsync(
         Guid runId, int fromSequence = 0, CancellationToken cancellationToken = default)
     {
-        var exists = await _runRepository.AnyAsync(r => r.Id == runId, cancellationToken);
-        if (!exists)
+        var run = await _runRepository.GetAsync(runId, cancellationToken);
+        if (run is null || !await CanSeeAsync(run))
         {
             return Fail<List<CliRunMessageDto>>("CLI run not found.", 404, ErrorCodes.CliRunNotFound);
         }
@@ -253,7 +320,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     public async Task<Result> CancelAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         var run = await _runRepository.GetAsync(runId, cancellationToken);
-        if (run is null)
+        if (run is null || !await CanSeeAsync(run))
         {
             return Fail("CLI run not found.", 404, ErrorCodes.CliRunNotFound);
         }

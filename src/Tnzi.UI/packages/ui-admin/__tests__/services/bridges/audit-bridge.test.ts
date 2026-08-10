@@ -131,4 +131,48 @@ describe('audit-bridge', () => {
     await expect(bridge.operations.update('id', {})).rejects.toThrow()
     await expect(bridge.operations.delete(['id'])).rejects.toThrow()
   })
+
+  // ---- 失败信封必须抛，不能被当成成功 ----
+  //
+  // ★ 这是本 bridge 最初写错的地方：HttpClient 对非 2xx **返回失败信封而不 reject**,
+  //   而 `unwrapResult` 会把信封里的 (null) data 原样交出来、一声不吭。于是
+  //   "链断了" 会显示成 "链完整,未发现篡改" —— 一个报假平安的安全校验比没有更糟。
+  //   页面测试 mock 的是 bridge 层,永远看不到这一层,所以门禁必须在这里。
+
+  const failedEnvelope = { succeeded: false, message: 'chain broken at sequence 7', data: null }
+
+  it('recordAccess.verify throws on a failed envelope instead of reporting success', async () => {
+    const bridge = createAuditBridge({
+      recordAccessApi: { verify: vi.fn(async () => failedEnvelope) } as never,
+    })
+
+    await expect(bridge.recordAccess.verify('u1')).rejects.toThrow('chain broken at sequence 7')
+  })
+
+  it('destruction.verify throws on a failed envelope', async () => {
+    const bridge = createAuditBridge({
+      destructionApi: { verify: vi.fn(async () => failedEnvelope) } as never,
+    })
+
+    await expect(bridge.destruction.verify()).rejects.toThrow('chain broken at sequence 7')
+  })
+
+  it('destruction.run surfaces the backend reason rather than a null dereference', async () => {
+    const bridge = createAuditBridge({
+      destructionApi: {
+        run: vi.fn(async () => ({ succeeded: false, message: 'duplicate policy names', data: null })),
+      } as never,
+    })
+
+    await expect(bridge.destruction.run()).rejects.toThrow('duplicate policy names')
+  })
+
+  it('injecting one api leaves the other sub-contracts usable', async () => {
+    // A test that only cares about logs/operations should not have to hand-roll
+    // mocks for the two optional capabilities it never touches.
+    const bridge = createAuditBridge({ auditApi: mockAuditApi() as never })
+
+    expect(typeof bridge.recordAccess.fetch).toBe('function')
+    await expect(bridge.recordAccess.verify()).rejects.toThrow('no deps provided')
+  })
 })

@@ -22,5 +22,16 @@
     <ProjectReference Include="..\..\src\Tnzi\Tnzi.csproj" />
   </ItemGroup>
 
+  <!--
+    仓库根的编译期真值，供 RepoRoot.Locate() 使用。
+
+    为什么不靠运行时从 AppContext.BaseDirectory 向上找：那条路径依赖测试产物落在仓库树内，
+    而 -p:BaseOutputPath=<临时目录>/（本仓库验证手册用来绕开 MSB3021 文件锁的推荐做法）
+    会把产物挪出仓库，于是 12 个源码扫描门禁全部静默通过。编译期路径没有这个耦合。
+  -->
+  <ItemGroup>
+    <AssemblyMetadata Include="TnziRepoRoot" Value="$(MSBuildThisFileDirectory)..\.." />
+  </ItemGroup>
+
 </Project>
 

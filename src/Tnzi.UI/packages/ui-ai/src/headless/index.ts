@@ -47,3 +47,19 @@ export { useGlobalAiTheme, AI_THEME_SCOPE } from './useGlobalAiTheme';
 export type { UseGlobalAiThemeOptions, UseGlobalAiThemeReturn } from './useGlobalAiTheme';
 export { useChatThreads } from './useChatThreads';
 export type { UseChatThreadsOptions, UseChatThreadsReturn } from './useChatThreads';
+export { useAiPersonalization } from './useAiPersonalization';
+export type {
+  UseAiPersonalizationOptions,
+  UseAiPersonalizationReturn,
+  AiPersonalizationDraft,
+} from './useAiPersonalization';
+export { useAccountSettings } from './useAccountSettings';
+export type {
+  UseAccountSettingsOptions,
+  UseAccountSettingsReturn,
+  AccountDraft,
+} from './useAccountSettings';
+export { useAiNaiveTheme } from './useAiNaiveTheme';
+export type { UseAiNaiveThemeReturn } from './useAiNaiveTheme';
+export { useAiUsage, usageBarPercent, formatTokens, isUnlimited } from './useAiUsage';
+export type { UseAiUsageOptions, UseAiUsageReturn } from './useAiUsage';

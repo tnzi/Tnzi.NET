@@ -67,7 +67,30 @@ public interface ICache
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递增后的值</returns>
     Task<long> IncrementAsync(string key, long increment, TimeSpan expiration, CancellationToken cancellationToken = default);
-    
+
+    /// <summary>
+    /// 读取由 <see cref="IncrementAsync(string, long, CancellationToken)"/> 维护的计数值，键不存在时返回 0。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>计数一律经本方法读取，不要自己写 <c>GetAsync&lt;int&gt;</c>。</b>
+    /// <c>IncrementAsync</c> 契约上存的是 <see cref="long"/>，而 <c>MemoryCacheService.GetAsync&lt;T&gt;</c>
+    /// 走 <c>IMemoryCache.TryGetValue&lt;TItem&gt;</c>，其判定是 <c>result is TItem</c> ——
+    /// 装箱的 <c>long</c> 不满足 <c>is int</c>，于是 <c>GetAsync&lt;int&gt;</c> 读同一个键<b>必然落空并返回 0</b>。
+    /// </para>
+    /// <para>
+    /// 这条不匹配不会报错，症状是<b>闸门永不触发</b>：计数恒为 0，所以「失败次数超限」「消息数超限」
+    /// 这类判定永远为假。2026-08-08 的审计实测踩中三处 —— 2FA 验证码失败锁定、滑块验证码难度自适应、
+    /// SignalR 消息限流，三者的写入侧都正确地做了原子递增，只有读出侧类型写错了。
+    /// </para>
+    /// <para>
+    /// <b>它还只在默认内存缓存下发生</b>：Redis 实现走 JSON 反序列化，<c>"5"</c> 能正常解析成 <c>int</c>，
+    /// 所以配了 Redis 的环境（通常是 staging 与生产）测得通，单机部署静默失效。
+    /// </para>
+    /// </remarks>
+    async Task<long> GetCounterAsync(string key, CancellationToken cancellationToken = default)
+        => await GetAsync<long>(key, cancellationToken);
+
     /// <summary>
     /// 递减缓存值
     /// </summary>

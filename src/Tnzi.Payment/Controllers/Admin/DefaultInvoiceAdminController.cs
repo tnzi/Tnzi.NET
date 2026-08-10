@@ -8,20 +8,20 @@ namespace Tnzi.Payment.Controllers.Admin;
 [ApiAuthorize(PermissionName = "payment.invoice.view")]
 public class DefaultInvoiceAdminController : ApiAdminControllerBase
 {
-    private readonly IInvoiceService _invoiceService;
+    private readonly IPaymentInvoiceService _invoiceService;
 
-    public DefaultInvoiceAdminController(IInvoiceService invoiceService)
+    public DefaultInvoiceAdminController(IPaymentInvoiceService invoiceService)
     {
         _invoiceService = Check.NotNull(invoiceService);
     }
 
-    protected IInvoiceService InvoiceService => _invoiceService;
+    protected IPaymentInvoiceService PaymentInvoiceService => _invoiceService;
 
     /// <summary>
     /// 获取发票列表
     /// </summary>
     [HttpGet]
-    public virtual async Task<ApiResult<IPagedList<InvoiceDto>>> GetList([FromQuery] InvoiceQueryDto query)
+    public virtual async Task<ApiResult<IPagedList<PaymentInvoiceDto>>> GetList([FromQuery] PaymentInvoiceQueryDto query)
     {
         var result = await _invoiceService.GetListAsync(query);
         return result.ToApiResult();
@@ -31,7 +31,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// 获取发票信息
     /// </summary>
     [HttpGet("{id:guid}")]
-    public virtual async Task<ApiResult<InvoiceDto>> Get(Guid id)
+    public virtual async Task<ApiResult<PaymentInvoiceDto>> Get(Guid id)
     {
         var result = await _invoiceService.GetAsync(id);
         return result.ToApiResult();
@@ -42,7 +42,7 @@ public class DefaultInvoiceAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPost("manual")]
     [ApiAuthorize(PermissionName = "payment.invoice.create")]
-    public virtual async Task<ApiResult<InvoiceDto>> CreateManual([FromBody] CreateInvoiceDto request)
+    public virtual async Task<ApiResult<PaymentInvoiceDto>> CreateManual([FromBody] CreatePaymentInvoiceDto request)
     {
         var result = await _invoiceService.CreateManualAsync(request);
         return result.ToApiResult();

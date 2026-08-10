@@ -90,6 +90,35 @@ public class UserService : ApplicationService, IUserService
         return Ok(userDto, "User created successfully");
     }
 
+    /// <inheritdoc />
+    public Task<Result<UserDto>> UpdateProfileAsync(Guid id, UpdateProfileDto input)
+    {
+        Check.NotNull(input);
+
+        // 逐字段显式搬运，不用 MapTo：映射器是「按名字尽量搬」的语义，
+        // 将来给 UpdateUserDto 加一个特权字段时，它会连同新字段一起被搬过来，
+        // 而这里要的恰恰是「特权字段永远保持 null」。显式赋值让新增字段默认落在安全的一侧。
+        var admin = new UpdateUserDto
+        {
+            Email = input.Email,
+            PhoneNumber = input.PhoneNumber,
+            FirstName = input.FirstName,
+            LastName = input.LastName,
+            Nickname = input.Nickname,
+            AvatarUrl = input.AvatarUrl,
+            AvatarId = input.AvatarId,
+            Gender = input.Gender,
+            Birthday = input.Birthday,
+            Bio = input.Bio,
+            Address = input.Address,
+            Website = input.Website,
+            // OrganizationId / RoleIds 刻意不赋值：自助路径不得改所属组织与角色
+        };
+
+        return UpdateAsync(id, admin);
+    }
+
+    /// <inheritdoc />
     public async Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input)
     {
         var user = await _userManager.FindByGuidAsync(id);

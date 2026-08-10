@@ -72,7 +72,6 @@
   },
   "dependencies": {
     "@tnzi/core": "workspace:*",
-    "@vue/reactivity": "^3.5.38",
     "@vueuse/core": "catalog:",
     "colord": "^2.9.3",
     "cropperjs": "^2.1.1"

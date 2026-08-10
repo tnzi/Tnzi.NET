@@ -4,7 +4,7 @@
  * 排序控制器 - 响应式无头逻辑。
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 
 // ============================================
 // Types

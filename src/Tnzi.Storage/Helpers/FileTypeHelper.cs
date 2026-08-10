@@ -16,9 +16,49 @@ public static class FileTypeHelper
         if (string.IsNullOrEmpty(extension))
             return false;
 
-        var imageExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico" };
+        // ★ .heic/.heif 是 iOS 相机的默认格式，.tif/.tiff 是扫描仪的默认格式 —— 它们不在这张
+        // 表里的后果不是「判不出是图片」而是 GetContentType 回落 application/octet-stream，
+        // 于是任何按 image/* 分支的下游（预览、缩略图、收据识别）都当它是二进制附件拒掉。
+        var imageExtensions = new[]
+        {
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico",
+            ".heic", ".heif", ".avif", ".tif", ".tiff"
+        };
         return Array.Exists(imageExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// 本机图片解码器（ImageSharp 3.1）读不了的图片格式。
+    /// </summary>
+    /// <remarks>
+    /// <c>.svg</c> 是矢量格式，ImageSharp 从来不支持；<c>.heic</c>/<c>.heif</c>/<c>.avif</c> 需要
+    /// 额外编解码器（框架刻意锁在 ImageSharp 3.1.x 免授权线上，见 <c>Tnzi.Imaging.csproj</c>）。
+    /// <para>
+    /// <c>.ico</c> <b>刻意不在此列</b>：它在 3.1 上能不能解码没有实测过，而它本来就走缩略图路径 ——
+    /// 列进来会改变一个与本表无关的既有行为。
+    /// </para>
+    /// </remarks>
+    private static readonly string[] NonDecodableImageExtensions = [".svg", ".heic", ".heif", ".avif"];
+
+    /// <summary>
+    /// 判断这个图片格式是否<b>解得开</b>（可用于生成缩略图 / 二次编码）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <see cref="IsImage"/> <b>正交</b>，调用方要区分两个问题：
+    /// 「这是不是一张图」（决定 Content-Type、决定要不要按图片呈现）与
+    /// 「我们的解码器读不读得了」（决定能不能生成缩略图）。
+    /// <para>
+    /// 混用的后果是**可预期的失败被当成异常记录**：`.heic` 是 iOS 相机默认格式，
+    /// 每张上传的照片都会让缩略图解码抛一次、在日志里留一条 ERROR，
+    /// 而那既不是错误也没有人能处理。`.svg` 从来就是这样（在本方法出现之前就是）。
+    /// </para>
+    /// 这与 <c>Tnzi.Documents</c> 的 <c>CanConvert</c>（格式白名单）vs <c>IsAvailable</c>
+    /// （宿主装了 LibreOffice 吗）是同一条教训：**两个正交的问题，调用方必须都问**。
+    /// </remarks>
+    /// <param name="extension">文件扩展名（包含点号）</param>
+    public static bool IsThumbnailable(string extension)
+        => IsImage(extension)
+           && !Array.Exists(NonDecodableImageExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// 判断是否为 PDF 文件。
@@ -108,6 +148,10 @@ public static class FileTypeHelper
             ".webp" => "image/webp",
             ".svg" => "image/svg+xml",
             ".ico" => "image/x-icon",
+            ".heic" => "image/heic",
+            ".heif" => "image/heif",
+            ".avif" => "image/avif",
+            ".tif" or ".tiff" => "image/tiff",
             ".pdf" => "application/pdf",
             ".txt" => "text/plain",
             ".html" => "text/html",

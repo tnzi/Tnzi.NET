@@ -26,9 +26,17 @@
  * this factory render it would trade that away for a few saved lines. The
  * `home` component is yours.
  */
-import type { App, Component } from 'vue';
+import { watchEffect, type App, type Component } from 'vue';
 import type { Router, RouteRecordRaw } from 'vue-router';
 import { createTnziAuthGuard } from '@tnzi/core';
+import {
+  THEME_CONTEXT_KEY,
+  createThemeContext,
+  mergeThemeSettings,
+  buildCssVars,
+  injectCssVars,
+  type ThemeSettings,
+} from '@tnzi/ui';
 import type { AdminAuthRuntime } from '@tnzi/ui';
 import TAuthRoute from '../auth/TAuthRoute.vue';
 
@@ -69,6 +77,18 @@ export interface DefineChatAppOptions {
    * its own - two guards racing to redirect is worse than none.
    */
   guard?: boolean;
+  /**
+   * The `@tnzi/ui` theme this product runs on. A partial `ThemeSettings` (most
+   * products set `colors.primary` and nothing else) is merged over the
+   * defaults; `false` opts out entirely.
+   *
+   * Establishing it here is what makes the colour actually reach the UI: the
+   * theme fans out to naive-ui overrides, `--tnzi-*` CSS variables and UnoCSS
+   * atoms at once, so one value moves the naive controls and this package's
+   * own painted surfaces together. Ignored when the host app already provided
+   * a theme context of its own.
+   */
+  theme?: Partial<ThemeSettings> | false;
 }
 
 export interface DefineChatAppResult {
@@ -114,7 +134,34 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
     ...(options.routes ?? []),
   ];
 
-  function install(_app: App, router: Router): void {
+  function install(app: App, router: Router): void {
+    /* Establish the `@tnzi/ui` theme unless the host already did.
+     *
+     * This package is an application package built on `@tnzi/ui`, and that is
+     * where the theme lives: one `ThemeSettings` fans out to naive-ui
+     * overrides, `--tnzi-*` CSS variables and UnoCSS atoms. Chat apps were not
+     * calling `createTnziUi()`, so none of those variables were ever on the
+     * document - which made this package's own tokens fall back to their
+     * literals and left "change the product's look" with nothing to change.
+     *
+     * Skipped when a host context already exists so an app that mounts
+     * `createTnziUi()` itself keeps ownership; `provideTheme` here would
+     * shadow it. */
+    if (options.theme !== false && !app._context.provides[THEME_CONTEXT_KEY as symbol]) {
+      const settings = mergeThemeSettings(
+        typeof options.theme === 'object' ? options.theme : {},
+      );
+      const context = createThemeContext(settings);
+      app.provide(THEME_CONTEXT_KEY, context);
+
+      /* Write the variables and keep writing them: the palette AND the
+         light/dark half both live in this map, so a mode flip has to re-emit
+         it or the surfaces keep the previous mode's greys. */
+      watchEffect(() => {
+        injectCssVars(buildCssVars(context.settings.value.colors, context.resolvedMode.value));
+      });
+    }
+
     if (options.guard === false) return;
 
     const { auth } = options.runtime;

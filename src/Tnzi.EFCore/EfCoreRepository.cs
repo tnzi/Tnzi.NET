@@ -686,6 +686,27 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// 只改变更跟踪状态，<b>不产生任何 SQL</b>：把实体置为 <see cref="EntityState.Detached"/>，
+    /// 于是它不再参与本 <c>DbContext</c> 后续的任何 <c>SaveChanges</c>。
+    /// <para>
+    /// ★ 刻意<b>不</b>复用 <see cref="DeleteAsync(TEntity, CancellationToken)"/>：那是业务删除 ——
+    /// 对软删实体会写 <c>IsDeleted = true</c> 然后走 <c>UpdateAsync</c>，而一个处于
+    /// <c>Added</c> 状态的实体在那条路径上会被<b>真的插进库里</b>（只是带着已删标记），
+    /// 也就是给一条从未成功过的插入凭空造出一行垃圾数据 —— 而软删实体的过滤唯一索引
+    /// 通常排除已删行，所以它甚至不会报错。
+    /// </para>
+    /// </remarks>
+    public virtual void Discard(TEntity entity)
+    {
+        Check.NotNull(entity);
+
+        var entry = DbContext.Entry(entity);
+        if (entry.State != EntityState.Detached)
+            entry.State = EntityState.Detached;
+    }
+
     public virtual async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         Check.NotNull(entity);

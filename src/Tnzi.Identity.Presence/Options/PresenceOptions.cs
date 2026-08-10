@@ -4,9 +4,20 @@ namespace Tnzi.Identity.Presence.Options;
 /// 用户在线状态（presence）模块配置。
 /// 配置路径：Presence
 /// </summary>
+/// <remarks>
+/// <b><c>PermissionGroup = "identity"</c> 不是可省的装饰。</b>配置组派生的一对权限码
+/// （<c>{permGroup}.settings.presence.view|update</c>）必须挂到一个<b>真实存在</b>的权限组下，
+/// 而缺省值是 <c>Module</c> 归一化后的 <c>"presence"</c> —— 本模块没有、也不需要自己的权限组
+/// （它一个 admin 控制器都没有）。挂到不存在的组上，<c>PermissionDbSeeder</c> 会记一行 warning
+/// 然后把这两个码<b>丢掉</b>：配置中心里这一组从此只有超管能看能改，角色权限矩阵里连行都没有。
+/// 本模块是 Identity 的子模块（共享 <c>Identity_</c> 表前缀），归到 <c>identity</c> 组是它的自然归属，
+/// 且 <c>[DependsOn(IdentityModule)]</c> 保证该组永远已被 <c>IdentityPermissions</c> 声明。
+/// 同一形态的门禁见 <c>SettingsPermissionGroupResolutionTests</c>。
+/// </remarks>
 [ConfigSection("Presence")]
 [RuntimeSettingGroup(Key = "presence", Module = "Presence", DisplayName = "Presence",
-    Icon = "mdi:account-clock-outline", Order = 455, I18nKey = "admin.modules.system.settings.groups.presence")]
+    Icon = "mdi:account-clock-outline", Order = 455, I18nKey = "admin.modules.system.settings.groups.presence",
+    PermissionGroup = "identity")]
 public class PresenceOptions
 {
     /// <summary>

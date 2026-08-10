@@ -23,6 +23,9 @@ const LEVELS: readonly PaletteLevel[] = [50, 100, 200, 300, 400, 500, 600, 700, 
 export function buildCssVars(
   colors: ThemeColors,
   mode: 'light' | 'dark',
+  /** Base corner radius. Omitted keeps the default, so existing callers are
+   *  unaffected and simply get the structural tokens they had none of. */
+  radius: number = DEFAULT_RADIUS,
 ): CssVarMap {
   const vars: CssVarMap = {}
 
@@ -77,7 +80,55 @@ export function buildCssVars(
     vars['--tnzi-shadow-drawer'] = '0 8px 24px rgb(0 0 0 / 50%)'
   }
 
+  Object.assign(vars, buildStructuralVars(radius))
+
   return vars
+}
+
+/**
+ * Shape and motion, the half of a theme that is not colour.
+ *
+ * Kept apart from the palette because it does not vary with light/dark: a
+ * radius or a duration is the same in both modes, and emitting it twice invites
+ * the two copies to drift. `buildCssVars` folds it in so callers get one map.
+ *
+ * This layer exists because the packages above had grown their own: ui-admin
+ * carried `--tnzi-admin-radius-*` (driven by its theme store, and separately
+ * pushed into naive's `common.borderRadius`), and ui-ai carried literal
+ * `--tnzi-ai-modal-radius` / `--tnzi-ai-duration-*` / `--tnzi-ai-easing`. Two
+ * parallel systems mean "make the corners rounder" is two changes that can
+ * disagree. Now both derive from here.
+ *
+ * @param radius base corner radius in px. The scale is derived rather than
+ *        configured per-step: a product picks one number, and sm/lg/xl keep
+ *        their proportions instead of needing four decisions.
+ */
+export function buildStructuralVars(radius = DEFAULT_RADIUS): CssVarMap {
+  const r = clampRadius(radius)
+  return {
+    '--tnzi-radius': `${r}px`,
+    '--tnzi-radius-sm': `${Math.max(0, Math.round(r * 0.5))}px`,
+    '--tnzi-radius-lg': `${Math.round(r * 2)}px`,
+    '--tnzi-radius-xl': `${Math.round(r * 3)}px`,
+    /* Full-round. A token rather than a literal so "pill" is one concept. */
+    '--tnzi-radius-pill': '999px',
+
+    '--tnzi-duration-fast': '120ms',
+    '--tnzi-duration-base': '200ms',
+    '--tnzi-duration-slow': '320ms',
+    /* Material's standard decelerate curve - what the sidebar width animation
+       and every hover transition in the ecosystem already used by hand. */
+    '--tnzi-easing': 'cubic-bezier(0.2, 0, 0, 1)',
+  }
+}
+
+/** Matches the range ui-admin's radius slider already offered. */
+export const DEFAULT_RADIUS = 6
+const MAX_RADIUS = 16
+
+export function clampRadius(radius: number): number {
+  if (!Number.isFinite(radius)) return DEFAULT_RADIUS
+  return Math.max(0, Math.min(MAX_RADIUS, Math.round(radius)))
 }
 
 /**

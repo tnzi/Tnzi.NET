@@ -52,13 +52,13 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         context.Services.AddScoped<IRefundService, RefundService>();
         context.Services.AddScoped<ISubscriptionService, SubscriptionService>();
-        context.Services.AddScoped<IInvoiceService, InvoiceService>();
+        context.Services.AddScoped<IPaymentInvoiceService, PaymentInvoiceService>();
         context.Services.AddScoped<IPromotionService, PromotionService>();
         context.Services.AddScoped<ICouponService, CouponService>();
         context.Services.AddScoped<IPaymentStatisticsService, PaymentStatisticsService>();
 
         // 税额计算：默认按配置的单一税率；应用可在自己的模块里覆盖（TryAdd 让消费者的注册优先）
-        context.Services.TryAddScoped<ITaxCalculator, DefaultTaxCalculator>();
+        context.Services.TryAddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
 
         // 注册支付渠道
         context.Services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();

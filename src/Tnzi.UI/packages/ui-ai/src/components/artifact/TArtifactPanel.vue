@@ -65,7 +65,11 @@ const props = withDefaults(
     view?: ArtifactView
     /** Manual lang override (single-file mode). */
     lang?: string
-    /** Shiki theme. Defaults to `github-light` (matches Manus). */
+    /**
+     * Pin a single Shiki theme. Left unset the code follows light/dark
+     * (`github-light` / `github-dark`); setting it freezes the colours in both
+     * modes, which is why it is no longer defaulted to `github-light`.
+     */
     theme?: string
     /** Hide the toolbar button cluster (for embedded variants). */
     hideToolbar?: boolean
@@ -114,7 +118,6 @@ const props = withDefaults(
     activeFile: '',
     view: 'code',
     lang: '',
-    theme: 'github-light',
     hideToolbar: false,
     previewUrl: '',
     previewDevice: 'desktop',

@@ -178,7 +178,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    class="relative rounded-xl border border-border bg-background transition-colors"
+    class="relative rounded-xl border border-tnzi-border bg-tnzi-container transition-colors"
     :class="{ 'border-primary/50 ring-1 ring-primary/20': isDragOver }"
     @drop="handleDrop"
     @dragover="handleDragOver"
@@ -187,12 +187,12 @@ onBeforeUnmount(() => {
     <!-- File previews -->
     <div
       v-if="files.length > 0"
-      class="flex flex-wrap gap-2 border-b border-border/50 p-2"
+      class="flex flex-wrap gap-2 border-b border-tnzi-border/50 p-2"
     >
       <div
         v-for="(file, index) in files"
         :key="`${file.name}:${file.size}:${file.lastModified}:${index}`"
-        class="group/file relative flex items-center gap-1.5 rounded-md bg-muted px-2 py-1"
+        class="relative flex items-center gap-1.5 rounded-md bg-tnzi-layout px-2 py-1"
       >
         <!-- Image preview -->
         <img
@@ -204,11 +204,11 @@ onBeforeUnmount(() => {
         <Icon
           v-else
           icon="lucide:file"
-          class="size-4 text-muted-foreground"
+          class="size-4 text-tnzi-muted"
         />
 
         <span class="max-w-[120px] truncate text-xs">{{ file.name }}</span>
-        <span class="text-[10px] text-muted-foreground">{{ formatFileSize(file.size) }}</span>
+        <span class="text-[10px] text-tnzi-muted">{{ formatFileSize(file.size) }}</span>
 
         <!-- Remove button -->
         <NButton quaternary size="tiny" @click="removeFile(index)">
@@ -233,7 +233,7 @@ onBeforeUnmount(() => {
         :placeholder="placeholderText"
         :disabled="disabled"
         rows="1"
-        class="min-h-[36px] max-h-[200px] flex-1 resize-none bg-transparent py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+        class="min-h-[36px] max-h-[200px] flex-1 resize-none bg-transparent py-2 text-sm text-tnzi-base placeholder:text-tnzi-muted focus:outline-none disabled:opacity-50"
         style="field-sizing: content"
         @input="updateValue"
         @keydown="handleKeyDown"

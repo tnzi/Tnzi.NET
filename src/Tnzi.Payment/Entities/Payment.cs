@@ -41,7 +41,7 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     public decimal DiscountAmount { get; set; }
 
     /// <summary>
-    /// 税额（由 ITaxCalculator 计算；价内税时该额度已含在 <see cref="PayableAmount"/> 中）
+    /// 税额（由 IPaymentTaxCalculator 计算；价内税时该额度已含在 <see cref="PayableAmount"/> 中）
     /// </summary>
     public decimal TaxAmount { get; set; }
 

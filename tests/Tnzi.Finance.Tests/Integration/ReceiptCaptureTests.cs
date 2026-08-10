@@ -104,6 +104,89 @@ public class ReceiptCaptureTests : FinanceIntegrationTestBase
         retried.Data.FailReason.ShouldBeNull();
     }
 
+    /// <summary>
+    /// ★ 提取器返回的值真的经过了归一化 —— 这条走的是<b>真实入口</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ReceiptFieldLimitsTests</c> 只能证明判定表本身对；把 <c>ReceiptCaptureService</c> 里
+    /// 那一次调用整段删掉，那些纯函数测试<b>照样全绿</b>。所以必须有这一条。
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>本测试库是 SQLite，它不执行 varchar 长度约束</b> —— 所以断言必须落在
+    /// 「存下来的值已经是归一化后的形状」，而不是「没有抛异常」。真实库（PG / SQL Server）
+    /// 上未归一化的值会让这一步插入失败，那是本机制存在的动机，但在这里测不出来。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Extract_NormalizesWhatTheExtractorReturns()
+    {
+        await SeedCoaAsync();
+        var receipt = await CreateReceiptAsync(currency: "USD");
+
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildServiceWithExtractor(scope.ServiceProvider, new StubExtractor(
+            Result<ReceiptExtractionResult>.Success(new ReceiptExtractionResult
+            {
+                VendorName = new string('A', 400),   // 超列宽 → 截断
+                Currency = "US DOLLARS",             // 不是 3 字母代码 → 丢弃，保留原有币种
+                Reference = new string('9', 300),    // 超列宽 → 丢弃（不是截断）
+                Total = 100m,
+                Confidence = 95m                     // 百分比作答 → 0.95
+            })));
+
+        var result = await service.ExtractAsync(receipt);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var stored = await ReloadAsync<Receipt>(receipt);
+        stored!.Confidence.ShouldBe(0.95m);
+        stored.VendorName!.Length.ShouldBe(256);
+        stored.Reference.ShouldBeNull();
+        stored.Currency.ShouldBe("USD");             // 丢弃后回落到创建时的币种，而不是变成 null
+    }
+
+    /// <summary>提取器给出的超长失败原因不得把「记下失败」这一步自己搞崩。</summary>
+    [Fact]
+    public async Task Extract_Failure_WithAVeryLongMessage_StillRecordsTheFailure()
+    {
+        await SeedCoaAsync();
+        var receipt = await CreateReceiptAsync();
+
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildServiceWithExtractor(scope.ServiceProvider,
+            new StubExtractor(Result<ReceiptExtractionResult>.Failure(new string('x', 5000), 502)));
+
+        var failed = await service.ExtractAsync(receipt);
+
+        failed.Succeeded.ShouldBeFalse();
+        var stored = await ReloadAsync<Receipt>(receipt);
+        stored!.Status.ShouldBe(ReceiptStatus.Failed);
+        stored.FailReason!.Length.ShouldBe(512);
+    }
+
+    /// <summary>人工修正里的坏币种是 400 而不是静默改写，也不是插入时 500。</summary>
+    [Fact]
+    public async Task UpdateExtraction_RejectsACurrencyThatIsNotAThreeLetterCode()
+    {
+        await SeedCoaAsync();
+        var receipt = await CreateReceiptAsync();
+
+        var result = await InScopeAsync<IReceiptCaptureService, Result<ReceiptDto>>(
+            s => s.UpdateExtractionAsync(receipt, new UpdateReceiptExtractionDto
+            {
+                VendorName = "Acme",
+                Currency = "US Dollars"
+            }));
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+
+        // 拒绝路径零副作用
+        var stored = await ReloadAsync<Receipt>(receipt);
+        stored!.VendorName.ShouldBeNull();
+        stored.Status.ShouldBe(ReceiptStatus.Uploaded);
+    }
+
     [Fact]
     public async Task Convert_ToExpense_CreatesDraft_AndLinks()
     {

@@ -1,4 +1,4 @@
-namespace Tnzi.Tests.Architecture;
+﻿namespace Tnzi.Tests.Architecture;
 
 /// <summary>
 /// 外部 CLI agent 执行域的三条红线门禁。
@@ -24,10 +24,9 @@ public class CliAgentRedLineTests
     [Fact]
     public void AgentExecutionMode_MustNotGainAnExternalCliValue()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
-        var path = Path.Combine(repoRoot!, "src", "Tnzi.AI", "Metadata", "AgentExecutionMode.cs");
+        var path = Path.Combine(repoRoot, "src", "Tnzi.AI", "Metadata", "AgentExecutionMode.cs");
         Assert.True(File.Exists(path), $"expected {path} to exist");
 
         var content = File.ReadAllText(path);
@@ -43,16 +42,15 @@ public class CliAgentRedLineTests
     [Fact]
     public void AiMiddlewareContext_MustNotGainSkipSwitches()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
-        var middlewareDirectory = Path.Combine(repoRoot!, "src", "Tnzi.AI", "Middleware");
+        var middlewareDirectory = Path.Combine(repoRoot, "src", "Tnzi.AI", "Middleware");
         Assert.True(Directory.Exists(middlewareDirectory), $"expected {middlewareDirectory} to exist");
 
         var offenders = Directory.EnumerateFiles(middlewareDirectory, "*.cs", SearchOption.AllDirectories)
             .Where(file => File.ReadAllText(file)
                 .Contains("ShouldSkipMiddleware", StringComparison.OrdinalIgnoreCase))
-            .Select(file => Path.GetRelativePath(repoRoot!, file))
+            .Select(file => Path.GetRelativePath(repoRoot, file))
             .ToList();
 
         Assert.True(offenders.Count == 0,
@@ -70,8 +68,7 @@ public class CliAgentRedLineTests
     [Fact]
     public void OnlyTheDispatchFacadeMayBridgeBuiltInAndExternalExecution()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
         var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -85,14 +82,14 @@ public class CliAgentRedLineTests
             Path.Combine("src", "Tnzi.AI", "AIModule.Registration.cs")
         };
 
-        var offenders = EnumerateFrameworkSources(repoRoot!)
+        var offenders = EnumerateFrameworkSources(repoRoot)
             .Where(file =>
             {
                 var content = File.ReadAllText(file);
                 return content.Contains("IAgentRuntime", StringComparison.Ordinal)
                        && content.Contains("ICliAgentDispatcher", StringComparison.Ordinal);
             })
-            .Select(file => Path.GetRelativePath(repoRoot!, file))
+            .Select(file => Path.GetRelativePath(repoRoot, file))
             .Where(relative => !allowed.Contains(relative))
             .ToList();
 
@@ -113,10 +110,9 @@ public class CliAgentRedLineTests
     [Fact]
     public void CliModule_MustNotReuseSandboxExecutionOrChannelsGateway()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
-        var moduleDirectory = Path.Combine(repoRoot!, "src", "Tnzi.AI.Cli");
+        var moduleDirectory = Path.Combine(repoRoot, "src", "Tnzi.AI.Cli");
         Assert.True(Directory.Exists(moduleDirectory), $"expected {moduleDirectory} to exist");
 
         var forbidden = new[] { "ISandbox", "IGateway", "ISandboxProvider" };
@@ -124,7 +120,7 @@ public class CliAgentRedLineTests
         var offenders = Directory.EnumerateFiles(moduleDirectory, "*.cs", SearchOption.AllDirectories)
             .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                            && !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Select(file => (File: Path.GetRelativePath(repoRoot!, file), Content: File.ReadAllText(file)))
+            .Select(file => (File: Path.GetRelativePath(repoRoot, file), Content: File.ReadAllText(file)))
             // XML 注释里解释「为什么不用它」是允许的；出现在代码里才是违规。
             .Where(entry => forbidden.Any(symbol => ContainsOutsideComments(entry.Content, symbol)))
             .Select(entry => entry.File)
@@ -140,15 +136,14 @@ public class CliAgentRedLineTests
     [Fact]
     public void ProviderCatalogue_ExposesWhetherEachProtocolIsImplemented()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
-        var factory = Path.Combine(repoRoot!, "src", "Tnzi.AI.Cli", "Adapters", "CliProtocolAdapterFactory.cs");
+        var factory = Path.Combine(repoRoot, "src", "Tnzi.AI.Cli", "Adapters", "CliProtocolAdapterFactory.cs");
         Assert.True(File.Exists(factory), $"expected {factory} to exist");
         Assert.Contains("IsImplemented", File.ReadAllText(factory), StringComparison.Ordinal);
 
         // 管理端下拉必须带上这一位，否则管理员会选中一个必然 501 的 provider。
-        var dto = Path.Combine(repoRoot!, "src", "Tnzi.AI", "Dtos", "CliAgentDtos.cs");
+        var dto = Path.Combine(repoRoot, "src", "Tnzi.AI", "Dtos", "CliAgentDtos.cs");
         Assert.Contains("Implemented", File.ReadAllText(dto), StringComparison.Ordinal);
     }
 
@@ -204,21 +199,5 @@ public class CliAgentRedLineTests
         }
 
         return false;
-    }
-
-    private static string? FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Tnzi.NET.slnx")))
-            {
-                return dir.FullName;
-            }
-
-            dir = dir.Parent;
-        }
-
-        return null;
     }
 }

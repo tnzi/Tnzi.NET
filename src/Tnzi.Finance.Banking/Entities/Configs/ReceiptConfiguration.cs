@@ -9,12 +9,14 @@ public class ReceiptConfiguration : EntityTypeConfigurationBase<Receipt, Guid>
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.OriginalFileName).HasMaxLength(256);
-        builder.Property(e => e.VendorName).HasMaxLength(256);
-        builder.Property(e => e.Currency).HasMaxLength(8);
-        builder.Property(e => e.Reference).HasMaxLength(128);
-        builder.Property(e => e.ConvertedDocType).HasMaxLength(32);
-        builder.Property(e => e.FailReason).HasMaxLength(512);
+        // 列宽常量与 ReceiptFieldLimits 共用：提取结果与人工输入都要按它们收敛，
+        // 两处各写一份数字迟早漂移，而漂移的症状是插入时 500 而不是编译失败。
+        builder.Property(e => e.OriginalFileName).HasMaxLength(ReceiptFieldLimits.FileNameMaxLength);
+        builder.Property(e => e.VendorName).HasMaxLength(ReceiptFieldLimits.VendorNameMaxLength);
+        builder.Property(e => e.Currency).HasMaxLength(ReceiptFieldLimits.CurrencyMaxLength);
+        builder.Property(e => e.Reference).HasMaxLength(ReceiptFieldLimits.ReferenceMaxLength);
+        builder.Property(e => e.ConvertedDocType).HasMaxLength(ReceiptFieldLimits.ConvertedDocTypeMaxLength);
+        builder.Property(e => e.FailReason).HasMaxLength(ReceiptFieldLimits.FailReasonMaxLength);
         builder.Property(e => e.Subtotal).HasMoneyPrecision();
         builder.Property(e => e.TaxAmount).HasMoneyPrecision();
         builder.Property(e => e.Total).HasMoneyPrecision();

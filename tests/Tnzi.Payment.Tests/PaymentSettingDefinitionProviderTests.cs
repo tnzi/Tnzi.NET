@@ -61,7 +61,7 @@ public class PaymentSettingDefinitionProviderTests
     }
 
     /// <summary>
-    /// 税务配置曾被标注 KEEP-STATIC（无运行时消费者）。接线 ITaxCalculator 后它才允许出现在配置中心，
+    /// 税务配置曾被标注 KEEP-STATIC（无运行时消费者）。接线 IPaymentTaxCalculator 后它才允许出现在配置中心，
     /// 这条测试守住"暴露的配置必须真的生效"这个约定。
     /// </summary>
     [Fact]

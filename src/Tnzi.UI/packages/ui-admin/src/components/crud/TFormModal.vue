@@ -31,7 +31,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import TModalShell from '../overlay/TModalShell.vue'
+import { TModalShell } from '@tnzi/ui'
 import { useFormModal } from '../../headless/useFormModal'
 
 type FormState = ReturnType<typeof useFormModal<unknown>>

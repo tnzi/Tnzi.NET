@@ -1,11 +1,19 @@
-#nullable enable
-override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentNumbering.DocumentSequence!>! builder) -> void
-override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
-static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
-static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
-static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName) -> string!
-static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
-static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
+﻿#nullable enable
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
+*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator
+*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+*REMOVED*Tnzi.EFCore.Caching.QueryableCacheExtensions
+*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedArrayAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T[]!>!
+*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedFirstOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
+*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
+*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedPagedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Data.PagedQuery! query, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
+Tnzi.EFCore.Data.DefaultEntityIdGenerator
+Tnzi.EFCore.Data.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
+Tnzi.EFCore.Data.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
+Tnzi.EFCore.Data.IEntityIdGenerator
+Tnzi.EFCore.Data.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
 Tnzi.EFCore.DocumentNumbering.DocumentNumberService
 Tnzi.EFCore.DocumentNumbering.DocumentNumberService.DocumentNumberService(System.IServiceProvider! serviceProvider, Tnzi.Domain.Repositories.IRepository<Tnzi.EFCore.DocumentNumbering.DocumentSequence!, System.Guid>! repository) -> void
 Tnzi.EFCore.DocumentNumbering.DocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
@@ -23,22 +31,40 @@ Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.DocumentSequenceConf
 Tnzi.EFCore.DocumentNumbering.IDocumentNumberService
 Tnzi.EFCore.DocumentNumbering.IDocumentNumberService.NextAsync(string! scope, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
 Tnzi.EFCore.DocumentNumbering.IDocumentNumberService.NextFormattedAsync(string! scope, string? prefix = null, int padding = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor.AesGcmFieldEncryptor(Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.EFCore.Encryption.FieldEncryptionOptions!>! options) -> void
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor.Decrypt(string! ciphertext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor.Encrypt(string! plaintext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor.IsEncrypted(string! value) -> bool
+Tnzi.EFCore.Encryption.FieldEncryptionException
+Tnzi.EFCore.Encryption.FieldEncryptionException.FieldEncryptionException(string! message, bool isKeyMissing = false, System.Exception? innerException = null) -> void
+Tnzi.EFCore.Encryption.FieldEncryptionException.IsKeyMissing.get -> bool
+Tnzi.EFCore.Encryption.FieldEncryptionOptions
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.ActiveKeyId.get -> string?
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.ActiveKeyId.set -> void
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Enabled.get -> bool
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Enabled.set -> void
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.FieldEncryptionOptions() -> void
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Keys.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Keys.set -> void
+Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator
+Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator.FieldEncryptionOptionsValidator() -> void
+Tnzi.EFCore.Encryption.IFieldEncryptor
+Tnzi.EFCore.Encryption.IFieldEncryptor.Decrypt(string! ciphertext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.IFieldEncryptor.Encrypt(string! plaintext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.IFieldEncryptor.IsEncrypted(string! value) -> bool
+Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions
+override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentNumbering.DocumentSequence!>! builder) -> void
+override Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator.ValidateOptions(Tnzi.EFCore.Encryption.FieldEncryptionOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
+static Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions.IsEncrypted(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<string!>! builder, string? purpose = null) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<string!>!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int value) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
-*REMOVED*Tnzi.EFCore.Caching.QueryableCacheExtensions
-*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedArrayAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T[]!>!
-*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedFirstOrDefaultAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T?>!
-*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.List<T>!>!
-*REMOVED*static Tnzi.EFCore.Caching.QueryableCacheExtensions.ToCachedPagedListAsync<T>(this System.Linq.IQueryable<T>! source, Tnzi.Data.PagedQuery! query, Tnzi.Caching.ICache! cache, string? cacheKey = null, System.TimeSpan? expiration = null, Tnzi.Caching.ICacheKeyGenerator? keyGenerator = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Data.IPagedList<T>!>!
-*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator
-Tnzi.EFCore.Data.DefaultEntityIdGenerator
-*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
-Tnzi.EFCore.Data.DefaultEntityIdGenerator.DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext! dbContext) -> void
-*REMOVED*Tnzi.Data.IdGenerators.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
-Tnzi.EFCore.Data.DefaultEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
-*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator
-Tnzi.EFCore.Data.IEntityIdGenerator
-*REMOVED*Tnzi.Data.IdGenerators.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
-Tnzi.EFCore.Data.IEntityIdGenerator.GenerateId(System.Type! entityType, System.Type! idType) -> object?
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNull(string! columnName) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNull(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName) -> string!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
+virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Discard(TEntity! entity) -> void

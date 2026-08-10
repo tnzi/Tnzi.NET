@@ -56,6 +56,13 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 即 <c>soffice</c> 找不找得到。<see cref="LibreOfficeLocator.Resolve"/> 按配置值缓存探测结果，
+    /// 所以列表页逐行询问也只有首次真正碰文件系统。
+    /// </remarks>
+    public bool IsAvailable => LibreOfficeLocator.Resolve(_options.Value.LibreOfficePath) != null;
+
+    /// <inheritdoc />
     public bool CanConvert(string fileName)
     {
         if (string.IsNullOrWhiteSpace(fileName))

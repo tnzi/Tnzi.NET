@@ -1,4 +1,4 @@
-namespace Tnzi.SignalR.Tests.Services;
+﻿namespace Tnzi.SignalR.Tests.Services;
 
 /// <summary>
 /// Tests for RateLimitService
@@ -73,8 +73,12 @@ public class RateLimitServiceTests
         // Arrange
         var userId = Guid.NewGuid();
         var cacheKey = CacheKeys.SignalR.MessageRateCount(userId);
-        _cacheMock.Setup(c => c.GetAsync<int?>(cacheKey, default))
-            .ReturnsAsync(5);
+        // 计数由 IncrementAsync 以 long 写入，被测代码经 GetCounterAsync 读；
+        // 此处必须 mock GetAsync<long> —— 早先 mock 的是 GetAsync<int?>，那条契约在
+        // 真实的 MemoryCacheService 上从来不成立（装箱 long 不满足 is int），
+        // 于是这两条测试长期在断言一个生产环境里从未生效过的行为。
+        _cacheMock.Setup(c => c.GetCounterAsync(cacheKey, default))
+            .ReturnsAsync(5L);
 
         // Act
         var result = await _rateLimitService.CheckMessageRateLimitAsync(userId);
@@ -89,8 +93,8 @@ public class RateLimitServiceTests
         // Arrange
         var userId = Guid.NewGuid();
         var cacheKey = CacheKeys.SignalR.MessageRateCount(userId);
-        _cacheMock.Setup(c => c.GetAsync<int?>(cacheKey, default))
-            .ReturnsAsync(10);
+        _cacheMock.Setup(c => c.GetCounterAsync(cacheKey, default))
+            .ReturnsAsync(10L);
 
         // Act
         var result = await _rateLimitService.CheckMessageRateLimitAsync(userId);

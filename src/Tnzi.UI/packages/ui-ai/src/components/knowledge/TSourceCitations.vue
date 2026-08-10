@@ -38,7 +38,7 @@ defineProps<{
         :href="citation.url"
         target="_blank"
         rel="noopener noreferrer"
-        class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+        class="flex items-center gap-1.5 rounded-md px-2 py-1 text-tnzi-muted hover:bg-tnzi-layout/50 hover:text-tnzi-base transition-colors"
       >
         <Icon icon="lucide:book" class="size-3 shrink-0" />
         <span class="truncate">{{ citation.title }}</span>

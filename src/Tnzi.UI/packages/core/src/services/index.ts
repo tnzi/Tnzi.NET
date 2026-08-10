@@ -17,6 +17,7 @@ export * as Storage from './storage';
 export * as System from './system';
 export * as Audit from './audit';
 export * as Template from './template';
+export * as Signing from './signing';
 export * as Logging from './logging';
 export * as Diagnostics from './diagnostics';
 export * as Performance from './performance';

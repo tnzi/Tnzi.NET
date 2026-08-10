@@ -37,22 +37,67 @@ public class CraGstHstReturnMapper : ApplicationService, ITaxReturnMapper
     /// <summary>诊断行的行号占位：它们不是 GST34 上的行，只是"这些钱没归进去"的提示。</summary>
     private const string UnmappedLineMarker = "-";
 
+    /// <summary>省级销售税代码：机关名里出现任一个即排除（它们不进 GST34）。</summary>
+    private static readonly string[] ProvincialSalesTaxCodes = ["PST", "QST", "RST"];
+
+    /// <summary>GST/HST 收取方的机关名关键字。</summary>
+    private static readonly string[] GstHstKeywords = ["GST", "HST", "CRA", "CANADA REVENUE"];
+
     /// <summary>
     /// 判定一个税务机关是不是 GST/HST 的收取方。
     /// </summary>
     /// <remarks>
     /// 关键字匹配而不是硬编码机关 Id：机关是部署自己建的主数据，框架不可能预知
-    /// 它的主键。省级销售税（PST/QST/RST）刻意排除——它们不进 GST34。
+    /// 它的主键。省级销售税（PST/QST/RST）刻意排除——它们不进 GST34，且这条排除
+    /// **优先于** GST/HST 关键字（"GST/PST Combined" 这类合并科目名按省税处理，
+    /// 未归入的金额由诊断行透出）。
     /// </remarks>
     private static bool IsGstHstAgency(string? agencyName)
     {
         if (string.IsNullOrWhiteSpace(agencyName))
             return false;
         var name = agencyName.ToUpperInvariant();
-        if (name.Contains("PST") || name.Contains("QST") || name.Contains("RST"))
+        if (ProvincialSalesTaxCodes.Any(code => ContainsWord(name, code)))
             return false;
-        return name.Contains("GST") || name.Contains("HST") || name.Contains("CRA")
-            || name.Contains("CANADA REVENUE");
+        return GstHstKeywords.Any(keyword => ContainsWord(name, keyword));
+    }
+
+    /// <summary>
+    /// <paramref name="keyword"/> 是否作为**独立的词**出现在 <paramref name="upperName"/> 中。
+    /// </summary>
+    /// <remarks>
+    /// ★ 必须是整词而不是裸子串，两个方向各有一个真实误判：
+    /// <list type="bullet">
+    /// <item><b>漏报</b>：<c>"First Nations GST"</c> 含 <c>"RST"</c>（在 FIRST 里）。而
+    /// First Nations GST 由 CRA 征收、报在 105 行 —— 裸子串会把它当省税排除，那笔销项税
+    /// 就从申报表上消失了。它只会在"未归入"诊断行里露出一个金额，而提示写的是
+    /// "检查机构名"，可机构名在操作员看来完全正确。</item>
+    /// <item><b>虚报</b>：<c>"Sacramento County Levy"</c> 含 <c>"CRA"</c>。裸子串会把与
+    /// GST/HST 无关的税收进 105 行，报出去的是一个偏大的应缴数。这个方向更糟：
+    /// 多出来的钱不会出现在任何诊断行上。</item>
+    /// </list>
+    /// 边界按"非字母数字"判定，故 <c>"GST/HST"</c>、<c>"BC-PST"</c>、<c>"CRA + RST"</c>
+    /// 这类带分隔符的写法照常命中。
+    /// </remarks>
+    private static bool ContainsWord(string upperName, string keyword)
+    {
+        var searchFrom = 0;
+        while (searchFrom <= upperName.Length - keyword.Length)
+        {
+            var index = upperName.IndexOf(keyword, searchFrom, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+
+            var startsWord = index == 0 || !char.IsLetterOrDigit(upperName[index - 1]);
+            var after = index + keyword.Length;
+            var endsWord = after == upperName.Length || !char.IsLetterOrDigit(upperName[after]);
+            if (startsWord && endsWord)
+                return true;
+
+            searchFrom = index + 1;
+        }
+
+        return false;
     }
 
     public async Task<Result<TaxReturnDto>> MapAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)

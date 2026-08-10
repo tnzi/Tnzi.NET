@@ -1485,6 +1485,14 @@ export interface EftBatchDto {
   totalAmount: number;
   fileName?: string | null;
   generatedTime?: string | null;
+  /**
+   * When the file was first handed out (null = never downloaded). Warn before voiding:
+   * voiding returns the batch's payments to the unpaid queue, so a batch whose file
+   * reached the bank would be paid twice. Requires `acknowledgeFileNotSubmitted`.
+   */
+  firstDownloadedTime?: string | null;
+  /** How many times the file has been downloaded. */
+  downloadCount: number;
   voidReason?: string | null;
   concurrencyStamp: string;
   creationTime: string;
@@ -1520,6 +1528,13 @@ export interface CreateEftBatchDto {
 /** Void an EFT batch. */
 export interface VoidEftBatchDto {
   reason?: string | null;
+  /**
+   * Confirm the generated file was never submitted to the bank. Required to void a
+   * batch whose file was already downloaded: voiding returns its payments to the
+   * unpaid queue, so a submitted batch would be paid a second time. Omitting it on a
+   * downloaded batch yields 409 with the download timestamp in the message.
+   */
+  acknowledgeFileNotSubmitted?: boolean;
 }
 
 export interface EftBatchQueryDto extends PagedQueryDto {

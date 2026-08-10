@@ -233,8 +233,13 @@ useBodyScrollLock(() => dialog.open.value)
 }
 .t-settings {
   position: relative;
-  width: min(1139px, 92vw);
-  height: min(649px, 86vh);
+  /* Sized to the viewport rather than to a fixed pixel height. The 649px cap
+     left a short panel with a long empty column under two or three rows of
+     content on any normal display - a settings surface reads as unfinished
+     when most of it is blank. Height now tracks the window the way the width
+     already did, so the panel grows with the space available. */
+  width: min(1180px, 92vw);
+  height: min(820px, 90vh);
   background: var(--tnzi-ai-bg, #f8f8f7);
   color: var(--tnzi-ai-text, inherit);
   border: 1px solid rgba(0, 0, 0, 0.06);

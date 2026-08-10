@@ -12,6 +12,13 @@ namespace Tnzi.AI.Cli.Controllers;
 /// 权限走 Agent 自身的执行门（<c>ai.agent.execute</c>）：能运行这个 Agent 的人
 /// 就能派任务给它，与它底层走内建还是外部无关 —— 那是部署配置，不是用户的权限维度。
 /// </para>
+/// <para>
+/// ★ <b>但那个码只回答「能不能派」，不回答「能不能看别人派的」</b>。本控制器与管理端控制器
+/// 调用的是<b>同一批</b>调度器方法，归属判定因此落在 <c>CliAgentDispatcher.CanSeeAsync</c>
+/// （服务层，因为这个类是 <c>[DefaultController]</c>、可被消费应用整体替换）：
+/// 派出者按 <c>CreatorId</c> 放行、管理码 <c>ai.cliRun.view</c> 放行全部、其余一律 404。
+/// 下面几个方法注释里说的「自己」指的就是那一条判定，不是靠调用方自觉。
+/// </para>
 /// </remarks>
 [DefaultController]
 [Route("ai/cli-runs")]

@@ -96,7 +96,7 @@ function handleSend(content: string, files: File[]): void {
     </div>
 
     <!-- Footer -->
-    <div class="border-t border-border p-4">
+    <div class="border-t border-tnzi-border p-4">
       <slot name="footer">
         <!-- Suggestions (when there are messages) -->
         <TSuggestions

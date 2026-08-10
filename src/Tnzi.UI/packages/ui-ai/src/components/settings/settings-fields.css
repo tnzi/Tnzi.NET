@@ -1,0 +1,63 @@
+/*
+ * Layout-only helpers for the built-in settings pages.
+ *
+ * The controls themselves are naive-ui (`NInput` / `NButton` / `NQrCode`) - it
+ * is already a peer dependency and already used across this package, and
+ * hand-rolling inputs beside a naive-ui QR code was inconsistent as well as
+ * wasteful. What is left here is the bits naive-ui has no opinion about: where
+ * an actions row sits, what a value the user cannot edit looks like, and the
+ * status pill. Imported by the package stylesheet, so consumers get it with
+ * `@tnzi/ui-ai/style.css`.
+ */
+
+/* A value shown but not editable here, because changing it is a verify-code
+   flow elsewhere. Rendered as text, not a disabled input: a greyed-out box
+   invites people to try typing in it. */
+.t-settings-field__readonly {
+  font-size: 13px;
+  color: var(--tnzi-ai-text-secondary);
+}
+
+.t-settings-field__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.t-settings-field__error {
+  margin: 0;
+  padding-top: 4px;
+  color: var(--tnzi-ai-danger);
+  font-size: 12px;
+}
+.t-settings-field__hint {
+  margin: 0;
+  color: var(--tnzi-ai-text-tertiary);
+  font-size: 12px;
+}
+
+/* Caps a single-line control so it does not stretch across the whole pane;
+   stacked rows (the personalization textarea) deliberately opt out. */
+.t-settings-field__control {
+  width: 100%;
+  max-width: 320px;
+}
+
+/* Status pill on a security row (2FA on/off). */
+.t-settings-field__pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--tnzi-ai-hover);
+  color: var(--tnzi-ai-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.t-settings-field__pill--on {
+  background: var(--tnzi-ai-success-soft, var(--tnzi-ai-accent-soft));
+  color: var(--tnzi-ai-success, var(--tnzi-ai-accent));
+}

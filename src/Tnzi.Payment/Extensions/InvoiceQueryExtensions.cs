@@ -6,9 +6,9 @@ namespace Tnzi.Payment.Extensions;
 public static class InvoiceQueryExtensions
 {
     /// <summary>
-    /// 根据 InvoiceQueryDto 过滤发票记录
+    /// 根据 PaymentInvoiceQueryDto 过滤发票记录
     /// </summary>
-    public static IQueryable<Invoice> Filter(this IQueryable<Invoice> queryable, InvoiceQueryDto query)
+    public static IQueryable<Invoice> Filter(this IQueryable<Invoice> queryable, PaymentInvoiceQueryDto query)
     {
         // 系统生成的流水号使用精确匹配（支持索引）
         if (!string.IsNullOrEmpty(query.InvoiceNo))

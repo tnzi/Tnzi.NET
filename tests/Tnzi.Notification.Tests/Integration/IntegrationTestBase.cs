@@ -26,6 +26,7 @@ public class NotificationTestDbContext : TnziDbContext<NotificationTestDbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Recipient> Recipients => Set<Recipient>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
+    public DbSet<OptOut> OptOuts => Set<OptOut>();
 
     // Template 模块实体
     public DbSet<Tnzi.Template.Entities.Template> Templates => Set<Tnzi.Template.Entities.Template>();
@@ -37,6 +38,8 @@ public class NotificationTestDbContext : TnziDbContext<NotificationTestDbContext
         modelBuilder.ApplyConfiguration(new Entities.Configs.MessageConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.RecipientConfiguration());
         modelBuilder.ApplyConfiguration(new Entities.Configs.AttachmentConfiguration());
+        modelBuilder.ApplyConfiguration(new Entities.Configs.OptOutConfiguration());
+        modelBuilder.ApplyConfiguration(new Entities.Configs.PreferenceConfiguration());
 
         // 应用 Template 模块实体配置
         modelBuilder.ApplyConfiguration(new Tnzi.Template.Entities.Configs.TemplateConfiguration());

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services.Internal;
+﻿namespace Tnzi.Finance.Services.Internal;
 
 /// <summary>
 /// 总账过账引擎（内部共享）：校验、换算、配平、编号、定稿
@@ -224,6 +224,34 @@ public sealed class LedgerPostingEngine
     public async Task<Result<JournalEntry>> BuildReversalAsync(JournalEntry original, DateTime postingDate, string? memo, CancellationToken cancellationToken = default)
     {
         Check.NotNull(original);
+
+        // ★ 只有已过账且未被冲销过的凭证可以冲销。这条**必须**在漏斗里，不能只由上游守。
+        //
+        // 七条上游（GL 冲销端点 + 六个单据 VoidAsync）里，此前只有 JournalEntryService.ReverseAsync
+        // 与 TransferService 检查了原凭证状态，另外五个单据 Void 一律
+        // `FirstOrDefaultAsync(e => e.Id == doc.JournalEntryId)` 直接取、不带 Status 谓词。
+        // 后果是同一张凭证可被冲销两次：先经 GL 端点冲销（原凭证 Status 置 Reversed、
+        // ReversedByEntryId 指向 R1），再走单据 void —— 单据自身仍是 Posted 故状态门全过，
+        // 于是对同一 original 再造 R2，并把 ReversedByEntryId 覆写成 R2，R1 成为孤儿。
+        //
+        // ★ 破坏是**完全静默**的：每张凭证内部各自平衡，试算平衡恒为 0；余额汇总忠实累加，
+        // VerifyAsync 报「一致」。唯一能暴露它的是人工把 AR/AP 控制科目余额与账龄合计对一遍。
+        //
+        // ReversalGuard 的注释曾写着「凭证状态不在这里判定 —— 上游各 VoidAsync 与 ReverseAsync
+        // 已经在做」，而七个上游里五个从来没做过。注释被当断言用了。
+        if (original.Status != JournalEntryStatus.Posted)
+        {
+            return Result<JournalEntry>.Failure(
+                original.Status == JournalEntryStatus.Draft
+                    ? "Draft entries cannot be reversed."
+                    : "The journal entry has already been reversed.",
+                409);
+        }
+
+        if (original.ReversedByEntryId.HasValue)
+        {
+            return Result<JournalEntry>.Failure("The journal entry has already been reversed.", 409);
+        }
 
         var date = postingDate.ToUtcDate();
         var block = await _reversalGuard.EvaluateAsync(original, date, cancellationToken);

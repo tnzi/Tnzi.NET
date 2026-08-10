@@ -4,7 +4,7 @@
  * User preferences state manager - pure logic layer.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 import type { UserState, UserPreferences, RecentItem } from './types/user';
 import { defaultUserPreferences } from './types/user';
 import type { UserDto, UpdateUserDto } from '../services/identity/types';

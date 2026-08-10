@@ -82,7 +82,7 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         services.AddScoped<IEventHandler<PaymentExpiredEvent>, SubscriptionPaymentExpiredHandler>();
 
         // 业务服务
-        services.AddScoped<ITaxCalculator, DefaultTaxCalculator>();
+        services.AddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         services.AddScoped<ISubscriptionService, SubscriptionService>();

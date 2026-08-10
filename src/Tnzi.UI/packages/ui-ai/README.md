@@ -12,7 +12,9 @@ pnpm add -D unocss
 ```
 
 > 样式层是 **UnoCSS**（`presetWind4` + 内联 `presetTnzi`）。Tailwind 已于 2026-04 移除，
-> **不要**引入 `tailwindcss` / `postcss.config.js`。
+> 遗留的 shadcn 类名词表（`text-muted-foreground` / `bg-accent` / `border-border`）已于
+> 2026-08-03 全部改写为生态统一的 `text-tnzi-muted` / `bg-tnzi-layout` / `border-tnzi-border`。
+> **不要**引入 `tailwindcss` / `postcss.config.js`，也不要重新引入 shadcn 类名。
 
 ## 最快的接法：`defineChatApp`
 

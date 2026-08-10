@@ -75,6 +75,27 @@ public class CheckBatchComposer
         if (string.IsNullOrWhiteSpace(bank.AccountNumberEncrypted) || !_protector.IsConfigured)
             return Result.Failure("Blank check stock requires a stored, decryptable account number on the bank account before printing.", 400);
 
+        // ★ 必须真解一次，而不是只确认密文在、加密已配置。
+        //
+        // 密钥轮换后（或把库恢复到另一把密钥的环境后）上面两个条件**都仍然成立**，而解密会失败。
+        // BuildRenderRequest 把那次失败吞成一条 LogWarning 并让 AccountNumberPlain 留 null，
+        // 渲染器于是丢掉整条 MICR 行 —— 渲染本身**成功**，所以 CheckService 的工作单元照常提交：
+        // 支票号已分配、BankCheck 已 Issued、付款单参考号已回写，打出来的却正是本方法注释开头
+        // 说要防的那种不可流通票据。守卫检查「有没有」而不是「解不解得开」，等于放行了它唯一要拦的场景。
+        try
+        {
+            _protector.Unprotect(bank.AccountNumberEncrypted!, FinanceProtectionAad.ForBankAccount(bank.AccountId));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "Bank account {BankAccountId} has a stored account number that cannot be decrypted; blocking blank-stock printing before any check number is allocated.",
+                bank.Id);
+            return Result.Failure(
+                "The stored account number on this bank account cannot be decrypted (the encryption key may have changed). "
+                + "Re-enter the account number before printing on blank check stock.", 400);
+        }
+
         return Result.Success();
     }
 

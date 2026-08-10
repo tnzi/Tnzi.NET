@@ -24,6 +24,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
+    <Using Include="Tnzi.TestBase" />
   </ItemGroup>
 
   <!-- Every framework module that declares permission codes in-module - this
@@ -51,7 +52,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" />
-    <ProjectReference Include="..\..\src\Tnzi.Documents.Signing\Tnzi.Documents.Signing.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Signing\Tnzi.Signing.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
@@ -59,6 +60,7 @@
     <ProjectReference Include="..\..\src\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Cli\Tnzi.AI.Cli.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
   </ItemGroup>
 

@@ -29,17 +29,17 @@ const t = useAiI18n();
     </template>
 
     <template v-else>
-      <div class="flex size-16 items-center justify-center rounded-full bg-muted">
-        <Icon :icon="props.icon" class="size-8 text-muted-foreground" />
+      <div class="flex size-16 items-center justify-center rounded-full bg-tnzi-layout">
+        <Icon :icon="props.icon" class="size-8 text-tnzi-muted" />
       </div>
 
       <div class="space-y-2">
-        <h3 class="text-lg font-semibold text-foreground">
+        <h3 class="text-lg font-semibold text-tnzi-base">
           {{ title ?? t.chat.emptyState }}
         </h3>
         <p
           v-if="description ?? t.chat.placeholder"
-          class="max-w-sm text-sm text-muted-foreground"
+          class="max-w-sm text-sm text-tnzi-muted"
         >
           {{ description ?? t.chat.placeholder }}
         </p>

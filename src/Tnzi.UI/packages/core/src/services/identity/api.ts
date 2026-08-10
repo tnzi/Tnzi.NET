@@ -42,6 +42,7 @@ import type {
   UserDto,
   UserListItemDto,
   CreateUserDto,
+  UpdateProfileDto,
   UpdateUserDto,
   UserListQueryDto,
   UserStatisticsDto,
@@ -250,8 +251,8 @@ export function useProfileApi(client: HttpClient) {
     get: () =>
       client.get<UserDto>(PROFILE_BASE),
 
-    /** Update profile (self) */
-    update: (data: UpdateUserDto) =>
+    /** Update profile (self) — privileged fields are not part of this shape */
+    update: (data: UpdateProfileDto) =>
       client.put<UserDto>(PROFILE_BASE, data),
 
     /** Change password */

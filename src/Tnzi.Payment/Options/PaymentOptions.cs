@@ -272,7 +272,7 @@ public class InvoiceOptions
 /// <summary>
 /// 税务配置选项
 /// 配置路径：Payment:Tax
-/// 由 <see cref="Services.DefaultTaxCalculator"/> 消费，参与支付应付额与发票税额的计算。
+/// 由 <see cref="Services.DefaultPaymentTaxCalculator"/> 消费，参与支付应付额与发票税额的计算。
 /// </summary>
 [ConfigSection("Payment:Tax")]
 [RuntimeSettingGroup(Key = "payment-tax", Module = "Payment", DisplayName = "Tax",

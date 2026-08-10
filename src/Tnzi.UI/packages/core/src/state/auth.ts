@@ -2,10 +2,10 @@
  * @tnzi/core/state/auth
  *
  * Authentication state manager - pure logic layer.
- * Uses @vue/reactivity for reactive state, UI packages can use directly or wrap as Pinia store.
+ * Uses Vue's reactivity for reactive state, UI packages can use directly or wrap as Pinia store.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 import type { AuthState } from './types/auth';
 import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateUserDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';

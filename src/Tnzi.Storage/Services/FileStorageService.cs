@@ -13,6 +13,12 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private readonly IPublicFileFieldResolver _publicFieldResolver;
     private readonly IFileUrlSigner _urlSigner;
 
+    /// <summary>
+    /// 上传净化管线。<strong>未注册任何净化器时为空集合</strong>，
+    /// 整条管线不执行、不读流、零开销——这是该能力保持可选的方式。
+    /// </summary>
+    private readonly IReadOnlyList<IUploadSanitizer> _sanitizers;
+
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
     public FileStorageService(
@@ -23,7 +29,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IFileAccessAuthorizer accessAuthorizer,
         IPublicFileFieldResolver publicFieldResolver,
         IFileUrlSigner urlSigner,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IEnumerable<IUploadSanitizer>? sanitizers = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -33,6 +40,112 @@ public class FileStorageService : ApplicationService, IFileStorageService
         _accessAuthorizer = Check.NotNull(accessAuthorizer);
         _publicFieldResolver = Check.NotNull(publicFieldResolver);
         _urlSigner = Check.NotNull(urlSigner);
+        _sanitizers = sanitizers?.OrderBy(s => s.Order).ToArray() ?? [];
+    }
+
+    /// <summary>
+    /// 依次运行已注册的净化器，返回最终要落库的流。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 流的所有权按本模块既有约定处理：<strong>传入的原始流始终归调用方</strong>，
+    /// 本方法只 dispose 由净化器创建的中间流（<c>disposables</c>）。
+    /// 因此调用方拿到的返回流可能不是它传进来的那个。
+    /// </para>
+    /// <para>
+    /// 每个净化器执行前把流复位到起点：上一个净化器读到哪里是它的自由
+    /// （见 <see cref="IUploadSanitizer"/> 的约定），不复位会让下一个读到半截内容。
+    /// </para>
+    /// </remarks>
+    private async Task<SanitizedUpload> RunSanitizersAsync(
+        string fileName, string extension, string contentType, Stream stream)
+    {
+        if (_sanitizers.Count == 0)
+        {
+            return SanitizedUpload.Passthrough(stream);
+        }
+
+        var owned = new List<Stream>();
+        var current = stream;
+
+        foreach (var sanitizer in _sanitizers)
+        {
+            if (current.CanSeek)
+            {
+                current.Position = 0;
+            }
+
+            var result = await sanitizer.SanitizeAsync(
+                new UploadSanitizationContext(fileName, extension, contentType, current));
+
+            if (result.Rejected)
+            {
+                LogWarning(
+                    "Upload rejected by {Sanitizer} for file {FileName}: {Reason}",
+                    sanitizer.GetType().Name, fileName, result.Reason);
+                return SanitizedUpload.Rejected(current, owned, result.Reason!);
+            }
+
+            if (result.Replacement != null && !ReferenceEquals(result.Replacement, current))
+            {
+                owned.Add(result.Replacement);
+                current = result.Replacement;
+            }
+        }
+
+        if (current.CanSeek)
+        {
+            current.Position = 0;
+        }
+
+        return SanitizedUpload.Accepted(current, owned);
+    }
+
+    /// <summary>
+    /// 净化管线的产物，负责释放管线自己创建的中间流。
+    /// </summary>
+    /// <remarks>
+    /// 做成 <see cref="IAsyncDisposable"/> 是为了配合 <c>await using</c>：
+    /// <c>SaveAsync</c> 有多个提前 return 的分支（校验失败、MD5 命中去重…），
+    /// 用 try/finally 逐个照顾容易漏掉一条。
+    /// <strong>传入的原始流不在释放范围内</strong>，它始终归调用方。
+    /// </remarks>
+    private sealed class SanitizedUpload : IAsyncDisposable
+    {
+        private readonly List<Stream> _owned;
+
+        private SanitizedUpload(Stream content, List<Stream> owned, bool rejected, string? reason)
+        {
+            Content = content;
+            _owned = owned;
+            IsRejected = rejected;
+            Reason = reason;
+        }
+
+        /// <summary>最终应交给存储提供者的流。</summary>
+        public Stream Content { get; }
+
+        /// <summary>是否被某个净化器拒绝。</summary>
+        public bool IsRejected { get; }
+
+        /// <summary>拒绝原因。</summary>
+        public string? Reason { get; }
+
+        public static SanitizedUpload Passthrough(Stream stream) => new(stream, [], false, null);
+
+        public static SanitizedUpload Accepted(Stream content, List<Stream> owned)
+            => new(content, owned, false, null);
+
+        public static SanitizedUpload Rejected(Stream content, List<Stream> owned, string reason)
+            => new(content, owned, true, reason);
+
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var stream in _owned)
+            {
+                await stream.DisposeAsync();
+            }
+        }
     }
 
     public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
@@ -49,6 +162,21 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (fileValidation != null)
             return fileValidation;
 
+        var extension = Path.GetExtension(originalFileName);
+        var contentType = FileTypeHelper.GetContentType(extension);
+
+        // 净化管线必须跑在 MD5 之前：净化器可以改写内容（剥元数据、重编码），
+        // 而 MD5 既用于去重也用于完整性校验——基于原始内容算出的哈希
+        // 与实际落库的字节对不上，会让去重命中错误的记录、让完整性校验永远失败。
+        // 未注册任何净化器时 Passthrough，不读流也不产生开销。
+        await using var sanitized = await RunSanitizersAsync(originalFileName, extension, contentType, stream);
+        if (sanitized.IsRejected)
+        {
+            return Fail<FileRecord>(sanitized.Reason!, 400);
+        }
+
+        stream = sanitized.Content;
+
         // 计算 MD5 + 按 MD5 去重（受 EnableMd5Validation 控制；关闭时跳过两者，每次都产生独立记录）
         string? md5Hash = null;
         if (Options.EnableMd5Validation)
@@ -64,9 +192,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
         }
 
-        var extension = Path.GetExtension(originalFileName);
         var fileName = $"{SequentialGuid.NewGuid()}{extension}";
-        var contentType = FileTypeHelper.GetContentType(extension);
 
         // 长度必须在把流交给 provider **之前**取。流的生命周期归调用方，但 provider 读完
         // 之后这个流还能不能读，不在本服务的控制之内（见 IFileStorage.UploadAsync 的所有权约定）；
@@ -79,7 +205,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         // 2. 如果是图片，生成缩略图
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(filePath, fileName);
         }
@@ -263,7 +389,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(filePath, newFileName);
         }
@@ -382,7 +508,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         }
 
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsImage(extension) && Options.AutoGenerateThumbnail)
+        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
         {
             thumbnailPath = await GenerateThumbnailAsync(newFilePath, copyFileName);
         }
@@ -625,6 +751,16 @@ public class FileStorageService : ApplicationService, IFileStorageService
                         if (fileRecord == null)
                             continue;
 
+                        // ★ 打包等于把字节交到调用者手上，与 CopyAsync 是同一件事，
+                        // 因此需要的是**读权限**而不只是知道 id。少了这一句，任意已登录用户
+                        // 拿到他人 fileId 即可打包下载：新 zip 的 CreatorId 是调用者自己，
+                        // 随后走 IsOwner 分支正常下载，7 条判据链被整体绕过。
+                        //
+                        // 越权 id 静默省略而不是让整批失败，与 CreateAccessTokensAsync 同一取舍：
+                        // 省略本身不透露那个 id 上是否真有文件（不可读与不存在观测上不可区分）。
+                        if (await EnsureReadableAsync<FileRecord>(fileRecord, cancellationToken) != null)
+                            continue;
+
                         using var fileStream = await _storage.DownloadAsync(GetSafePath(fileRecord.Path));
                         var entry = archive.CreateEntry(fileRecord.OriginalName ?? fileRecord.FileName);
                         using (var entryStream = entry.Open())
@@ -672,10 +808,14 @@ public class FileStorageService : ApplicationService, IFileStorageService
     public async Task<Result<IEnumerable<FileRecord>>> DecompressAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
         var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
-        if (fileRecord == null)
-            return Fail<IEnumerable<FileRecord>>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        // ★ 解包把整个压缩包的内容交到调用者手上（解出的每条记录 CreatorId 都是他），
+        // 所以要的是对这个 zip 的读权限，不是知道它的 id。与其它单文件操作同形：
+        // 不可读与不存在都返回 404，不泄露存在性。
+        var readCheck = await EnsureReadableAsync<IEnumerable<FileRecord>>(fileRecord, cancellationToken);
+        if (readCheck != null)
+            return readCheck;
 
-        if (fileRecord.Extension != ".zip")
+        if (fileRecord!.Extension != ".zip")
             return Fail<IEnumerable<FileRecord>>("Only ZIP files can be decompressed", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
         var extractedFiles = new List<FileRecord>();
@@ -1190,7 +1330,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             existing.Path = newFilePath;
             existing.ReferenceCount++;
 
-            if (FileTypeHelper.IsImage(existing.Extension ?? "") && Options.AutoGenerateThumbnail)
+            if (FileTypeHelper.IsThumbnailable(existing.Extension ?? "") && Options.AutoGenerateThumbnail)
             {
                 // 缩略图是从 newFilePath 回读生成的，不碰 stream。上传之后这个流可能已经
                 // 被 provider 关掉，回退它的位置只会白白抛 ObjectDisposedException。

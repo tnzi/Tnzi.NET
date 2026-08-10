@@ -129,6 +129,15 @@ public class PdfSharpCheckRenderer : ICheckDocumentRenderer
         {
             if (!Internal.FinanceFontResolver.TryLoadMicr(request.MicrFontPath))
                 return Result.Failure("Blank check stock requires an E-13B MICR font. Configure Finance:CheckMicrFontPath with a valid font file.", 400);
+
+            // ★ 有字体文件不等于画得出磁码：PDFsharp 的字体解析器是**进程级单例**，
+            // 若在我们之后又有别人装了自己的，MICR 族会被它当未知族回退成常规 sans ——
+            // 磁码行印成普通字形，屏幕与纸面都看不出异常，只有银行的读头认不出来。
+            if (!Internal.FinanceFontResolver.OwnsProcessResolver)
+            {
+                return Result.Failure(
+                    "Another component replaced the process-wide PDF font resolver, so the E-13B MICR line cannot be rendered. Print on pre-printed stock, or keep check rendering as the last component to install a font resolver.", 500);
+            }
         }
 
         return Result.Success();

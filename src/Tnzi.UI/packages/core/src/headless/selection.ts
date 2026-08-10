@@ -4,7 +4,7 @@
  * Selection state controller - reactive headless logic.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 
 // ============================================
 // Types

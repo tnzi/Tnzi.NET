@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace Tnzi.Tests.Architecture;
 
@@ -29,8 +29,7 @@ public class CapabilityNameConventionTests
     [Fact]
     public void CapabilityNames_AreNeverWrittenAsInlineLiterals()
     {
-        var repoRoot = FindRepoRoot();
-        Assert.NotNull(repoRoot);
+        var repoRoot = RepoRoot.Locate();
 
         var scanned = 0;
         var offenders = new List<string>();
@@ -102,19 +101,5 @@ public class CapabilityNameConventionTests
                 yield return file;
             }
         }
-    }
-
-    private static string? FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Tnzi.NET.slnx")))
-                return dir.FullName;
-
-            dir = dir.Parent;
-        }
-
-        return null;
     }
 }

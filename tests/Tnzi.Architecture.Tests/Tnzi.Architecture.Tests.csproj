@@ -1,0 +1,104 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+    <Using Include="Tnzi.TestBase" />
+  </ItemGroup>
+
+  <!--
+    每一个可显式加载的框架模块都必须在这里直接引用。
+
+    为什么不能靠 Tnzi.Hosting 传递：Hosting 对全部可选业务模块用了 PrivateAssets="all"
+    （正确设计 —— 不把 30 多个程序集传递给 NuGet 消费者），所以传递引用拿不到 typeof(XModule)。
+    历史后果是 ModuleDependencyArchitectureTests 只能审计 12 个模块，30+ 业务模块从未被审计过；
+    这个项目存在的唯一理由就是把那 12 补成全部。
+
+    同理，Hosting 对业务模块用的是 [OptionalDependsOn]（只排序不发现），所以还必须有一个
+    [DependsOn] 全量的启动模块（AllModulesStartupModule）才能真的把它们拉进模块图。
+
+    ★ 单独立项而不是并进 Tnzi.Tests：全生态程序集闭包一旦进入某个模块自己的集成测试，
+      实体自动发现会扫描全部已加载程序集（Chat/Notification 的 Message 实测撞表）。
+      这条约束与 Tnzi.PermissionCatalogue.Tests 独立存在的理由是同一条。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
+
+    <!-- 核心 / 框架层 -->
+    <ProjectReference Include="..\..\src\Tnzi\Tnzi.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.EFCore\Tnzi.EFCore.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Mapster\Tnzi.Mapster.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Logging\Tnzi.Logging.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Localization\Tnzi.Localization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Swagger\Tnzi.Swagger.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.SignalR\Tnzi.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.HealthChecks\Tnzi.HealthChecks.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hosting\Tnzi.Hosting.csproj" />
+
+    <!-- 基础设施层（这几个从不在 Hosting 的依赖图里，至今没被任何架构门禁扫过） -->
+    <ProjectReference Include="..\..\src\Tnzi.Redis\Tnzi.Redis.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.RabbitMQ\Tnzi.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Kafka\Tnzi.Kafka.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.OpenTelemetry\Tnzi.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Performance\Tnzi.Performance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hangfire\Tnzi.Hangfire.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Imaging\Tnzi.Imaging.csproj" />
+
+    <!-- 业务模块 -->
+    <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.Presence\Tnzi.Identity.Presence.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Feature\Tnzi.Feature.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Documents\Tnzi.Documents.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Signing\Tnzi.Signing.csproj" />
+
+    <!-- Finance 家族 -->
+    <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Ai\Tnzi.Finance.Ai.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Documents\Tnzi.Finance.Documents.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Tax.Ca\Tnzi.Finance.Tax.Ca.csproj" />
+
+    <!-- AI 家族 -->
+    <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Skills\Tnzi.AI.Skills.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Workflow\Tnzi.AI.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Rag\Tnzi.AI.Rag.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Sandbox\Tnzi.AI.Sandbox.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.AI.Cli\Tnzi.AI.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

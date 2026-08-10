@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Tests;
+﻿namespace Tnzi.AI.Tests;
 
 /// <summary>
 /// AI 中间件管道单元测试
@@ -325,6 +325,11 @@ public class AiMiddlewarePipelineTests
     {
         var threadId = Guid.NewGuid();
         var threadService = new Mock<IAgentThreadInternalService>();
+
+        // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
+        // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
+        threadService.Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((default(ConversationContext)!, threadId, false));
 
         // 模拟历史消息
         var history = new List<ChatMessage>

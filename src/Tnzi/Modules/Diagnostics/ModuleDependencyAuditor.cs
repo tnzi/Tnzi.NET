@@ -47,27 +47,37 @@ public static class ModuleDependencyAuditor
                         if (IsSystemService(paramType))
                             continue;
 
-                        if (serviceTypeToModule.TryGetValue(paramType, out var providerModuleType))
-                        {
-                            if (providerModuleType == module.Type)
-                                continue;
+                        // 可选构造参数（`IFoo? foo = null`）是框架表达「可选依赖」的既定写法：
+                        // 提供方模块没加载时注入 null、能力优雅退化。把它当硬依赖会把
+                        // Storage 消费 IDocumentConverter 这类正确设计报成违规。
+                        if (param.HasDefaultValue)
+                            continue;
 
-                            if (!declaredDependencies.Contains(providerModuleType))
-                            {
-                                // Check suppression
-                                if (moduleSuppression != null &&
-                                    moduleSuppression.Any(s => s.IgnoredServiceType == null || s.IgnoredServiceType == paramType))
-                                    continue;
+                        if (!serviceTypeToModule.TryGetValue(paramType, out var providerModules))
+                            continue;
 
-                                violations.Add(new DependencyViolation(
-                                    module.Type,
-                                    paramType,
-                                    providerModuleType,
-                                    $"Module {module.Type.Name} uses service {paramType.Name} " +
-                                    $"(registered by {providerModuleType.Name}) " +
-                                    $"but does not declare [DependsOn(typeof({providerModuleType.Name}))]"));
-                            }
-                        }
+                        // 一个服务类型可能被多个模块注册（CachingModule 注册 ICache、
+                        // RedisCachingModule 再 RemoveAll 后替换）。只要**任一**注册者在
+                        // 依赖闭包内，这个依赖就是声明过的。
+                        if (providerModules.Any(p => p == module.Type || declaredDependencies.Contains(p)))
+                            continue;
+
+                        // 核心程序集里的模块由框架无条件加载，任何模块都不需要声明它们。
+                        if (providerModules.Any(IsAlwaysLoadedCoreModule))
+                            continue;
+
+                        if (moduleSuppression != null &&
+                            moduleSuppression.Any(s => s.IgnoredServiceType == null || s.IgnoredServiceType == paramType))
+                            continue;
+
+                        var providerNames = string.Join(" / ", providerModules.Select(p => p.Name));
+                        violations.Add(new DependencyViolation(
+                            module.Type,
+                            paramType,
+                            providerModules[0],
+                            $"Module {module.Type.Name} uses service {paramType.Name} " +
+                            $"(registered by {providerNames}) " +
+                            $"but does not declare [DependsOn(typeof({providerModules[0].Name}))]"));
                     }
                 }
             }
@@ -96,23 +106,50 @@ public static class ModuleDependencyAuditor
     }
 
     /// <summary>
-    /// 构建服务类型到注册模块的映射
+    /// 构建服务类型到<b>全部</b>注册模块的映射。
     /// </summary>
-    private static Dictionary<Type, Type> BuildServiceTypeToModuleMap(Dictionary<Type, List<ServiceDescriptor>> moduleServiceMap)
+    /// <remarks>
+    /// 曾经写作 <c>map[descriptor.ServiceType] = moduleType</c>，即「后注册的覆盖先注册的」。
+    /// 那是错的：<c>CachingModule</c> 注册 <c>ICache</c>，<c>RedisCachingModule</c> 之后
+    /// <c>RemoveAll&lt;ICache&gt;()</c> 再注册自己的实现，于是 <c>ICache</c> 的「提供者」
+    /// 被记成 Redis —— 所有用缓存的模块都会被报成「没声明依赖 RedisCachingModule」，
+    /// 而 Redis 只是个可替换实现，没人应该依赖它。保留全部候选，判定时任一命中即放行。
+    /// </remarks>
+    private static Dictionary<Type, List<Type>> BuildServiceTypeToModuleMap(
+        Dictionary<Type, List<ServiceDescriptor>> moduleServiceMap)
     {
-        var map = new Dictionary<Type, Type>();
+        var map = new Dictionary<Type, List<Type>>();
 
         foreach (var (moduleType, descriptors) in moduleServiceMap)
         {
             foreach (var descriptor in descriptors)
             {
-                // 使用 ServiceType 作为键，后注册的模块覆盖先注册的
-                map[descriptor.ServiceType] = moduleType;
+                if (!map.TryGetValue(descriptor.ServiceType, out var providers))
+                {
+                    providers = [];
+                    map[descriptor.ServiceType] = providers;
+                }
+
+                if (!providers.Contains(moduleType))
+                    providers.Add(moduleType);
             }
         }
 
         return map;
     }
+
+    /// <summary>
+    /// 是否为核心程序集里那批由框架无条件加载的模块。
+    /// </summary>
+    /// <remarks>
+    /// <c>CoreServicesModule</c> / <c>CachingModule</c> / <c>EventBusModule</c> /
+    /// <c>ResilienceModule</c> / <c>DependencyInjectionModule</c> 随 <c>TnziApplication</c>
+    /// 一起加载，不在任何模块的 <c>[DependsOn]</c> 里，也不该要求写 —— 每个模块都必然
+    /// 引用核心程序集，它们的服务（<c>ICache</c>、<c>IEventBus</c>、<c>TimeProvider</c>…）
+    /// 是无条件可用的基线。
+    /// </remarks>
+    private static bool IsAlwaysLoadedCoreModule(Type moduleType)
+        => moduleType.Assembly == typeof(ITnziModule).Assembly;
 
     /// <summary>
     /// 构建每个模块的完整依赖链（包括传递依赖）

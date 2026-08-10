@@ -2,7 +2,10 @@
  * @tnzi/core/state
  *
  * 响应式状态管理逻辑层。
- * 基于 @vue/reactivity 实现，UI 包可直接使用或包装为 Pinia store。
+ * 基于 Vue 响应式系统实现，UI 包可直接使用或包装为 Pinia store。
+ *
+ * ★ `reactive` 从 `'vue'` 导入而非 `'@vue/reactivity'`，理由见 `headless/index.ts`
+ * 的同名说明：两份响应式运行时会让状态更新对消费方静默不可见。
  */
 
 // 状态管理器

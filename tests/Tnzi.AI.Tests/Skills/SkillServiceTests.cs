@@ -12,6 +12,7 @@ public class SkillServiceTests : IDisposable
     private readonly Mock<ISkillRegistry> _mockRegistry;
     private readonly Mock<ISkillTemplateEngine> _mockTemplateEngine;
     private readonly FileSystemSkillStore _fileStore;
+    private readonly Mock<IPermissionChecker> _permissionChecker;
     private readonly IServiceProvider _serviceProvider;
 
     public SkillServiceTests()
@@ -42,9 +43,22 @@ public class SkillServiceTests : IDisposable
         var fileStoreLogger = Mock.Of<ILogger<FileSystemSkillStore>>();
         _fileStore = new FileSystemSkillStore(fileStoreLogger, aiOptions);
 
+        // 默认**拒绝**一切管理码 = 自服务调用者（DefaultSkillController 只有 [ApiAuthorize]）。
+        // 需要管理端视角的用例显式 GrantSkillManage()。
+        _permissionChecker = new Mock<IPermissionChecker>();
+        _permissionChecker.Setup(p => p.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(false);
+
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddScoped(_ => _permissionChecker.Object);
         _serviceProvider = services.BuildServiceProvider();
+    }
+
+    /// <summary>把当前调用者当成管理端（持有 <c>ai.skill.update</c>/<c>.delete</c>）。</summary>
+    private void GrantSkillManage()
+    {
+        _permissionChecker.Setup(p => p.IsGrantedAsync("ai.skill.update")).ReturnsAsync(true);
+        _permissionChecker.Setup(p => p.IsGrantedAsync("ai.skill.delete")).ReturnsAsync(true);
     }
 
     public void Dispose()
@@ -399,6 +413,7 @@ public class SkillServiceTests : IDisposable
     [Fact]
     public async Task UpdateAsync_Found_UpdatesEntityAndInvalidatesCache()
     {
+        GrantSkillManage();   // Tenant 作用域的技能是管理面资产：这三条建模的是管理端调用者
         var id = Guid.NewGuid();
         var entity = new SkillEntity
         {
@@ -447,6 +462,7 @@ public class SkillServiceTests : IDisposable
     [Fact]
     public async Task DeleteAsync_Found_DeletesEntityAndInvalidatesCache()
     {
+        GrantSkillManage();   // Tenant 作用域的技能是管理面资产：这三条建模的是管理端调用者
         var id = Guid.NewGuid();
         var entity = new SkillEntity
         {
@@ -480,6 +496,88 @@ public class SkillServiceTests : IDisposable
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(404);
+    }
+
+    // -------------------------------------------------------------------------
+    // 共享作用域（System / Tenant）只有管理面能动 —— 单租户宿主上的守卫
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 自服务调用者动不了共享作用域的技能。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 此前这条守卫整段包在 <c>if (tenantId != null)</c> 里，而<b>多租户默认关闭</b> ——
+    /// 于是在默认配置下它一次都不执行：任何已登录用户经自服务端点
+    /// <c>PUT/DELETE /api/skills/{id}</c> 就能改掉或删掉 <c>System</c> 作用域的技能。
+    /// </para>
+    /// <para>
+    /// 而 System 技能是随框架分发、会被注入进 agent 提示词的，改一条等于对所有用到它的 agent
+    /// 做提示注入。自服务的 <c>Create</c> 本来就强制 <c>Scope = User</c>
+    /// （<c>DefaultSkillControllerTests.Create_CallerRequestsElevatedScope_ForcesScopeToUser</c>），
+    /// 所以 Update/Delete 少了同样的限制是遗漏而不是设计。
+    /// </para>
+    /// <para>
+    /// ★ 拒绝路径必须<b>零副作用</b>：断言仓储的删除/更新一次都没被调用。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(SkillScope.System)]
+    [InlineData(SkillScope.Tenant)]
+    public async Task UpdateAsync_SelfServiceCaller_CannotTouchSharedScope(SkillScope scope)
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity { Id = id, Slug = "shared", Name = "Shared", Content = "x", Scope = scope };
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+
+        var service = CreateService();
+        var result = await service.UpdateAsync(id, new UpdateSkillDto { Name = "Hijacked" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        _mockRepository.Verify(r => r.UpdateAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(SkillScope.System)]
+    [InlineData(SkillScope.Tenant)]
+    public async Task DeleteAsync_SelfServiceCaller_CannotTouchSharedScope(SkillScope scope)
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity { Id = id, Slug = "shared", Name = "Shared", Content = "x", Scope = scope };
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+
+        var service = CreateService();
+        var result = await service.DeleteAsync(id);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        _mockRepository.Verify(r => r.DeleteAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
+    }
+
+    /// <summary>
+    /// 对照：自服务调用者照常能改<b>自己的</b> User 作用域技能 —— 守卫不得误伤本来的用法。
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_SelfServiceCaller_CanStillUpdateOwnUserScopedSkill()
+    {
+        var id = Guid.NewGuid();
+        var entity = new SkillEntity
+        {
+            Id = id, Slug = "mine", Name = "Mine", Content = "x",
+            Scope = SkillScope.User,
+            OwnerUserId = null   // CurrentUser 未注册 → Id 为 null，与 OwnerUserId 相等即视为本人
+        };
+        _mockRepository.Setup(r => r.GetAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(entity);
+        _mockRepository.Setup(r => r.UpdateAsync(entity, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var service = CreateService();
+        var result = await service.UpdateAsync(id, new UpdateSkillDto { Name = "Renamed" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        _mockRepository.Verify(r => r.UpdateAsync(entity, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // -------------------------------------------------------------------------
@@ -896,6 +994,7 @@ public class SkillServiceTests : IDisposable
     [Fact]
     public async Task UpdateAsync_PartialConstraints_MergesWithExisting()
     {
+        GrantSkillManage();   // Tenant 作用域的技能是管理面资产：这三条建模的是管理端调用者
         var id = Guid.NewGuid();
         var entity = new SkillEntity
         {

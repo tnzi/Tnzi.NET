@@ -688,7 +688,7 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         // 检查锁定
         if (_cache != null)
         {
-            var failCount = await _cache.GetAsync<int>(cacheKey);
+            var failCount = await _cache.GetCounterAsync(cacheKey);
             if (failCount >= MaxTwoFactorFailureAttempts)
             {
                 return Fail<Guid?>("Too many failed attempts. Please try again later.", 429, ErrorCodes.VALIDATION_ERROR);

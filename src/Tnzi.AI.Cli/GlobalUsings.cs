@@ -41,6 +41,7 @@ global using Tnzi.Extensions;
 global using Tnzi.Json;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;
+global using Tnzi.Modules.Diagnostics;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;

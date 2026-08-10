@@ -24,5 +24,17 @@ public class AuditPermissions : IPermissionDefinitionProvider
         // Business - it is the compliance view business owners actually read.
         context.AddPermission("audit.log.view", "View Audit Logs", parentName: "audit", category: PermissionCategory.Technical);
         context.AddCrudPermissions("audit.operation", "Audit Operations", parentName: "audit", actions: CrudActions.View | CrudActions.Delete);
+
+        // Destruction certificates are the evidence that a retention policy was
+        // honoured, so reading them is a Business concern (auditors and privacy
+        // officers ask for them), while triggering a run is a privileged action
+        // that permanently destroys data - it gets its own operation code rather
+        // than riding on any of the CRUD ones.
+        // Who read which record is the most sensitive view this module offers -
+        // it answers "who opened this informant's file last month" - so it gets
+        // its own code rather than riding on audit.operation.view.
+        context.AddPermission("audit.recordAccess.view", "View Record Access Trail", parentName: "audit");
+        context.AddPermission("audit.destruction.view", "View Destruction Certificates", parentName: "audit");
+        context.AddPermission("audit.destruction.execute", "Run Data Destruction", parentName: "audit");
     }
 }

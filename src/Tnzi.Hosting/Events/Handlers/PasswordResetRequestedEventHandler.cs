@@ -145,6 +145,8 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         var request = new CreateNotificationRequest
         {
             Type = NotificationType.Email,
+            // 事务性：对方自己点了「忘记密码」，退订营销邮件不该把这条也一起挡掉。
+            IsTransactional = true,
             TemplateName = "PasswordReset",
             IsHtml = true,
             SendImmediately = true,

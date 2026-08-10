@@ -48,6 +48,7 @@ global using Tnzi.EFCore.Internal;
 global using Tnzi.EFCore.Options;
 global using Tnzi.EFCore.Providers;
 global using Tnzi.EFCore.Sql;
+global using Tnzi.EFCore.Encryption;
 global using Tnzi.EFCore.Outbox;
 global using Tnzi.EFCore.Sql.Implementations;
 global using Tnzi.EventBus;

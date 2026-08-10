@@ -18,4 +18,14 @@
     <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      PDF 收据走文本路径（AiReceiptExtractor 用 PdfPig 读文字，再交给 LLM 结构化）。
+      2026-08-07 之前这是从 Tnzi.AI 传递来的：本项目用着 UglyToad 却没声明过它。
+      AI 那边的文档转换器删除后传递链断了 —— 直接依赖就该直接声明。
+      版本对齐 Tnzi.Documents / Tnzi.AI.Rag。
+    -->
+    <PackageReference Include="PdfPig" Version="0.1.15" />
+  </ItemGroup>
+
 </Project>

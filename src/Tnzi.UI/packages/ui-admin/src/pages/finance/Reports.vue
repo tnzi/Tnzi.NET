@@ -323,7 +323,7 @@ import { NAlert, NButton, NDropdown, NInput, NPagination, NSelect, NSpin, useDia
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { TEmpty } from '@tnzi/ui'
-import TModalShell from '../../components/overlay/TModalShell.vue'
+import { TModalShell } from '@tnzi/ui'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import {
   createFinanceBridge,

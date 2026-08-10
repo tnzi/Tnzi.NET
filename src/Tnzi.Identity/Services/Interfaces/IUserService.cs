@@ -11,9 +11,19 @@ public interface IUserService
     Task<Result<UserDto>> CreateAsync(CreateUserDto input);
 
     /// <summary>
-    /// 更新用户
+    /// 更新用户（管理端口径，可改角色与所属组织）
     /// </summary>
     Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input);
+
+    /// <summary>
+    /// 更新用户本人的资料（自助口径，<b>不可</b>改角色与所属组织）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="UpdateAsync"/> 的区别只有一个：入参类型。
+    /// <see cref="UpdateProfileDto"/> 不含 <c>RoleIds</c>/<c>OrganizationId</c>，
+    /// 因此自助路径上的提权不是「被拦住」而是无法表达。理由详见该类型的注释。
+    /// </remarks>
+    Task<Result<UserDto>> UpdateProfileAsync(Guid id, UpdateProfileDto input);
 
     /// <summary>
     /// 删除用户

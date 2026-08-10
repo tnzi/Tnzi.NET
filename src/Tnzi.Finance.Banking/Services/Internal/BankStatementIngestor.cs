@@ -243,7 +243,12 @@ public class BankStatementIngestor : ApplicationService
             }
             catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
             {
-                // 并发导入已落同一 ExternalId：唯一索引兜底，跳过不失败整批
+                // 并发导入已落同一 ExternalId：唯一索引兜底，跳过不失败整批。
+                // ★★ 必须 Discard：插入失败的实体仍是 Added 留在变更跟踪器里，
+                //    下一行的 SaveChanges 会把它一起重新提交并再次撞索引 ——
+                //    于是本批**剩下的每一行都被计成已跳过而一条都没真的导进去**，
+                //    而返回值看起来完全正常（报告成功的静默数据丢失）。
+                _txnRepository.Discard(txn);
                 skipped++;
             }
         }

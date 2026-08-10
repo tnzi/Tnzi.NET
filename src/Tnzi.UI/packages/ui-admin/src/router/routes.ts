@@ -512,6 +512,26 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            path: 'record-access',
+            name: 'audit.recordAccess',
+            component: () => import('../pages/audit/RecordAccess.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.audit.recordAccess.title',
+              permission: 'audit.recordAccess.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'destruction',
+            name: 'audit.destruction',
+            component: () => import('../pages/audit/Destruction.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.audit.destruction.title',
+              permission: 'audit.destruction.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 
@@ -1339,6 +1359,35 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             meta: {
               title: 'tnzi.admin.modules.template.layouts.title',
               permission: 'template.layout.view',
+              keepAlive: true,
+            },
+          },
+        ],
+      },
+
+      // ── Signing ───────────────────────────────────────────────
+      {
+        path: 'signing',
+        name: 'signing',
+        meta: { title: 'tnzi.admin.modules.signing.label', permission: 'signing.view', order: 195, moduleGate: true },
+        children: [
+          {
+            path: 'requests',
+            name: 'signing.requests',
+            component: () => import('../pages/signing/Requests.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.signing.requests.title',
+              permission: 'signing.request.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'templates',
+            name: 'signing.templates',
+            component: () => import('../pages/signing/Templates.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.signing.templates.title',
+              permission: 'signing.template.view',
               keepAlive: true,
             },
           },

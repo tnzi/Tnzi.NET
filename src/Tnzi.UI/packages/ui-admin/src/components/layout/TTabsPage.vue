@@ -50,6 +50,7 @@
     <div v-if="$slots.kpis" class="t-tabs-page__kpis"><slot name="kpis" /></div>
 
     <NTabs
+      ref="tabsRef"
       :value="active"
       type="line"
       animated
@@ -78,18 +79,26 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { ref, watch, type VNode, type VNodeChild } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import TContentPage from './TContentPage.vue'
 import type { BackTarget } from './back-target'
 import { useSectionRoute } from '../../headless/useSectionRoute'
+import { useTabBarSync, type TabBarSyncTarget } from '../../headless/useTabBarSync'
 
 /** One primary tab. `label` is the (already-translated) tab title; `scroll`
  *  makes the pane own its vertical scroll (mixed variable-height content like
  *  reports/status boards) - leave it off for a single flex-height table/cards. */
 export interface TabSection {
   name: string
-  label?: string
+  /**
+   * The (already-translated) tab title. A plain string covers the common case;
+   * a `VNode` or a render function is forwarded verbatim to `NTabPane`'s `tab`
+   * prop (whose own type is `string | number | VNode | (() => VNodeChild)`),
+   * for a tab that needs a badge / icon / count alongside its text. Omit it and
+   * the section name is run through `translate`.
+   */
+  label?: string | VNode | (() => VNodeChild)
   scroll?: boolean
   disabled?: boolean
   /** naive display strategy. Default `'if'` (destroy on leave); `'show'` keeps
@@ -152,11 +161,23 @@ watch(
   },
 )
 
+// A tab whose label carries an asynchronously-loaded count / status badge grows
+// after mount and pushes every tab after it sideways, and naive only re-measures
+// the underline on a value change or a nav WIDTH change - neither of which
+// happens here. Without this, deep-linking into a tab that sits after the one
+// that grew underlines the wrong tab.
+const tabsRef = ref<TabBarSyncTarget | null>(null)
+// The watch source is the tab SET, not `sections` itself: a label that merely
+// changed size is the observer's job, and the rendered tab elements survive a
+// new `sections` array as long as the names are the same (both this `v-for` and
+// naive's panes key on `name`), so re-reading the strip then would be churn.
+useTabBarSync(tabsRef, () => JSON.stringify(props.sections.map((s) => s.name)))
+
 function onTab(v: string | number): void {
   active.value = String(v)
 }
 
-function tabLabel(s: TabSection): string {
+function tabLabel(s: TabSection): string | VNode | (() => VNodeChild) {
   return s.label ?? (props.translate ? props.translate(s.name) : s.name)
 }
 </script>

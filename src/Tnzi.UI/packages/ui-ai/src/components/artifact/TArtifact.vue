@@ -21,11 +21,11 @@ defineEmits<{
 
 <template>
   <div class="flex h-full flex-col overflow-hidden rounded-lg border shadow-lg">
-    <div class="flex items-center justify-between border-b bg-muted/50 px-4 py-2">
+    <div class="flex items-center justify-between border-b bg-tnzi-layout/50 px-4 py-2">
       <div class="min-w-0">
         <slot name="header">
           <div class="text-sm font-medium truncate">{{ title }}</div>
-          <p v-if="description" class="text-xs text-muted-foreground truncate">{{ description }}</p>
+          <p v-if="description" class="text-xs text-tnzi-muted truncate">{{ description }}</p>
         </slot>
       </div>
       <div class="flex items-center gap-1 shrink-0">

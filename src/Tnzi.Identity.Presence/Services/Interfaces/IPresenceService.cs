@@ -17,11 +17,22 @@ public interface IPresenceService
     /// </summary>
     Task<Result> ReportActivityAsync(bool active);
 
-    /// <summary>标记用户上线活动（清 IsAutoAway、置 LastActivityAt）。连接建立时由事件处理器调用。</summary>
-    Task MarkActiveAsync(Guid userId);
+    /// <summary>
+    /// 标记用户上线活动（清 IsAutoAway、置 LastActivityAt）。连接建立时由事件处理器调用。
+    /// 返回<b>旁观者视角的状态是否发生变化</b>——隐身用户恒为 <see langword="false"/>，
+    /// 调用方据此跳过推送（见 <see cref="MarkOfflineAsync"/> 的说明）。
+    /// </summary>
+    Task<bool> MarkActiveAsync(Guid userId);
 
-    /// <summary>标记用户离线（写 LastSeenAt）。全部连接断开时由事件处理器调用。</summary>
-    Task MarkOfflineAsync(Guid userId);
+    /// <summary>
+    /// 标记用户离线（写 <c>LastSeenAt</c>）。全部连接断开时由事件处理器调用。
+    /// </summary>
+    /// <returns>
+    /// 旁观者视角的状态是否发生变化。<b>隐身用户恒为 <see langword="false"/></b>：他们在旁观者眼里
+    /// 早已是离线，真的断开时既不该改动 <c>LastSeenAt</c>，也不该广播一条"状态变了"——
+    /// 那两件事都会泄露"这个显示为离线的人其实刚刚才真的离开"。
+    /// </returns>
+    Task<bool> MarkOfflineAsync(Guid userId);
 
     /// <summary>解析该用户有效状态并发布 <c>UserPresenceChangedEvent</c>，触发实时推送。</summary>
     Task NotifyChangedAsync(Guid userId);

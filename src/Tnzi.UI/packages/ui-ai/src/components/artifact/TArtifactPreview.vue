@@ -55,16 +55,16 @@ const logLevelClass: Record<string, string> = {
     <div class="relative flex-1 min-h-0">
       <iframe v-if="srcdoc" :srcdoc="srcdoc" class="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation" />
       <iframe v-else-if="localUrl" :src="localUrl" class="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation" />
-      <div v-else class="flex h-full items-center justify-center text-sm text-muted-foreground">{{ t.artifact.noPreview }}</div>
+      <div v-else class="flex h-full items-center justify-center text-sm text-tnzi-muted">{{ t.artifact.noPreview }}</div>
     </div>
     <div v-if="logs?.length">
-      <button class="flex w-full items-center gap-1.5 border-t px-3 py-1 text-xs text-muted-foreground hover:bg-accent/50 transition-colors" @click="consoleOpen = !consoleOpen">
+      <button class="flex w-full items-center gap-1.5 border-t px-3 py-1 text-xs text-tnzi-muted hover:bg-tnzi-layout/50 transition-colors" @click="consoleOpen = !consoleOpen">
         <Icon icon="lucide:terminal" class="size-3" />
         <span>{{ t.artifact.console }}</span>
         <span class="ml-auto tabular-nums">{{ logs.length }}</span>
         <Icon icon="lucide:chevron-down" class="size-3 transition-transform" :class="{ 'rotate-180': consoleOpen }" />
       </button>
-      <div v-show="consoleOpen" class="max-h-[120px] overflow-auto border-t bg-muted/30 p-2 font-mono text-[11px]">
+      <div v-show="consoleOpen" class="max-h-[120px] overflow-auto border-t bg-tnzi-layout/30 p-2 font-mono text-[11px]">
         <div v-for="(log, i) in logs" :key="i" class="py-0.5" :class="logLevelClass[log.level]">{{ log.message }}</div>
       </div>
     </div>

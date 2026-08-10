@@ -84,6 +84,10 @@ public class FinanceBankingModule : TnziApplicationModule
         // ── 块 3：EFT 批量付款（文件构建器可替换以适配银行方言）──
         context.Services.TryAddScoped<IEftFileComposer, DefaultEftFileComposer>();
         context.Services.AddScoped<IEftService, EftService>();
+        // 拒绝作废「还在未作废批次里」的付款：核心的 IFinancePostingGuard 此前全仓零实现，
+        // 而核心对 EftBatch 引用数为 0，于是已交给银行的付款可以被静默作废（账上冲销、银行照付）。
+        // 支票侧有对称保护（PaymentVoidedCheckHandler），EFT 侧此前一片空白。
+        context.Services.AddScoped<IFinancePostingGuard, EftBatchPaymentGuard>();
 
         // ── 块 4：收据采集（IReceiptExtractor 契约在本模块，默认实现由 Tnzi.Finance.Ai 提供；
         //    未注册时 ExtractAsync 返回 501 引导）──

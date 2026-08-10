@@ -92,7 +92,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     public async Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(string? clientId = null, CancellationToken cancellationToken = default)
     {
         var baseOptions = _imagingOptions.Value.SlidingCaptcha;
-        var failureCount = 0;
+        long failureCount = 0;
 
         if (!string.IsNullOrEmpty(clientId) && _cache != null)
         {
@@ -119,7 +119,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     /// <summary>
     /// 根据失败次数获取难度设置
     /// </summary>
-    private static (int Tolerance, int PieceSize, bool AddNoise) GetDifficultySettings(int failureCount)
+    private static (int Tolerance, int PieceSize, bool AddNoise) GetDifficultySettings(long failureCount)
     {
         return failureCount switch
         {
@@ -414,11 +414,13 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     /// <summary>
     /// 获取失败次数
     /// </summary>
-    private async Task<int> GetFailureCountAsync(string clientId, CancellationToken cancellationToken)
+    private async Task<long> GetFailureCountAsync(string clientId, CancellationToken cancellationToken)
     {
         if (_cache == null) return 0;
         var key = $"{FailureCacheKeyPrefix}{clientId}";
-        return await _cache.GetAsync<int>(key, cancellationToken);
+        // 计数由 IncrementAsync 以 long 写入，必须经 GetCounterAsync 读；
+        // 用 GetAsync<int> 会因类型不匹配恒返回 0，难度自适应静默失效。
+        return await _cache.GetCounterAsync(key, cancellationToken);
     }
 
     /// <summary>

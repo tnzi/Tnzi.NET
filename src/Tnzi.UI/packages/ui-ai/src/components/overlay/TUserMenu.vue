@@ -204,10 +204,14 @@ function onAction(id: string, event: MouseEvent): void {
       </div>
     </div>
 
+    <!-- Expanded: the menu takes the account row's width, so it reads as that
+         row opening upward rather than as a panel pinned to the window edge.
+         In the 56px rail there is no width to match, so it keeps its own. -->
     <TPopoverMenu
       v-model="open"
       align="left"
       :placement="placement"
+      :full-width="!compact"
       :min-width="264"
       :max-width="300"
     >
@@ -289,7 +293,9 @@ function onAction(id: string, event: MouseEvent): void {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 6px 8px;
+  /* Small: the sidebar footer supplies the column inset. Padding sized to sit
+     inside it as one more row, not to inset the row a second time. */
+  padding: 2px 4px;
 }
 .t-user-menu__trigger {
   flex: 1;
@@ -306,11 +312,11 @@ function onAction(id: string, event: MouseEvent): void {
   font-family: inherit;
   font-size: 14px;
   text-align: left;
+  /* No hover fill. The account row is the last thing in the sidebar and it is
+     always on screen, so a fill under the cursor is a permanent flicker as the
+     pointer crosses it on the way anywhere else. The pointer cursor and the
+     menu it opens are the affordance. */
   cursor: pointer;
-  transition: background var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
-}
-.t-user-menu__trigger:hover {
-  background: var(--tnzi-ai-hover);
 }
 .t-user-menu__avatar {
   flex-shrink: 0;

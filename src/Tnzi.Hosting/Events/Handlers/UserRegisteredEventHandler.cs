@@ -184,6 +184,8 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         var request = new CreateNotificationRequest
         {
             Type = NotificationType.Email,
+            // 事务性：注册确认 / 邮箱验证，不验证就用不了账号。
+            IsTransactional = true,
             TemplateName = "WelcomeEmail",
             IsHtml = true,
             SendImmediately = true,

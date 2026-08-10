@@ -81,9 +81,10 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         StorageOptions? options = null,
         IPublicFileFieldResolver? publicFieldResolver = null,
         IFileAccessAuthorizer? authorizer = null,
-        IFileAccessGrantContext? grantContext = null)
+        IFileAccessGrantContext? grantContext = null,
+        IEnumerable<IUploadSanitizer>? sanitizers = null)
     {
-        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext);
+        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers);
     }
 
     /// <summary>
@@ -95,7 +96,8 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         StorageOptions? options = null,
         IPublicFileFieldResolver? publicFieldResolver = null,
         IFileAccessAuthorizer? authorizer = null,
-        IFileAccessGrantContext? grantContext = null)
+        IFileAccessGrantContext? grantContext = null,
+        IEnumerable<IUploadSanitizer>? sanitizers = null)
     {
         var effective = options ?? StorageOptions;
         var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
@@ -110,7 +112,8 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             authorizer ?? BuildAuthorizer(grantContext),
             publicFieldResolver ?? TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            ServiceProvider);
+            ServiceProvider,
+            sanitizers);
     }
 
     protected FileFolderService CreateFolderService()

@@ -249,17 +249,17 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         RecurringDocument template, DateTime period, CancellationToken cancellationToken)
     {
         var autoPost = template.AutoPost ?? _options.DefaultAutoPost;
+        var run = new RecurringRun
+        {
+            RecurringDocumentId = template.Id,
+            PeriodDate = period,
+            Status = RecurringRunStatus.Generated,
+        };
 
         try
         {
             return await ExecuteInUnitOfWorkAsync(async ct =>
             {
-                var run = new RecurringRun
-                {
-                    RecurringDocumentId = template.Id,
-                    PeriodDate = period,
-                    Status = RecurringRunStatus.Generated,
-                };
                 await _runRepository.InsertAsync(run, ct);
                 await _runRepository.SaveChangesAsync(ct);
 
@@ -281,11 +281,13 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         }
         catch (RecurringAbortException ex)
         {
+            UndoFailedInsert(run);
             return await RecordFailureAsync(template, period, ex.Result.Message ?? "Generation failed.", cancellationToken);
         }
         catch (Exception ex) when (IsDuplicatePeriod(ex))
         {
             // 这一期已经有人做过了（重跑或并发）。这正是幂等键该起的作用，不是错误。
+            UndoFailedInsert(run);
             Logger?.LogInformation(
                 "Recurring template {TemplateId} period {Period:yyyy-MM-dd} was already generated; skipping.",
                 template.Id, period);
@@ -293,10 +295,35 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         }
         catch (Exception ex)
         {
+            UndoFailedInsert(run);
             Logger?.LogError(ex, "Recurring template {TemplateId} failed for period {Period:yyyy-MM-dd}.", template.Id, period);
             return await RecordFailureAsync(template, period, ex.Message, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// 撤销一条<b>插入失败</b>的生成记录。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ 插入失败后实体仍是 <c>Added</c> 留在变更跟踪器里，会被本 DI 作用域内<b>任何</b>
+    /// 后续 <c>SaveChanges</c> 重放。而下一个 <c>SaveChanges</c> 就是 <see cref="AdvanceAsync"/>
+    /// 的模板更新 —— 它只接住 <c>DbUpdateConcurrencyException</c>，于是重放出来的
+    /// <c>DbUpdateException</c> 会冲出 <see cref="SweepAsync"/>，把本轮<b>剩下的模板全部弄死</b>。
+    /// </para>
+    /// <para>
+    /// 触发它的不是什么异常情形，而是本模块设计上的<b>正常</b>路径：
+    /// 「这一期已经有人做过了」（重跑或多实例并发）—— 也就是说，正是那道让多实例安全的
+    /// 唯一索引，在没有撤销的情况下会毁掉整轮扫描。
+    /// </para>
+    /// <para>
+    /// ★ 三处 catch 的注释都写着「不能再抛，否则扫描会在第一条坏模板上整个停摆」，
+    /// 而不撤销等于两行之后照样停摆 —— 吞掉异常只挡住了症状的第一跳。
+    /// 手法与 <c>DocumentNumberService</c> 的首插竞态兜底一致（<c>Remove</c> 一个 <c>Added</c>
+    /// 实体即把它转为 <c>Detached</c>，不会产生任何 DELETE 语句）。
+    /// </para>
+    /// </remarks>
+    private void UndoFailedInsert(RecurringRun run) => _runRepository.Discard(run);
 
     private async Task<RecurringRunDto?> RecordSkippedAsync(RecurringDocument template, DateTime period, CancellationToken cancellationToken)
     {
@@ -316,6 +343,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         }
         catch (Exception ex) when (IsDuplicatePeriod(ex))
         {
+            UndoFailedInsert(run);
             return null;
         }
     }
@@ -346,6 +374,9 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         catch (Exception ex)
         {
             // 连失败记录都写不进去时不能再抛：那会让扫描在第一条坏模板上整个停摆。
+            // ★ 但只吞不撤销挡不住停摆：留在跟踪器里的 Added 实体会被下一次
+            //   SaveChanges 重放，见 UndoFailedInsert。
+            UndoFailedInsert(run);
             Logger?.LogError(ex, "Could not record the failed run for template {TemplateId}.", template.Id);
             return null;
         }

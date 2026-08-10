@@ -52,4 +52,17 @@ describe('TDetailHost', () => {
     const w = mount(TDetailHost, { props: { state: makeState('page') as any, title: 'Edit' }, slots: { default: '<div class="body" />' }, global: { stubs } })
     expect(w.find('.t-page-header').exists()).toBe(true)
   })
+
+  it('forwards #extra (with the record) into the page-mode identity column', () => {
+    const w = mount(TDetailHost, {
+      props: { state: makeState('page') as any, title: 'Edit' },
+      slots: {
+        default: '<div class="body" />',
+        extra: '<span class="meta">{{ params.data.name }}</span>',
+      },
+      global: { stubs },
+    })
+    expect(w.find('.t-page-header__main > .t-page-header__extra .meta').text()).toBe('a')
+    expect(w.find('.t-page-header__left .meta').exists()).toBe(false)
+  })
 })

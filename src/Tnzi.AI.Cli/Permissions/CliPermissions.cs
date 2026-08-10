@@ -10,6 +10,16 @@ namespace Tnzi.AI.Cli.Permissions;
 /// </remarks>
 public class CliPermissions : IPermissionDefinitionProvider
 {
+    /// <summary>看全部外部执行记录（管理台）。</summary>
+    /// <remarks>
+    /// 服务层用它区分「管理台在看」与「用户在看自己的」，故声明与判定共用同一个字面量 ——
+    /// 两处各写一份字符串，改名时漏掉一处的症状是权限静默失效而不是编译失败。
+    /// </remarks>
+    public const string CliRunView = "ai.cliRun.view";
+
+    /// <summary>控制外部执行（取消等）。</summary>
+    public const string CliRunExecute = "ai.cliRun.execute";
+
     /// <inheritdoc />
     public void Define(IPermissionDefinitionContext context)
     {
@@ -28,9 +38,9 @@ public class CliPermissions : IPermissionDefinitionProvider
             parentName: "ai", category: PermissionCategory.Technical,
             actions: CrudActions.View | CrudActions.Update | CrudActions.Delete);
 
-        context.AddPermission("ai.cliRun.view", "View CLI Runs",
+        context.AddPermission(CliRunView, "View CLI Runs",
             parentName: "ai", category: PermissionCategory.Technical);
-        context.AddPermission("ai.cliRun.execute", "Control CLI Runs",
+        context.AddPermission(CliRunExecute, "Control CLI Runs",
             parentName: "ai", category: PermissionCategory.Technical);
     }
 }

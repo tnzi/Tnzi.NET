@@ -46,6 +46,14 @@ const props = withDefaults(
      */
     placement?: 'top' | 'bottom'
     /**
+     * Span the anchor's full width instead of sizing to `minWidth` /
+     * `maxWidth`, which then do not apply. This is what a menu anchored to a
+     * full-width row wants: sized to its trigger it reads as part of that
+     * column, whereas a fixed width anchored to one edge reads as pinned to
+     * whatever is behind it - in a sidebar footer, the window edge.
+     */
+    fullWidth?: boolean
+    /**
      * Whether clicking outside closes the menu. Default `true`. Set
      * `false` if the consumer wants to manage close behavior manually
      * (e.g. nested menus that need a click-through pattern).
@@ -58,6 +66,7 @@ const props = withDefaults(
     maxWidth: 320,
     align: 'right',
     placement: 'bottom',
+    fullWidth: false,
     closeOnOutsideClick: true,
   },
 )
@@ -106,8 +115,11 @@ onBeforeUnmount(() => {
     v-if="modelValue"
     ref="root"
     class="t-popover-menu"
-    :class="[`t-popover-menu--${align}`, `t-popover-menu--place-${placement}`]"
-    :style="{ minWidth: `${minWidth}px`, maxWidth: `${maxWidth}px` }"
+    :class="[
+      fullWidth ? 't-popover-menu--full' : `t-popover-menu--${align}`,
+      `t-popover-menu--place-${placement}`,
+    ]"
+    :style="fullWidth ? undefined : { minWidth: `${minWidth}px`, maxWidth: `${maxWidth}px` }"
     role="menu"
     @click.stop
   >
@@ -134,6 +146,11 @@ onBeforeUnmount(() => {
 }
 .t-popover-menu--left {
   left: 0;
+}
+/* Both edges pinned, so the menu takes the anchor's width. */
+.t-popover-menu--full {
+  left: 0;
+  right: 0;
 }
 .t-popover-menu--place-bottom {
   top: 100%;

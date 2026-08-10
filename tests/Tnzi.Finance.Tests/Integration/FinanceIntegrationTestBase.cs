@@ -1,4 +1,4 @@
-using Mapster;
+﻿using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -132,6 +132,11 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         // 业务单据服务（P2b）
         services.AddScoped<FinanceDocumentHelper>();
         services.AddScoped<PostingGuardRunner>();
+        // 镜像 FinanceBankingModule：拒绝作废「还在未作废 EFT 批次里」的付款。
+        // 不注册它，PostingGuardRunner 就是在空集合上跑，恒放行。
+        services.AddScoped<IFinancePostingGuard, EftBatchPaymentGuard>();
+        // 镜像 FinanceBankingModule：拒绝作废「还在未作废 EFT 批次里」的付款。
+        // 不注册它，PostingGuardRunner 就是在空集合上跑，恒放行。
         services.AddScoped<ICustomerStatementService, CustomerStatementService>();
         services.AddScoped<IDunningPolicy, DefaultDunningPolicy>();
         services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();

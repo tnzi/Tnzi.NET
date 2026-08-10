@@ -14,6 +14,25 @@ public interface IPayslipCalculationHook
     /// <summary>执行顺序（升序）</summary>
     int Order => 0;
 
+    /// <summary>
+    /// 本钩子会在 <see cref="BeforeCalculateAsync"/> 注入的变量名（大写规范形，与组件 Code 同口径）
+    /// </summary>
+    /// <remarks>
+    /// 声明过的名字会并进**结构保存期**的公式变量白名单。★不声明就注入的变量，公式引用不到它
+    /// ——结构存不进库（400）。这是刻意的：判据必须是静态可知的**声明**，否则「拼错变量名要报错」
+    /// 就退化成只有跑批时才发现。
+    /// <para>
+    /// 值随 (辖区, 生效日) 变化不影响这里——白名单只关心**名字**，值在每张 payslip 求值前由
+    /// <see cref="BeforeCalculateAsync"/> 现算。这正是 country pack 注入法定标量
+    /// （费率 / 免征额 / 年度上限）的通路。
+    /// </para>
+    /// <para>
+    /// ⚠️ 与组件 Code 撞名会被组件保存端拒绝：同一个名字不能既是注入标量、又是某个结构行的
+    /// 计算结果——按序求值时后者会覆盖前者，引用它的公式读到哪个值取决于行序，是一条静默错账的路子。
+    /// </para>
+    /// </remarks>
+    IReadOnlyCollection<string> ProvidedVariables => [];
+
     /// <summary>按序求值前（变量已就绪，行未生成）</summary>
     Task<Result> BeforeCalculateAsync(PayslipCalculationContext context, CancellationToken cancellationToken = default)
         => Task.FromResult(Result.Success());

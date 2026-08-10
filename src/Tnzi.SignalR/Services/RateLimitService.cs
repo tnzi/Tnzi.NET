@@ -53,7 +53,9 @@ public class RateLimitService : IRateLimitService
     public async Task<bool> CheckMessageRateLimitAsync(Guid userId)
     {
         var cacheKey = CacheKeys.SignalR.MessageRateCount(userId);
-        var count = (await _cache.GetAsync<int?>(cacheKey)) ?? 0;
+        // 计数由 RecordMessageAsync 经 IncrementAsync 以 long 写入，必须经 GetCounterAsync 读；
+        // 用 GetAsync<int?> 会因类型不匹配恒返回 null，限流静默失效。
+        var count = await _cache.GetCounterAsync(cacheKey);
 
         if (count >= _options.MaxMessagesPerMinute)
         {

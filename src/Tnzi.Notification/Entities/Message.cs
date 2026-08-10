@@ -92,6 +92,17 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public string Category { get; set; } = "General";
 
     /// <summary>
+    /// 事务性消息（与商业/群发消息相对）：本条消息不受退订名单约束。
+    /// </summary>
+    /// <remarks>
+    /// 密码重置、二次验证码、账单与订阅通知属于此类 —— 它们是对方主动发起或既有关系
+    /// 必需的往来，退订按钮管的是营销邮件，不该让人再也收不到验证码。
+    /// <b>默认 false</b>：拿不准就按商业消息处理，宁可少发一条也不要把退订当摆设。
+    /// 必须落库而不是只留在请求里：定时与排队的消息在很久以后才真正发送，那时只剩这条记录。
+    /// </remarks>
+    public bool IsTransactional { get; set; }
+
+    /// <summary>
     /// 模板名称（如果使用模板创建）
     /// </summary>
     public string? TemplateName { get; set; }

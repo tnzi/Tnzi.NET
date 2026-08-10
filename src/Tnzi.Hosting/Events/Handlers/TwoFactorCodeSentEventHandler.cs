@@ -93,6 +93,8 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
         var request = new CreateNotificationRequest
         {
             Type = NotificationType.Email,
+            // 事务性：验证码是登录流程的一环，收不到就等于账号进不去。
+            IsTransactional = true,
             TemplateName = "TwoFactorCode",
             IsHtml = true,
             SendImmediately = true,
@@ -126,6 +128,8 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
         var request = new CreateNotificationRequest
         {
             Type = NotificationType.Sms,
+            // 同上，短信通道亦然。
+            IsTransactional = true,
             TemplateName = "TwoFactorCode",
             IsHtml = false,
             SendImmediately = true,

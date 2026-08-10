@@ -9,7 +9,7 @@ public partial class PaymentService : ApplicationService, IPaymentService
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IRepository<CouponUsage, Guid> _couponUsageRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
-    private readonly ITaxCalculator _taxCalculator;
+    private readonly IPaymentTaxCalculator _taxCalculator;
     private readonly IPaymentMethodService _paymentMethodService;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
     private readonly ICouponService? _couponService;
@@ -23,7 +23,7 @@ public partial class PaymentService : ApplicationService, IPaymentService
         IRepository<PaymentEntity, Guid> paymentRepository,
         IRepository<CouponUsage, Guid> couponUsageRepository,
         IPaymentProviderFactory paymentProviderFactory,
-        ITaxCalculator taxCalculator,
+        IPaymentTaxCalculator taxCalculator,
         IPaymentMethodService paymentMethodService,
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider,

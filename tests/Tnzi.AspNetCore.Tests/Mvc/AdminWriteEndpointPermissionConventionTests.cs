@@ -98,6 +98,12 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.Search:POST",
         "Tnzi.AI.Rag.Controllers.Admin.DefaultKnowledgeBaseAdminController.SearchAll:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.GetList:POST",
+        //    销毁证明查询：只读证明列表，不触发任何销毁（触发是同控制器的 Run，它带
+        //    audit.destruction.execute）。
+        "Tnzi.Audit.Controllers.Admin.DefaultDataDestructionAdminController.GetList:POST",
+        //    记录访问查询：只读审计条目。它自身刻意不做记录级登记，否则每翻一页都会
+        //    往被查记录的访问历史里插进一条无关的行。
+        "Tnzi.Audit.Controllers.Admin.DefaultRecordAccessAdminController.GetList:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportCsv:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportJson:POST",
         "Tnzi.Authorization.Controllers.Admin.DefaultDataAuthAdminController.CheckDataPermission:POST",
@@ -112,8 +118,6 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.Storage.Controllers.Admin.DefaultStorageAdminController.QueryFiles:POST",
         "Tnzi.Storage.Controllers.Admin.DefaultStorageAdminController.BatchVerifyIntegrity:POST",
         "Tnzi.Storage.Controllers.Admin.DefaultStorageAdminController.QueryActiveShares:POST",
-        "Tnzi.Template.Controllers.Admin.DefaultTemplateAdminController.Validate:POST",
-        "Tnzi.Template.Controllers.Admin.DefaultTemplateAdminController.Preview:POST",
     };
 
     [Fact]

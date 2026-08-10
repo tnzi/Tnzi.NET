@@ -40,7 +40,6 @@ global using Tnzi.AI.Infrastructure;
 global using Tnzi.AI.Infrastructure.ChatHistory;
 global using Tnzi.AI.Infrastructure.Helpers;
 global using Tnzi.AI.Infrastructure.ContextProviders;
-global using Tnzi.AI.Infrastructure.Documents;
 global using Tnzi.AI.Infrastructure.Providers;
 global using Tnzi.AI.Infrastructure.Stores;
 global using Tnzi.AI.Infrastructure.Streaming;

@@ -222,7 +222,7 @@ import { NButton, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-u
 import { TImageUpload } from '@tnzi/ui'
 import type { UserDto, UpdateUserDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
-import TModalShell from '../../../components/overlay/TModalShell.vue'
+import { TModalShell } from '@tnzi/ui'
 import { vModule } from '../../../directives/vModule'
 import { useUserCenterContext } from '../user-center-context'
 import {

@@ -3,7 +3,7 @@ namespace Tnzi.Payment.Dtos;
 /// <summary>
 /// 创建发票 DTO
 /// </summary>
-public class CreateInvoiceDto
+public class CreatePaymentInvoiceDto
 {
     /// <summary>
     /// 发票类型
@@ -141,7 +141,7 @@ public class InvoiceLineItemDto
 /// <summary>
 /// 发票 DTO
 /// </summary>
-public class InvoiceDto
+public class PaymentInvoiceDto
 {
     /// <summary>
     /// 发票ID
@@ -247,7 +247,7 @@ public class InvoiceDto
 /// <summary>
 /// 发票查询 DTO
 /// </summary>
-public class InvoiceQueryDto : PagedQueryDto
+public class PaymentInvoiceQueryDto : PagedQueryDto
 {
     /// <summary>
     /// 发票号码
@@ -326,7 +326,7 @@ public class CancelInvoiceDto
 /// </summary>
 public class InvoicePdfDto
 {
-    public InvoiceDto Invoice { get; set; } = new();
+    public PaymentInvoiceDto Invoice { get; set; } = new();
     public List<InvoiceLineItemDto> LineItems { get; set; } = new();
     public string CompanyName { get; set; } = string.Empty;
     public string CompanyAddress { get; set; } = string.Empty;

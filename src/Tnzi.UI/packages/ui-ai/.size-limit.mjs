@@ -69,7 +69,13 @@ export default [
   // Reached from ui-admin's WorkflowEditor, which lazy-loads it; pulls @vue-flow.
   // Previously had no budget at all.
   budget('workflow barrel (@vue-flow canvas)', 'dist/workflow.js', '90 kB'),
-  budget('chat barrel (TChatApp + markdown pipeline)', 'dist/chat.js', '85 kB'),
+  // 85 -> 88 kB on 2026-08-05: the shell gained three wired settings pages
+  // (Account / Security / Personalization, which call the framework's own
+  // user-facing routes) plus the naive theme provider that makes every control
+  // inside this package follow the product's palette. Both are capability the
+  // barrel did not have, not creep - but the slack is small, so a further
+  // increase should be argued rather than nudged.
+  budget('chat barrel (TChatApp + markdown pipeline)', 'dist/chat.js', '88 kB'),
   // The embeddable widgets. Their whole value proposition is dropping onto a
   // third-party page, so this is the budget that matters most to defend.
   budget('embed barrel (floating / sidebar / inline chat)', 'dist/embed.js', '80 kB'),

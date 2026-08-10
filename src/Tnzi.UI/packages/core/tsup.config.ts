@@ -41,6 +41,7 @@ export default defineConfig({
         "services/system/index": "src/services/system/index.ts",
         "services/audit/index": "src/services/audit/index.ts",
         "services/template/index": "src/services/template/index.ts",
+        "services/signing/index": "src/services/signing/index.ts",
         "services/logging/index": "src/services/logging/index.ts",
         "services/diagnostics/index": "src/services/diagnostics/index.ts",
         "services/performance/index": "src/services/performance/index.ts",
@@ -62,5 +63,9 @@ export default defineConfig({
     clean: true,
     treeshake: true,
     minify: false,
-    external: ["@vue/reactivity"],
+    // `vue` must stay external AND must be the only reactivity runtime this
+    // package references. Bundling it - or importing `@vue/reactivity`
+    // directly - gives the consumer a second reactivity instance whose proxies
+    // no consumer `computed()` ever tracks. See `src/headless/index.ts`.
+    external: ["vue"],
 });

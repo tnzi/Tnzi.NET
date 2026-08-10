@@ -4,6 +4,7 @@ import { DataQueryController } from '@tnzi/core/headless'
 import {
   useColumnSettings,
   type ColumnDef,
+  type ColumnDefs,
   type UseColumnSettingsReturn,
 } from './useColumnSettings'
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
@@ -63,7 +64,13 @@ export type CrudPageOp = 'fetch' | 'create' | 'update' | 'delete' | 'export' | '
 
 export interface UseCrudPageOptions<T, TId = string | number> {
   pageId: string
-  columns: ColumnDef[]
+  /** Column definitions. Declare them against the page's row type
+   *  (`ColumnDef<FooDto>[]`) to have every `render` body checked against it,
+   *  or pass the loose `ColumnDef[]` shape - see {@link ColumnDefs}.
+   *  `NoInfer` keeps this a checked position, not an inference site: `T` comes
+   *  from the explicit type argument / `fetchData` / `rowKey`, and a column
+   *  list typed against a narrower row alias must not redefine it. */
+  columns: ColumnDefs<NoInfer<T>>
   rowKey: (row: T) => TId
   initialPageSize?: number
   fetchData: (query: CrudPageQuery) => Promise<CrudPageResult<T>>
@@ -391,7 +398,12 @@ export function useCrudPage<T, TId = string | number>(
 
   const columnSettings = useColumnSettings({
     pageId: options.pageId,
-    columns: options.columns,
+    // Normalise `ColumnDefs<T>` to the loose shape once, here. The settings
+    // engine is pure key/visibility/order bookkeeping - it never touches a row
+    // - and the table renderer calls `render` with the actual row object, so
+    // this erases nothing at runtime. Row-level type safety lives where it is
+    // useful: at the declaration site (`ColumnDef<FooDto>[]` in the config).
+    columns: options.columns as ColumnDef[],
   })
   const batchActions = useBatchActions<TId>()
 

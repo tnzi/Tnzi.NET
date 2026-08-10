@@ -60,3 +60,6 @@ export * from './knowledge/index';
 
 // External CLI agent run components
 export * from './cli/index';
+
+// Built-in settings pages (wired to the framework's own user-facing routes)
+export * from './settings/index';

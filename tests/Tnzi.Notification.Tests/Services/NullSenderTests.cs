@@ -21,6 +21,26 @@ public class NullSenderTests
     }
 
     [Fact]
+    public async Task NullEmailSender_Should_Accept_Multi_Recipient_Messages()
+    {
+        // Arrange
+        var loggerMock = new Mock<ILogger<NullEmailSender>>();
+        var sender = new NullEmailSender(loggerMock.Object);
+
+        // Act
+        var result = await sender.SendAsync(new EmailMessage
+        {
+            To = [new EmailAddress("claims@insurer.example", "Claims Intake")],
+            Cc = [new EmailAddress("adjuster@insurer.example")],
+            Subject = "Subject",
+            Body = "Body"
+        });
+
+        // Assert
+        result.Success.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task NullSmsSender_Should_Always_Return_Success()
     {
         // Arrange

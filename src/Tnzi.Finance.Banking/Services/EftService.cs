@@ -363,6 +363,8 @@ public class EftService : ApplicationService, IEftService
             return Fail<EftFileDto>("The EFT file could not be decrypted.", 500);
         }
 
+        await StampHandoutAsync(batch.Id, cancellationToken);
+
         return Ok(new EftFileDto
         {
             FileName = batch.FileName ?? $"{batch.Number ?? batch.Id.ToString()}.txt",
@@ -380,13 +382,46 @@ public class EftService : ApplicationService, IEftService
         if (batch.Status == EftBatchStatus.Voided)
             return Fail<EftBatchDto>("The batch is already voided.", 409);
 
+        // ★ 文件交出去过就不能顺手作废：作废硬删批次行，那些付款回到待付队列、
+        // 看上去从没付过，于是会被再装一批发出去 —— 而第二笔看起来完全正常。
+        // 框架无从知道文件是否真的上传到了银行门户，所以把这个判断交还给操作者，
+        // 但**必须是显式的**：默认放行的话，重复付款就成了不需要任何人点头的默认行为。
+        //
+        // ★★ 判据必须绕开变更跟踪器重新读一次，不能用上面那个 batch 实例：
+        // 留痕是 ExecuteUpdate 写的，而 ExecuteUpdate **不会更新已跟踪的实体**。
+        // 同一个 scope 里先下载再作废（后台任务、批处理）时，EF 的标识解析会把
+        // 跟踪器里那份 FirstDownloadedTime=null 的旧副本交还给我们，守卫就此静默失效 ——
+        // 而「守卫读到陈旧值于是不再设防」恰恰不会让任何测试变红。
+        var handedOutAt = await _batchRepository.AsNoTracking()
+            .Where(b => b.Id == batch.Id)
+            .Select(b => b.FirstDownloadedTime)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (handedOutAt.HasValue && !input.AcknowledgeFileNotSubmitted)
+            return Fail<EftBatchDto>(
+                $"The file for this batch was already downloaded on {handedOutAt.Value:yyyy-MM-dd HH:mm} UTC. "
+                + "Voiding returns its payments to the unpaid queue, so they can be paid again. "
+                + "Confirm the file was never submitted to the bank to proceed.",
+                409);
+
         try
         {
             await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
                 var lines = await _lineRepository.ToListAsync(l => l.EftBatchId == batch.Id, ct);
                 if (lines.Count > 0)
+                {
+                    // 行是硬删的（唯一索引无软删过滤，见 EftBatchLineConfiguration），
+                    // 删完就再也答不出「这个批次里装的是哪几笔」。已交出过文件的批次尤其要留痕：
+                    // 万一真的付了两次，第一次付了什么全靠这条日志。
+                    // 同上：交出留痕取自刚才那次无跟踪读取，不取跟踪器里的副本。
+                    if (handedOutAt.HasValue)
+                        Logger.LogWarning(
+                            "Voiding EFT batch {BatchNumber} ({BatchId}) whose file was handed out since {FirstDownloadedTime}. Released payments: {PaymentEntryIds}. Reason: {Reason}",
+                            batch.Number, batch.Id, handedOutAt,
+                            string.Join(", ", lines.Select(l => l.PaymentEntryId)), input.Reason);
+
                     await _lineRepository.DeleteManyAsync(lines, ct);
+                }
 
                 batch.Status = EftBatchStatus.Voided;
                 batch.VoidReason = input.Reason;
@@ -400,6 +435,30 @@ public class EftService : ApplicationService, IEftService
         }
 
         return await GetAsync(batch.Id, cancellationToken);
+    }
+
+    /// <summary>
+    /// 记下「文件被交出去了」—— 首次时间取最早那次，次数每次递增。
+    /// </summary>
+    /// <remarks>
+    /// ★ 走 <c>ExecuteUpdate</c> 而不是加载实体再保存：后者会经过变更跟踪器，从而参与
+    /// <see cref="EftBatch.ConcurrencyStamp"/> 的乐观并发校验，两个人同时下载就会有一个拿到 409 ——
+    /// 让一个纯粹的读动作因为并发而失败。这里的写入是单调的（时间取 coalesce、次数自增），
+    /// 天然不需要并发校验。
+    /// <para>
+    /// 首次时间用 <c>x.FirstDownloadedTime ?? now</c> 而不是「先查再判断」：并发下载下
+    /// 后者会让两次都认为自己是第一次，把首次时间改晚 —— 而这个字段的全部意义就是
+    /// 「最早交出去是什么时候」。
+    /// </para>
+    /// </remarks>
+    private async Task StampHandoutAsync(Guid batchId, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        await _batchRepository.AsQueryable(true)
+            .Where(b => b.Id == batchId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.FirstDownloadedTime, x => x.FirstDownloadedTime ?? now)
+                .SetProperty(x => x.DownloadCount, x => x.DownloadCount + 1), cancellationToken);
     }
 
     /// <summary>原子递增 <see cref="BankAccount.EftFileCreationNumber"/> 并返回 1-9999 循环序号（须在活动事务内）。</summary>

@@ -1,4 +1,4 @@
-﻿global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
@@ -28,3 +28,4 @@ global using Tnzi.Storage.Permissions;
 global using Tnzi.Storage.Services;
 global using Tnzi.Storage.Tests.TestSupport;
 global using Xunit;
+global using Tnzi.Storage.Sanitization;

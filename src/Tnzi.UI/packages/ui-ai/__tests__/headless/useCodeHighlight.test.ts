@@ -9,12 +9,18 @@ import {
  * Shiki is mocked so the tests can control resolution order and assert the
  * race guard, which is the whole reason the composable owns a watcher.
  */
-const pending: Array<{ code: string; resolve: (html: string) => void; reject: (e: Error) => void }> = [];
+interface ShikiCall {
+  code: string;
+  options: { lang?: string; theme?: string; themes?: { light: string; dark: string } };
+  resolve: (html: string) => void;
+  reject: (e: Error) => void;
+}
+const pending: ShikiCall[] = [];
 
 vi.mock('shiki', () => ({
-  codeToHtml: (code: string) =>
+  codeToHtml: (code: string, options: ShikiCall['options']) =>
     new Promise<string>((resolve, reject) => {
-      pending.push({ code, resolve, reject });
+      pending.push({ code, options, resolve, reject });
     }),
 }));
 
@@ -92,6 +98,61 @@ describe('useCodeHighlight', () => {
     pending[0]!.resolve('<pre>first</pre>');
     await settle();
     expect(result.html.value).toBe('<pre>second</pre>');
+    scope.stop();
+  });
+
+  /**
+   * The default has to be the DUAL-theme call. Asking Shiki for a single theme
+   * emits one set of colours with no `--shiki-dark` counterpart, and then no
+   * stylesheet can make the block readable in dark mode - which is exactly how
+   * TArtifactPanel shipped light-on-black code for months.
+   */
+  it('asks shiki for both themes by default', async () => {
+    const scope = effectScope();
+    scope.run(() => useCodeHighlight('const x = 1', 'typescript'));
+    await settle();
+
+    expect(pending[0]!.options.themes).toEqual({ light: 'github-light', dark: 'github-dark' });
+    expect(pending[0]!.options.theme).toBeUndefined();
+    scope.stop();
+  });
+
+  it('pins a single theme only when the caller asks for one', async () => {
+    const scope = effectScope();
+    scope.run(() => useCodeHighlight('const x = 1', 'typescript', { theme: 'nord' }));
+    await settle();
+
+    expect(pending[0]!.options.theme).toBe('nord');
+    expect(pending[0]!.options.themes).toBeUndefined();
+    scope.stop();
+  });
+
+  /* An empty string arrives from components that declare `theme?: string` with
+     a `''` default; it means "not pinned", not "a theme called empty string". */
+  it('treats an empty theme string as unpinned', async () => {
+    const scope = effectScope();
+    scope.run(() => useCodeHighlight('const x = 1', 'typescript', { theme: '' as never }));
+    await settle();
+
+    expect(pending[0]!.options.themes).toEqual({ light: 'github-light', dark: 'github-dark' });
+    scope.stop();
+  });
+
+  it('re-highlights when the theme pair changes', async () => {
+    const dark = ref<'github-dark' | 'nord'>('github-dark');
+    const scope = effectScope();
+    scope.run(() =>
+      useCodeHighlight('const x = 1', 'typescript', {
+        themes: () => ({ light: 'github-light', dark: dark.value }),
+      }),
+    );
+    await settle();
+    expect(pending).toHaveLength(1);
+
+    dark.value = 'nord';
+    await settle();
+    expect(pending).toHaveLength(2);
+    expect(pending[1]!.options.themes).toEqual({ light: 'github-light', dark: 'nord' });
     scope.stop();
   });
 

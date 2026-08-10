@@ -360,9 +360,6 @@ public partial class AIModule
         AddAiMiddleware<ViewImageMiddleware>(services);
         AddAiMiddleware<TodoMiddleware>(services);
         AddAiMiddleware<ClarificationMiddleware>(services);
-
-        // Document converter (default: native .NET, can be overridden with CliDocumentConverter)
-        services.TryAddSingleton<IDocumentConverter, NativeDocumentConverter>();
     }
 
     private static void RegisterRuntimeAndRunServices(IServiceCollection services)

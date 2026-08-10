@@ -33,7 +33,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { NDrawer, NDrawerContent, NButton } from 'naive-ui'
-import TOverlayTheme from '../overlay/TOverlayTheme.vue'
+import { TOverlayTheme } from '@tnzi/ui'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import type { SearchableState } from './TCrudSearch.vue'
 import type { FormSchemaItem } from '@tnzi/ui'

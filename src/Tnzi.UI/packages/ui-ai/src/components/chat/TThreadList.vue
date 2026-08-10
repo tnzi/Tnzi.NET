@@ -136,7 +136,11 @@ function cancel(): void {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 14px 10px 4px;
+  /* 8px, not 10px, to match `.t-sidebar-nav__group` - this is the column inset
+     the alignment note above depends on. It was 10px, which put every thread
+     row and the "All tasks" heading 2px right of the nav above them (measured:
+     labels at 49 vs 47, headings at 20 vs 18). */
+  padding: 14px 8px 4px;
 }
 .t-thread-list__head {
   display: flex;

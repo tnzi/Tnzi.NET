@@ -30,15 +30,25 @@ public class UserProfileService : ApplicationService, IUserProfileService
         Check.NotNull(input);
 
         var profile = await FindByUserIdAsync(userId, ct);
-        if (profile == null)
+        var isNew = profile == null;
+        profile ??= new UserProfile { UserId = userId };
+
+        input.MapTo(profile);
+
+        // UpdateUserProfileDto.Content is nullable but UserProfile.Content is a
+        // NOT NULL column, and Mapster assigns the null straight through. Any
+        // client clearing the field - which the DTO's nullability invites -
+        // therefore reached the database as null and came back a 500. The other
+        // three fields are nullable columns and take null as "cleared"; for
+        // Content the cleared value is the empty string.
+        profile.Content ??= string.Empty;
+
+        if (isNew)
         {
-            profile = new UserProfile { UserId = userId };
-            input.MapTo(profile);
             await _repository.InsertAsync(profile, ct);
         }
         else
         {
-            input.MapTo(profile);
             await _repository.UpdateAsync(profile, ct);
         }
 

@@ -13,7 +13,7 @@ export interface TnziSingletonsOptions {
 
 /**
  * Vite plugin that pins the `@tnzi/*` single-instance dependencies (Vue, Vue
- * Router, Pinia, Naive UI, `@vue/reactivity`) to the consuming app's own copy.
+ * Router, Pinia, Naive UI) to the consuming app's own copy.
  *
  * Needed for `link:` installs, where bare imports inside the linked `dist/`
  * would otherwise resolve into the framework's own `node_modules`.

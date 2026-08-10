@@ -153,4 +153,9 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   // ── Template sub-routes ─────────────────────────────────────────
   'template.templates': 'mdi:file-document-outline',
   'template.layouts': 'mdi:view-dashboard-outline',
+
+  // ── Signing sub-routes ──────────────────────────────────────────
+  signing: 'mdi:draw-pen',
+  'signing.requests': 'mdi:file-sign',
+  'signing.templates': 'mdi:file-document-edit-outline',
 }

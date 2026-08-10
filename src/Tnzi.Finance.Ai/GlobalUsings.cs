@@ -15,6 +15,8 @@ global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Settings;
 global using Tnzi.Storage;
+// FileTypeHelper：内容类型在存储元数据里没定型时按扩展名回落
+global using Tnzi.Storage.Helpers;
 global using Tnzi.Storage.Services;
 global using Tnzi.Utilities;
 

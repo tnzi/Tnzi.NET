@@ -11,6 +11,25 @@ namespace Tnzi.AI;
 /// </summary>
 [DependsOn(typeof(EFCoreModule))]
 [DependsOn(typeof(AspNetCoreModule))]
+// ─────────────── 可选子模块 NoOp 回退：对依赖审计的显式豁免 ───────────────
+// 这些接口由本模块定义，并在 PostConfigureServicesAsync 里以 TryAdd 注册 NoOp 回退，
+// 所以「子模块没加载」时它们照样能解析（回退返回 501 并给出加载指引）。
+// 依赖审计看不到这一点：子模块在 Configure 阶段已注册真实现，本模块 Post 阶段的
+// TryAdd 见已存在即跳过 —— 于是服务图里这些类型的注册者只剩子模块，审计据此
+// 认定本模块「依赖子模块却没声明」。方向恰恰相反：子模块 [DependsOn] 本模块。
+// 逐类型豁免而非整体豁免：本模块将来真的漏声明别的模块依赖时，仍要报出来。
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(IWorkflowService))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(IWorkflowExecutionControlService))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(IWorkflowExecutionQueryService))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(IWorkflowExecutionMailbox))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ISkillRegistry))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ISkillTemplateEngine))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ISkillConstraintEnforcer))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ISkillLoadTracker))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ITextSearchService))]
+[SuppressDependencyAudit("Optional sub-module contract with a NoOp fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ICliAgentDispatcher))]
+// 绑定服务的回退刻意不实现 INoOpService：「没有绑定外部 CLI」是正确答案而非降级。
+[SuppressDependencyAudit("Optional sub-module contract with a built-in-only fallback registered in PostConfigureServices", IgnoredServiceType = typeof(ICliAgentBindingService))]
 public partial class AIModule : TnziApplicationModule
 {
     /// <summary>

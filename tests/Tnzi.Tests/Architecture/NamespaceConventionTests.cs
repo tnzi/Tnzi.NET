@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace Tnzi.Tests.Architecture;
 
@@ -41,8 +41,7 @@ public class NamespaceConventionTests
     [Fact]
     public void Namespace_MustStartWithOwningAssemblyName()
     {
-        var repoRoot = FindRepoRoot();
-        if (repoRoot == null) return;   // 打包/隔离环境跳过，不误报
+        var repoRoot = RepoRoot.Locate();
 
         var violations = new List<string>();
 
@@ -65,8 +64,7 @@ public class NamespaceConventionTests
     [Fact]
     public void TopLevelDirectory_MustMapToNamespaceUnit()
     {
-        var repoRoot = FindRepoRoot();
-        if (repoRoot == null) return;
+        var repoRoot = RepoRoot.Locate();
 
         var violations = new List<string>();
 
@@ -95,8 +93,7 @@ public class NamespaceConventionTests
     [Fact]
     public void RegisteredExceptions_AreNotStale()
     {
-        var repoRoot = FindRepoRoot();
-        if (repoRoot == null) return;
+        var repoRoot = RepoRoot.Locate();
 
         var stale = RegisteredExceptions.Keys
             .Where(rel => !File.Exists(Path.Combine(repoRoot, rel.Replace('/', Path.DirectorySeparatorChar))))
@@ -169,17 +166,5 @@ public class NamespaceConventionTests
                 stack.Push(sub);
             }
         }
-    }
-
-    private static string? FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Tnzi.NET.slnx")))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-        return null;
     }
 }

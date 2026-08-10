@@ -33,7 +33,7 @@
     <ProjectReference Include="..\Tnzi.Feature\Tnzi.Feature.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Documents\Tnzi.Documents.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\Tnzi.Documents.Signing\Tnzi.Documents.Signing.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Signing\Tnzi.Signing.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Hangfire\Tnzi.Hangfire.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Chat\Tnzi.Chat.csproj" PrivateAssets="all" />

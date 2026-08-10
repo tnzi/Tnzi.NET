@@ -74,6 +74,33 @@ export interface ColumnDef<TRow = Record<string, unknown>> {
   mobileHidden?: boolean
 }
 
+/**
+ * Columns as the CRUD boundary accepts them: declared against the page's own
+ * row type, or against the loose default shape.
+ *
+ * **Why a union and not plain `ColumnDef<T>[]`.** `render` sits in a property
+ * position, so under `strictFunctionTypes` its parameter is CONTRAVARIANT:
+ * `ColumnDef<FooDto>[]` is assignable to `ColumnDef<Record<string, unknown>>[]`
+ * only when `Record<string, unknown>` is assignable to `FooDto` - true for the
+ * all-optional `type FooRow = { … }` row shapes the built-in configs use, false
+ * for any interface with required fields. That asymmetry is what forced the
+ * house "all-optional row alias" workaround (see `finance/account-config.ts`)
+ * and the explicit cast in `ai/permissions/tool-permissions-config.ts`, and it
+ * is what makes a consuming app's `render: (row: MatterSummaryDto) => VNode`
+ * unassignable.
+ *
+ * Tightening the boundary to `ColumnDef<T>[]` would fix that but BREAK the
+ * ~60 in-repo configs that declare a plain `ColumnDef[]` next to a
+ * `useCrudPage<FooDto>` page - a narrowing, not a widening. The union accepts
+ * both: pass DTO-typed columns and the render bodies are checked against the
+ * DTO; pass the loose shape and nothing changes.
+ *
+ * Consumers of the columns (this hook, the column-settings popover, the table
+ * renderer) only read `key` / `title` / layout hints and call `render` with a
+ * real row, so they normalise the union to `ColumnDef[]` once at the seam.
+ */
+export type ColumnDefs<TRow> = ColumnDef<TRow>[] | ColumnDef[]
+
 export interface UseColumnSettingsOptions {
   pageId: string
   columns: ColumnDef[]

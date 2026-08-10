@@ -1,5 +1,6 @@
 /* Tnzi UI-AI base styles - inherits from @tnzi/ui */
 @import '@tnzi/ui/style.css';
+@import '../components/settings/settings-fields.css';
 
 /* ===========================================================================
  * Manus-inspired chat-app surface tokens (powers TChatApp + shell components).
@@ -92,7 +93,11 @@
   /* Modal chrome (consumed by TSettingsDialog / TCommandPalette) */
   --tnzi-ai-backdrop:        rgba(0, 0, 0, 0.60);
   --tnzi-ai-backdrop-blur:   4px;
-  --tnzi-ai-modal-radius:    20px;
+  /* Class C. `--tnzi-radius-xl` is the ui layer's largest step (3x base), which
+     at the default base of 6px reproduces the 18px this panel was hand-tuned
+     to within 2px - close enough that deriving is worth more than the literal.
+     A product that dials radius down now moves this too. */
+  --tnzi-ai-modal-radius:    var(--tnzi-radius-xl, 20px);
   --tnzi-ai-modal-border:    1px solid rgba(0, 0, 0, 0.06);
   --tnzi-ai-composer-radius: 22px;
   --tnzi-ai-composer-shadow: 0 12px 32px rgba(0, 0, 0, 0.02);
@@ -103,11 +108,15 @@
   --tnzi-ai-font-body:    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Display', 'Segoe UI', Helvetica, Arial, sans-serif;
   --tnzi-ai-font-mono:    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
 
-  /* Motion */
-  --tnzi-ai-duration-fast: 120ms;
-  --tnzi-ai-duration-base: 200ms;
-  --tnzi-ai-duration-slow: 320ms;
-  --tnzi-ai-easing:        cubic-bezier(0.2, 0, 0, 1);
+  /* Motion - class C (structural). Derived from @tnzi/ui's structural layer
+     (`buildStructuralVars`), which `createTnziUi()` writes onto <html>. The
+     literals are the fallback for an app that never called it, so these are
+     the SAME numbers the ui layer emits - if you change one, change both, or
+     better: change only the ui layer and delete the fallback here. */
+  --tnzi-ai-duration-fast: var(--tnzi-duration-fast, 120ms);
+  --tnzi-ai-duration-base: var(--tnzi-duration-base, 200ms);
+  --tnzi-ai-duration-slow: var(--tnzi-duration-slow, 320ms);
+  --tnzi-ai-easing:        var(--tnzi-easing, cubic-bezier(0.2, 0, 0, 1));
 
   /* Conversation content width - consumers may widen (e.g. 1100px) via the
      `content-width` prop on TChatApp or by redefining this variable. */
@@ -117,6 +126,48 @@
   --tnzi-ai-scrollbar-size:        8px;
   --tnzi-ai-scrollbar-thumb:       rgba(0, 0, 0, 0.18);
   --tnzi-ai-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+
+  /* ---- Component surfaces (chat bubbles, reasoning, code, workflow nodes) --
+   * Class A: derived from the tokens above, so retinting the product reaches
+   * them. Until 2026-08-03 these were literal shadcn HSL values sitting in a
+   * second `:root` block further down the file - a leftover of the pre-UnoCSS
+   * Tailwind + shadcn architecture, and the reason the chat bubbles rendered
+   * in the cool admin palette instead of this file's warm one. */
+
+  /* Chat message bubbles */
+  --tnzi-ai-chat-user-bg:        #ebebeb;
+  --tnzi-ai-chat-user-text:      var(--tnzi-ai-text);
+  --tnzi-ai-chat-assistant-bg:   var(--tnzi-ai-surface);
+  --tnzi-ai-chat-assistant-text: var(--tnzi-ai-text);
+  --tnzi-ai-chat-system-bg:      var(--tnzi-ai-hover);
+  --tnzi-ai-chat-system-text:    var(--tnzi-ai-text-secondary);
+
+  /* Reasoning / thought panels */
+  --tnzi-ai-reasoning-indent: 16px;
+  --tnzi-ai-reasoning-border: var(--tnzi-ai-border);
+  --tnzi-ai-reasoning-bg:     color-mix(in srgb, var(--tnzi-ai-warning) 6%, transparent);
+
+  /* Tool call blocks */
+  --tnzi-ai-tool-call-bg: var(--tnzi-ai-bg);
+
+  /* Streaming caret */
+  --tnzi-ai-streaming-cursor: var(--tnzi-ai-text);
+
+  /* Code blocks */
+  --tnzi-ai-code-bg: #f3f3f1;
+
+  /* Workflow node states - reuse the status palette so a failed node is the
+   * same red as every other failure in the product. The handoff accent is
+   * deliberately NOT the brand accent: a handoff has to read as something
+   * other than the product's own colour, so it stays a literal (class B). */
+  --tnzi-ai-node-active:    var(--tnzi-ai-info);
+  --tnzi-ai-node-completed: var(--tnzi-ai-success);
+  --tnzi-ai-node-failed:    var(--tnzi-ai-danger);
+  --tnzi-ai-handoff-accent: #7c3aed;
+
+  /* Shimmer animation */
+  --tnzi-ai-shimmer-from: rgba(0, 0, 0, 0.6);
+  --tnzi-ai-shimmer-to:   rgba(0, 0, 0, 1);
 }
 
 .dark,
@@ -157,6 +208,17 @@
 
   --tnzi-ai-scrollbar-thumb:       rgba(255, 255, 255, 0.18);
   --tnzi-ai-scrollbar-thumb-hover: rgba(255, 255, 255, 0.34);
+
+  /* Component surfaces - only the literals need flipping. Everything else in
+   * that group is declared with var() on :root, so it follows the dark tokens
+   * above without being restated here. */
+  --tnzi-ai-chat-user-bg:   #2a2a28;
+  --tnzi-ai-code-bg:        #121211;
+  --tnzi-ai-reasoning-bg:   color-mix(in srgb, var(--tnzi-ai-warning) 10%, transparent);
+  --tnzi-ai-handoff-accent: #a78bfa;
+
+  --tnzi-ai-shimmer-from: rgba(255, 255, 255, 0.6);
+  --tnzi-ai-shimmer-to:   rgba(255, 255, 255, 1);
 }
 
 /* Display helper for serif hero headings (Manus-style).
@@ -171,57 +233,6 @@
 .t-ai-display.lg { font-size: 36px; }
 .t-ai-display.md { font-size: 28px; }
 .t-ai-display.sm { font-size: 22px; }
-
-/* AI-specific CSS variables (--tnzi-ai-* namespace) - chat bubble + reasoning */
-:root {
-  /* Chat message bubbles */
-  --tnzi-ai-chat-user-bg: hsl(222.2 47.4% 95%);
-  --tnzi-ai-chat-user-text: var(--tnzi-base-text);
-  --tnzi-ai-chat-assistant-bg: var(--tnzi-container-bg);
-  --tnzi-ai-chat-assistant-text: var(--tnzi-base-text);
-  --tnzi-ai-chat-system-bg: rgba(0, 0, 0, 0.04);
-  --tnzi-ai-chat-system-text: var(--tnzi-base-text-muted);
-
-  /* Reasoning / thought panels */
-  --tnzi-ai-reasoning-indent: 16px;
-  --tnzi-ai-reasoning-border: var(--tnzi-border);
-  --tnzi-ai-reasoning-bg: rgba(146, 64, 14, 0.06);
-
-  /* Tool call blocks */
-  --tnzi-ai-tool-call-bg: hsl(210 40% 96%);
-
-  /* Streaming */
-  --tnzi-ai-streaming-cursor: hsl(222.2 47.4% 11.2%);
-
-  /* Code blocks */
-  --tnzi-ai-code-bg: hsl(220 14% 96%);
-
-  /* Workflow node states */
-  --tnzi-ai-node-active: hsl(217.2 91.2% 59.8%);
-  --tnzi-ai-node-completed: hsl(142.1 76.2% 36.3%);
-  --tnzi-ai-node-failed: hsl(0 84.2% 60.2%);
-  --tnzi-ai-handoff-accent: hsl(262.1 83.3% 57.8%);
-
-  /* Shimmer animation */
-  --tnzi-ai-shimmer-from: rgba(0, 0, 0, 0.6);
-  --tnzi-ai-shimmer-to: rgba(0, 0, 0, 1);
-}
-
-.dark,
-[data-theme='dark'] {
-  --tnzi-ai-chat-user-bg: hsl(217.2 32.6% 17.5%);
-  --tnzi-ai-chat-assistant-bg: var(--tnzi-container-bg);
-  --tnzi-ai-chat-system-bg: rgba(255, 255, 255, 0.04);
-  --tnzi-ai-reasoning-bg: rgba(245, 158, 11, 0.08);
-  --tnzi-ai-tool-call-bg: hsl(217.2 32.6% 12%);
-  --tnzi-ai-streaming-cursor: hsl(210 40% 98%);
-  --tnzi-ai-code-bg: hsl(220 14% 11%);
-  --tnzi-ai-node-completed: hsl(142.1 70.6% 45.3%);
-  --tnzi-ai-node-failed: hsl(0 72.2% 50.6%);
-  --tnzi-ai-handoff-accent: hsl(262.1 83.3% 67.8%);
-  --tnzi-ai-shimmer-from: rgba(255, 255, 255, 0.6);
-  --tnzi-ai-shimmer-to: rgba(255, 255, 255, 1);
-}
 
 /* Responsive card grid for resource pages (Agents / Skills / Artifacts ...).
  * A plain class rather than a component: the only thing it carries is column
@@ -241,6 +252,46 @@
 .t-reasoning-indent {
   padding-left: var(--tnzi-ai-reasoning-indent);
   border-left: 1px solid var(--tnzi-ai-reasoning-border);
+}
+
+/* ===========================================================================
+ * Shiki dual-theme swap - THE one place this is done.
+ *
+ * Shiki renders both themes at once: the light colours land in the element's
+ * inline `style="color:#005CC5"` and the dark ones in a `--shiki-dark` custom
+ * property beside them. Nothing reads that property on its own, so without the
+ * rule below a highlighted block keeps its LIGHT colours on a near-black
+ * canvas - measured `'hello'` at rgb(3,47,98) on rgb(20,20,20), i.e. invisible.
+ *
+ * `!important` is not optional: the value being overridden is an inline style,
+ * which outranks any selector. Declarations whose variable is undefined (a
+ * token Shiki gave no dark counterpart, or a consumer rendering single-theme
+ * output) are simply dropped by the parser, so this is inert unless dual-theme
+ * markup is actually present.
+ *
+ * ★ It lives here, unscoped on Shiki's own `.shiki` class, because it was
+ * previously a scoped `:deep()` copy inside TStreamMarkdown only - and the
+ * three other components that render highlighted code (TArtifactCodeView,
+ * TArtifactPanel, TCodeBlock) were unreadable in dark mode for months as a
+ * result. Do NOT re-add a per-component copy; add call sites, not rules.
+ *
+ * ★★ TOKEN COLOURS ONLY - deliberately NOT `background-color`. Every component
+ * here paints the code surface itself with `--tnzi-ai-code-bg` and forces
+ * Shiki's own canvas transparent. Swapping in `--shiki-dark-bg` would win on
+ * specificity in some of them and not others (measured: TArtifactCodeView went
+ * to github-dark's rgb(36,41,46) while TCodeBlock kept the token), so the code
+ * surface would differ between modes AND between components - and worse, it
+ * would silently defeat `applyAiTheme({ codeBg })` in dark mode, since that
+ * public override writes exactly the variable this would out-rank.
+ * ========================================================================= */
+.dark .shiki,
+.dark .shiki span,
+[data-theme='dark'] .shiki,
+[data-theme='dark'] .shiki span {
+  color: var(--shiki-dark) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
 /* ===========================================================================

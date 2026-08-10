@@ -96,8 +96,19 @@ public class OptOutOptions
 /// 恢复是<b>幂等</b>的：续发只挑 <c>Pending</c> / <c>Failed</c> 的收件人（已 <c>Sent</c> 的不会重发），
 /// 这是既有发送路径本来的行为，恢复只是把它重新触发一次。
 /// </para>
+/// <para>
+/// <b>为什么带 <c>[RuntimeSettingGroup]</c> 且并入 <c>notification-general</c>。</b>本类此前只有
+/// <c>[ConfigSection]</c>：缺了组特性，<c>RuntimeSettingMetadataExtractor</c> 就拿配置节字符串顶替组元数据，
+/// 派生出 <c>ModuleName = "Notification:Dispatch"</c>，进而是权限组 <c>notificationdispatch</c> ——
+/// 一个谁都没声明的组，于是 <c>PermissionDbSeeder</c> 记一行 warning 就把这一组的 view/update 两个码丢了
+/// （配置中心里这四个字段从此只有超管能改）。顺带还让 admin 侧栏出现一张标题写着 <c>Notification:Dispatch</c>、
+/// 无图标、<c>Order = 0</c> 排在最前的卡片。并入而不是另开一组，是照同文件 <c>RetryOptions</c> 的既有取舍：
+/// 派发节奏与重试节奏同属"发送行为"，运维在一张卡里调完。
+/// </para>
 /// </remarks>
 [ConfigSection("Notification:Dispatch")]
+[RuntimeSettingGroup(Key = "notification-general", Module = "Notification", DisplayName = "General",
+    Icon = "mdi:bell-cog-outline", Order = 400, I18nKey = "admin.modules.system.settings.groups.notificationGeneral")]
 public class DispatchOptions
 {
     /// <summary>

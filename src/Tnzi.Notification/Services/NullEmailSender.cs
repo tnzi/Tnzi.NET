@@ -14,10 +14,16 @@ public class NullEmailSender : IEmailSender
 
     public Task<SendResult> SendToAsync(string to, string? name, string subject, string body, bool isHtml = true, List<EmailAttachment>? attachments = null, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("NullEmailSender: Sending Email to {To}: {Subject}", to, subject);
+        return SendAsync(EmailMessage.Create(to, name, subject, body, isHtml, attachments), cancellationToken);
+    }
+
+    public Task<SendResult> SendAsync(EmailMessage message, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(message);
+
+        _logger.LogInformation("NullEmailSender: Sending Email to {To}: {Subject}", EmailEnvelope.Describe(message), message.Subject);
         return Task.FromResult(SendResult.CreateSuccess("null-sender-mock-id"));
     }
 
 }
-
 

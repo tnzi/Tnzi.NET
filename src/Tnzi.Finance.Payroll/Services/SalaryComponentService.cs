@@ -15,16 +15,19 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
     private readonly IRepository<SalaryComponent, Guid> _componentRepository;
     private readonly IRepository<SalaryStructureLine, Guid> _lineRepository;
     private readonly ISalaryFormulaEvaluator _evaluator;
+    private readonly IEnumerable<IPayslipCalculationHook> _hooks;
 
     public SalaryComponentService(
         IServiceProvider serviceProvider,
         IRepository<SalaryComponent, Guid> componentRepository,
         IRepository<SalaryStructureLine, Guid> lineRepository,
-        ISalaryFormulaEvaluator evaluator) : base(serviceProvider)
+        ISalaryFormulaEvaluator evaluator,
+        IEnumerable<IPayslipCalculationHook> hooks) : base(serviceProvider)
     {
         _componentRepository = Check.NotNull(componentRepository);
         _lineRepository = Check.NotNull(lineRepository);
         _evaluator = Check.NotNull(evaluator);
+        _hooks = Check.NotNull(hooks);
     }
 
     public async Task<Result<IPagedList<SalaryComponentDto>>> GetPagedAsync(SalaryComponentQueryDto query, CancellationToken cancellationToken = default)
@@ -147,6 +150,16 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
         // 内置变量名保留——组件 Code 撞名会让公式引用产生歧义
         if (PayrollFormulaVariables.All.Contains(code))
             return Fail($"Component code '{code}' is a reserved formula variable name.");
+
+        // 钩子声明提供的外部变量同理保留。★不挡住的话撞名是**静默错账**而不是报错：
+        // 钩子在按序求值前注入标量，而组件算完会把同名键覆盖掉（PayslipCalculator 逐行写
+        // context.Variables[component.Code]）——于是引用这个名字的公式读到的是费率还是某行金额，
+        // 取决于它排在第几行。
+        if (PayrollExternalVariables.Collect(_hooks).Contains(code))
+        {
+            return Fail($"Component code '{code}' is already provided as a run-time variable by a registered " +
+                "calculation hook. Pick a different code, or drop the name from IPayslipCalculationHook.ProvidedVariables.");
+        }
 
         var expressionCheck = ValidateExpressions(code, input.Formula, input.Condition);
         if (!expressionCheck.Succeeded)

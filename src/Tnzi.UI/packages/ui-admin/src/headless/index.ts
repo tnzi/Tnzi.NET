@@ -49,6 +49,11 @@ export * from './useGlDrilldown'
 export * from './query-scope'
 export * from './useSectionRoute'
 
+// Re-measures naive-ui's active-tab underline when a tab label changes size
+// after mount (a lazily-loaded count / status badge). `TTabsPage` rides it;
+// exposed because any page that hand-rolls `NTabs` has the same gap.
+export * from './useTabBarSync'
+
 // Overlay theming - the hook behind `TOverlayTheme`. Needed by anyone who has
 // to hand-roll an NModal/NDrawer instead of using TModalShell/TDrawerShell,
 // which is exactly when the content-area dark-card theme leaks into it.

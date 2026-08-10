@@ -58,7 +58,7 @@ public class PaymentServiceTests
             _paymentRepositoryMock.Object,
             new Mock<IRepository<CouponUsage, Guid>>().Object,
             _providerFactoryMock.Object,
-            new DefaultTaxCalculator(taxOptionsMock.Object),
+            new DefaultPaymentTaxCalculator(taxOptionsMock.Object),
             new Mock<IPaymentMethodService>().Object,
             _optionsMock.Object,
             serviceProviderMock.Object

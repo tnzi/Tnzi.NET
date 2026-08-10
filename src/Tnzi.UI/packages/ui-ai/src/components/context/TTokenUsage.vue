@@ -62,7 +62,7 @@ function formatCost(cost: number): string {
             fill="none"
             stroke="currentColor"
             stroke-width="3"
-            class="text-border"
+            class="text-tnzi-border"
           />
           <!-- Progress ring -->
           <circle
@@ -80,7 +80,7 @@ function formatCost(cost: number): string {
           />
         </svg>
 
-        <span class="text-xs tabular-nums text-muted-foreground">
+        <span class="text-xs tabular-nums text-tnzi-muted">
           {{ formatCompactNumber(usage.totalTokens) }}
         </span>
       </div>
@@ -89,13 +89,13 @@ function formatCost(cost: number): string {
     <div class="w-52 space-y-2 text-sm">
         <!-- Input tokens -->
         <div class="flex items-center justify-between">
-          <span class="text-muted-foreground">{{ t.token.input }}</span>
+          <span class="text-tnzi-muted">{{ t.token.input }}</span>
           <span class="tabular-nums font-medium">{{ formatCompactNumber(usage.inputTokens) }}</span>
         </div>
 
         <!-- Output tokens -->
         <div class="flex items-center justify-between">
-          <span class="text-muted-foreground">{{ t.token.output }}</span>
+          <span class="text-tnzi-muted">{{ t.token.output }}</span>
           <span class="tabular-nums font-medium">{{ formatCompactNumber(usage.outputTokens) }}</span>
         </div>
 
@@ -104,7 +104,7 @@ function formatCost(cost: number): string {
           v-if="usage.cachedInputTokens > 0"
           class="flex items-center justify-between"
         >
-          <span class="text-muted-foreground">{{ t.token.cached }}</span>
+          <span class="text-tnzi-muted">{{ t.token.cached }}</span>
           <span class="tabular-nums font-medium">{{ formatCompactNumber(usage.cachedInputTokens) }}</span>
         </div>
 
@@ -113,7 +113,7 @@ function formatCost(cost: number): string {
           v-if="usage.cacheCreationTokens > 0"
           class="flex items-center justify-between"
         >
-          <span class="text-muted-foreground">{{ t.token.cacheWrite }}</span>
+          <span class="text-tnzi-muted">{{ t.token.cacheWrite }}</span>
           <span class="tabular-nums font-medium">{{ formatCompactNumber(usage.cacheCreationTokens) }}</span>
         </div>
 
@@ -122,7 +122,7 @@ function formatCost(cost: number): string {
 
         <!-- Total -->
         <div class="flex items-center justify-between">
-          <span class="text-muted-foreground">{{ t.token.total }}</span>
+          <span class="text-tnzi-muted">{{ t.token.total }}</span>
           <span class="tabular-nums font-semibold">{{ formatCompactNumber(usage.totalTokens) }}</span>
         </div>
 
@@ -131,7 +131,7 @@ function formatCost(cost: number): string {
           v-if="estimatedCost > 0"
           class="flex items-center justify-between"
         >
-          <span class="text-muted-foreground">{{ t.token.cost }}</span>
+          <span class="text-tnzi-muted">{{ t.token.cost }}</span>
           <span class="tabular-nums font-semibold text-ai-node-active">
             {{ formatCost(estimatedCost) }}
           </span>

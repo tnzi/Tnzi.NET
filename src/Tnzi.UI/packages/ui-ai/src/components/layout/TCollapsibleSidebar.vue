@@ -12,7 +12,7 @@
  * Import `useSidebarState` from `@tnzi/ui-ai/headless` (or
  * `@tnzi/ui-ai/shell`) for the state machine.
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { SidebarMode } from '../../headless/useSidebarState'
 import { useBodyScrollLock } from '../../headless/useBodyScrollLock'
 
@@ -67,6 +67,19 @@ function handleRailClick(e: MouseEvent): void {
   emit('update:modelValue', 'expanded')
 }
 
+/* A pinned `nav` region and the scrolling content read as one column until
+   something scrolls under the seam - then the two need separating, or rows
+   appear to slide into the pinned block. Only once scrolled: an unconditional
+   rule would draw a line across a sidebar with nothing to scroll. The
+   scrollbar is hidden here (see `__content` below), so this line is also the
+   only remaining hint that there is more below. */
+const contentEl = ref<HTMLElement | null>(null)
+const contentScrolled = ref(false)
+
+function onContentScroll(): void {
+  contentScrolled.value = (contentEl.value?.scrollTop ?? 0) > 0
+}
+
 /* The mobile drawer covers the page, so the page behind it must not scroll.
    The shared lock restores whatever overflow the host had and releases on
    unmount: without that, unmounting mid-drawer (a route change while the
@@ -110,11 +123,16 @@ useBodyScrollLock(isDrawer)
       <div
         v-if="$slots.nav && modelValue !== 'icon'"
         class="t-collapsible-sidebar__nav"
+        :class="{ 'is-detached': contentScrolled }"
       >
         <slot name="nav" />
       </div>
 
-      <div class="t-collapsible-sidebar__content">
+      <div
+        ref="contentEl"
+        class="t-collapsible-sidebar__content"
+        @scroll="onContentScroll"
+      >
         <template v-if="modelValue === 'icon' && $slots.rail">
           <slot name="rail" :mode="modelValue" />
         </template>
@@ -195,9 +213,41 @@ useBodyScrollLock(isDrawer)
 .t-collapsible-sidebar__footer {
   flex-shrink: 0;
 }
+.t-collapsible-sidebar__nav {
+  /* Reserve the seam always, so gaining it costs no layout shift. */
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-collapsible-sidebar__nav.is-detached {
+  border-bottom-color: var(--tnzi-ai-divider);
+}
+/* A stack, not a single slot: products put a plan card, an upgrade prompt or a
+   storage meter beside the account row, and each is its own full-width row.
+   Padding lives here rather than on the children so a consumer dropping an
+   element in gets the same inset as the built-ins - and so the account
+   popover, positioned against its row, lands inside the sidebar instead of
+   flush against the window edge. */
+.t-collapsible-sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
 .t-collapsible-sidebar__content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Scrolls, but without a visible bar. The sidebar is a short, familiar list
+     the user scrolls by wheel or trackpad; a permanent bar there costs real
+     layout (the package's 8px scrollbar takes a 10px gutter out of a 300px
+     sidebar, and it is the nav rows that get narrowed) to report a position
+     nobody navigates by. The main thread scroller keeps its bar - there the
+     position is the point. Overriding the package-wide rule in
+     `styles/index.css`, which is why both properties are set. */
+  scrollbar-width: none;
+}
+.t-collapsible-sidebar__content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 </style>

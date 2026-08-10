@@ -18,6 +18,7 @@ global using Microsoft.Extensions.Options;
 global using Microsoft.AspNetCore.Authorization;
 global using Microsoft.AspNetCore.Mvc;
 global using Tnzi.Application;
+global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;

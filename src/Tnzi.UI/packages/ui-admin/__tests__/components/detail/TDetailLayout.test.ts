@@ -27,6 +27,31 @@ describe('TDetailLayout', () => {
     expect(w.find('.ft').text()).toBe('F')
   })
 
+  it('forwards #extra to the header, under the title in the identity column', () => {
+    const w = mount(TDetailLayout, {
+      props: { layout: 'plain', title: 'Edit' },
+      slots: {
+        default: '<div class="body" />',
+        extra: '<span class="meta">FILE-2024-0912 - Litigation - Acme Corp</span>',
+      },
+      global: { stubs },
+    })
+    // Its own row inside the identity column (so it lines up with the title)...
+    expect(w.find('.t-page-header__main > .t-page-header__extra .meta').exists()).toBe(true)
+    // ...and NOT in the identity row itself, whose width sizes the title.
+    expect(w.find('.t-page-header__left .meta').exists()).toBe(false)
+  })
+
+  it('renders no extra row when the page supplies no #extra', () => {
+    const w = mount(TDetailLayout, {
+      props: { layout: 'plain', title: 'Edit' },
+      slots: { default: '<div class="body" />', actions: '<button class="act" />' },
+      global: { stubs },
+    })
+    expect(w.find('.t-page-header__extra').exists()).toBe(false)
+    expect(w.find('.t-page-header__bar .act').exists()).toBe(true)
+  })
+
   it('tabs layout renders an NTabs from sections', () => {
     const w = mount(TDetailLayout, {
       props: { layout: 'tabs', title: 'X', sections, activeSection: 'basic' },

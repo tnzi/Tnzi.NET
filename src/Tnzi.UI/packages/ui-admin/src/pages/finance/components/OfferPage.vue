@@ -113,7 +113,7 @@ import { NAlert, NButton, NDatePicker, NDescriptions, NDescriptionsItem, type Da
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
-import TModalShell from '../../../components/overlay/TModalShell.vue'
+import { TModalShell } from '@tnzi/ui'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './DocumentEditor.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'

@@ -85,6 +85,8 @@ export interface NotificationInfo {
   category: string;
   templateName?: string | null;
   scheduledTime?: string | null;
+  /** Transactional message: exempt from the opt-out list. */
+  isTransactional: boolean;
   recipients: RecipientOutput[];
   attachments: FileInfoDto[];
 }
@@ -109,6 +111,17 @@ export interface CreateNotificationRequest {
   priority?: NotificationPriority;
   senderId?: string;
   scheduledTime?: string;
+  /**
+   * Transactional message (as opposed to commercial/bulk): exempt from the
+   * opt-out list. Defaults to `false`.
+   *
+   * Set this for password resets, verification codes, invoices and billing
+   * notices - the unsubscribe button governs marketing mail, and it must not
+   * leave someone unable to receive a login code. When in doubt, leave it
+   * unset: the default treats the message as commercial, which errs towards
+   * sending one message fewer rather than making an unsubscribe meaningless.
+   */
+  isTransactional?: boolean;
 }
 
 /**

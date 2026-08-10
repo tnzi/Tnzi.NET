@@ -84,9 +84,27 @@ export function detectLangFromFilename(filename: string | null | undefined): Cod
   return 'text'
 }
 
+/** The light/dark pair Shiki renders when no single `theme` is pinned. */
+export const DEFAULT_CODE_THEMES = { light: 'github-light', dark: 'github-dark' } as const
+
 export interface UseCodeHighlightOptions {
-  /** Shiki theme id. Defaults to `github-light` (matches Manus). */
-  theme?: MaybeRefOrGetter<CodeTheme>
+  /**
+   * Pin a SINGLE Shiki theme. Leave unset to get the dual-theme output
+   * (`themes` below), which is what follows light/dark. Setting this is an
+   * opt-out: the rendered colours will then be the same in both modes.
+   */
+  theme?: MaybeRefOrGetter<CodeTheme | undefined>
+  /**
+   * Light/dark theme pair. Defaults to `github-light` / `github-dark`.
+   *
+   * Shiki renders the light colours as inline `color:` and the dark ones as a
+   * `--shiki-dark` custom property on the same element. Nothing consumes that
+   * property on its own - the swap lives in ONE place, `styles/index.css`
+   * (`.dark .shiki span { color: var(--shiki-dark) !important }`). Do not add a
+   * scoped copy per component: this was broken for months precisely because
+   * only `TStreamMarkdown` carried its own copy of that rule.
+   */
+  themes?: MaybeRefOrGetter<{ light: CodeTheme; dark: CodeTheme }>
   /** Run the first highlight synchronously in the setup tick. Default `true`. */
   immediate?: boolean
 }
@@ -119,12 +137,18 @@ export function useCodeHighlight(
      would create a new reference every reactive tick and re-trigger
      the highlight pass even when none of the inputs changed. */
   watch(
-    () => [
-      toValue(code),
-      toValue(lang),
-      toValue(options.theme ?? 'github-light'),
-    ] as const,
-    async ([c, l, t]) => {
+    /* Resolved down to primitives on purpose: a `{ light, dark }` object in the
+       tuple would be a new reference every reactive tick and re-trigger the
+       highlight pass even when nothing changed. */
+    () => {
+      /* `||` rather than `??`: an empty string reaches here from components
+         that declare `theme?: string` with a `''` prop default, and it means
+         "not pinned", not "a theme named empty string". */
+      const pinned = toValue(options.theme) || null
+      const pair = toValue(options.themes) ?? DEFAULT_CODE_THEMES
+      return [toValue(code), toValue(lang), pinned, pair.light, pair.dark] as const
+    },
+    async ([c, l, pinned, light, dark]) => {
       /* Two awaits follow, so a rapid input change (switching files in the
          artifact panel) can leave an older pass still in flight. Registering
          the cleanup synchronously - before the first await - lets a superseded
@@ -145,7 +169,9 @@ export function useCodeHighlight(
       try {
         const shiki = await import('shiki')
         if (superseded) return
-        const rendered = await shiki.codeToHtml(c, { lang: l || 'text', theme: t })
+        const rendered = pinned
+          ? await shiki.codeToHtml(c, { lang: l || 'text', theme: pinned })
+          : await shiki.codeToHtml(c, { lang: l || 'text', themes: { light, dark } })
         if (superseded) return
         html.value = rendered
       } catch (err) {

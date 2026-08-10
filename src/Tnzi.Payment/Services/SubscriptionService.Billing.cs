@@ -644,6 +644,8 @@ public partial class SubscriptionService
         var result = await _notificationService.CreateAndSendAsync(new CreateNotificationRequest
         {
             Type = Tnzi.Notification.Metadata.NotificationType.Email,
+            // 事务性：订阅续费 / 扣款结果，属既有付费关系下必需的往来。
+            IsTransactional = true,
             Subject = subject,
             Content = body,
             IsHtml = false,

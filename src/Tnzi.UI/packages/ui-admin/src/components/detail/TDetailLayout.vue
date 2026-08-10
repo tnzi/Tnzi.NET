@@ -3,6 +3,7 @@
     <TPageHeader v-if="showHeader" surface :title="title" :icon="icon" :back="back" :translate="translate">
       <template v-if="$slots.title" #title><slot name="title" /></template>
       <template v-if="$slots.actions" #actions><slot name="actions" /></template>
+      <template v-if="$slots.extra" #extra><slot name="extra" /></template>
     </TPageHeader>
 
     <!-- tabs: horizontal section nav above a single body -->
@@ -114,6 +115,19 @@ const emit = defineEmits<{ 'update:activeSection': [key: string] }>()
 defineSlots<{
   title?: () => unknown
   actions?: () => unknown
+  /**
+   * Secondary particulars for the record (number, type, related party, …) as
+   * their own row UNDER the title bar, inside the header card - the same
+   * `#extra` region `TContentPage` / `TTabsPage` already forward.
+   *
+   * Put a meta line HERE, not in `#title`: the title bar sizes itself on the
+   * left group's own content (`flex: 1 1 auto`, deliberately - see TPageHeader),
+   * so a meta line inside `#title` contributes ITS max-content width to that
+   * row and pushes `#actions` down onto a line of their own, even though the
+   * meta line already wrapped inside the group. `#extra` is a sibling of the
+   * bar, so it cannot displace the actions.
+   */
+  extra?: () => unknown
   footer?: () => unknown
   /** Rendered inside the left nav card, above the menu, in `side` layout (e.g. a section search box). */
   'nav-header'?: () => unknown

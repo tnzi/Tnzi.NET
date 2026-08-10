@@ -211,7 +211,7 @@ import { THint, TSvgIcon } from '@tnzi/ui'
 import { TwoFactorType } from '@tnzi/core/services/identity'
 import type { TwoFactorStatusDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
-import TModalShell from '../../../components/overlay/TModalShell.vue'
+import { TModalShell } from '@tnzi/ui'
 import { useUserCenterContext } from '../user-center-context'
 
 const ctx = useUserCenterContext()

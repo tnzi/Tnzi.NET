@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Middleware;
+﻿namespace Tnzi.AI.Middleware;
 
 /// <summary>
 /// 历史中间件 - Before: 自动创建线程 + 加载对话历史, After: 保存用户消息和助手回复
@@ -395,26 +395,45 @@ public class HistoryMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 当 ThreadId 为 null 时，自动创建新线程并写回 Request.ThreadId
+    /// 解析本轮的线程：<c>ThreadId</c> 为 null 时新建，非 null 时<b>校验归属</b>后复用。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 这里<b>不能</b>因为 <c>ThreadId</c> 已有值就早退。<c>ThreadId</c> 是客户端完全可控的
+    /// 对象引用（<c>ChatRequestDto.ThreadId</c> 直接来自请求体），而归属校验的唯一所在地就是
+    /// <c>IAgentThreadInternalService.GetOrCreateThreadAsync</c>（比对 <c>CreatorId</c>，不匹配一律 404）。
+    /// 早退等于「客户端给了 id 就不查了」：拿到他人 threadId 即可读出其全部历史
+    /// （<c>LoadHistoryAsync</c> 的谓词只有 <c>m.ThreadId == threadId</c>），
+    /// 并把本轮问答<b>写进他人的线程</b>。
+    /// </para>
+    /// <para>
+    /// <c>SaveMessageAsync</c> 的注释写着「调用方必须已经安排好归属/租户对齐」——
+    /// 调用方正是不满足这条契约的那个。
+    /// </para>
+    /// <para>
+    /// 边界：未认证上下文（Gateway / MCP 等无用户的入站路径）下 <c>CurrentUser?.Id</c> 为 null，
+    /// 归属判定按既有语义跳过。收紧那条属于另一处设计决定，不在本次修复范围内。
+    /// </para>
+    /// </remarks>
     private async Task EnsureThreadAsync(AiMiddlewareContext context, CancellationToken ct)
     {
-        if (context.Request.ThreadId != null) return;
-
         try
         {
-            var (_, resolvedThreadId, isNewThread) = await _threadService.GetOrCreateThreadAsync(null, context.Request.AgentId, ct);
+            var (_, resolvedThreadId, isNewThread) = await _threadService.GetOrCreateThreadAsync(
+                context.Request.ThreadId, context.Request.AgentId, ct);
             context.Request.ThreadId = resolvedThreadId;
             context.IsNewThread = isNewThread;
-            _logger.LogDebug("Auto-created thread {ThreadId} for agent {AgentId}", resolvedThreadId, context.Request.AgentId);
+            _logger.LogDebug("Resolved thread {ThreadId} for agent {AgentId} (new: {IsNew})", resolvedThreadId, context.Request.AgentId, isNewThread);
         }
         catch (BusinessException)
         {
-            throw; // Agent 不存在等业务异常应向上传播
+            // 归属不符 / 线程不存在 / Agent 不存在都走这里，必须向上传播 ——
+            // 吞掉它就等于放行一个未经校验的 threadId 继续跑完整条管线。
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to auto-create thread for agent {AgentId}", context.Request.AgentId);
+            _logger.LogWarning(ex, "Failed to resolve thread for agent {AgentId}", context.Request.AgentId);
         }
     }
 

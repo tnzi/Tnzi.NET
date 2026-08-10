@@ -83,8 +83,47 @@ public class UpdateUserDto
     public string? Address { get; set; }
     public string? Website { get; set; }
     public Guid? OrganizationId { get; set; }
-    
+
     public List<Guid>? RoleIds { get; set; }
+}
+
+/// <summary>
+/// 用户本人可自助修改的资料字段。
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>刻意不含 <c>RoleIds</c> 与 <c>OrganizationId</c></b>，这是本类型存在的全部理由。
+/// 自助端点（<c>PUT /api/users/profile</c>）此前直接收 <see cref="UpdateUserDto"/>，
+/// 而那个 DTO 是给<b>管理端</b>用的、带这两个字段，于是任何已登录用户 PUT 一个
+/// <c>{"roleIds":["&lt;管理员角色id&gt;"]}</c> 就能给自己授予任意角色、把自己挪进任意组织。
+/// </para>
+/// <para>
+/// 修在 DTO 而不是在控制器里把字段置空：<c>UserService.UpdateAsync</c> 无从知道调用者
+/// 是管理员还是本人，任何「调用前记得清掉」的约定都会在下一个调用点被忘掉。
+/// 字段在绑定层不存在，越权就不是「被拦住」而是<b>无法表达</b>。
+/// </para>
+/// <para>
+/// 新增自助字段加在这里；新增仅管理员可改的字段加在 <see cref="UpdateUserDto"/>。
+/// 两者的字段集由 <c>UserProfileDtoShapeTests</c> 守着。
+/// </para>
+/// </remarks>
+public class UpdateProfileDto
+{
+    public string? Email { get; set; }
+
+    public string? PhoneNumber { get; set; }
+
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+    public string? Nickname { get; set; }
+    public string? AvatarUrl { get; set; }
+    [FileField]
+    public Guid? AvatarId { get; set; }
+    public int? Gender { get; set; }
+    public DateTime? Birthday { get; set; }
+    public string? Bio { get; set; }
+    public string? Address { get; set; }
+    public string? Website { get; set; }
 }
 
 /// <summary>

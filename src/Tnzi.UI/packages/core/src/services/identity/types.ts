@@ -97,6 +97,30 @@ export interface UpdateUserDto {
 }
 
 /**
+ * Fields a user may change on their own profile.
+ *
+ * Deliberately has no `roleIds` / `organizationId` — that is the entire reason
+ * this type exists separately from `UpdateUserDto` (the admin-surface shape).
+ * `PUT /users/profile` used to accept the admin DTO, so any signed-in user
+ * could grant themselves a role or move themselves into another org.
+ * Keep privileged fields out of this type; add self-service fields here.
+ */
+export interface UpdateProfileDto {
+  email?: string | null;
+  phoneNumber?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  nickname?: string | null;
+  avatarUrl?: string | null;
+  avatarId?: string | null;
+  gender?: number;
+  birthday?: Date | string | null;
+  bio?: string | null;
+  address?: string | null;
+  website?: string | null;
+}
+
+/**
  * Change password request
  */
 export interface ChangePasswordDto {

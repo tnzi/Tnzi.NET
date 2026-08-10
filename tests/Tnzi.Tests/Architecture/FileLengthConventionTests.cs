@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Tests.Architecture;
 
 /// <summary>
@@ -29,12 +29,7 @@ public class FileLengthConventionTests
     [Fact]
     public void NoSourceFileExceedsMaxLines_ExceptKnownAllowlist()
     {
-        var repoRoot = FindRepoRoot();
-        if (repoRoot == null)
-        {
-            // 打包/隔离环境下找不到源码树时跳过（不误报）
-            return;
-        }
+        var repoRoot = RepoRoot.Locate();
 
         var srcDir = Path.Combine(repoRoot, "src");
         var violations = new List<string>();
@@ -57,11 +52,7 @@ public class FileLengthConventionTests
     [Fact]
     public void Allowlist_HasNoStaleEntries()
     {
-        var repoRoot = FindRepoRoot();
-        if (repoRoot == null)
-        {
-            return;
-        }
+        var repoRoot = RepoRoot.Locate();
 
         // allowlist 中已不再超标的条目应被移除，保持名单收敛
         var stale = new List<string>();
@@ -120,17 +111,5 @@ public class FileLengthConventionTests
                 stack.Push(sub);
             }
         }
-    }
-
-    private static string? FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "Tnzi.NET.slnx")))
-                return dir.FullName;
-            dir = dir.Parent;
-        }
-        return null;
     }
 }

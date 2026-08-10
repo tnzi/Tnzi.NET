@@ -6,19 +6,52 @@ namespace Tnzi.Storage.Services;
 public class FilePreviewService : ApplicationService, IFilePreviewService
 {
     private readonly IFileStorage _storage;
+    private readonly IDocumentConverter? _documentConverter;
 
     /// <summary>
     /// 初始化 <see cref="FilePreviewService"/> 类型的新实例。
     /// </summary>
     /// <param name="storage">云存储服务。</param>
     /// <param name="serviceProvider">服务提供者。</param>
+    /// <param name="documentConverter">
+    /// Office 转 PDF 转换器；来自可选包 <c>Tnzi.Documents</c>，没加载时为 null，
+    /// 此时 Office 文档维持「不支持预览」。
+    /// </param>
     public FilePreviewService(
         IFileStorage storage,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IDocumentConverter? documentConverter = null)
         : base(serviceProvider)
     {
         _storage = Check.NotNull(storage);
+        _documentConverter = documentConverter;
     }
+
+    /// <summary>
+    /// Office 文档此刻能不能转成 PDF 预览。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 三个条件缺一不可：可选包 <c>Tnzi.Documents</c> 加载了（转换器非 null）、运行环境齐备
+    /// （<see cref="IDocumentConverter.IsAvailable"/>，即宿主装了 LibreOffice）、这个格式在支持列表里
+    /// （<see cref="IDocumentConverter.CanConvert"/>）。
+    /// </para>
+    /// <para>
+    /// ★ <b><see cref="IDocumentConverter.IsAvailable"/> 不能省。</b>只问 <c>CanConvert</c> 的话，
+    /// 「加载了包但没装 LibreOffice」会让 <see cref="CanPreview"/> 答 true，用户点开预览才在
+    /// 转换那一步炸成 500 —— 而这恰恰是**默认情形**：<c>Tnzi.Signing</c> 是本包的主要消费者，
+    /// 它只用盖章与定位，根本不需要 LibreOffice。
+    /// </para>
+    /// <para>
+    /// 转换器的入参名叫 <c>fileName</c>，这里递的却是扩展名，是因为它的契约声明「只取扩展名」，
+    /// 而 <see cref="FileRecord.Extension"/> 全部来自 <c>Path.GetExtension</c>，一定带前导点
+    /// （<c>Path.GetExtension(".docx")</c> 就是 <c>".docx"</c>，实测确认）。调用点也都先验过它非空。
+    /// </para>
+    /// </remarks>
+    private bool CanConvertToPdf(string extension)
+        => FileTypeHelper.IsOffice(extension)
+           && _documentConverter is { IsAvailable: true } converter
+           && converter.CanConvert(extension);
 
     /// <summary>
     /// 检查文件是否支持预览。
@@ -32,12 +65,14 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
 
         var extension = fileRecord.Extension;
 
-        // 支持的预览类型（Office 文档暂不支持服务端预览）
+        // Office 文档只在转换器可用时才算可预览 —— 这条判定必须与 GeneratePreviewAsync 一致，
+        // 因为控制器拿它当闸门：返回 false 时那边直接 400，压根不会调到生成方法。
         return FileTypeHelper.IsImage(extension) ||
                FileTypeHelper.IsPdf(extension) ||
                FileTypeHelper.IsVideo(extension) ||
                FileTypeHelper.IsAudio(extension) ||
-               FileTypeHelper.IsText(extension);
+               FileTypeHelper.IsText(extension) ||
+               CanConvertToPdf(extension);
     }
 
     /// <summary>
@@ -85,6 +120,11 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
             return "audio";
         if (FileTypeHelper.IsText(extension))
             return "text";
+
+        // Office 文档转换后产出的**就是** PDF，如实报告：控制器据此定 Content-Type，
+        // 前端据此选查看器。转换器没加载时仍报 "office"（配合 CanPreview=false，即不可预览）。
+        if (CanConvertToPdf(extension))
+            return "pdf";
         if (FileTypeHelper.IsOffice(extension))
             return "office";
 
@@ -127,24 +167,40 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
             return await _storage.DownloadAsync(fileRecord.Path!);
         }
 
-        // 对于 Office 文档，需要转换为 PDF 或 HTML
-        // 注意：Office 文档转换功能计划在后续版本中实现。
-        // 实现方案选项：
-        // 1. 使用 LibreOffice 命令行工具进行转换（需安装 LibreOffice）
-        // 2. 使用在线转换服务（如 CloudConvert、Zamzar 等）
-        // 3. 使用 Microsoft Graph API（仅限 Office 365 环境）
-        // 当前版本：不支持预览，抛出明确异常
+        // 对于 Office 文档，转成 PDF 后返回（浏览器可预览）
+        if (CanConvertToPdf(extension))
+        {
+            return await ConvertOfficeToPdfAsync(fileRecord, extension);
+        }
+
         if (FileTypeHelper.IsOffice(extension))
         {
             throw new NotSupportedException(
-                "Office document preview is not yet implemented. " +
-                "Please download the file and open it with your local application. " +
-                "This feature is planned for a future release.");
+                "Office document preview requires the optional Tnzi.Documents module and LibreOffice on the host. " +
+                "Please download the file and open it with your local application.");
         }
 
         // 其他类型不支持预览
         throw new NotSupportedException($"Preview is not supported for file type: {extension}");
     }
 
+    /// <summary>
+    /// 下载原件并转成 PDF。
+    /// </summary>
+    /// <remarks>
+    /// 转换器契约收 <c>byte[]</c>（它要把内容落成临时文件交给外部进程），所以这里必须整份读进内存。
+    /// 上限由 <c>Storage:MaxFileSize</c> 在上传那一侧就已经约束住。
+    /// </remarks>
+    private async Task<Stream> ConvertOfficeToPdfAsync(FileRecord fileRecord, string extension)
+    {
+        await using var source = await _storage.DownloadAsync(fileRecord.Path!);
+        using var buffer = new MemoryStream();
+        await source.CopyToAsync(buffer);
+
+        var pdf = await _documentConverter!.ConvertToPdfAsync(buffer.ToArray(), extension);
+
+        // 返回的流交给调用方（控制器 File(...)）dispose，与本方法其它分支一致。
+        return new MemoryStream(pdf);
+    }
 }
 

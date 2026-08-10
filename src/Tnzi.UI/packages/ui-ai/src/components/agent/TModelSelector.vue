@@ -97,25 +97,25 @@ function getProviderLogoUrl(provider: string): string {
         size="large"
       >
         <template #prefix>
-          <Icon icon="lucide:search" class="size-4 text-muted-foreground" />
+          <Icon icon="lucide:search" class="size-4 text-tnzi-muted" />
         </template>
       </NInput>
 
       <div class="max-h-[300px] overflow-y-auto">
         <template v-if="filtered.length === 0">
-          <div class="py-6 text-center text-sm text-muted-foreground">
+          <div class="py-6 text-center text-sm text-tnzi-muted">
             {{ t.model.noResults }}
           </div>
         </template>
         <template v-else>
           <template v-for="[group, groupModels] in grouped" :key="group">
-            <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            <div class="px-2 py-1.5 text-xs font-medium text-tnzi-muted">
               {{ group }}
             </div>
             <div
               v-for="model in groupModels"
               :key="model.id"
-              class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+              class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-tnzi-layout"
               @click="selectModel(model.id)"
             >
               <img
@@ -131,7 +131,7 @@ function getProviderLogoUrl(provider: string): string {
                 class="size-3.5 text-primary"
               />
             </div>
-            <div class="my-1 h-px bg-border last:hidden" />
+            <div class="my-1 h-px bg-tnzi-border last:hidden" />
           </template>
         </template>
       </div>

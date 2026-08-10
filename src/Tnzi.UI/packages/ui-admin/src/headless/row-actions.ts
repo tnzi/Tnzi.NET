@@ -35,8 +35,19 @@ export interface RowAction<T = Record<string, unknown>> {
   type?: RowActionType
   /** Optional leading iconify icon. */
   icon?: string
-  /** Click handler. The built-in factories wire this to the CRUD state. */
-  onClick?: (row: T) => void | Promise<void>
+  /**
+   * Click handler. The built-in factories wire this to the CRUD state.
+   *
+   * The return value is **ignored** ({@link TRowActions} fires it as
+   * `void a.onClick?.(row)`), so it is typed `unknown` rather than
+   * `void | Promise<void>`. That narrower type rejected two shapes that are
+   * the common case, not the exotic one: `onClick: row => router.push(…)`
+   * (vue-router resolves `Promise<NavigationFailure | undefined>`) and the
+   * arrow-body shorthand `onClick: row => (selected.value = row)` (an
+   * assignment expression evaluates to the assigned value). Neither needed a
+   * wrapper at runtime - only in the type.
+   */
+  onClick?: (row: T) => unknown
   /** Conditional visibility - when it returns false the action is dropped for
    *  that row (replaces the `isEnabled ? {enable} : {disable}` idiom). */
   show?: (row: T) => boolean

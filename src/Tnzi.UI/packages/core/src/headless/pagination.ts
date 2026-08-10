@@ -4,7 +4,7 @@
  * Pagination controller - reactive headless logic.
  */
 
-import { reactive } from '@vue/reactivity';
+import { reactive } from 'vue';
 import type { PagedQueryDto } from '../types/pagination';
 import { createPagedQuery } from '../types/pagination';
 

@@ -1,10 +1,10 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Tnzi.AI.Channels.Permissions;
-using Tnzi.Documents.Signing.Permissions;
+using Tnzi.AI.Cli.Permissions;
+using Tnzi.Signing.Permissions;
 using Tnzi.AspNetCore.Mvc;
 using Tnzi.Authorization.Permissions;
 using Tnzi.Security.Authorization;
-using Tnzi.TestBase;
 using Tnzi.AI.Mcp.Permissions;
 using Tnzi.AI.Permissions;
 using Tnzi.AI.Rag.Permissions;
@@ -80,6 +80,7 @@ public class PermissionCataloguePactTests
             ["Finance.Recurring"] = new FinanceRecurringPermissions(),
             ["Finance.Payroll"] = new PayrollPermissions(),
             ["Template"] = new TemplatePermissions(),
+            ["Signing"] = new SigningPermissions(),
             ["AI"] = new AIPermissions(),
             ["AI.Mcp"] = new AIMcpPermissions(),
             ["AI.Skills"] = new AISkillsPermissions(),
@@ -87,7 +88,7 @@ public class PermissionCataloguePactTests
             ["AI.Rag"] = new RagPermissions(),
             ["AI.Sandbox"] = new SandboxPermissions(),
             ["AI.Channels"] = new ChannelsPermissions(),
-            ["Documents.Signing"] = new SigningPermissions(),
+            ["AI.Cli"] = new CliPermissions(),
         };
 
     private static PermissionDefinitionContext BuildContext()
@@ -143,7 +144,16 @@ public class PermissionCataloguePactTests
         // 再加电子签署 9 码（1 组，2026-07-31）——signing.view + template/request 各一套
         // crud。收件人签署面不在目录里：它是匿名的、凭一次性令牌进入，给客户和对家发
         // 账号才能签字等于让电子签比纸笔更麻烦。
-        codes.Count.ShouldBe(290);
+        // 再加 audit.destruction 的 view/execute（2 码，2026-08-06）——查销毁证明是
+        // 合规人员的日常，手动触发一轮销毁会永久删数据，两者必须分开授权。
+        // 又加 audit.recordAccess.view（1 码，2026-08-07）——「谁看过这位举报人的材料」
+        // 是本模块最敏感的视图，不该搭 audit.operation.view 的便车。
+        // 再加外部 CLI agent 的 9 码（2026-08-08）：ai.cliRuntime crud+execute（4）、
+        // ai.cliBinding crud（3）、ai.cliRun view/execute（2），全部 Technical，复用既有 ai 组。
+        // ★ 它们不是新写的码 —— CliPermissions 自 2026-07-31 起就在 src 里、模块也一直
+        //   正确注册着，只是从未进入本清单，于是整整一个模块的码既不计入总数锁，也不受
+        //   「每个码只能有一个声明模块」约束。是 PermissionProviderInventoryTests 扫源码扫出来的。
+        codes.Count.ShouldBe(302);
         context.Groups.Count.ShouldBe(13);
     }
 
@@ -330,7 +340,9 @@ public class PermissionCataloguePactTests
         // Technical). The system.menu crud codes were removed 2026-07-22 with
         // the Sys_Menu override layer; the ai.mcpServer view/update/delete trio
         // (self-hosted MCP server ops surface) was added 2026-07-23.
-        technical.Count.ShouldBe(90);
+        // 2026-08-08：外部 CLI agent 的 9 码全部 Technical（「哪台机器能跑什么 CLI」是运维面
+        // 不是业务面），90 → 99。它们自 2026-07-31 就存在，只是此前不在清单里。
+        technical.Count.ShouldBe(99);
     }
 
     [Theory]

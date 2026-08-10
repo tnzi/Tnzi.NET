@@ -118,12 +118,29 @@
       <!-- Void reason. -->
       <TDetailHost :state="voidDetail" :title="t('voidModal.title')" :width="420" :footer="false" :translate="t">
         <NForm label-placement="top" size="small" class="fin-eft__form">
+          <!--
+            文件交出去过就必须显式确认才能作废：作废会把批内付款放回待付队列，
+            已提交给银行的批次这么一放就会被付第二次。后端同样拦（409），这里只是
+            让操作者在点下去之前就看见后果，而不是先吃一个错误再猜怎么办。
+          -->
+          <NAlert v-if="voidHandedOutAt" type="warning" :bordered="false" class="fin-eft__void-warning">
+            {{ t('voidModal.handedOutWarning', { time: voidHandedOutAt, count: voidDownloadCount }) }}
+          </NAlert>
           <NFormItem :label="t('voidModal.reason')" :show-feedback="false">
             <NInput v-model:value="voidReason" type="textarea" :rows="2" :placeholder="t('voidModal.reason')" />
           </NFormItem>
+          <NFormItem v-if="voidHandedOutAt" :show-label="false" :show-feedback="false">
+            <NCheckbox v-model:checked="voidAcknowledged">{{ t('voidModal.acknowledge') }}</NCheckbox>
+          </NFormItem>
           <div class="fin-eft__form-actions">
             <NButton size="small" @click="voidDetail.close()">{{ t('common.cancel') }}</NButton>
-            <NButton size="small" type="warning" :loading="voiding" :disabled="voiding" @click="submitVoid">
+            <NButton
+              size="small"
+              type="warning"
+              :loading="voiding"
+              :disabled="voiding || (!!voidHandedOutAt && !voidAcknowledged)"
+              @click="submitVoid"
+            >
               {{ t('voidModal.submit') }}
             </NButton>
           </div>
@@ -136,9 +153,9 @@
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref } from 'vue'
-import { NButton, NSelect, NInput, NDatePicker, NDescriptions, NDescriptionsItem, NForm, NFormItem } from 'naive-ui'
+import { NAlert, NButton, NCheckbox, NSelect, NInput, NDatePicker, NDescriptions, NDescriptionsItem, NForm, NFormItem } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { downloadBlob } from '@tnzi/core'
+import { downloadBlob, formatDateTime } from '@tnzi/core'
 import TTabsPage from '../../components/layout/TTabsPage.vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
@@ -317,10 +334,17 @@ const voidDetail = useDetail<{ id: string }>({ mode: 'modal', url: 'void' })
 const voidReason = ref<string | null>(null)
 const voidTargetId = ref<string | null>(null)
 const voiding = ref(false)
+/** 该批次文件首次被交出去的时间，非空 = 作废前必须显式确认。 */
+const voidHandedOutAt = ref<string | null>(null)
+const voidDownloadCount = ref(0)
+const voidAcknowledged = ref(false)
 
 function openVoid(row: EftBatchRow) {
   voidTargetId.value = String(row.id ?? '')
   voidReason.value = null
+  voidHandedOutAt.value = row.firstDownloadedTime ? formatDateTime(row.firstDownloadedTime) : null
+  voidDownloadCount.value = row.downloadCount ?? 0
+  voidAcknowledged.value = false
   void voidDetail.open('create')
 }
 
@@ -328,7 +352,10 @@ async function submitVoid() {
   if (!voidTargetId.value) return
   voiding.value = true
   try {
-    await bridge.eftBatches.voidBatch(voidTargetId.value, { reason: voidReason.value?.trim() || null })
+    await bridge.eftBatches.voidBatch(voidTargetId.value, {
+      reason: voidReason.value?.trim() || null,
+      acknowledgeFileNotSubmitted: voidAcknowledged.value,
+    })
     message.success(t('voidModal.success'))
     voidDetail.close()
     await crud.refresh()

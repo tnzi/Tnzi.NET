@@ -52,8 +52,8 @@ async function copyCode(): Promise<void> {
 <template>
   <div class="flex h-full flex-col">
     <div class="flex items-center justify-between border-b px-3 py-1.5">
-      <span v-if="filename" class="text-xs font-mono text-muted-foreground">{{ filename }}</span>
-      <span v-else class="text-xs text-muted-foreground">{{ language ?? 'text' }}</span>
+      <span v-if="filename" class="text-xs font-mono text-tnzi-muted">{{ filename }}</span>
+      <span v-else class="text-xs text-tnzi-muted">{{ language ?? 'text' }}</span>
       <div class="flex items-center gap-1">
         <NTooltip>
           <template #trigger>

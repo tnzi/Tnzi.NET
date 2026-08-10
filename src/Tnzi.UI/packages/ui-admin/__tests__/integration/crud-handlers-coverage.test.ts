@@ -343,6 +343,14 @@ vi.mock('../../src/services/bridges/notification-bridge', () => ({
 vi.mock('../../src/services/bridges/template-bridge', () => ({
   createTemplateBridge: () => ({ templates: mkCrud(), layouts: mkCrud() }),
 }))
+vi.mock('../../src/services/bridges/signing-bridge', () => ({
+  createSigningBridge: () => ({
+    // The signing pages call `getById` (template hydration / request detail)
+    // and the request lifecycle actions, neither of which mkCrud provides.
+    requests: { ...mkCrud(), getById: vi.fn(async () => ({})), send: vi.fn(async () => []), void: vi.fn(async () => undefined) },
+    templates: { ...mkCrud(), getById: vi.fn(async () => ({ fields: [] })) },
+  }),
+}))
 vi.mock('../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
     users: mkCrud(), roles: mkCrud(), tenants: mkCrud(), loginLogs: mkCrud(),
@@ -441,6 +449,8 @@ import AccessLogs from '../../src/pages/system/AccessLogs.vue'
 import Dictionaries from '../../src/pages/system/Dictionaries.vue'
 import Parameters from '../../src/pages/system/Parameters.vue'
 import ScheduledJobs from '../../src/pages/system/ScheduledJobs.vue'
+import SigningRequests from '../../src/pages/signing/Requests.vue'
+import SigningTemplates from '../../src/pages/signing/Templates.vue'
 import FunctionModules from '../../src/pages/authorization/FunctionModules.vue'
 import EntityRoles from '../../src/pages/authorization/EntityRoles.vue'
 import RoleFunctions from '../../src/pages/authorization/RoleFunctions.vue'
@@ -562,6 +572,8 @@ const PAGES: Array<[string, any]> = [
   ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
   ['NotificationSubscriptions', NotificationSubscriptions],
   ['Layouts', Layouts], ['Templates', Templates],
+  // Signing
+  ['SigningRequests', SigningRequests], ['SigningTemplates', SigningTemplates],
   // Identity / Audit / System / Authorization / Storage
   ['Users', Users], ['Roles', Roles],
   ['Tenants', Tenants], ['LoginLogs', LoginLogs],

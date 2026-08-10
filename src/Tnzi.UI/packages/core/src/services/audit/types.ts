@@ -140,6 +140,117 @@ export interface TopUserDto {
 }
 
 // ============================================
+// Record-level read audit (optional capability)
+// ============================================
+
+/**
+ * One record-level read: who opened WHICH row.
+ *
+ * Distinct from AuditOperationDto, which answers "who called which endpoint".
+ * Privacy questions are usually about the former ("who viewed this informant's
+ * file last month") and endpoint logs cannot answer them.
+ */
+export interface RecordAccessDto {
+  id: string;
+  /** Position in this user's tamper-evident chain. */
+  sequence: number;
+  resourceType: string;
+  resourceId: string;
+  purpose?: string | null;
+  userId?: string | null;
+  /** Denormalised so a later rename does not erase who it was at the time. */
+  userName?: string | null;
+  hash: string;
+  creationTime: string;
+}
+
+export interface RecordAccessQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  resourceType?: string;
+  resourceId?: string;
+  userId?: string;
+  purpose?: string;
+  startTime?: Date | string;
+  endTime?: Date | string;
+}
+
+/**
+ * Read volume per user.
+ *
+ * The per-hour quota is the *preventive* gate; this is the *retrospective*
+ * view - an account reading ten times its usual volume without crossing the
+ * quota is only visible when the volumes sit side by side.
+ */
+export interface RecordAccessUserStatDto {
+  userId?: string | null;
+  userName?: string | null;
+  accessCount: number;
+  /** Distinct records touched, so re-reading one row does not look like breadth. */
+  distinctRecordCount: number;
+  lastAccessTime: string;
+}
+
+// ============================================
+// Policy-driven data destruction (optional capability)
+// ============================================
+
+/** A destruction certificate: what a retention policy destroyed, and when. */
+export interface DataDestructionDto {
+  id: string;
+  /** Position in the global tamper-evident chain. */
+  sequence: number;
+  policyName: string;
+  entityType: string;
+  /** Records with a timestamp older than this were treated as expired. */
+  cutoff: string;
+  destroyedCount: number;
+  /** Expired but NOT destroyed because a litigation hold applied. */
+  heldCount: number;
+  /** Digest of the destroyed identifiers - never the data itself. */
+  identifierDigest: string;
+  /** Present only when the backend is configured to keep the list. */
+  identifiers?: string | null;
+  mode: string;
+  encryptionKeyId?: string | null;
+  /** Whether that key is confirmed absent from the key ring. */
+  isKeyDestroyed: boolean;
+  isDryRun: boolean;
+  executedByUserId?: string | null;
+  hash: string;
+  creationTime: string;
+}
+
+export interface DataDestructionQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  policyName?: string;
+  startTime?: Date | string;
+  endTime?: Date | string;
+  isDryRun?: boolean;
+}
+
+/** Per-policy outcome of one destruction cycle. */
+export interface DataDestructionPolicyResultDto {
+  policyName: string;
+  entityType: string;
+  cutoff: string;
+  destroyedCount: number;
+  heldCount: number;
+  /** True when the batch cap was hit - more expired data remains. */
+  hasMore: boolean;
+  certificateId?: string | null;
+  error?: string | null;
+}
+
+export interface DataDestructionRunDto {
+  policies: DataDestructionPolicyResultDto[];
+  totalDestroyed: number;
+  totalHeld: number;
+  isDryRun: boolean;
+}
+
+// ============================================
 // Legacy type aliases (deprecated)
 // ============================================
 

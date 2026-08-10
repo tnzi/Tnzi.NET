@@ -76,6 +76,11 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         if (input.FileId == Guid.Empty)
             return Fail<ReceiptDto>("A file id is required.", 400);
 
+        // 人打的值越界一律 400 并点名字段：悄悄截断会让他看到自己没输入过的内容而没有解释。
+        var invalid = ReceiptFieldLimits.ValidateUserInput(input.FileName, vendorName: null, input.Currency, reference: null);
+        if (invalid != null)
+            return Fail<ReceiptDto>(invalid, 400);
+
         var receipt = new Receipt
         {
             FileId = input.FileId,
@@ -123,16 +128,25 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         if (!extraction.Succeeded || extraction.Data == null)
         {
             receipt.Status = ReceiptStatus.Failed;
-            receipt.FailReason = extraction.Message ?? "Extraction failed.";
+            receipt.FailReason = ReceiptFieldLimits.TruncateFailReason(extraction.Message);
             await _receiptRepository.UpdateAsync(receipt, cancellationToken);
             await _receiptRepository.SaveChangesAsync(cancellationToken);
             return Fail<ReceiptDto>(receipt.FailReason, extraction.Code ?? 502);
         }
 
-        var data = extraction.Data;
+        // 提取器是可替换的扩展点，返回值一律当外部数据看待：越界的字符串会让插入 500，
+        // 而未归一化的置信度会在界面上渲染成 9500%。见 ReceiptFieldLimits。
+        var data = ReceiptFieldLimits.NormalizeExtraction(extraction.Data, out var adjustments);
+        if (adjustments.Count > 0)
+        {
+            Logger.LogWarning(
+                "Receipt {ReceiptId}: the extractor returned values outside the persisted shape ({Adjustments}).",
+                id, string.Join("; ", adjustments));
+        }
+
         receipt.VendorName = data.VendorName;
         receipt.DocDate = data.DocDate?.ToUtcDate();
-        receipt.Currency = string.IsNullOrWhiteSpace(data.Currency) ? receipt.Currency : data.Currency.Trim().ToUpperInvariant();
+        receipt.Currency = data.Currency ?? receipt.Currency;
         receipt.Subtotal = data.Subtotal;
         receipt.TaxAmount = data.TaxAmount;
         receipt.Total = data.Total;
@@ -167,6 +181,11 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
             return Fail<ReceiptDto>("Receipt not found.", 404);
         if (receipt.Status == ReceiptStatus.Converted)
             return Fail<ReceiptDto>("A converted receipt cannot be edited.", 409);
+
+        var invalid = ReceiptFieldLimits.ValidateUserInput(
+            fileName: null, input.VendorName, input.Currency, input.Reference);
+        if (invalid != null)
+            return Fail<ReceiptDto>(invalid, 400);
 
         receipt.VendorName = input.VendorName;
         receipt.DocDate = input.DocDate?.ToUtcDate();

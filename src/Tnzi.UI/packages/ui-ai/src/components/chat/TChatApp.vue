@@ -24,9 +24,11 @@
  * See the Acme chat app (projects/acme/src/Acme.UI/chat) for a
  * real-world integration.
  */
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, useSlots } from 'vue'
 import { Icon } from '@iconify/vue'
+import { NConfigProvider } from 'naive-ui'
 import { TAvatar, applyThemeModeToDocument } from '@tnzi/ui'
+import { useAiNaiveTheme } from '../../headless/useAiNaiveTheme'
 import type { ThemeMode } from '@tnzi/core/types'
 import { normalizeThemeMode } from '@tnzi/core/types'
 import TCollapsibleSidebar from '../layout/TCollapsibleSidebar.vue'
@@ -43,6 +45,14 @@ import TSettingRow from '../layout/TSettingRow.vue'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TAppearanceAdmin from '../layout/TAppearanceAdmin.vue'
 import type { UseGlobalAiThemeReturn } from '../../headless/useGlobalAiTheme'
+import type { HttpClient } from '@tnzi/core/http'
+import { useAccountSettings } from '../../headless/useAccountSettings'
+import { useAiPersonalization } from '../../headless/useAiPersonalization'
+import TAccountSettings from '../settings/TAccountSettings.vue'
+import TSecuritySettings from '../settings/TSecuritySettings.vue'
+import TPersonalizationSettings from '../settings/TPersonalizationSettings.vue'
+import TUsageSettings from '../settings/TUsageSettings.vue'
+import { useAiUsage } from '../../headless/useAiUsage'
 import type { UserMenuItem, UserBarAction } from '../overlay/TUserMenu.vue'
 import type { LandingChip } from './TLandingPage.vue'
 import TThreadComposer from './TThreadComposer.vue'
@@ -158,13 +168,15 @@ const props = withDefaults(
     sidebarWidth?: number
     /** Section heading above the threads list. */
     threadsLabel?: string
-    /** Label for the prominent new-chat button at the top of the sidebar. */
+    /** Label for the new-chat entry. Defaults to the current locale's. */
     newChatLabel?: string
+    /** Iconify name for the new-chat entry. A product that calls this
+     *  something else usually wants its own glyph too. */
+    newChatIcon?: string
     /**
-     * Render the built-in new-chat button above the nav. Turn it off when the
-     * product already carries "New chat" as a nav entry, which is the common
-     * case once `navGroups` is in play - otherwise the entry appears twice,
-     * in both the expanded sidebar and the collapsed rail.
+     * Contribute the built-in new-chat entry at the top of the nav. Turn it off
+     * when the product already carries "New chat" among its own nav entries -
+     * otherwise it appears twice, in both the expanded sidebar and the rail.
      */
     showNewChatButton?: boolean
     /** Hover delete affordance on each thread row (with inline confirm). Default true. */
@@ -223,6 +235,12 @@ const props = withDefaults(
      * built-in conversation; any other value renders the `view` slot while
      * keeping the sidebar and top bar. This is what lets one shell host both
      * the conversation and the product's other pages.
+     *
+     * Supports `v-model`. The shell renders the nav and the thread list, so it
+     * is the only thing that knows a click there means "show me that page" or
+     * "show me the conversation"; with `v-model:view` it routes itself. Bind
+     * one-way instead to route by hand from `nav` / `new-chat` / `select-thread`
+     * - `update:view` is then simply ignored.
      */
     view?: ChatAppView
 
@@ -270,6 +288,16 @@ const props = withDefaults(
      * renders, so a product without a super-admin story pays nothing.
      */
     globalTheme?: UseGlobalAiThemeReturn | null
+    /**
+     * HTTP client for the built-in wired settings pages (Account, Security,
+     * Personalization). They call the framework's own **user-facing** routes -
+     * `/users/profile/*` in `Tnzi.Identity` and `/user-profile` in `Tnzi.AI` -
+     * so the client is all a consumer supplies; there is no data to pass.
+     *
+     * Omit it on a deployment without those modules and the pages hide
+     * themselves rather than rendering a form that cannot save.
+     */
+    accountClient?: HttpClient | null
     /**
      * `(key, fallback?) => string` for the appearance pane's copy. The rest of
      * the dialog reads the `locales` prop; this pane takes an injected
@@ -327,7 +355,10 @@ const props = withDefaults(
     sidebarMobileBreakpoint: 768,
     sidebarWidth: 300,
     threadsLabel: 'All tasks',
-    newChatLabel: 'New chat',
+    /* No default for `newChatLabel`: `newChatText` falls back to the
+       dictionary, so leaving it unset translates instead of pinning the entry
+       to English. */
+    newChatIcon: 'lucide:square-pen',
     showNewChatButton: true,
     enableThreadDelete: true,
     deleteConfirmLabel: 'Delete?',
@@ -351,8 +382,14 @@ const props = withDefaults(
     enableSettings: true,
     globalTheme: null,
     translateSetting: undefined,
+    /* Security and Personalization are listed but render nothing without an
+       `accountClient`; a consumer on a different backend drops them from this
+       array. Listing them here is what makes them built-in rather than
+       something every product re-declares. */
     settingsSections: () => [
       { id: 'account', label: 'Account', icon: 'lucide:circle-user-round' },
+      { id: 'security', label: 'Security', icon: 'lucide:shield-check' },
+      { id: 'personalization', label: 'Personalization', icon: 'lucide:sparkles' },
       { id: 'appearance', label: 'Appearance', icon: 'lucide:settings' },
       { id: 'about', label: 'About', icon: 'lucide:info' },
     ],
@@ -389,6 +426,12 @@ const emit = defineEmits<{
   nav: [item: NavItem]
   /** A nav group's header action was clicked (e.g. "new project"). */
   'nav-group-action': [groupId: string, actionId: string]
+  /**
+   * `v-model:view`. Emitted alongside `nav` (the entry's id) and alongside
+   * `new-chat` / `select-thread` (back to the conversation). Ignore it to keep
+   * routing by hand.
+   */
+  'update:view': [view: ChatAppView]
 
   // Account bar
   /** A user-menu item was activated. Built-in ids: account / settings / sign-out. */
@@ -477,41 +520,188 @@ const hasMessages = computed(() => (props.messages?.length ?? 0) > 0)
 /* `view` decides whether the main area is the conversation or the consumer's
    own page. The sidebar and top bar are outside this branch on purpose: a
    product's nav must survive navigating away from the chat. */
-const isChatView = computed(() => props.view === 'chat')
+const CHAT_VIEW_ID = 'chat'
 
-/* `mainNav` becomes an unlabelled leading group so the flat prop and the
-   grouped prop render through one component. Kept out of the array entirely
-   when empty, otherwise TSidebarNav would draw the group's margins around
-   nothing. */
-/* Built-in views render as one unlabelled group between the primary nav and
-   the consumer's own groups: they are destinations, not a titled section. */
-const builtinNavGroup = computed<NavGroup | null>(() => {
-  if (props.builtinViews.length === 0) return null
-  return {
-    id: '__builtin',
-    items: props.builtinViews.map((id) => ({
-      id,
-      label: t.value.views[id],
-      icon: BUILTIN_VIEW_ICONS[id],
-      active: props.view === id,
-    })),
-  }
-})
+const isChatView = computed(() => props.view === CHAT_VIEW_ID)
 
-const navGroupsResolved = computed<ReadonlyArray<NavGroup>>(() => {
-  const flat: NavGroup[] =
-    props.mainNav.length > 0 ? [{ id: '__main', items: props.mainNav }] : []
-  const builtin = builtinNavGroup.value ? [builtinNavGroup.value] : []
-  return [...flat, ...builtin, ...props.navGroups]
-})
+/* New chat is a nav destination like any other - it opens the landing page -
+   so it renders through TSidebarNav rather than as its own button. It used to
+   be hand-written markup in this file whose geometry was pixel-matched to
+   `.t-sidebar-nav__item` by hand, and the copy had already drifted: it sat at
+   x=0 instead of the nav's 8px inset (icon and label 8px left of every entry
+   below it) and carried `font-weight: 500` nothing else had. Duplicated
+   geometry cannot be kept in sync by discipline; sharing the row markup is
+   what makes "same kind of thing" true rather than aspirational. */
+const NEW_CHAT_NAV_ID = '__new-chat'
 
-const hasNav = computed(() => navGroupsResolved.value.length > 0)
-const effectiveSettingsSections = computed(() => props.settingsSections)
-const customSettingsSections = computed(() =>
-  props.settingsSections.filter(
-    (s) => s.id !== 'account' && s.id !== 'appearance' && s.id !== 'about',
-  ),
+/* Falls back to the dictionary so this entry translates like every other one.
+   The prop stays as the override for products that call it something else. */
+const newChatText = computed(() => props.newChatLabel ?? t.value.chat.newChat)
+
+/* Active on the landing page, which is where it navigates to. The rail's copy
+   of this button used to light up on `hasMessages || activeThreadId` - the
+   exact inverse - so the two disagreed about what the entry meant. */
+const isLandingView = computed(
+  () => isChatView.value && !props.activeThreadId && !hasMessages.value,
 )
+
+/* One unlabelled leading group: new chat, the consumer's flat `mainNav`, and
+   the built-in views are all primary destinations with no heading, and a
+   heading is the only thing that makes a group its own visual unit. Splitting
+   them put a 14px gap in the expanded sidebar and a rule in the rail between
+   entries that read as one list. Titled `navGroups` still follow as their own
+   sections. Empty when nothing contributes, otherwise TSidebarNav would draw
+   the group's margins around nothing. */
+const primaryNavGroup = computed<NavGroup | null>(() => {
+  const newChat: NavItem[] = props.showNewChatButton
+    ? [
+        {
+          id: NEW_CHAT_NAV_ID,
+          label: newChatText.value,
+          icon: props.newChatIcon,
+          active: isLandingView.value,
+        },
+      ]
+    : []
+
+  const builtin: NavItem[] = props.builtinViews.map((id) => ({
+    id,
+    label: t.value.views[id],
+    icon: BUILTIN_VIEW_ICONS[id],
+    active: props.view === id,
+  }))
+
+  const items = [...newChat, ...props.mainNav, ...builtin]
+  return items.length > 0 ? { id: '__primary', items } : null
+})
+
+/* The primary group is pinned above the scroll area; the consumer's titled
+   sections scroll with the conversation history below them. Reaching New chat
+   should never require scrolling back up a long history - which is exactly
+   what happened before, since the whole sidebar was one scroller.
+   (Manus splits at the same seam: its "New task" / "Agent" block sits outside
+   the scroller while Projects and Tasks scroll.)
+   Titled sections stay in the scroller on purpose - pinning them would eat
+   the history's height, and unlike the primary run they can be arbitrarily
+   long. */
+const pinnedNavGroups = computed<ReadonlyArray<NavGroup>>(() =>
+  primaryNavGroup.value ? [primaryNavGroup.value] : [],
+)
+
+/* Full list, in visual order. The rail draws every entry at once (it has no
+   scroll split), and the top bar looks up the active view here. */
+const navGroupsResolved = computed<ReadonlyArray<NavGroup>>(() => [
+  ...pinnedNavGroups.value,
+  ...props.navGroups,
+])
+
+/* Now that the shell routes, "navigate" also has to mean the drawer gets out
+   of the way: on a phone the sidebar is an overlay, so every destination it
+   sends you to would otherwise open underneath it. Outside the guard below -
+   picking the conversation you are already on still has to close the drawer. */
+function goToView(id: ChatAppView): void {
+  if (effectiveIsMobile.value) sidebarMode.value = 'hidden'
+  /* Guarded so a click on the page you are already on is not a mutation. On a
+     plain ref the write would be a no-op anyway, but a consumer whose setter
+     has side effects (a router push, an analytics event, a fetch) would see
+     one per click on the current entry. */
+  if (props.view !== id) emit('update:view', id)
+}
+
+/* Every path back to the conversation goes through these two, so the routing
+   cannot be right in the sidebar and missing in the rail. Both surfaces, plus
+   the thread list's own "+", call them. */
+function startNewChat(): void {
+  goToView(CHAT_VIEW_ID)
+  emit('new-chat')
+}
+
+function openThread(threadId: string): void {
+  goToView(CHAT_VIEW_ID)
+  emit('select-thread', threadId)
+}
+
+/* New chat keeps its own event - consumers wire it to starting a conversation,
+   not to a page. Everything else is a destination and moves `view`. */
+function onNavSelect(item: NavItem): void {
+  if (item.id === NEW_CHAT_NAV_ID) {
+    startNewChat()
+    return
+  }
+  goToView(item.id)
+  emit('nav', item)
+}
+
+/* The nav entry that `view` is currently on, so the top bar can name it. Both
+   the top bar's own comment and `TResourcePage` ("page name in the top bar,
+   not repeated in the body" - which is why those pages render no title of
+   their own) promised this, but the bar only ever read `threadTitle` - so a
+   view opened while a conversation was active sat under that conversation's
+   title, and one opened from a fresh session sat under the brand name. */
+const activeViewLabel = computed(() => {
+  if (isChatView.value) return ''
+  for (const group of navGroupsResolved.value) {
+    const hit = group.items.find((item) => item.id === props.view)
+    if (hit) return hit.label
+  }
+  return ''
+})
+
+const topbarTitle = computed(
+  () => activeViewLabel.value || props.threadTitle || props.brandName,
+)
+
+const hasPinnedNav = computed(() => pinnedNavGroups.value.length > 0)
+
+/* Sections that render nothing on their own - they need either an
+   `accountClient` to call or a consumer slot to fill them. */
+const WIRED_SETTINGS_IDS = ['security', 'personalization', 'usage'] as const
+
+const slots = useSlots()
+
+/* A listed section that opens an empty pane is worse than an absent one: it
+   reads as a broken page rather than a capability this deployment does not
+   have. So the wired sections drop out unless something can actually fill
+   them - the client, or a consumer slot of the same id. */
+const effectiveSettingsSections = computed(() =>
+  props.settingsSections.filter((section) => {
+    if (!WIRED_SETTINGS_IDS.includes(section.id as (typeof WIRED_SETTINGS_IDS)[number])) return true
+    return accountSettings !== null || Boolean(slots[`settings-${section.id}`])
+  }),
+)
+
+/* Section ids the shell renders itself. The three originals plus the pages
+   that arrived once `accountClient` was a thing: their data is the framework's
+   own and their routes are user-facing, so there is nothing for a consumer to
+   fetch. A consumer can still take any of them over by filling the matching
+   `#settings-{id}` slot. */
+const BUILTIN_SETTINGS_IDS = new Set([
+  'account',
+  'appearance',
+  'about',
+  'security',
+  'personalization',
+  'usage',
+])
+
+const customSettingsSections = computed(() =>
+  props.settingsSections.filter((s) => !BUILTIN_SETTINGS_IDS.has(s.id)),
+)
+
+/* Controllers for the wired pages.
+   Built once during setup, not inside a computed: these register refs and are
+   composables, so re-running them on a dependency change would create a fresh
+   set of state on every read. Account and Security deliberately share one
+   controller - they read the same profile, and two would fetch it twice and
+   then disagree after a write. `null` when no client was supplied, which is
+   what hides both pages. */
+const accountSettings = props.accountClient
+  ? useAccountSettings({ client: props.accountClient })
+  : null
+const personalization = props.accountClient
+  ? useAiPersonalization({ client: props.accountClient })
+  : null
+const usage = props.accountClient ? useAiUsage({ client: props.accountClient }) : null
 
 const themeOptions = computed<ReadonlyArray<{ id: ThemePref; label: string }>>(() => [
   { id: 'light', label: t.value.settings.themeLight },
@@ -535,6 +725,10 @@ const resolvedTheme = computed<'light' | 'dark'>(() => {
 })
 
 const isDark = computed(() => resolvedTheme.value === 'dark')
+
+/* Naive theme for this shell. `isDark` is the same value written to <html>,
+   so the controls and the painted surfaces cannot disagree about the mode. */
+const { theme: naiveTheme, themeOverrides: naiveThemeOverrides } = useAiNaiveTheme(isDark)
 
 // ---------------------------------------------------------------------------
 // Theme application
@@ -667,6 +861,20 @@ function onArtifactWidthChange(w: number): void {
 </script>
 
 <template>
+  <!-- The shell provides the naive theme for everything it renders, including
+       the modals and drawers it teleports. Without it the naive controls inside
+       this package fell back to naive's stock look while the painted surfaces
+       followed `--tnzi-ai-*`, so a product could set its colour and watch half
+       the UI ignore it. Overrides come from the host's `@tnzi/ui` context when
+       there is one - see `useAiNaiveTheme`. -->
+  <!-- `abstract`: renders NO element. Without it naive inserts a
+       `<div class="n-config-provider">` between the page and this shell,
+       and `.t-chat-app`'s height chain resolves against a block div with
+       no height - measured 1467px of content in a 711px viewport, with the
+       composer and account bar pushed off screen. Theme still reaches every
+       descendant (including teleported ones) because provide/inject follows
+       the component tree, not the DOM. -->
+  <NConfigProvider abstract :theme="naiveTheme" :theme-overrides="naiveThemeOverrides">
   <div class="t-chat-app" :class="{ 't-chat-app--dark': isDark }" :style="rootStyle">
     <!-- ───────────────────────── Sidebar ───────────────────────── -->
     <TCollapsibleSidebar
@@ -709,22 +917,25 @@ function onArtifactWidthChange(w: number): void {
         </slot>
       </template>
 
-      <!-- Sidebar content (expanded mode): nav + threads list -->
-      <template #content>
-        <button
-          v-if="showNewChatButton"
-          type="button"
-          class="t-chat-app__nav-item t-chat-app__new-chat"
-          @click="emit('new-chat')"
-        >
-          <Icon icon="lucide:square-pen" class="t-chat-app__nav-icon" />
-          <span>{{ newChatLabel }}</span>
-        </button>
-        <slot name="sidebar-nav" :nav="mainNav" :groups="navGroupsResolved">
+      <!-- Primary nav, pinned above the scroll area. New chat and the product's
+           destinations stay reachable however long the history gets. -->
+      <template v-if="hasPinnedNav" #nav>
+        <slot name="sidebar-nav" :nav="mainNav" :groups="pinnedNavGroups">
           <TSidebarNav
-            v-if="hasNav"
-            :groups="navGroupsResolved"
-            @select="(item) => emit('nav', item)"
+            :groups="pinnedNavGroups"
+            @select="onNavSelect"
+            @group-action="(groupId, actionId) => emit('nav-group-action', groupId, actionId)"
+          />
+        </slot>
+      </template>
+
+      <!-- Sidebar content (expanded mode): titled sections + threads list -->
+      <template #content>
+        <slot name="sidebar-sections" :groups="navGroups">
+          <TSidebarNav
+            v-if="navGroups.length > 0"
+            :groups="navGroups"
+            @select="onNavSelect"
             @group-action="(groupId, actionId) => emit('nav-group-action', groupId, actionId)"
           />
         </slot>
@@ -740,9 +951,9 @@ function onArtifactWidthChange(w: number): void {
             :label="threadsLabel"
             :enable-delete="enableThreadDelete"
             :confirm-label="deleteConfirmLabel"
-            @select="(id) => emit('select-thread', id)"
+            @select="openThread"
             @delete="(id) => emit('delete-thread', id)"
-            @add="emit('new-chat')"
+            @add="startNewChat"
           />
         </slot>
       </template>
@@ -799,25 +1010,15 @@ function onArtifactWidthChange(w: number): void {
       <!-- Collapsed rail -->
       <template #rail>
         <slot name="rail" :mode="sidebarMode" :main-nav="mainNav">
+          <!-- New chat arrives through `groups` like every other entry; the
+               rail has no special case for it either. -->
           <TChatRail
             :groups="navGroupsResolved"
             :brand-logo="brandLogo"
             :expand-label="t.sidebar.expand"
             @expand="sidebarMode = 'expanded'"
-            @select="(item) => emit('nav', item)"
+            @select="onNavSelect"
           >
-            <template #top>
-              <button
-                v-if="showNewChatButton"
-                type="button"
-                class="t-chat-rail__btn"
-                :class="{ 'is-active': hasMessages || activeThreadId }"
-                :aria-label="t.chat.newChat"
-                @click="emit('new-chat')"
-              >
-                <Icon icon="lucide:square-pen" />
-              </button>
-            </template>
             <template #bottom>
               <button
                 v-if="enableSettings && !showAccountBar"
@@ -866,7 +1067,7 @@ function onArtifactWidthChange(w: number): void {
              the `view` slot is showing. -->
         <slot
           name="topbar-left"
-          :title="threadTitle ?? brandName"
+          :title="topbarTitle"
           :has-thread="hasMessages"
           :view="view"
         >
@@ -879,9 +1080,9 @@ function onArtifactWidthChange(w: number): void {
             <span>{{ modelName }}</span>
             <Icon icon="lucide:chevron-down" />
           </button>
-          <slot v-else name="topbar-title" :title="threadTitle ?? brandName" :has-thread="hasMessages">
+          <slot v-else name="topbar-title" :title="topbarTitle" :has-thread="hasMessages">
             <span class="t-chat-app__workspace-switcher">
-              <span>{{ threadTitle || brandName }}</span>
+              <span>{{ topbarTitle }}</span>
             </span>
           </slot>
         </slot>
@@ -1025,10 +1226,14 @@ function onArtifactWidthChange(w: number): void {
       :switchable="accountSwitchable"
       @switch-account="emit('switch-account')"
     >
-      <!-- Default Account section - real profile card (props-driven) -->
+      <!-- Account. With a client this is the wired self-service page (profile
+           + password against `/users/profile/*`); without one it falls back to
+           the read-only card built from props, which is all a deployment
+           without Tnzi.Identity can honestly show. -->
       <template #account>
         <slot name="settings-account">
-          <div class="t-chat-app__account">
+          <TAccountSettings v-if="accountSettings" :controller="accountSettings" />
+          <div v-else class="t-chat-app__account">
             <div class="t-chat-app__account-card">
               <TAvatar
                 class="t-chat-app__account-avatar"
@@ -1119,6 +1324,30 @@ function onArtifactWidthChange(w: number): void {
         </slot>
       </template>
 
+      <!-- Security: two-factor + active sessions. Wired, so it renders only
+           with a client - see `accountClient`. -->
+      <template #security>
+        <slot name="settings-security">
+          <TSecuritySettings v-if="accountSettings" :controller="accountSettings" />
+        </slot>
+      </template>
+
+      <!-- Personalization: the user's AI profile, applied to every new
+           conversation. -->
+      <template #personalization>
+        <slot name="settings-personalization">
+          <TPersonalizationSettings v-if="personalization" :controller="personalization" />
+        </slot>
+      </template>
+
+      <!-- Usage: the user's own token quota. Read-only - a user cannot raise
+           their own limit. -->
+      <template #usage>
+        <slot name="settings-usage">
+          <TUsageSettings v-if="usage" :controller="usage" />
+        </slot>
+      </template>
+
       <!-- About -->
       <template #about>
         <slot name="settings-about">
@@ -1148,6 +1377,7 @@ function onArtifactWidthChange(w: number): void {
       :actions="commandActions"
     />
   </div>
+  </NConfigProvider>
 </template>
 
 <style scoped>
@@ -1230,54 +1460,19 @@ function onArtifactWidthChange(w: number): void {
   color: var(--tnzi-ai-text);
 }
 
-/* ─── Main nav (expanded) ──────────────────────────────────────────────── */
-.t-chat-app__nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 8px 8px;
-}
-.t-chat-app__nav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  height: 36px;
-  padding: 0 9px;
-  border: none;
-  background: transparent;
-  border-radius: 10px;
-  color: var(--tnzi-ai-text);
-  font-family: inherit;
-  font-size: 14px;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
-}
-.t-chat-app__nav-item:hover { background: var(--tnzi-ai-hover); }
-.t-chat-app__nav-item.is-active {
-  background: var(--tnzi-ai-accent-soft);
-  color: var(--tnzi-ai-accent);
-  font-weight: 500;
-}
-.t-chat-app__nav-icon {
-  width: 18px;
-  height: 18px;
-  font-size: 18px;
-  flex-shrink: 0;
-  color: var(--tnzi-ai-text-secondary);
-}
-.t-chat-app__nav-item.is-active .t-chat-app__nav-icon {
-  color: var(--tnzi-ai-accent);
-}
+/* The nav owns its own row geometry (`.t-sidebar-nav__item` in TSidebarNav).
+   This file used to carry a second copy of it for the new-chat button, plus a
+   `.t-chat-app__nav` container that nothing had rendered since the nav moved
+   into TSidebarNav. Both are gone - there is one row style now. */
 
 /* ─── Sidebar footer ───────────────────────────────────────────────────── */
+/* The sidebar footer is a padded stack now, so this row only needs its own
+   gap - its inset and its separation from the list above come from there. */
 .t-chat-app__foot-icons {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px 10px;
-  border-top: 1px solid var(--tnzi-ai-divider);
+  padding: 2px 4px;
 }
 .t-chat-app__foot-btn {
   width: 28px;
@@ -1424,12 +1619,6 @@ function onArtifactWidthChange(w: number): void {
 .t-chat-app__artifact-slot {
   flex-shrink: 0;
   margin: 12px 12px 12px 0;
-}
-
-/* ─── New-chat button (prominent, top of sidebar) ──────────────────────── */
-.t-chat-app__new-chat {
-  margin-bottom: 4px;
-  font-weight: 500;
 }
 
 /* ─── Settings: built-in Account profile card ──────────────────────────── */

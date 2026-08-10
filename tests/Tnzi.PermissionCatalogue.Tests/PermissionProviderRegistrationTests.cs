@@ -1,7 +1,9 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.AI.Channels.Permissions;
 using Tnzi.AI.Channels;
+using Tnzi.AI.Cli.Permissions;
+using Tnzi.AI.Cli;
 using Tnzi.AI.Mcp.Permissions;
 using Tnzi.AI.Mcp;
 using Tnzi.AI.Permissions;
@@ -22,8 +24,8 @@ using Tnzi.Authorization.Permissions;
 using Tnzi.Authorization;
 using Tnzi.Chat.Permissions;
 using Tnzi.Chat;
-using Tnzi.Documents.Signing.Permissions;
-using Tnzi.Documents.Signing;
+using Tnzi.Signing.Permissions;
+using Tnzi.Signing;
 using Tnzi.Feature.Permissions;
 using Tnzi.Feature;
 using Tnzi.Finance.Banking.Permissions;
@@ -112,6 +114,7 @@ public class PermissionProviderRegistrationTests
         { typeof(AIMcpModule), typeof(AIMcpPermissions) },
         { typeof(AISkillsModule), typeof(AISkillsPermissions) },
         { typeof(AIWorkflowModule), typeof(AIWorkflowPermissions) },
+        { typeof(AICliModule), typeof(CliPermissions) },
         { typeof(AIRagModule), typeof(RagPermissions) },
         { typeof(AISandboxModule), typeof(SandboxPermissions) },
         { typeof(AIChannelsModule), typeof(ChannelsPermissions) },

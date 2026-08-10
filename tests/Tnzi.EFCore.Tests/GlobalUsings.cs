@@ -22,3 +22,4 @@ global using Tnzi.EFCore.Tests.TestEntities;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Security.Claims;
 global using Xunit;
+global using Tnzi.EFCore.Encryption;

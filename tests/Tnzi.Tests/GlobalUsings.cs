@@ -30,3 +30,4 @@ global using Tnzi.Security;
 global using Tnzi.Utilities;
 global using Xunit;
 global using Tnzi.AI.Services;
+global using Tnzi.TestBase;

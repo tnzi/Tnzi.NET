@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Identity.Controllers;
 
 /// <summary>
@@ -67,14 +67,16 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 更新当前用户信息
     /// </summary>
     [HttpPut]
-    public virtual async Task<ApiResult<UserDto>> UpdateCurrentUser([FromBody] UpdateUserDto input)
+    public virtual async Task<ApiResult<UserDto>> UpdateCurrentUser([FromBody] UpdateProfileDto input)
     {
         if (CurrentUser?.Id == null)
         {
             return Unauthorized<UserDto>("User not authenticated");
         }
 
-        var result = await UserService.UpdateAsync(CurrentUser.Id.Value, input);
+        // 入参**必须**是 UpdateProfileDto 而不是管理端的 UpdateUserDto：后者带
+        // RoleIds/OrganizationId，任何已登录用户 PUT 一个 roleIds 就能给自己授予任意角色。
+        var result = await UserService.UpdateProfileAsync(CurrentUser.Id.Value, input);
         return result.ToApiResult();
     }
 

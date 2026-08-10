@@ -7,7 +7,8 @@ namespace Tnzi.Finance.Payroll.Services;
 /// 保存期静态校验（缓冲式，任何失败先于写入返回）：
 /// 组件存在且启用、序号/组件不重复、逐行提取变量
 /// （<see cref="ISalaryFormulaEvaluator.GetVariables"/>），
-/// 允许集 = 内置变量 ∪ 更早序号行的组件 Code——越序/未知变量 400。
+/// 允许集 = 内置变量 ∪ 更早序号行的组件 Code ∪ 计算钩子声明提供的外部变量
+/// （<see cref="IPayslipCalculationHook.ProvidedVariables"/>）——越序/未知变量 400。
 /// </remarks>
 public class SalaryStructureService : ApplicationService, ISalaryStructureService
 {
@@ -16,6 +17,7 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
     private readonly IRepository<SalaryComponent, Guid> _componentRepository;
     private readonly IRepository<SalaryAssignment, Guid> _assignmentRepository;
     private readonly ISalaryFormulaEvaluator _evaluator;
+    private readonly IEnumerable<IPayslipCalculationHook> _hooks;
 
     public SalaryStructureService(
         IServiceProvider serviceProvider,
@@ -23,13 +25,15 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
         IRepository<SalaryStructureLine, Guid> lineRepository,
         IRepository<SalaryComponent, Guid> componentRepository,
         IRepository<SalaryAssignment, Guid> assignmentRepository,
-        ISalaryFormulaEvaluator evaluator) : base(serviceProvider)
+        ISalaryFormulaEvaluator evaluator,
+        IEnumerable<IPayslipCalculationHook> hooks) : base(serviceProvider)
     {
         _structureRepository = Check.NotNull(structureRepository);
         _lineRepository = Check.NotNull(lineRepository);
         _componentRepository = Check.NotNull(componentRepository);
         _assignmentRepository = Check.NotNull(assignmentRepository);
         _evaluator = Check.NotNull(evaluator);
+        _hooks = Check.NotNull(hooks);
     }
 
     public async Task<Result<IPagedList<SalaryStructureListDto>>> GetPagedAsync(SalaryStructureQueryDto query, CancellationToken cancellationToken = default)
@@ -166,8 +170,11 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
             .Select(l => (int?)l.Sequence)
             .LastOrDefault();
 
-        // 允许集从内置变量起步，随序号推进滚入已算组件的 Code
+        // 允许集从内置变量起步，随序号推进滚入已算组件的 Code；
+        // 再并进计算钩子**声明**会注入的外部变量（法定标量随辖区/生效日变化，值在跑批时现算，
+        // 但名字静态可知）——不并进来的话，运行期注入得再对也没有公式敢引用它。
         var allowed = new HashSet<string>(PayrollFormulaVariables.All, StringComparer.Ordinal);
+        allowed.UnionWith(PayrollExternalVariables.Collect(_hooks));
 
         foreach (var line in orderedLines)
         {
@@ -224,8 +231,10 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
             if (!allowed.Contains(variable))
             {
                 return Fail(
-                    $"The {kind} for component '{componentCode}' references '{variable}', which is not a built-in variable " +
-                    "or the code of an earlier line. Components can only reference components with a smaller sequence.", 400);
+                    $"The {kind} for component '{componentCode}' references '{variable}', which is not a built-in variable, " +
+                    "the code of an earlier line, or a variable declared by a registered calculation hook. " +
+                    "Components can only reference components with a smaller sequence; to supply a value at run time, " +
+                    "declare the name in IPayslipCalculationHook.ProvidedVariables and set it in BeforeCalculateAsync.", 400);
             }
         }
 

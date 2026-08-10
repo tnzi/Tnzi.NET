@@ -7,7 +7,8 @@ namespace Tnzi.Finance.Banking.Entities;
 /// 单据范式：Draft 可增删行/编辑/作废；Generate 组文件（含明文账号，加密固化不落 Storage）→ 分配
 /// <see cref="Number"/>（<see cref="IDocumentNumberService"/> scope，前缀 <c>EftNumberPrefix</c>）+ 原子递增
 /// <see cref="BankAccount.EftFileCreationNumber"/> → Generated 后不可改（要改须作废重建）。
-/// 作废硬删关联 <see cref="EftBatchLine"/> 释放付款重入批。文件明文经 <see cref="IFinanceDataProtector"/> 加密存
+/// 作废硬删关联 <see cref="EftBatchLine"/> 释放付款重入批（文件已交出去过则须显式确认，见
+/// <see cref="FirstDownloadedTime"/>）。文件明文经 <see cref="IFinanceDataProtector"/> 加密存
 /// <see cref="FileContentEncrypted"/>（含全量账号明文，与 view 权限分离，仅 finance.eft.download 可解密下载）。
 /// </remarks>
 public class EftBatch : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
@@ -50,6 +51,26 @@ public class EftBatch : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
 
     /// <summary>生成时间</summary>
     public DateTime? GeneratedTime { get; set; }
+
+    /// <summary>
+    /// 文件首次被交出去的时间（<c>null</c> = 从未下载过）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这个字段存在的唯一理由是**作废守卫**：作废会硬删批次行，把那些付款放回
+    /// <c>GetQueueAsync</c> 的待付队列，于是它们看起来从没付过、可以再装一批发出去。
+    /// 文件没交出去时这是正确的（生成错了就重建）；文件已经交给银行之后这就是**付第二次**。
+    /// 框架无从知道文件有没有真的上传到银行门户，但完全知道它有没有被交出去过 ——
+    /// 而「交出去过」正是释放付款从安全变危险的那条分界线。
+    /// <para>
+    /// 由 <c>DownloadAsync</c> 在解密成功之后原子戳（<c>ExecuteUpdate</c>，不经变更跟踪器
+    /// 也就不碰 <see cref="ConcurrencyStamp"/>）—— 否则两个人同时下载会有一个拿到 409，
+    /// 让一个纯读动作因并发而失败。
+    /// </para>
+    /// </remarks>
+    public DateTime? FirstDownloadedTime { get; set; }
+
+    /// <summary>文件被下载的次数（含首次）。</summary>
+    public int DownloadCount { get; set; }
 
     /// <summary>作废原因</summary>
     public string? VoidReason { get; set; }

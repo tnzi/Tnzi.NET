@@ -16,6 +16,7 @@
     "clean": "pnpm -r clean",
     "dev": "pnpm -r --parallel dev",
     "api:generics:check": "node ./tools/check-api-generics/check.mjs",
+    "codegen:status": "node -e \"console.log('NOT WIRED UP. packages/core/src/services is hand-written. codegen needs both src/Tnzi.UI/openapi.json and a repo-root tnzi.json; neither exists, so these scripts have never run here. Contract drift is checked by FrontendBackendContractTests (tests/Tnzi.Architecture.Tests) instead. See docs/coding-standards/frontend-api-contract.md')\"",
     "codegen": "tnzi generate --input ./openapi.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths",
     "codegen:url": "tnzi generate --url http://localhost:5000/swagger/v1/swagger.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths",
     "codegen:check": "tnzi generate --input ./openapi.json --out ./packages/core/src/services --targets dto,schema,api,metadata,paths --check",

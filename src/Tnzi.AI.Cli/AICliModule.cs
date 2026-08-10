@@ -29,6 +29,10 @@ namespace Tnzi.AI.Cli;
 /// </para>
 /// </remarks>
 [DependsOn(typeof(AIModule))]
+// ISkillService 的契约与 NoOp 回退都在 AIModule（已 [DependsOn]）；真实实现来自可选的
+// AISkillsModule。审计只看到「注册者是 AISkillsModule」，但本模块并不依赖它 ——
+// Skills 没加载时解析到的是 AIModule 的 NoOp 回退，这正是预期行为。
+[SuppressDependencyAudit("Contract and NoOp fallback both live in AIModule; AISkillsModule is an optional provider", IgnoredServiceType = typeof(ISkillService))]
 public class AICliModule : TnziApplicationModule
 {
     /// <inheritdoc />
