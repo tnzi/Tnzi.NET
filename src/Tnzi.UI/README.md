@@ -64,10 +64,11 @@ pnpm typecheck
 # Run tests
 pnpm test
 
-# OpenAPI Codegen
-pnpm codegen:url
-pnpm codegen
-pnpm codegen:check
+# Lint (CI runs with --max-warnings 0)
+pnpm lint
+
+# Publish a package to npm (maintainers; requires npm auth)
+pnpm release <package> [patch|minor|major]
 ```
 
 ## Component Prefix
@@ -83,50 +84,29 @@ All Tnzi components use the `T` prefix:
 </template>
 ```
 
-## OpenAPI Codegen (Optional)
+## Service Layer
 
-当前 `@tnzi/core` 的 service 层类型为**手写维护**。`Tnzi.Cli` 提供了从 OpenAPI spec 自动生成 DTO/API/Schema 的能力，适用于应用项目快速对齐后端 API。
-
-**前提**: 安装 `tnzi` CLI（`dotnet tool install -g Tnzi.Cli`），并在项目根目录有 `tnzi.json` 配置文件（通过 `tnzi init` 创建）。
-
-```bash
-# 从运行中的后端生成
-pnpm codegen:url
-
-# 从本地 openapi.json 生成
-pnpm codegen
-
-# CI 检查（不写入，仅检测漂移）
-pnpm codegen:check
-```
-
-生成文件输出到 `packages/core/src/services/{module}/generated/` 目录。
+`@tnzi/core` service types are **hand-written**, not generated from an OpenAPI spec. Drift against
+the backend is caught by `FrontendBackendContractTests`, which reflects over every controller and
+reconciles it with the paths declared in each `api.ts`.
 
 ## Documentation
 
-**Consumer-facing docs live in [`docs/frontend/`](../../docs/frontend/index.md)** — that tree is
-registered in `docs/doc-manifest.yaml`, drift-checked by `/sync-docs`, and served by `Tnzi.Mcp`.
-Start there:
+Per-package reference lives on the docs site:
 
-- [快速开始](../../docs/frontend/getting-started.md) — install, Vite + UnoCSS setup, first component
-- [架构](../../docs/frontend/architecture.md) — five-package layering, dependency direction
-- [@tnzi/core 指南](../../docs/frontend/core-packages.md) — HTTP, state, adapters, service contracts
-- [CRUD 组件](../../docs/frontend/crud-components.md) — `TCrudPage` / `TCardPage` / `TListShell`
-- [组件覆盖](../../docs/frontend/component-override.md) · [排错](../../docs/frontend/troubleshooting.md)
+- [@tnzi/core](https://tnzi.cc/docs/modules/ui-core) — HTTP, state, adapters, service contracts
+- [@tnzi/ui](https://tnzi.cc/docs/modules/ui) — base components, theming, headless controllers
+- [@tnzi/ui-admin](https://tnzi.cc/docs/modules/ui-admin) — shell, CRUD engine, built-in admin pages
+- [@tnzi/ui-ai](https://tnzi.cc/docs/modules/ui-ai) — chat, workflow, agent, streaming
+- [@tnzi/mobile](https://tnzi.cc/docs/modules/ui-mobile) — Vant 4 components
 
-The authoritative source for each package is its own `packages/{name}/CLAUDE.md`; `docs/frontend/`
-is synced from those.
+New to the framework? Start with [Getting started](https://tnzi.cc/docs/getting-started).
 
-Repo-local docs (contributors, not consumers):
+In this directory:
 
-- [UI-PACKAGE-GUIDE.md](./UI-PACKAGE-GUIDE.md) — package development conventions
-- [PUBLISHING.md](./PUBLISHING.md) — npm publishing guide
-- [MIGRATION.md](./MIGRATION.md) · [CHANGELOG.md](./CHANGELOG.md) — historical, per-release
-
-> `USAGE.md` was deleted on 2026-08-01. It documented shadcn-vue + Tailwind (both replaced in
-> 2026-04) and referenced ten components that no longer exist, so following it produced code that
-> did not compile. `docs/frontend/` supersedes it.
+- [MIGRATION.md](./MIGRATION.md) · [CHANGELOG.md](./CHANGELOG.md) — breaking changes and
+  per-release history; read these when upgrading
 
 ## License
 
-[MIT](LICENSE) (c) Tnzi.NET
+[MIT](../../LICENSE) (c) Tnzi.NET

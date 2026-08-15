@@ -113,7 +113,9 @@ public class UsageLogService : ApplicationService, IUsageLogService
                 EstimatedCostUsd = estimatedCostUsd,
                 CachedInputTokens = cachedInputTokens,
                 CacheCreationTokens = cacheCreationTokens,
-                IpAddress = httpContext?.Connection?.RemoteIpAddress?.ToString(),
+                // 走 GetClientIp：支持反向代理，且受隐私开关
+                // AspNetCoreOptions.CollectClientIpAddress 统一约束。
+                IpAddress = httpContext?.Request?.GetClientIp(),
                 UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString()
             };
 

@@ -64,16 +64,35 @@ public class DataDestructionServiceTests : IntegrationTestBase
             EncryptionKeyId = keyId
         };
 
+    /// <summary>返回固定答案的密钥状态判定，代表云端密钥管理服务一类的自定义实现。</summary>
+    private sealed class StubKeyStateProvider(bool destroyed) : IEncryptionKeyStateProvider
+    {
+        public bool IsDestroyed(string keyId) => destroyed;
+    }
+
+    private sealed class ThrowingKeyStateProvider : IEncryptionKeyStateProvider
+    {
+        public bool IsDestroyed(string keyId) => throw new InvalidOperationException("KMS unreachable");
+    }
+
     private DataDestructionService CreateService(
         DataDestructionOptions options,
         IEnumerable<RetentionPolicy>? policies = null,
         IEnumerable<ILitigationHoldProvider>? holds = null,
         IDataDestroyer? destroyer = null,
         FieldEncryptionOptions? encryption = null,
-        MultiTenancyOptions? multiTenancy = null)
+        MultiTenancyOptions? multiTenancy = null,
+        IEncryptionKeyStateProvider? keyState = null)
     {
         var repository = new EFCoreRepository<AuditTestDbContext, AuditDataDestruction, Guid>(
             DbContext, serviceProvider: ServiceProvider);
+
+        // encryption 与 keyState 的关系：给了 encryption 就走框架默认的密钥环判定，
+        // 给了 keyState 就走自定义判定；两者都不给表示部署方没有配置任何判定。
+        var resolvedKeyState = keyState
+            ?? (encryption == null
+                ? null
+                : new FieldEncryptionKeyStateProvider(new StaticOptionsMonitor<FieldEncryptionOptions>(encryption)));
 
         return new DataDestructionService(
             ServiceProvider,
@@ -83,7 +102,7 @@ public class DataDestructionServiceTests : IntegrationTestBase
             holds ?? [],
             destroyer ?? new HardDeleteDataDestroyer(ServiceProvider, new StubEntityManager()),
             ServiceProvider.GetRequiredService<ICurrentTenant>(),
-            encryption == null ? null : new StaticOptionsMonitor<FieldEncryptionOptions>(encryption),
+            resolvedKeyState,
             multiTenancy == null ? null : Microsoft.Extensions.Options.Options.Create(multiTenancy));
     }
 
@@ -489,6 +508,58 @@ public class DataDestructionServiceTests : IntegrationTestBase
         await service.RunAsync();
 
         Assert.False(Assert.Single(await CertificatesAsync()).IsKeyDestroyed);
+    }
+
+    [Fact]
+    public async Task NoKeyStateProvider_NeverClaimsTheKeyWasDestroyed()
+    {
+        // 部署方没有配置任何密钥状态判定：这一栏进的是证据链，
+        // 无法确认时必须如实记「未销毁」，而不是替部署方盖章。
+        await SeedAsync(ageInDays: 100);
+        var service = CreateService(Enabled(), [Policy(keyId: "tip-2025")]);
+
+        await service.RunAsync();
+
+        var certificate = Assert.Single(await CertificatesAsync());
+        Assert.Equal("tip-2025", certificate.EncryptionKeyId);
+        Assert.False(certificate.IsKeyDestroyed);
+    }
+
+    [Fact]
+    public async Task CustomKeyStateProvider_DecidesTheAnswer()
+    {
+        // ★密钥在云端密钥管理服务里、且本部署根本不启用字段级加密时，
+        //   框架自带的密钥环判定给不出正确答案（它会恒答「未销毁」）。
+        //   自定义判定必须能覆盖它，否则证明里这一栏永远是错的。
+        await SeedAsync(ageInDays: 100);
+        var service = CreateService(
+            Enabled(),
+            [Policy(keyId: "arn:aws:kms:ca-central-1:key/tip-2025-q1")],
+            keyState: new StubKeyStateProvider(destroyed: true));
+
+        await service.RunAsync();
+
+        Assert.True(Assert.Single(await CertificatesAsync()).IsKeyDestroyed);
+    }
+
+    [Fact]
+    public async Task KeyStateLookupThrows_StillWritesCertificate_AndReportsNotDestroyed()
+    {
+        // 数据已经按策略销毁掉了。因为一次密钥状态查询失败就不写证明，
+        // 等于用「没有证明」换掉「证明里有一栏是保守值」——后者显然更好。
+        await SeedAsync(ageInDays: 100);
+        var service = CreateService(
+            Enabled(),
+            [Policy(keyId: "tip-2025")],
+            keyState: new ThrowingKeyStateProvider());
+
+        var result = await service.RunAsync();
+
+        Assert.True(result.Succeeded);
+        var certificate = Assert.Single(await CertificatesAsync());
+        Assert.Equal(1, certificate.DestroyedCount);
+        Assert.False(certificate.IsKeyDestroyed);
+        Assert.Empty(await SurvivingRecordsAsync());
     }
 
     // ---- 多策略隔离 ---------------------------------------------------------

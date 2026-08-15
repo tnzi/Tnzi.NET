@@ -643,8 +643,8 @@ const groups = computed<ModuleGroup[]>(() => {
     }
 
     // Module ACCESS codes: a view-only surface whose prefix is the parent of
-    // other surfaces in the module (`ai` for `ai.agent`, `acme.blog` for
-    // `acme.blog.post`) gates the sidebar group, not an entity - tag it and
+    // other surfaces in the module (`ai` for `ai.agent`, `blog` for
+    // `blog.post`) gates the sidebar group, not an entity - tag it and
     // pin it above the entity rows so it stops reading as a duplicate of the
     // module header.
     const allPrefixes = [...byPrefix.keys()]

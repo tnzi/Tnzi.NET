@@ -1,4 +1,4 @@
-namespace Tnzi.System.Tests.Settings;
+﻿namespace Tnzi.System.Tests.Settings;
 
 public class AttributeSettingDefinitionProviderTests
 {
@@ -96,7 +96,7 @@ public class AttributeSettingDefinitionProviderTests
     {
         // ApplicationOptions lives in the Tnzi core assembly → framework built-in,
         // so the admin "Built-in menus" toggle hides it. Consumer app Options
-        // (non-Tnzi assembly) resolve to IsBuiltIn=false (see Acme SmokeTests).
+        // (non-Tnzi assembly) resolve to IsBuiltIn=false (see the consumer's smoke tests).
         var g = RuntimeSettingMetadataExtractor.Extract(typeof(ApplicationOptions))!;
         Assert.True(g.IsBuiltIn);
     }

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <section class="t-detail-section">
     <header class="t-detail-section__bar">
       <div class="t-detail-section__heading">
@@ -47,7 +47,7 @@
  * Layout: a fixed header bar (title + optional hint on the left, `#actions` on
  * the right) above a body that claims the residual panel height and scrolls.
  * The default slot is the body; `#savebar` renders a top-bordered, right-aligned
- * action strip at the end of the content column (mirrors Fabrikam BotDetail tabs).
+ * action strip at the end of the content column (mirrors a consumer's detail-page tabs).
  *
  * The title row also takes `#titleExtra` (a chip / counter / tag beside the
  * heading) and can move `hint` into a hover popover via `hintMode="popover"`

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 namespace Tnzi.TestBase;
 
@@ -38,6 +38,38 @@ public static class RepoRoot
     /// <summary>返回仓库根的绝对路径；定位不到时抛出而不是静默跳过。</summary>
     /// <exception cref="InvalidOperationException">两条解析路径都拿不到含标志物的目录。</exception>
     public static string Locate() => Cached.Value;
+
+    /// <summary>读取仓库内某个路径的文本内容，供做源码文本断言的测试使用。</summary>
+    /// <param name="relativePath">相对仓库根的路径，用 <c>/</c> 分隔（跨平台）。</param>
+    /// <remarks>
+    /// <para>
+    /// 存在的理由是一次实测到的 CI 失败。Channels 那批测试用文本断言检查源码本身
+    /// （"模块里确实注册了 Slack 适配器"），此前它们把路径写死成
+    /// <c>"D:/dev/Repo/src/..."</c>：在作者本机通过，在 Linux runner 上那个绝对路径
+    /// 被当成相对路径拼在 <c>bin/Debug/net10.0/</c> 后面，必然 DirectoryNotFoundException。
+    /// </para>
+    /// <para>
+    /// 它一直没被发现，是因为 <c>backend-quality.yml</c> 的 full-suite job 更早一步就挂了
+    /// （某消费应用的 NuGet.config 里有 Windows 本地 NuGet 源,runner 上不存在），
+    /// 这批测试从未真正在 CI 上跑过。2026-08-14 该应用迁出、restore 通过后才第一次暴露。
+    /// </para>
+    /// <para>
+    /// 读不到时抛 <see cref="FileNotFoundException"/> 并带上解析后的绝对路径 ——
+    /// 与 <see cref="Locate"/> 同一个理由：让「文件找不到」与「断言通过」不可混淆。
+    /// </para>
+    /// </remarks>
+    /// <exception cref="FileNotFoundException">目标文件不存在。</exception>
+    public static string ReadText(string relativePath)
+    {
+        var full = Path.Combine(Locate(), relativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(full))
+        {
+            throw new FileNotFoundException(
+                $"源码文本断言找不到目标文件：{relativePath}（解析为 {full}）。", full);
+        }
+
+        return File.ReadAllText(full);
+    }
 
     private static string Resolve()
         => FromAssemblyMetadata()

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Phase 6.2e - function coverage booster for CRUD-style pages.
  *
  * Mount-based integration tests cover lines but NOT the arrow-function CRUD
@@ -14,7 +14,7 @@
  * raising the function-coverage metric for the corresponding .vue file.
  *
  * NOTE: this is a coverage booster, not a replacement for E2E tests. Real
- * user flows are currently only exercised by hand in Acme.
+ * user flows are currently only exercised by hand in a consumer app.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

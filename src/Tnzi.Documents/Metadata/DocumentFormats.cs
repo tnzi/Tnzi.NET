@@ -12,6 +12,18 @@ public static class DocumentFormats
     public const string PdfExtension = ".pdf";
 
     /// <summary>
+    /// HTML 扩展名（含点号，大小写不敏感）。
+    /// </summary>
+    /// <remarks>
+    /// 单列出来是因为 HTML **走的不是 LibreOffice**：它由
+    /// <see cref="Services.ChromiumHtmlDocumentConverter"/> 交给本机浏览器渲染，
+    /// 只有浏览器才认得全 CSS。这份名单是那条路径的输入白名单，也是
+    /// <see cref="Services.RoutingDocumentConverter"/> 的分流依据。
+    /// </remarks>
+    public static readonly IReadOnlySet<string> HtmlExtensions =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".htm", ".html" };
+
+    /// <summary>
     /// 可转 PDF 的源格式扩展名（含点号，大小写不敏感）。
     /// </summary>
     /// <remarks>

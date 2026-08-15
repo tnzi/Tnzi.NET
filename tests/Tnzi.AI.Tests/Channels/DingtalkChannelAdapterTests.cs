@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Moq.Protected;
 using Tnzi.AI.Channels.Adapters.Dingtalk;
 using Tnzi.AI.Channels.Bus;
@@ -370,7 +370,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersDingtalk()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("DingtalkChannelAdapter");
         source.ShouldContain("options.Dingtalk.Enabled");
     }
@@ -378,7 +378,7 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public void DingtalkOptions_HasRequiredFields()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Adapters/Dingtalk/DingtalkAdapterOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Adapters/Dingtalk/DingtalkAdapterOptions.cs");
         source.ShouldContain("AppKey");
         source.ShouldContain("AppSecret");
         source.ShouldContain("RobotCode");
@@ -390,14 +390,14 @@ public class DingtalkChannelAdapterTests
     [Fact]
     public void ChannelsModuleOptions_HasDingtalkProperty()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
         source.ShouldContain("DingtalkAdapterOptions Dingtalk");
     }
 
     [Fact]
     public void OptionsValidator_RequiresDingtalkCredentials()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
         source.ShouldContain("options.Dingtalk.Enabled");
         source.ShouldContain("Dingtalk.AppKey");
         source.ShouldContain("Dingtalk.AppSecret");

@@ -38,6 +38,7 @@ public class TemplateStoreServiceFileSystemIntegrationTests : IDisposable
 
         // 添加文件系统相关服务
         services.AddSingleton<TemplateFileParser>();
+        services.AddSingleton<ITemplateFileService, TemplateFileService>();
         services.AddSingleton<IHostEnvironment>(new TestHostEnvironment(_testTemplatesDir));
         var templateOptions = Microsoft.Extensions.Options.Options.Create(new TemplateOptions
         {
@@ -48,7 +49,7 @@ public class TemplateStoreServiceFileSystemIntegrationTests : IDisposable
         services.AddSingleton<IOptions<TemplateOptions>>(templateOptions);
         services.AddSingleton<ILogger<TemplateStoreService>>(new TestLogger<TemplateStoreService>());
 
-        // 添加 TemplateStoreService（构造函数注入 TemplateFileParser 和 IOptions<TemplateOptions>）
+        // 添加 TemplateStoreService（构造函数注入 ITemplateFileService）
         services.AddScoped<TemplateStoreService>();
 
         _serviceProvider = services.BuildServiceProvider();
@@ -143,6 +144,7 @@ description: Welcome email template
         services.AddSingleton(currentUserMock2.Object);
 
         services.AddSingleton<TemplateFileParser>();
+        services.AddSingleton<ITemplateFileService, TemplateFileService>();
         services.AddSingleton<IHostEnvironment>(new TestHostEnvironment(_testTemplatesDir));
         var templateOptions2 = Microsoft.Extensions.Options.Options.Create(new TemplateOptions
         {

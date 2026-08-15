@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * Default `/admin` route layout - wraps the child routes in {@link TAdminShell}
  * so the 42-page preset renders inside the standard sidebar + header + content
@@ -93,7 +93,7 @@ const headerAvatarUrl = computed<string | null>(() =>
  *  reference `var(--tnzi-admin-radius-*)` - the bulk of the UI (~80%
  *  Naive UI primitives) stays at the library default.
  *  Inner NConfigProviders inherit + override outer ones, so any
- *  Acme-side `<NConfigProvider :theme-overrides="{ common: { primaryColor } }">`
+ *  Consumer-side `<NConfigProvider :theme-overrides="{ common: { primaryColor } }">`
  *  upstream of this still wins for primary colour. */
 const naiveOverrides = computed<GlobalThemeOverrides>(() => {
   const r = themeStore.themeRadius
@@ -112,7 +112,7 @@ const naiveOverrides = computed<GlobalThemeOverrides>(() => {
 
 /**
  * Defensive dark-theme binding - when consumers wrap their top-level
- * `<App>` with `<NConfigProvider :theme="...">` (the Acme pattern),
+ * `<App>` with `<NConfigProvider :theme="...">` (the common consumer pattern),
  * Naive UI's inner providers inherit the theme automatically and this
  * binding is redundant. When they DON'T (the bare-bones "drop ui-admin
  * in and go" pattern), NConfigProvider here has `theme: undefined`
@@ -120,7 +120,7 @@ const naiveOverrides = computed<GlobalThemeOverrides>(() => {
  * shell to render with the light palette - even when `<html class="dark">`
  * is set. Reading `THEME_CONTEXT_KEY` (provided by `createTnziUi()`)
  * and applying `darkTheme` ourselves makes the admin shell self-sufficient
- * without breaking the Acme inheritance flow (consumers' outer provider
+ * without breaking the consumer inheritance flow (consumers' outer provider
  * still wins for any token they explicitly override).
  */
 const themeCtx = inject<ThemeContext | undefined>(THEME_CONTEXT_KEY, undefined)

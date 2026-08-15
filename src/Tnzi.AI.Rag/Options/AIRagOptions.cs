@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Rag.Options;
+﻿namespace Tnzi.AI.Rag.Options;
 
 /// <summary>
 /// AI RAG 模块配置选项
@@ -86,7 +86,7 @@ public class AIRagOptions
     public string TableNamePrefix { get; set; } = "RAG";
 
     /// <summary>
-    /// RagDbContext 迁移文件所在的程序集名称（如 "Acme.Api"）。
+    /// RagDbContext 迁移文件所在的程序集名称（如 "MyApp.Api"）。
     /// <para>
     /// RagDbContext 定义在框架库 Tnzi.AI.Rag 中，但其迁移文件应由消费应用持有
     /// （因为嵌入维度 <see cref="DefaultEmbeddingDimensions"/> 可配置，不能锁死在框架库的迁移里）。

@@ -167,7 +167,7 @@ public class McpServerSecurityMiddleware
                     _logger.LogWarning(
                         "MCP Server accepted API key from query string (AllowApiKeyInQuery=true). " +
                         "This is INSECURE: credentials leak to logs/proxies. Migrate client '{RemoteIp}' to the X-Api-Key header.",
-                        request.HttpContext.Connection.RemoteIpAddress);
+                        request.GetClientIp());
                     return apiKey;
                 }
             }
@@ -180,7 +180,7 @@ public class McpServerSecurityMiddleware
                     _logger.LogWarning(
                         "MCP Server accepted API key from legacy 'apikey' query parameter (AllowApiKeyInQuery=true). " +
                         "This is INSECURE. Migrate client '{RemoteIp}' to X-Api-Key header.",
-                        request.HttpContext.Connection.RemoteIpAddress);
+                        request.GetClientIp());
                     return apiKey;
                 }
             }
@@ -230,9 +230,13 @@ public class McpServerSecurityMiddleware
             ? ExtractTenantId(context.Request) ?? "public"
             : "shared";
 
+        // 有 API key 就按 key 分区；没有才退到来源地址。
+        // 走 GetClientIp 使其受 AspNetCoreOptions.CollectClientIpAddress 约束：
+        // 声明不采集地址的部署，匿名调用方会一起落到 "anonymous" 这个全局桶上——
+        // 总量仍有上限，但单个调用方能占满它。需要真正分区的部署应当要求 API key。
         var callerSegment = !string.IsNullOrWhiteSpace(apiKey)
             ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16]
-            : context.Connection.RemoteIpAddress?.ToString() ?? "anonymous";
+            : context.Request.GetClientIp() ?? "anonymous";
 
         return $"{tenantSegment}:{callerSegment}";
     }

@@ -64,6 +64,12 @@ public class AuditModule : TnziApplicationModule
         // Add 一个 IDataDestroyer（如匿名化）即可胜出——同一服务的多条注册，DI 解析取最后一条。
         // 后台服务始终注册，未启用时它立刻退出，不占任何资源。
         context.Services.TryAddScoped<IDataDestroyer, HardDeleteDataDestroyer>();
+
+        // 密钥存活判定同样 TryAdd：默认回查字段级加密的配置密钥环，
+        // 密钥在云端密钥管理服务或自有硬件模块里的部署 Add 自己的实现即可胜出。
+        // 不注册的后果不是报错而是证明里那一栏恒为「未销毁」，故默认实现必须在场。
+        context.Services.TryAddScoped<IEncryptionKeyStateProvider, FieldEncryptionKeyStateProvider>();
+
         context.Services.AddScoped<IDataDestructionService, DataDestructionService>();
         context.Services.AddHostedService<DataDestructionBackgroundService>();
 

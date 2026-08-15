@@ -19,6 +19,7 @@ global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Routing;
 global using Tnzi.AspNetCore;
+global using Tnzi.AspNetCore.Http;
 global using Tnzi.AspNetCore.Services;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;

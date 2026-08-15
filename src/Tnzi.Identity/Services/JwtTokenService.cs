@@ -48,20 +48,29 @@ public class JwtTokenService : ApplicationService, ITokenService
         _jwtOptions = Check.NotNull(identityOptions).Value.Jwt;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
 
-        // 安全检查：生产环境必须配置 JWT 密钥
+        // 安全检查：只有开发环境允许回落到内置默认密钥。
+        //
+        // 判据是「不是 Development」而不是「是 Production」，理由与 IdentityModule 同处一致：
+        // ① `EnvironmentName == "Production"` 大小写敏感，`production` 就绕过去了；
+        //    `IsDevelopment()` 走 OrdinalIgnoreCase。
+        // ② 只拦 Production 拦不住 Staging 与任何自定义环境名，而它们同样是真实部署。
+        //
+        // environment 为 null 时按「未知环境」处理并拒绝：不知道这是不是开发机，
+        // 就不该拿一个人人可见的默认密钥去签真 token。
         _secretKey = _jwtOptions.SecretKey;
         if (string.IsNullOrEmpty(_secretKey))
         {
-            var isProduction = environment?.EnvironmentName == "Production";
-            if (isProduction)
+            var isDevelopment = environment?.IsDevelopment() ?? false;
+            if (!isDevelopment)
             {
                 throw new InvalidOperationException(
-                    "JWT SecretKey must be configured in production environment. " +
-                    "Please set 'Identity:Jwt:SecretKey' in your configuration.");
+                    $"JWT SecretKey must be configured outside the Development environment "
+                    + $"(current: '{environment?.EnvironmentName ?? "unknown - no IWebHostEnvironment was provided"}'). "
+                    + "Set 'Identity:Jwt:SecretKey' in your configuration. "
+                    + "The built-in default key is public knowledge and must never sign real tokens.");
             }
-            // 仅在非生产环境使用默认密钥，并记录警告
             _secretKey = "Tnzi_Default_Secret_Key_For_Dev_Only_123456";
-            LogWarning("Using default JWT secret key. This is NOT secure for production use!");
+            LogWarning("Using the built-in default JWT secret key. It is public knowledge; Development only.");
         }
     }
 

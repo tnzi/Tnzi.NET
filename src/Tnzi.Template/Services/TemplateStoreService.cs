@@ -9,19 +9,16 @@ namespace Tnzi.Template.Services;
 public class TemplateStoreService : ApplicationService, ITemplateStoreService
 {
     private readonly IRepository<TemplateEntity, Guid> _repository;
-    private readonly TemplateFileParser? _templateFileParser;
-    private readonly TemplateOptions? _templateOptions;
+    private readonly ITemplateFileService? _templateFileService;
 
     public TemplateStoreService(
         IRepository<TemplateEntity, Guid> repository,
         IServiceProvider serviceProvider,
-        TemplateFileParser? templateFileParser = null,
-        IOptions<TemplateOptions>? templateOptions = null)
+        ITemplateFileService? templateFileService = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
-        _templateFileParser = templateFileParser;
-        _templateOptions = templateOptions?.Value;
+        _templateFileService = templateFileService;
     }
 
     public async Task<Result<TemplateEntity>> GetTemplateAsync(string templateName, string module, string? category = null, CancellationToken cancellationToken = default)
@@ -44,7 +41,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         var template = await query.FirstOrDefaultAsync(cancellationToken);
 
         // 如果数据库中没有找到，且启用了文件系统模板，尝试从文件系统加载
-        if (template == null && _templateFileParser != null && _templateOptions?.EnableFileSystemTemplates == true)
+        if (template == null && _templateFileService?.IsEnabled == true)
         {
             template = await LoadTemplateFromFileSystemAsync(templateName, module, category, cancellationToken);
         }
@@ -58,70 +55,37 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
     }
 
     /// <summary>
-    /// 从文件系统加载模板
+    /// 从文件系统加载模板并投影成实体（路径解析、越界校验、IO 容错都在 <see cref="ITemplateFileService"/> 里）
     /// </summary>
     private async Task<TemplateEntity?> LoadTemplateFromFileSystemAsync(string templateName, string module, string? category, CancellationToken cancellationToken)
     {
-        if (_templateFileParser == null || _templateOptions == null)
+        if (_templateFileService == null)
             return null;
 
-        try
-        {
-            var templateRoot = _templateOptions.TemplateRootPath ?? "Templates";
-            var extension = _templateOptions.TemplateExtension ?? ".cshtml";
-
-            var relativePath = string.IsNullOrWhiteSpace(category)
-                ? Path.Combine(templateRoot, module, $"{templateName}{extension}")
-                : Path.Combine(templateRoot, module, category, $"{templateName}{extension}");
-
-            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
-            var foundPath = FindFileInSearchRoots(relativePath, searchRoots);
-
-            if (foundPath == null)
-                return null;
-
-            var templateInfo = await _templateFileParser.ParseTemplateFileAsync(foundPath, cancellationToken);
-            if (templateInfo == null)
-            {
-                Logger.LogWarning("Failed to parse template file: {Path}", foundPath);
-                return null;
-            }
-
-            return new TemplateEntity
-            {
-                TemplateName = templateInfo.Name,
-                Module = module,
-                Category = category ?? templateInfo.Category ?? string.Empty,
-                SubjectTemplate = templateInfo.SubjectTemplate ?? string.Empty,
-                ContentTemplate = templateInfo.ContentTemplate ?? string.Empty,
-                DefaultLayoutName = templateInfo.DefaultLayoutName,
-                IsActive = true,
-                Description = templateInfo.Metadata?.TryGetValue("description", out var desc) == true
-                    ? desc?.ToString()
-                    : null
-            };
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
-            Logger.LogDebug(ex, "Template file not found: {TemplateName} (module: {Module}, category: {Category})", templateName, module, category);
+        var templateInfo = await _templateFileService.FindTemplateAsync(templateName, module, category, cancellationToken);
+        if (templateInfo == null)
             return null;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Logger.LogWarning(ex, "Unauthorized access when loading template: {TemplateName} (module: {Module}, category: {Category})", templateName, module, category);
-            return null;
-        }
-        catch (IOException ex)
-        {
-            Logger.LogWarning(ex, "IO error when loading template: {TemplateName} (module: {Module}, category: {Category})", templateName, module, category);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Unexpected error loading template '{TemplateName}' from file system (module: {Module}, category: {Category})", templateName, module, category);
-            return null;
-        }
+
+        return ToEntity(templateInfo, module, category);
     }
+
+    /// <summary>
+    /// 文件模板 → 实体投影。实体不落库，只是让文件来源的模板与数据库来源的模板在调用方眼里同形。
+    /// </summary>
+    private static TemplateEntity ToEntity(TemplateInfo templateInfo, string module, string? category)
+        => new()
+        {
+            TemplateName = templateInfo.Name,
+            Module = module,
+            Category = category ?? templateInfo.Category ?? string.Empty,
+            SubjectTemplate = templateInfo.SubjectTemplate ?? string.Empty,
+            ContentTemplate = templateInfo.ContentTemplate ?? string.Empty,
+            DefaultLayoutName = templateInfo.DefaultLayoutName,
+            IsActive = true,
+            // 顶层 description 优先；老写法把描述写在 metadata: 块里，继续认
+            Description = templateInfo.Description
+                ?? (templateInfo.Metadata?.TryGetValue("description", out var desc) == true ? desc?.ToString() : null)
+        };
 
     public async Task<Result<TemplateDto>> GetTemplateByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -331,105 +295,71 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
     }
 
     /// <summary>
-    /// Scan the configured search roots for `.cshtml` templates and project
-    /// them into <see cref="TemplateInfoDto"/> entries. Honours
-    /// <c>request.Module</c> / <c>Category</c> / <c>Keyword</c> filters so
-    /// the merged result obeys the same predicates as the DB branch.
+    /// Project the filesystem-backed templates into <see cref="TemplateInfoDto"/>
+    /// entries. Enumeration itself lives in <see cref="ITemplateFileService"/> -
+    /// this method only applies the keyword predicate (module/category are
+    /// pushed down) and maps to the list DTO.
     ///
     /// File-source rows also surface `SubjectTemplate` + `ContentTemplate`
-    /// inline (via <see cref="TemplateFileParser"/>) so the admin view
-    /// modal can render the template body without a follow-up call -
-    /// file-source rows have no DB id so they can't be hydrated via
-    /// `getById`. Template count is bounded by how many .cshtml files
-    /// the host ships, so reading them all on list is acceptable.
+    /// inline so the admin view modal can render the template body without a
+    /// follow-up call - file-source rows have no DB id so they can't be
+    /// hydrated via `getById`. Template count is bounded by how many .cshtml
+    /// files the host ships, so reading them all on list is acceptable.
     /// </summary>
     private async Task<List<TemplateInfoDto>> ScanFileSystemTemplatesAsync(QueryTemplateRequest request, CancellationToken cancellationToken)
     {
         var results = new List<TemplateInfoDto>();
-        if (_templateOptions == null || !_templateOptions.EnableFileSystemTemplates)
+        if (_templateFileService == null || !_templateFileService.IsEnabled)
             return results;
+
+        var files = await _templateFileService.ListTemplatesAsync(request.Module, request.Category, cancellationToken);
+        var keyword = request.Keyword?.ToLowerInvariant();
+
+        foreach (var file in files)
+        {
+            if (!string.IsNullOrWhiteSpace(keyword) && !file.Name.ToLowerInvariant().Contains(keyword))
+                continue;
+
+            results.Add(new TemplateInfoDto
+            {
+                Id = Guid.Empty,
+                TemplateName = file.Name,
+                Module = file.Module ?? string.Empty,
+                Category = file.Category ?? string.Empty,
+                Version = 1,
+                Type = TemplateType.Email,
+                IsActive = true,
+                Description = file.Description,
+                Source = "FileSystem",
+                IsReadOnly = true,
+                FilePath = file.FilePath,
+                SubjectTemplate = file.SubjectTemplate,
+                ContentTemplate = file.ContentTemplate,
+                CreationTime = SafeCreationTimeUtc(file.FilePath),
+                LastModificationTime = file.LastModified,
+            });
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// 文件创建时间只用于列表展示，取不到就退回默认值（不能让一行读不到属性把整页查询打断）。
+    /// </summary>
+    private DateTime SafeCreationTimeUtc(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return default;
+
         try
         {
-            var root = _templateOptions.TemplateRootPath ?? "Templates";
-            var extension = _templateOptions.TemplateExtension ?? ".cshtml";
-            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
-            var keyword = request.Keyword?.ToLowerInvariant();
-            foreach (var searchRoot in searchRoots)
-            {
-                if (cancellationToken.IsCancellationRequested) break;
-                var rootedTemplates = Path.IsPathRooted(root)
-                    ? root
-                    : Path.Combine(searchRoot, root);
-                if (!Directory.Exists(rootedTemplates)) continue;
-                foreach (var path in Directory.EnumerateFiles(rootedTemplates, "*" + extension, SearchOption.AllDirectories))
-                {
-                    if (cancellationToken.IsCancellationRequested) break;
-                    var relPath = Path.GetRelativePath(rootedTemplates, path);
-                    var parts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    if (parts.Length < 2) continue; // Must be at least Module/file.cshtml
-                    var fileModule = parts[0];
-                    var fileCategory = parts.Length >= 3
-                        ? string.Join('/', parts.Skip(1).Take(parts.Length - 2))
-                        : string.Empty;
-                    var fileName = Path.GetFileNameWithoutExtension(parts[^1]);
-                    if (!string.IsNullOrWhiteSpace(request.Module) && !string.Equals(fileModule, request.Module, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (!string.IsNullOrWhiteSpace(request.Category) && !string.Equals(fileCategory, request.Category, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (!string.IsNullOrWhiteSpace(keyword) && !fileName.ToLowerInvariant().Contains(keyword))
-                        continue;
-                    var fi = new FileInfo(path);
-                    // Read the actual template content so the admin view modal
-                    // can render Subject + Content fields. Parser returns null
-                    // for files without YAML frontmatter - we fall back to
-                    // the raw file content in that case.
-                    string? subjectTemplate = null;
-                    string? contentTemplate = null;
-                    try
-                    {
-                        if (_templateFileParser != null)
-                        {
-                            var parsed = await _templateFileParser.ParseTemplateFileAsync(path, cancellationToken);
-                            if (parsed != null)
-                            {
-                                subjectTemplate = parsed.SubjectTemplate;
-                                contentTemplate = parsed.ContentTemplate;
-                            }
-                        }
-                        if (string.IsNullOrEmpty(contentTemplate))
-                        {
-                            contentTemplate = await File.ReadAllTextAsync(path, cancellationToken);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogDebug(ex, "ScanFileSystemTemplates: could not read content for {Path}", path);
-                    }
-                    results.Add(new TemplateInfoDto
-                    {
-                        Id = Guid.Empty,
-                        TemplateName = fileName,
-                        Module = fileModule,
-                        Category = fileCategory,
-                        Version = 1,
-                        Type = TemplateType.Email,
-                        IsActive = true,
-                        Source = "FileSystem",
-                        IsReadOnly = true,
-                        FilePath = path,
-                        SubjectTemplate = subjectTemplate,
-                        ContentTemplate = contentTemplate,
-                        CreationTime = fi.CreationTimeUtc,
-                        LastModificationTime = fi.LastWriteTimeUtc,
-                    });
-                }
-            }
+            return File.GetCreationTimeUtc(path);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.LogWarning(ex, "ScanFileSystemTemplates failed");
+            Logger.LogDebug(ex, "Could not read creation time for template file {Path}", path);
+            return default;
         }
-        return results;
     }
 
     public async Task<Result<string>> ExportTemplatesAsync(string? module = null, string? category = null, CancellationToken cancellationToken = default)

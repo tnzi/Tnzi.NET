@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Tnzi.AspNetCore.Mvc;
 using Tnzi.Finance.Permissions;
@@ -10,7 +10,7 @@ using Tnzi.Security.Authorization;
 namespace Tnzi.PermissionCatalogue.Tests;
 
 /// <summary>
-/// Finance / Payroll 控制器接线契约：把 Acme 手工 boot 冒烟（端点 401 而非 404）
+/// Finance / Payroll 控制器接线契约：把消费应用的手工 boot 冒烟（端点 401 而非 404）
 /// 验证的接线不变量固化为测试。
 /// </summary>
 /// <remarks>

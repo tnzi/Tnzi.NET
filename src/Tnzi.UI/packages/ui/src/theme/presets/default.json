@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "default",
-  "description": "Default Tnzi theme — teal primary (Fabrikam Manus brand), standard density",
+  "description": "Default Tnzi theme — teal primary, standard density",
   "colors": {
     "primary": "#0d9488",
     "info": "#2080f0",

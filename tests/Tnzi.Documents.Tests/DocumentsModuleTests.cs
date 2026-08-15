@@ -13,7 +13,6 @@ namespace Tnzi.Documents.Tests;
 public class DocumentsModuleTests
 {
     [Theory]
-    [InlineData(typeof(IDocumentConverter), typeof(LibreOfficeDocumentConverter))]
     [InlineData(typeof(IPdfInspector), typeof(PdfPigPdfInspector))]
     [InlineData(typeof(IPdfStamper), typeof(PdfSharpPdfStamper))]
     public void Module_RegistersTheDefaultImplementationOfEachPrimitive(Type contract, Type implementation)
@@ -23,6 +22,28 @@ public class DocumentsModuleTests
         var descriptor = services.Single(service => service.ServiceType == contract);
         descriptor.ImplementationType.ShouldBe(implementation);
         descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
+    }
+
+    /// <summary>
+    /// 转换器是**一个**服务、背后两个引擎：HTML 交浏览器，其余交 LibreOffice。
+    /// </summary>
+    /// <remarks>
+    /// 分流只体现在注册代码里，接错了编译照过 —— 症状是「PDF 出来了，只是排版全丢」。
+    /// </remarks>
+    [Fact]
+    public async Task Module_RegistersOneConverterThatRoutesHtmlToTheBrowserAndTheRestToLibreOffice()
+    {
+        using var provider = await BuildProviderAsync();
+
+        var converter = provider.GetRequiredService<IDocumentConverter>();
+
+        converter.ShouldBeOfType<RoutingDocumentConverter>();
+        converter.CanConvert("composed.html").ShouldBeTrue();
+        converter.CanConvert("contract.docx").ShouldBeTrue();
+        converter.CanConvert("photo.png").ShouldBeFalse();
+
+        // 单例：两个引擎都无状态，且浏览器并发闸门挂在实例上，解析出两份会让上限翻倍
+        provider.GetRequiredService<IDocumentConverter>().ShouldBeSameAs(converter);
     }
 
     [Fact]
@@ -58,18 +79,49 @@ public class DocumentsModuleTests
     [Fact]
     public async Task Module_RegistersOptionsBoundToTheDocumentsSection()
     {
+        using var provider = await BuildProviderAsync(new Dictionary<string, string?>
+        {
+            ["Documents:ConversionTimeoutSeconds"] = "45",
+            ["Documents:Html:PaperSize"] = "Legal"
+        });
+
+        provider.GetRequiredService<IOptions<DocumentsOptions>>().Value.ConversionTimeoutSeconds.ShouldBe(45);
+        provider.GetRequiredService<IOptions<HtmlPdfOptions>>().Value.PaperSize.ShouldBe("Legal");
+    }
+
+    /// <summary>
+    /// <c>Documents:Html:Enabled = false</c> 是退回旧行为的唯一开关：浏览器引擎不再认领 HTML。
+    /// </summary>
+    [Fact]
+    public async Task Module_WhenBrowserRenderingIsDisabled_HtmlStillConverts_ThroughLibreOffice()
+    {
+        using var provider = await BuildProviderAsync(new Dictionary<string, string?>
+        {
+            ["Documents:Html:Enabled"] = "false"
+        });
+
+        var converter = provider.GetRequiredService<IDocumentConverter>();
+
+        // 仍然认领 .html —— 只是这次认领它的是 LibreOffice
+        converter.CanConvert("composed.html").ShouldBeTrue();
+        provider.GetRequiredService<ChromiumHtmlDocumentConverter>().CanConvert("composed.html").ShouldBeFalse();
+    }
+
+    private static async Task<ServiceProvider> BuildProviderAsync(Dictionary<string, string?>? settings = null)
+    {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Documents:ConversionTimeoutSeconds"] = "45" })
+            .AddInMemoryCollection(settings ?? [])
             .Build();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        var module = new DocumentsModule();
-        await module.PreConfigureServicesAsync(new ServiceConfigurationContext(services, configuration));
-        await module.ConfigureServicesAsync(new ServiceConfigurationContext(services, configuration));
 
-        using var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<IOptions<DocumentsOptions>>().Value.ConversionTimeoutSeconds.ShouldBe(45);
+        var module = new DocumentsModule();
+        var context = new ServiceConfigurationContext(services, configuration);
+        await module.PreConfigureServicesAsync(context);
+        await module.ConfigureServicesAsync(context);
+
+        return services.BuildServiceProvider();
     }
 
     private static ServiceCollection ConfigureModule()

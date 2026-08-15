@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+﻿import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TPermissionMatrix from '../../src/components/forms/TPermissionMatrix.vue'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
@@ -171,14 +171,14 @@ describe('TPermissionMatrix', () => {
       id: 'mb', code: 'identity', name: 'Identity', order: 1, isEnabled: true, isBuiltIn: true,
     }
     const consumer: FunctionModuleDto = {
-      id: 'mc', code: 'acme', name: 'Acme', order: 5, isEnabled: true,
+      id: 'mc', code: 'shop', name: 'Shop', order: 5, isEnabled: true,
     }
     const wrapper = mount(TPermissionMatrix, {
       props: {
         modules: [builtin, consumer],
         functionsByModule: new Map([
           ['mb', [fn('b1', 'user.view', 'View Users')]],
-          ['mc', [fn('c1', 'acme.blog.view', 'View Blog')]],
+          ['mc', [fn('c1', 'shop.blog.view', 'View Blog')]],
         ]),
         checkedIds: [],
         translate: (k: string) => k,
@@ -194,7 +194,7 @@ describe('TPermissionMatrix', () => {
 
     // Consumer module row precedes the built-in one despite input/order.
     const names = wrapper.findAll('.t-perm-matrix__module-name').map((n) => n.text())
-    expect(names[0]).toBe('Acme')
+    expect(names[0]).toBe('Shop')
     expect(names[1]).toBe('Identity')
   })
 

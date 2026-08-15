@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `useAdminLoginConfig()` - install-time configuration for the built-in
  * `/login/:module(…)?` route shipped by `@tnzi/ui-admin` (Phase I.7+).
  *
@@ -14,7 +14,7 @@
  * defineAdminApp({
  *   client: http,
  *   login: {
- *     brand: 'Acme Admin',
+ *     brand: 'MyApp Admin',
  *     callbacks: {
  *       pwdLogin: async ({ userName, password, remember }) => { … },
  *     },

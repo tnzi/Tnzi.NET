@@ -18,13 +18,23 @@ public class DocumentsModule : TnziCustomModule
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         context.Services.AddTnziOptions<DocumentsOptions, DocumentsOptionsValidator>(context.Configuration);
+        context.Services.AddTnziOptions<HtmlPdfOptions, HtmlPdfOptionsValidator>(context.Configuration);
         return base.PreConfigureServicesAsync(context);
     }
 
     /// <inheritdoc />
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        context.Services.TryAddSingleton<IDocumentConverter, LibreOfficeDocumentConverter>();
+        // 两个引擎各自注册成具体类型，再由 RoutingDocumentConverter 按扩展名分流：
+        // HTML 的判定标准是浏览器长什么样，Office 的判定标准是 LibreOffice 打开长什么样，
+        // 而消费方注入的是一个 IDocumentConverter，所以分流只能发生在这一侧。
+        // 顺序即优先级：HTML 先被浏览器引擎认领（它关掉时不认领，于是自然落回 LibreOffice）。
+        context.Services.TryAddSingleton<LibreOfficeDocumentConverter>();
+        context.Services.TryAddSingleton<ChromiumHtmlDocumentConverter>();
+        context.Services.TryAddSingleton<IDocumentConverter>(provider => new RoutingDocumentConverter(
+            provider.GetRequiredService<ChromiumHtmlDocumentConverter>(),
+            provider.GetRequiredService<LibreOfficeDocumentConverter>()));
+
         context.Services.TryAddSingleton<IPdfInspector, PdfPigPdfInspector>();
         context.Services.TryAddSingleton<IPdfStamper, PdfSharpPdfStamper>();
 
@@ -49,6 +59,26 @@ public class DocumentsModule : TnziCustomModule
         else
         {
             logger.LogInformation("Office to PDF conversion will use LibreOffice at '{Path}'.", executable);
+        }
+
+        // HTML 走本机浏览器（见 ChromiumHtmlDocumentConverter），同样是运维事实而非配置错误。
+        var html = context.ServiceProvider.GetRequiredService<IOptions<HtmlPdfOptions>>().Value;
+        if (!html.Enabled)
+        {
+            logger.LogInformation(
+                "Browser-based HTML rendering is disabled; HTML will go through LibreOffice, which drops most CSS.");
+        }
+        else
+        {
+            var browser = ChromiumLocator.Resolve(html.BrowserPath);
+            if (browser == null)
+            {
+                logger.LogWarning("HTML to PDF conversion is unavailable. {Reason}", ChromiumLocator.NotFoundMessage(html.BrowserPath));
+            }
+            else
+            {
+                logger.LogInformation("HTML to PDF conversion will use the browser at '{Path}'.", browser);
+            }
         }
 
         return base.OnApplicationInitializationAsync(context);

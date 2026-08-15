@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+﻿import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp, h, defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { RouteRecordRaw, Router } from 'vue-router'
@@ -491,7 +491,7 @@ describe('defineAdminApp', () => {
       path: 'blog',
       meta: { title: 'Blog' },
       children: [
-        { name: 'blog.posts', path: 'posts', component: async () => ({}), meta: { title: 'Posts', permission: 'acme.blog.post.view' } },
+        { name: 'blog.posts', path: 'posts', component: async () => ({}), meta: { title: 'Posts', permission: 'shop.blog.post.view' } },
       ],
     }
     const app = createApp({ render: () => h('div') })

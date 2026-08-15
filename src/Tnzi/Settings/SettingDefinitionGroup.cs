@@ -1,4 +1,4 @@
-namespace Tnzi.Settings;
+﻿namespace Tnzi.Settings;
 
 /// <summary>
 /// 配置中心分组定义。模块通过 ISettingDefinitionProvider 注册；
@@ -28,7 +28,7 @@ public sealed class SettingDefinitionGroup
 
     /// <summary>
     /// 是否为框架内置配置组（来自 <c>Tnzi.*</c> 程序集的 Options 类）。消费应用自己的
-    /// <c>[RuntimeSetting]</c> 组（如 <c>Acme.Blog</c>）为 false。前端「内置菜单」开关关闭时
+    /// <c>[RuntimeSetting]</c> 组（如 <c>MyApp.Blog</c>）为 false。前端「内置菜单」开关关闭时
     /// 只隐藏内置组，消费方自有配置组始终保留。属性驱动定义由提取器按声明程序集自动判定；
     /// 手写 provider 缺省 false（保守：不确定即视为消费方，永不误隐）。
     /// </summary>

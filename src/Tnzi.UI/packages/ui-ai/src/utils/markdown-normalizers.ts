@@ -1,8 +1,8 @@
-/**
+﻿/**
  * Markdown normalizers - pure text-transform utilities for LLM output post-processing.
  *
  * These are framework-agnostic: no dependencies, no side effects, no Vue reactivity.
- * Ported from Fabrikam as standalone utilities so any consumer can use them directly.
+ * Ported from a consumer app as standalone utilities so any consumer can use them directly.
  */
 
 // ---------------------------------------------------------------------------

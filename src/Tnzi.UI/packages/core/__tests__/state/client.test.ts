@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import { createTnziClient } from '../../src/state/client';
 import { HttpClient } from '../../src/http/http';
 import { AuthStateManager } from '../../src/state/auth';
@@ -55,9 +55,9 @@ describe('createTnziClient', () => {
 
   it('isolates persisted tokens via storagePrefix', async () => {
     const storage = memStorage();
-    const { auth } = createTnziClient({ storage, storagePrefix: 'acme:auth' });
+    const { auth } = createTnziClient({ storage, storagePrefix: 'app:auth' });
     const p = auth.applyTokenSession({ accessToken: 'x', refreshToken: 'y', expiresIn: 10 });
-    expect(storage.get('acme:auth:token')).toBe('x');
+    expect(storage.get('app:auth:token')).toBe('x');
     expect(storage.get('tnzi:auth:token')).toBeNull();
     await p.catch(() => undefined);
   });

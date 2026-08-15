@@ -1,4 +1,4 @@
-namespace Tnzi.Settings;
+﻿namespace Tnzi.Settings;
 
 /// <summary>从打了 [RuntimeSetting] 的 Options 类型派生配置中心分组定义（纯函数）。</summary>
 public static class RuntimeSettingMetadataExtractor
@@ -68,7 +68,7 @@ public static class RuntimeSettingMetadataExtractor
 
     /// <summary>
     /// 框架内置配置组来自 <c>Tnzi</c> / <c>Tnzi.*</c> 程序集；消费应用自有 <c>[RuntimeSetting]</c>
-    /// 组（如 <c>Acme.Blog</c>）不是内置，必须不受 admin「内置菜单」开关影响。判据沿用框架
+    /// 组（如 <c>MyApp.Blog</c>）不是内置，必须不受 admin「内置菜单」开关影响。判据沿用框架
     /// 铁律「框架程序集名称以 Tnzi 开头」。
     /// </summary>
     private static bool IsFrameworkAssembly(Assembly assembly)

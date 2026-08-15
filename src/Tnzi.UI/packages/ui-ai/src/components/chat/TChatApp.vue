@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * @experimental
  * TChatApp - production-grade chat application shell with Manus-inspired design.
@@ -21,7 +21,7 @@
  *   - Command palette (Cmd+K) - optional, off by default
  *   - Auto theme application (light/dark/system)
  *
- * See the Acme chat app (projects/acme/src/Acme.UI/chat) for a
+ * See a consumer chat app for a
  * real-world integration.
  */
 import { computed, ref, watch, onMounted, onBeforeUnmount, useSlots } from 'vue'

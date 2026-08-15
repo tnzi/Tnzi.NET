@@ -6,7 +6,6 @@ namespace Tnzi.Template.Internal;
 /// </summary>
 public class TemplateFileParser
 {
-    private static readonly Regex FrontMatterRegex = new(@"^---\s*(.*?)\s*---\s*(.*)$", RegexOptions.Singleline | RegexOptions.Compiled);
     private readonly IDeserializer _deserializer;
     private readonly ILogger<TemplateFileParser>? _logger;
 
@@ -44,6 +43,9 @@ public class TemplateFileParser
             SubjectTemplate = metadata.Subject ?? string.Empty,
             ContentTemplate = body,
             DefaultLayoutName = metadata.Layout,
+            // 顶层 description 此前解析出来就被丢掉，只有嵌在 metadata: 下的同名键能被读到 ——
+            // 于是按文件格式文档写法声明描述的模板，导入后描述是空的
+            Description = metadata.Description,
             Metadata = metadata.Metadata ?? new Dictionary<string, object>(),
             FilePath = fileInfo.FullName,
             LastModified = fileInfo.LastWriteTimeUtc
@@ -81,23 +83,10 @@ public class TemplateFileParser
         };
     }
 
+    // front matter 的识别规则统一在 FrontMatterExtractor —— 渲染路径要按同一规则剥离头部，
+    // 两边各写一份正则迟早会让"导入后渲染"与"按文件渲染"得到不同的正文
     private static (string? FrontMatter, string Body) ExtractFrontMatter(string content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return (null, string.Empty);
-        }
-
-        var match = FrontMatterRegex.Match(content);
-        if (!match.Success)
-        {
-            return (null, content);
-        }
-
-        var frontMatter = match.Groups[1].Value.Trim();
-        var body = match.Groups[2].Value;
-        return (frontMatter, body);
-    }
+        => FrontMatterExtractor.Extract(content);
 
     private TemplateMetadata ParseTemplateMetadata(string? yaml)
     {

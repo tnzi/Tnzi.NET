@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Tnzi.AspNetCore.Mvc;
 using Tnzi.Security.Authorization;
@@ -153,11 +153,11 @@ public class AuditMiddlewareClassificationTests
         var operation = await RunAsync("POST", "/api/admin/fiscal-years/1/close",
         [
             AdminDescriptor(),
-            new ApiAuthorizeAttribute { PermissionName = "contoso.finance.manage" }
+            new ApiAuthorizeAttribute { PermissionName = "crm.finance.manage" }
         ]);
 
         operation.IsWrite.ShouldBe(true);
-        operation.PermissionName.ShouldBe("contoso.finance.manage");
+        operation.PermissionName.ShouldBe("crm.finance.manage");
     }
 
     [Fact]

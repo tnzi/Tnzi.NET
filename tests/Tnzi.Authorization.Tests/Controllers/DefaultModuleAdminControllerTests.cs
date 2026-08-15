@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Tnzi.Authorization.Controllers.Admin;
 using Tnzi.Modules;
 
@@ -19,7 +19,7 @@ public class DefaultModuleAdminControllerTests
         var modules = new List<FunctionModule>
         {
             new() { Code = "authorization", Name = "Authorization" }, // framework (Tnzi.Authorization is loaded)
-            new() { Code = "acme", Name = "Acme" },               // a consumer application's own module
+            new() { Code = "shop", Name = "Shop" },               // a consumer application's own module
         };
         var svc = new Mock<IModuleManagementService>();
         svc.Setup(s => s.GetModulesAsync())
@@ -36,7 +36,7 @@ public class DefaultModuleAdminControllerTests
         result.Success.ShouldBeTrue();
         var byCode = result.Data!.ToDictionary(m => m.Code);
         byCode["authorization"].IsBuiltIn.ShouldBeTrue();
-        byCode["acme"].IsBuiltIn.ShouldBeFalse();
+        byCode["shop"].IsBuiltIn.ShouldBeFalse();
     }
 
     private static IModuleDescriptor FrameworkModuleDescriptor(Assembly assembly)

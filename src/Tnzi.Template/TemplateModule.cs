@@ -44,6 +44,9 @@ public class TemplateModule : TnziApplicationModule
         // 注册通用解析器
         context.Services.AddSingleton<TemplateFileParser>();
 
+        // 注册文件模板读取服务（消费方读取模板文件 front matter 自述内容的受支持入口）
+        context.Services.AddSingleton<ITemplateFileService, TemplateFileService>();
+
         // 注册模板存储服务
         context.Services.AddScoped<ITemplateStoreService, TemplateStoreService>();
         context.Services.AddScoped<ILayoutStoreService, LayoutStoreService>();

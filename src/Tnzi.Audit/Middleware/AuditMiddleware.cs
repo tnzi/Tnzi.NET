@@ -213,7 +213,10 @@ public class AuditMiddleware
             UserId = currentUser.Id,
             UserName = currentUser.UserName,
             NickName = null, // ICurrentUser 不包含 NickName，避免错误赋值 UserName
-            Ip = context.Connection.RemoteIpAddress?.ToString(),
+            // 走 GetClientIp 而不是直接读 Connection：它支持反向代理，
+            // 且是隐私开关 AspNetCoreOptions.CollectClientIpAddress 的唯一判定点——
+            // 关闭采集的部署，审计操作日志同样不该留下地址。
+            Ip = context.Request.GetClientIp(),
             OperatingSystem = operatingSystem,
             Browser = browser,
             UserAgent = userAgent,

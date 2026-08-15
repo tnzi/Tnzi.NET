@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Tests.Integration;
+﻿namespace Tnzi.Finance.Tests.Integration;
 
 /// <summary>
 /// 单据附件与讨论：多态寻址、上限、去重、软删。
@@ -44,7 +44,7 @@ public class DocumentCollaborationTests : FinanceIntegrationTestBase
         var doc = Guid.NewGuid().ToString();
 
         var result = await InScopeAsync<IDocumentAttachmentService, Result<DocumentAttachmentDto>>(
-            s => s.AttachAsync("Acme.ServiceOrder", doc, new CreateDocumentAttachmentDto
+            s => s.AttachAsync("Demo.ServiceOrder", doc, new CreateDocumentAttachmentDto
             {
                 FileId = Guid.NewGuid(), FileName = "x.pdf"
             }));

@@ -82,7 +82,7 @@ public class FileCleanupBackgroundServiceTests
 
         // Act
         var task = service.StartAsync(cts.Token);
-        await Task.Delay(200);
+        await WaitForLogAsync(LogLevel.Information, "cron expression");
         cts.Cancel();
 
         try
@@ -118,7 +118,7 @@ public class FileCleanupBackgroundServiceTests
 
         // Act
         var task = service.StartAsync(cts.Token);
-        await Task.Delay(200);
+        await WaitForLogAsync(LogLevel.Error, "Invalid Cleanup.CronExpression");
         cts.Cancel();
 
         try
@@ -159,4 +159,36 @@ public class FileCleanupBackgroundServiceTests
             new StaticOptionsMonitor<StorageOptions>(options),
             _mockLogger.Object);
     }
+
+    /// <summary>
+    /// 轮询等到日志出现，最多 <paramref name="timeoutMs"/> 毫秒。
+    /// </summary>
+    /// <remarks>
+    /// 取代 <c>await Task.Delay(200)</c> 那种固定等待。固定等待的问题不是慢，是<b>会假红</b>：
+    /// 后台服务在另一个线程启动，机器负载高时它还没跑到记日志那一行，主线程就已经断言了。
+    /// 表现为「单独跑绿、全量跑偶发红」—— 2026-08-15 在全量测试里复现两次，
+    /// 而单独跑该项目三次都是 350/350 绿。
+    ///
+    /// 轮询版在快的时候立刻返回（比固定等待更快），慢的时候最多等到超时，两头都不吃亏。
+    /// </remarks>
+    private async Task WaitForLogAsync(LogLevel level, string fragment, int timeoutMs = 5000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (!HasLogged(level, fragment) && Environment.TickCount64 < deadline)
+            await Task.Delay(10);
+    }
+
+    /// <summary>
+    /// Mock 是否已记录过含指定片段的日志。
+    /// </summary>
+    /// <remarks>
+    /// <c>ToArray()</c> 是必需的：日志由后台线程写入，直接枚举 <c>Invocations</c>
+    /// 会与并发写入撞车。
+    /// </remarks>
+    private bool HasLogged(LogLevel level, string fragment) =>
+        _mockLogger.Invocations.ToArray().Any(i =>
+            i.Method.Name == nameof(ILogger.Log)
+            && i.Arguments.Count > 2
+            && Equals(i.Arguments[0], level)
+            && i.Arguments[2]?.ToString()?.Contains(fragment, StringComparison.Ordinal) == true);
 }

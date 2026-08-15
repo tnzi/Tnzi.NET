@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -274,7 +274,7 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
     // side/tabs/plain layouts all consume the same array). Verify the full set
     // of section keys rather than scraping the rendered nav, which differs by
     // layout (NMenu labels vs NTabPane names). Identity/Provider/Capabilities
-    // are now merged into the single Basic Info page (mirrors Fabrikam BotDetail);
+    // are now merged into the single Basic Info page (mirrors a consumer's BotDetail);
     // Persona is its own rich page.
     const vm = wrapper.vm as unknown as { sections: Array<{ key: string }> }
     const keys = vm.sections.map((s) => s.key)

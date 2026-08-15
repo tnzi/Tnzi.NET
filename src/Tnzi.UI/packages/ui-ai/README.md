@@ -1,4 +1,4 @@
-# @tnzi/ui-ai
+﻿# @tnzi/ui-ai
 
 > AI chat & agent UI for Tnzi.NET frontends — a drop-in chat product shell, streaming message
 > primitives, workflow visualisation, and an embeddable widget mode.
@@ -99,13 +99,12 @@ import '@tnzi/ui-ai/style.css'
 
 本包的 SFC 不参与单测覆盖率（需要真实 DOM + 用户交互）。原先承担这部分的 playground 与
 Playwright 规格**已于 2026-08-01 删除**，因此**单测全绿不代表 SFC 改动是对的**。
-唯一的可视验证入口是 Acme chat 应用（`projects/acme/src/Acme.UI/chat`，dev 端口 6174）。
+唯一的可视验证入口是消费应用的 chat 界面（dev 端口 6174）。
 
 ## 文档
 
-- [架构](../../../../docs/frontend/architecture.md)
-- [排错](../../../../docs/frontend/troubleshooting.md)
-- 包内设计约束与踩坑：`packages/ui-ai/CLAUDE.md`
+- [@tnzi/ui-ai 包文档](https://tnzi.cc/docs/modules/ui-ai) — 入口、主题令牌、扩展点
+- [架构](https://tnzi.cc/docs/architecture) — 五包分层与依赖方向
 
 ## License
 

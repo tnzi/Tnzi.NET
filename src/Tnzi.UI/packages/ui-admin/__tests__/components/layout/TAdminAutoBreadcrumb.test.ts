@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+﻿import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
@@ -37,7 +37,7 @@ function makeRouter(): Router {
   })
 }
 
-// Mirrors Contoso: the parent list (`contoso-matters` = "Files") is itself
+// 某消费应用的场景:父列表(`matters` = "Files")本身
 // hideInMenu (reached only via a client), and the detail's activeMenu points at
 // it. Before the fix the activeMenu-rebuilt chain was re-filtered by hideInMenu
 // and collapsed to just the leaf.
@@ -50,12 +50,12 @@ function makeHiddenParentRouter(): Router {
         name: 'admin-root',
         component: Blank,
         children: [
-          { path: 'matters', name: 'contoso-matters', component: Blank, meta: { title: 'Files', hideInMenu: true } },
+          { path: 'matters', name: 'crm-matters', component: Blank, meta: { title: 'Files', hideInMenu: true } },
           {
             path: 'matters/:id',
-            name: 'contoso-matter-detail',
+            name: 'crm-matter-detail',
             component: Blank,
-            meta: { title: 'File', hideInMenu: true, activeMenu: 'contoso-matters' },
+            meta: { title: 'File', hideInMenu: true, activeMenu: 'crm-matters' },
           },
         ],
       },

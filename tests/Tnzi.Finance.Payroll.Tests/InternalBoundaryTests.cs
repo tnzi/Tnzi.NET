@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 
 namespace Tnzi.Finance.Payroll.Tests;
 
@@ -14,7 +14,7 @@ namespace Tnzi.Finance.Payroll.Tests;
 /// 覆盖构造注入与成员持有这两种真实的越界形态；方法体内的临时解析
 /// （如 <c>GetRequiredService&lt;T&gt;()</c> 局部变量）不在扫描面。
 /// 扫描集按程序集参数化：将来 Tnzi.Finance.Banking 等 Finance 系子模块
-/// 加入 <see cref="TargetAssemblies"/> 即被覆盖；Tnzi.Hosting / Acme 等
+/// 加入 <see cref="TargetAssemblies"/> 即被覆盖；Tnzi.Hosting 与消费应用等
 /// 其余引用方不在本项目引用闭包内（当前经人工 grep 证实零引用）。
 /// </remarks>
 public class InternalBoundaryTests

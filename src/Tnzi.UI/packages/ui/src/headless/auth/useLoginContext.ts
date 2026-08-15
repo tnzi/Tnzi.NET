@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `useLoginContext` - communication channel between `TLoginPage` shell and the
  * five login modules (pwd-login / code-login / register / reset-pwd / bind-wechat).
  *
@@ -159,7 +159,7 @@ export interface LoginCallbackHelpers {
 }
 
 /**
- * Auth callbacks supplied by the page consumer (Acme, music, webshop, …).
+ * Auth callbacks supplied by the page consumer (the host application).
  *
  * All callbacks are optional - when a module's flow callback is missing the
  * module shows a "not configured" hint. Phase I.7.2+ wires each module to

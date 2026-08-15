@@ -22,6 +22,7 @@ global using Tnzi.AI.Mcp.Entities;
 global using Tnzi.AI.Mcp.Server;
 global using McpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
 global using Tnzi.AspNetCore.Extensions;
+global using Tnzi.AspNetCore.Http;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Security.Authorization;

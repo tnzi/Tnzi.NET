@@ -31,6 +31,9 @@ const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // The ⓘ + popover primitive TDetailSection renders for `hintMode="popover"`.
   // Named in the doc to explain what the mode produces, not as an admin import.
   THint: '@tnzi/ui',
+  // Horizontal bar-rank widget for "top-N by X" drilldowns. The doc names it in
+  // section 5 and spells the package out inline - `TMetricBars`（`@tnzi/ui`）.
+  TMetricBars: '@tnzi/ui',
   // Admin shell internals assembled by defineAdminApp; named in the doc only to
   // describe framework behaviour, never as something a consumer imports.
   TAdminContent: 'shell internal',

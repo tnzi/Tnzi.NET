@@ -1,4 +1,4 @@
-import { watch, toValue, getCurrentScope, onScopeDispose, type MaybeRefOrGetter } from 'vue'
+﻿import { watch, toValue, getCurrentScope, onScopeDispose, type MaybeRefOrGetter } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAdminBreadcrumbStore, type BreadcrumbItem } from '../stores/useAdminBreadcrumbStore'
 import { isMultiInstanceRoute, multiInstanceKey } from '../stores/useAdminTabStore'
@@ -63,7 +63,7 @@ function useBreadcrumbContribution(
  * const router = useRouter()
  * const clientsPath = router.resolve({ name: 'clients' }).path
  * useBreadcrumbTrail(() => matter.value ? [
- *   { label: 'admin.modules.contoso.clients.title', to: clientsPath },
+ *   { label: 'admin.modules.crm.clients.title', to: clientsPath },
  *   { label: matter.value.clientName, to: `${clientsPath}/${matter.value.clientId}?section=files` },
  *   { label: matter.value.matterNumber },  // leaf, non-navigable (no `to`)
  * ] : [])

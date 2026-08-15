@@ -32,15 +32,20 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 三个条件缺一不可：可选包 <c>Tnzi.Documents</c> 加载了（转换器非 null）、运行环境齐备
-    /// （<see cref="IDocumentConverter.IsAvailable"/>，即宿主装了 LibreOffice）、这个格式在支持列表里
-    /// （<see cref="IDocumentConverter.CanConvert"/>）。
+    /// 两个条件缺一不可：可选包 <c>Tnzi.Documents</c> 加载了（转换器非 null）、
+    /// <b>这个扩展名</b>此刻转得动（<see cref="IDocumentConverter.IsAvailableFor"/>，
+    /// 即格式在支持列表里**且**它背后那个引擎的运行环境齐备）。
     /// </para>
     /// <para>
-    /// ★ <b><see cref="IDocumentConverter.IsAvailable"/> 不能省。</b>只问 <c>CanConvert</c> 的话，
-    /// 「加载了包但没装 LibreOffice」会让 <see cref="CanPreview"/> 答 true，用户点开预览才在
-    /// 转换那一步炸成 500 —— 而这恰恰是**默认情形**：<c>Tnzi.Signing</c> 是本包的主要消费者，
-    /// 它只用盖章与定位，根本不需要 LibreOffice。
+    /// ★ <b>不能只问 <see cref="IDocumentConverter.CanConvert"/>。</b>那样「加载了包但没装 LibreOffice」
+    /// 会让 <see cref="CanPreview"/> 答 true，用户点开预览才在转换那一步炸成 500 —— 而这恰恰是
+    /// **默认情形**：<c>Tnzi.Signing</c> 是本包的主要消费者，它只用盖章与定位，根本不需要 LibreOffice。
+    /// </para>
+    /// <para>
+    /// ★ <b>也不能只问 <see cref="IDocumentConverter.IsAvailable"/>。</b>框架的默认转换器背后有两个引擎
+    /// （HTML 交浏览器、其余交 LibreOffice），该属性只回答「有没有任何引擎能干活」；
+    /// 在「装了浏览器、没装 LibreOffice」的宿主上，拿它去判断 <c>.docx</c> 会得到肯定答复。
+    /// <c>IsAvailableFor</c> 问的才是这里真正要问的那个问题。
     /// </para>
     /// <para>
     /// 转换器的入参名叫 <c>fileName</c>，这里递的却是扩展名，是因为它的契约声明「只取扩展名」，
@@ -50,8 +55,7 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
     /// </remarks>
     private bool CanConvertToPdf(string extension)
         => FileTypeHelper.IsOffice(extension)
-           && _documentConverter is { IsAvailable: true } converter
-           && converter.CanConvert(extension);
+           && _documentConverter?.IsAvailableFor(extension) == true;
 
     /// <summary>
     /// 检查文件是否支持预览。

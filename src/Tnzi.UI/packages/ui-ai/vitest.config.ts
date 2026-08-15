@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+﻿import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 
 export default defineConfig({
@@ -25,7 +25,7 @@ export default defineConfig({
         'src/chat-app.ts',
         // The SFCs under components/** need a real DOM plus user interaction to
         // test meaningfully; unit tests target the headless layer and utils instead,
-        // and the SFCs are exercised in the Acme chat app.
+        // and the SFCs are exercised in a consumer chat app.
         //
         // Scoped to `.vue` on purpose: pure logic co-located with a component
         // (parsers, grouping, formatting) is exactly what this comment says unit
@@ -38,7 +38,7 @@ export default defineConfig({
         statements: 80,
         // Same rationale as ui-admin: mount-based unit tests can't reach 80%
         // function coverage for arrow-function handlers inside script setup.
-        // Real flows are only exercised by hand in the Acme chat app.
+        // Real flows are only exercised by hand in a consumer chat app.
         functions: 60,
         branches: 70,
       },

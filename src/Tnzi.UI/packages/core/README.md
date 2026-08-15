@@ -98,15 +98,15 @@ import { AuthStateManager, UserStateManager, AppStateManager } from "@tnzi/core/
 | AI           | ✅   | ✅  | ⏳     |
 | App          | ✅   | ✅  | ✅     |
 
-## OpenAPI Codegen（可选）
+## Service 层是手写的
 
-当前 service 层类型为手写维护。可通过 `Tnzi.Cli` 从 OpenAPI spec 自动生成到 `{module}/generated/` 目录：
+`src/services` 下的类型与调用**不是生成的**，这是有意的选择而非欠账。
 
-```bash
-# 前提: 安装 tnzi CLI + 项目根目录有 tnzi.json
-pnpm -C src/Tnzi.UI codegen:url   # 从运行中的后端生成
-pnpm -C src/Tnzi.UI codegen       # 从本地 openapi.json 生成
-```
+契约漂移由 `FrontendBackendContractTests` 检查：它反射后端每一个控制器，
+与每份 `api.ts` 里的路径对账，漂移会让测试变红。
+
+> 早前文档提到过一组 `pnpm codegen*` 命令。那三个脚本于 2026-08-15 删除 ——
+> 它们需要两个从未在本仓存在过的文件，从来就跑不起来。
 
 ## License
 

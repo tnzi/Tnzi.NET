@@ -1,4 +1,4 @@
-import { EMPTY_DASH } from '../../../src/utils/placeholders'
+﻿import { EMPTY_DASH } from '../../../src/utils/placeholders'
 import { describe, it, expect } from 'vitest'
 import { FINANCE_SOURCE_TYPES } from '../../../src/services/bridges/finance-bridge'
 import {
@@ -26,7 +26,7 @@ describe('finance source-type vocabulary', () => {
     // Consuming apps post their own tokens through ILedgerPostingService; a
     // source the framework does not recognise is still a source the accountant
     // must see, so it must never be blanked or hidden.
-    expect(financeSourceTypeLabel('ContosoMatterBilling')).toBe('ContosoMatterBilling')
+    expect(financeSourceTypeLabel('SomeUnmappedSource')).toBe('SomeUnmappedSource')
   })
 
   it('shows the placeholder for a posting with no source (manual journal entry)', () => {

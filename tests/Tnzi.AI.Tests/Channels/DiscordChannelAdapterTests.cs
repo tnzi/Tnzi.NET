@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Moq.Protected;
 using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Bus;
@@ -453,7 +453,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersDiscord()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("DiscordChannelAdapter");
         source.ShouldContain("options.Discord.Enabled");
     }
@@ -461,7 +461,7 @@ public class DiscordChannelAdapterTests
     [Fact]
     public void DiscordOptions_HasRequiredFields()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Adapters/Discord/DiscordAdapterOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Adapters/Discord/DiscordAdapterOptions.cs");
         source.ShouldContain("BotToken");
         source.ShouldContain("ApplicationId");
         source.ShouldContain("AllowedGuilds");
@@ -474,14 +474,14 @@ public class DiscordChannelAdapterTests
     [Fact]
     public void ChannelsModuleOptions_HasDiscordProperty()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
         source.ShouldContain("DiscordAdapterOptions Discord");
     }
 
     [Fact]
     public void OptionsValidator_RequiresDiscordBotToken()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
         source.ShouldContain("options.Discord.Enabled");
         source.ShouldContain("Discord.BotToken");
     }
@@ -490,7 +490,7 @@ public class DiscordChannelAdapterTests
     public void DiscordAdapter_UsesCorrectAuthScheme()
     {
         // Discord uses "Bot" prefix, not "Bearer" like Slack
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Adapters/Discord/DiscordChannelAdapter.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Adapters/Discord/DiscordChannelAdapter.cs");
         source.ShouldContain("\"Bot\"");
         source.ShouldContain("Tnzi.AI.Discord");
     }

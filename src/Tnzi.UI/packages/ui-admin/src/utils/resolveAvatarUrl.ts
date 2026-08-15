@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `resolveAvatarUrl` - turn a user-like profile object into a displayable
  * avatar `<img>` source, or `null` when the user has no avatar.
  *
@@ -9,7 +9,7 @@
  *     `UpdateUserDto` call the same concept `avatarUrl`. Rather than force
  *     every call site to know which DTO it holds, we read **both** and prefer
  *     `avatarUrl`. (We deliberately do NOT touch the DTO contracts here -
- *     renaming them would ripple into the music/webshop consumers.)
+ *     renaming them would ripple into downstream consumers.)
  *  2. **Local file uploads.** When the avatar was uploaded through the storage
  *     module there is no external URL - only an `avatarId` pointing at a file
  *     record. `GET /files/{id}/preview` is `[AllowAnonymous]`, so the file id

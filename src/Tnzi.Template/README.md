@@ -33,15 +33,18 @@ Templates/
 ```
 
 ## 文件格式示例
+
+文件 = 可选的 YAML front matter（开头的 `--- ... ---` 块）+ Razor 正文。
+
 ```cshtml
 ---
-Subject: Welcome to @Model.SiteName!
-Layout: EmailDefault
-Description: Welcome email
-Type: Email
+subject: Welcome to our site
+layout: DefaultEmail
+description: Welcome email
+metadata:
+  type: Email
+  version: "1.0"
 ---
-@model UserWelcomeModel
-
 <h2>Welcome @Model.UserName!</h2>
 <p>Thanks for joining @Model.SiteName.</p>
 ```
@@ -49,9 +52,10 @@ Type: Email
 布局文件：
 ```cshtml
 ---
-Type: Email
-IsDefault: true
-Description: Default email layout
+description: Default email layout
+isDefault: true
+metadata:
+  type: Email
 ---
 <!DOCTYPE html>
 <html>
@@ -60,10 +64,35 @@ Description: Default email layout
     <meta charset="utf-8" />
 </head>
 <body>
-    <div>@Model.Content</div>
+    <div>@Html.Raw(Model.Content)</div>
 </body>
 </html>
 ```
+
+### 两条约束（都是实测的，写错不会报错只会渲染出怪东西）
+
+**1. front matter 的键名是 camelCase，且大小写敏感。**
+`subject` / `layout` / `description` / `type` / `isDefault` / `metadata`。写成 `Subject:` 不会报错，
+也不会有警告 —— 该键被静默忽略，元数据为空。框架自带的模板（`Tnzi.Hosting/Templates/`）就是这个写法，
+可直接对照。
+
+**2. 没有 `@model` 强类型指令。** 模型是动态的（`SafeDynamicObject`），直接写 `@Model.UserName` 即可；
+访问不存在的字段返回 null 而不抛异常。写 `@model SomeType` 会导致模板编译失败
+（`error CS0103: The name 'model' does not exist in the current context`）。
+
+### front matter 在两条路径上的处理
+
+| 路径 | 行为 |
+|---|---|
+| 导入模板存储（`ITemplateStoreService` / `ILayoutStoreService`，含文件系统后备） | 解析元数据：`subject` → `SubjectTemplate`、`layout` → `DefaultLayoutName`、`isDefault` → 布局默认标记等 |
+| 直接按文件渲染（`ITemplateEngine.RenderFromFileAsync` / `RenderFromNameAsync`） | **剥离后丢弃**：不出现在输出里，也不解析、不注入 `@Model` |
+
+两条路径拿到的**正文完全一致**（同一套 front matter 识别规则）。差别只在元数据：引擎的文件渲染路径
+是"渲染这个文件"，不是"加载一个模板定义"，所以它不会替你解析 `layout:` 去套布局 —— 布局由
+`layoutPath` 参数或 `DefaultLayoutPath` 配置显式指定。需要元数据驱动（`subject` 渲染、`layout:`
+自动生效）的消费方请走 `ITemplateRenderService`。
+
+> 正文以 `---` 开头的文件会被当作带 front matter。正文**中间**的 `---`（分隔线）不受影响。
 
 ## 使用
 ```csharp

@@ -1,4 +1,4 @@
-// Phase I.7.2+: ui-admin now ships precompiled unocss atoms in its
+﻿// Phase I.7.2+: ui-admin now ships precompiled unocss atoms in its
 // `dist/style.css`. Importing the virtual stylesheet here ensures the atoms
 // referenced by ui-admin's own components (e.g. TLoginPage / PwdLogin) end
 // up in the build output so consumers get pixel-perfect rendering without
@@ -16,7 +16,7 @@ import 'virtual:uno.css'
 // on every component, headless hook, store and route helper, while the runtime
 // import works fine (bundlers read dist/index.js, which is correct). Spelling
 // `/index` skips the file probe and lands on `dist/<folder>/index.d.ts`.
-// Verified with `tsc --traceResolution` from the in-tree Acme admin app.
+// Verified with `tsc --traceResolution` from a consumer admin app.
 export * from './components/index'
 export * from './headless/index'
 // i18n layer. `translatePageKey` & co. used to live under `pages/_shared/` even

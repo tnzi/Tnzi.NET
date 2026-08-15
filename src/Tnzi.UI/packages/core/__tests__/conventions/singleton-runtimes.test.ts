@@ -1,4 +1,4 @@
-// @vitest-environment node
+﻿// @vitest-environment node
 /**
  * Convention gate: **single-instance runtimes must be owned by the host app**.
  *
@@ -68,7 +68,7 @@ const PACKAGES = ['core', 'ui', 'ui-ai', 'ui-admin', 'mobile'];
  * deliberately absent. Both hold a genuine module-level registry, but
  * `@tnzi/ui-admin` ships them as regular dependencies and an app can consume
  * every chart and icon the framework renders without importing either itself -
- * Acme's own admin app does exactly that and has no copy of `@iconify/vue`
+ * A consumer admin app doing exactly that has no copy of `@iconify/vue`
  * at its root. Promoting them to peers would invent an install requirement for
  * apps that never touch them, and listing them for dedupe would repeat the
  * `@vue/reactivity` mistake. They stay dependencies; apps that DO use them

@@ -1,9 +1,13 @@
 // System（System / System.Collections.Generic / System.IO / System.Linq / System.Threading[.Tasks]
 // 由 ImplicitUsings 提供，不在此重复）
+global using System.Collections.Concurrent;
 global using System.Diagnostics;
 global using System.Globalization;
+global using System.Net.WebSockets;
 global using System.Runtime.InteropServices;
 global using System.Text;
+global using System.Text.Json;
+global using System.Text.Json.Serialization;
 global using System.Text.RegularExpressions;
 
 // Microsoft

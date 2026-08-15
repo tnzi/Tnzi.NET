@@ -1,8 +1,8 @@
-/**
+﻿/**
  * `defineAdminApp()` - convenience factory for booting a Tnzi admin app.
  *
- * Wraps three previously-manual steps that every consumer (Acme, music,
- * webshop, Fabrikam-AI…) had to repeat in their own `admin/main.ts`:
+ * Wraps three previously-manual steps that every consumer app had to
+ * repeat in its own `admin/main.ts`:
  *   1. Take `defaultAdminRoutes` and filter / override / extend them.
  *   2. Bridge consumer-supplied `RouteRecordRaw[]` to the admin route store
  *      (so `TAdminSidebar` can render the menu).
@@ -20,9 +20,9 @@
  * import { createRouter, createWebHistory } from 'vue-router'
  * import { defineAdminApp } from '@tnzi/ui-admin'
  * import App from './App.vue'
- * import { getAcmeApp } from '@acme/shared'
+ * import { getAppRuntime } from '@myapp/shared'
  *
- * const { http } = getAcmeApp()
+ * const { http } = getAppRuntime()
  * const { routes, install } = defineAdminApp({
  *   client: http,
  *   hideModules: ['Payment'],          // optional
@@ -974,7 +974,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     //
     //  • AUTHENTICATION guard (opt-in via `auth.enabled`): redirects
     //    unauthenticated users to login. Left opt-in so apps that wire their own
-    //    `router.beforeEach` for auth (e.g. Acme, which restores the session
+    //    `router.beforeEach` for auth (e.g. an app that restores the session
     //    itself) aren't double-guarded.
     //
     //  • PERMISSION guard (on by DEFAULT - opt out with `auth.permissionGuard:

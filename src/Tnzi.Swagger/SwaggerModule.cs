@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Swagger;
 
 /// <summary>
@@ -209,7 +209,7 @@ public class SwaggerModule : TnziFrameworkModule
             return simpleName;
         }
 
-        // Finance.Dtos.InvoiceDto → FinanceInvoiceDto；Acme.Blog.Dtos.PostDto → AcmeBlogPostDto
+        // Finance.Dtos.InvoiceDto → FinanceInvoiceDto；MyApp.Blog.Dtos.PostDto → MyAppBlogPostDto
         var tokens = (type.Namespace ?? string.Empty).Split('.')
             .Where(t => t.Length > 0 && t is not ("Tnzi" or "Dtos" or "Models" or "Contracts" or "Options"));
         return string.Concat(tokens) + simpleName;

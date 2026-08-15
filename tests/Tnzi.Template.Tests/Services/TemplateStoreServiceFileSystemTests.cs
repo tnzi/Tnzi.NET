@@ -44,8 +44,7 @@ public class TemplateStoreServiceFileSystemTests : IDisposable
         _service = new TemplateStoreService(
             _repositoryMock.Object,
             serviceProvider.Object,
-            _fileParser,
-            templateOptions);
+            new TemplateFileService(_fileParser, templateOptions, serviceProvider.Object));
     }
 
     /// <summary>
@@ -101,6 +100,31 @@ description: Welcome email template
         Assert.Contains("Welcome to", result.Data.ContentTemplate);
         Assert.Contains("Thank you for registering", result.Data.ContentTemplate);
         Assert.Equal("DefaultEmail", result.Data.DefaultLayoutName);
+    }
+
+    [Fact]
+    public async Task GetTemplateAsync_FromFileSystem_ShouldCarryTopLevelDescription()
+    {
+        // Arrange - front matter 顶层的 description 此前解析出来就被丢弃，
+        // 只有嵌在 metadata: 下的同名键才读得到，于是按文件格式写法声明的描述永远是空的
+        SetupQueryable(new List<TemplateEntity>());
+
+        var templateDir = Path.Combine(_testTemplatesDir, "Templates", "Notification", "Email");
+        Directory.CreateDirectory(templateDir);
+
+        await File.WriteAllTextAsync(Path.Combine(templateDir, "WelcomeEmail.cshtml"), @"---
+subject: Welcome
+description: Welcome email template
+---
+<p>Hi</p>");
+
+        // Act
+        var result = await _service.GetTemplateAsync("WelcomeEmail", "Notification", "Email");
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Assert.Equal("Welcome email template", result.Data.Description);
     }
 
     [Fact]
@@ -162,8 +186,7 @@ description: Welcome email template
         var service = new TemplateStoreService(
             repositoryMock.Object,
             serviceProvider.Object,
-            _fileParser,
-            templateOptions);
+            new TemplateFileService(_fileParser, templateOptions, serviceProvider.Object));
 
         // Act
         var result = await service.GetTemplateAsync("WelcomeEmail", "Notification", "Email");

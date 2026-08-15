@@ -106,8 +106,8 @@ public class RazorTemplateEngine : ITemplateEngine
                 throw new TemplateNotFoundException(fullPath);
             }
 
-            // 读取模板内容（使用缓存）
-            var templateContent = await GetOrReadFileContentAsync(fullPath, cancellationToken);
+            // 读取模板正文（使用缓存；文件若带 YAML front matter，在这里已被剥离）
+            var templateContent = await GetOrReadTemplateBodyAsync(fullPath, cancellationToken);
 
             // 渲染模板
             var renderedContent = await RenderAsync(templateContent, model, cancellationToken);
@@ -203,7 +203,7 @@ public class RazorTemplateEngine : ITemplateEngine
                     return;
                 }
 
-                var content = await GetOrReadFileContentAsync(fullPath, cancellationToken);
+                var content = await GetOrReadTemplateBodyAsync(fullPath, cancellationToken);
                 var cacheKey = GenerateCacheKey(content);
                 await GetOrCompileTemplateAsync(cacheKey, content, cancellationToken);
 
@@ -361,18 +361,23 @@ public class RazorTemplateEngine : ITemplateEngine
     }
 
     /// <summary>
-    /// 获取或读取文件内容（带缓存和热重载支持）
+    /// 获取模板正文（读文件 → 剥离 YAML front matter，带缓存和热重载支持）
     /// </summary>
     /// <param name="fullPath">模板文件的完整路径</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>文件内容</returns>
+    /// <returns>去掉 front matter 后的模板正文</returns>
     /// <remarks>
     /// 此方法实现了文件内容的缓存和热重载功能：
     /// 1. 在热重载模式下，快速检查缓存中的文件时间戳，如果文件未修改则直接返回缓存内容
     /// 2. 使用 GetOrCreateAsync 确保文件读取的原子性，避免并发读取导致的不一致
     /// 3. 在读取文件后再次检查文件时间戳，防止在读取过程中文件被修改
+    ///
+    /// ★ 剥离 front matter 放在这里，是因为它是引擎读模板文件的**唯一入口**：模板正文、
+    /// 布局文件、预编译三条路径都经过它。放到各调用点则要写三遍，且预编译按内容哈希建缓存键，
+    /// 一处漏剥就会与渲染路径的键对不上，预编译白做。
+    /// 缓存的是剥离后的正文（front matter 属于文件格式，不属于要编译的模板）。
     /// </remarks>
-    private async Task<string> GetOrReadFileContentAsync(string fullPath, CancellationToken cancellationToken = default)
+    private async Task<string> GetOrReadTemplateBodyAsync(string fullPath, CancellationToken cancellationToken = default)
     {
         var cacheKey = $"{CacheKeyPrefix}file:{fullPath}";
 
@@ -402,7 +407,7 @@ public class RazorTemplateEngine : ITemplateEngine
 
             // 读取文件时间（在回调开始时获取，确保原子性）
             lastWrite = File.GetLastWriteTimeUtc(fullPath);
-            content = await File.ReadAllTextAsync(fullPath, cancellationToken);
+            content = FrontMatterExtractor.StripFrontMatter(await File.ReadAllTextAsync(fullPath, cancellationToken));
 
             // 读取后再次检查文件时间（防止在读取过程中文件被修改）
             // 最多重试 maxRetries 次，防止极端情况下的无限循环
@@ -417,7 +422,7 @@ public class RazorTemplateEngine : ITemplateEngine
 
                 // 文件在读取过程中被修改，使用最新的时间和内容
                 lastWrite = verifyLastWrite;
-                content = await File.ReadAllTextAsync(fullPath, cancellationToken);
+                content = FrontMatterExtractor.StripFrontMatter(await File.ReadAllTextAsync(fullPath, cancellationToken));
                 retryCount++;
             }
 
@@ -560,7 +565,7 @@ public class RazorTemplateEngine : ITemplateEngine
             return bodyContent;
         }
 
-        var layoutContent = await GetOrReadFileContentAsync(fullLayoutPath, cancellationToken);
+        var layoutContent = await GetOrReadTemplateBodyAsync(fullLayoutPath, cancellationToken);
         return await RenderLayoutAsync(layoutContent, bodyContent, templateModel, cancellationToken);
     }
 }

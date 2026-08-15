@@ -55,7 +55,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     private readonly IEnumerable<ILitigationHoldProvider> _holdProviders;
     private readonly IDataDestroyer _destroyer;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IOptionsMonitor<FieldEncryptionOptions>? _encryptionOptions;
+    private readonly IEncryptionKeyStateProvider? _keyStateProvider;
     private readonly ICurrentTenant _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -69,9 +69,11 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     /// <param name="holdProviders">诉讼保全提供者（可为空集合，表示没有保全）。</param>
     /// <param name="destroyer">销毁动作。</param>
     /// <param name="currentTenant">当前租户上下文，用于按租户隔离地销毁。</param>
-    /// <param name="encryptionOptions">
-    /// 字段加密选项，用于回查策略声明的密钥是否已被销毁。
-    /// 可选：没启用字段加密的应用照样可以做保留期销毁。
+    /// <param name="keyStateProvider">
+    /// 密钥存活判定，用于回查策略声明的密钥是否已被销毁。
+    /// 可选：未注册时该栏恒为「未销毁」，保留期销毁本身照常工作。
+    /// 密钥不在框架配置里的部署（云端密钥管理服务、自有硬件模块，或加密发生在客户端）
+    /// 必须注册自己的实现，否则证明里这一栏永远是错的——见 <see cref="IEncryptionKeyStateProvider"/>。
     /// </param>
     /// <param name="multiTenancyOptions">多租户开关；未启用时整库视为单一逻辑租户。</param>
     public DataDestructionService(
@@ -82,7 +84,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         IEnumerable<ILitigationHoldProvider> holdProviders,
         IDataDestroyer destroyer,
         ICurrentTenant currentTenant,
-        IOptionsMonitor<FieldEncryptionOptions>? encryptionOptions = null,
+        IEncryptionKeyStateProvider? keyStateProvider = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
@@ -93,7 +95,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         _holdProviders = Check.NotNull(holdProviders);
         _destroyer = Check.NotNull(destroyer);
         _currentTenant = Check.NotNull(currentTenant);
-        _encryptionOptions = encryptionOptions;
+        _keyStateProvider = keyStateProvider;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
@@ -529,26 +531,39 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     }
 
     /// <summary>
-    /// 回查策略声明的加密密钥是否已不在密钥环里。
+    /// 回查策略声明的加密密钥是否已被销毁。
     /// </summary>
     /// <remarks>
-    /// <strong>字段加密未启用时恒为 <c>false</c>。</strong>此时密钥环本来就是空的，
-    /// 若据此判定「密钥已销毁」，等于给每一份证明都盖上一个它没有资格盖的章。
+    /// <para>
+    /// 判定委托给 <see cref="IEncryptionKeyStateProvider"/>，未注册时恒为 <c>false</c>——
+    /// 这一栏进入证据链，无法确认时必须如实记「未销毁」，而不是替部署方盖章。
+    /// </para>
+    /// <para>
+    /// 回查抛异常不中止销毁：数据已经按策略销毁掉了，
+    /// 因为一次密钥状态查询失败而不写证明，等于用「没有证明」替换「证明里有一栏是保守值」，
+    /// 后者显然更好。异常降级为 <c>false</c> 并记一条警告。
+    /// </para>
     /// </remarks>
     private bool IsEncryptionKeyDestroyed(string? keyId)
     {
-        if (string.IsNullOrWhiteSpace(keyId))
+        if (string.IsNullOrWhiteSpace(keyId) || _keyStateProvider is null)
         {
             return false;
         }
 
-        var encryption = _encryptionOptions?.CurrentValue;
-        if (encryption is not { Enabled: true })
+        try
         {
+            return _keyStateProvider.IsDestroyed(keyId);
+        }
+        catch (Exception ex)
+        {
+            // 直调 Logger：ApplicationService.LogWarning 没有带异常的重载（同本文件既有的 LogError 处理）。
+            Logger.LogWarning(ex,
+                "Encryption key state lookup failed for key '{KeyId}'. "
+                + "The destruction certificate will record the key as NOT destroyed.",
+                keyId);
             return false;
         }
-
-        return !encryption.Keys.ContainsKey(keyId);
     }
 
     /// <summary>

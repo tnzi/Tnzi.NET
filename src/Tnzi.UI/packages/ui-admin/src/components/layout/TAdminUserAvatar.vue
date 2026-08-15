@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 /**
  * `TAdminUserAvatar` - header user avatar + dropdown.
  *
@@ -9,7 +9,7 @@
  * The component is intentionally stateless about *which* auth store it
  * reads - consumers pass `userName` and `onLogout` (and optionally
  * `onUserCenter`) as props. `AdminShellRoot` wires the defaults from
- * `useAdminLoginConfig().userMenu` so the common case (Acme et al.)
+ * `useAdminLoginConfig().userMenu` so the common case
  * is one-config-line away.
  */
 import { computed, h } from 'vue'

@@ -1,4 +1,4 @@
-namespace Tnzi.AI.Cli.Tests;
+﻿namespace Tnzi.AI.Cli.Tests;
 
 /// <summary>A host that loads nothing but this module and whatever it pulls in.</summary>
 [DependsOn(typeof(AICliModule))]
@@ -13,7 +13,7 @@ internal sealed class CliBootStartupModule : TnziApplicationModule
 /// Everything else in this suite tests a class in isolation. Nothing exercised
 /// <b>module composition</b>: the module registers 19 services and three
 /// <see cref="BackgroundService"/>s, and no application in this repository loads it
-/// (Acme does not <c>[DependsOn]</c> it), so until this file existed the whole
+/// (the reference app does not <c>[DependsOn]</c> it), so until this file existed the whole
 /// wiring had never run once.
 /// <para>
 /// The failure it guards against does not show up in a build or in a unit test:

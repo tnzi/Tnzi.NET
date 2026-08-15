@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `defineEnumMeta` - one declaration of an enum's UI metadata that yields the
  * three shapes pages repeatedly hand-build: locale-reactive select `options`, a
  * `label(value)` accessor, and a `badgeMapping` ready for `<TStatusBadge>`.
@@ -13,7 +13,7 @@
  *       { value: 'Active', labelKey: 'matter.status.active', tone: 'success' },
  *       { value: 'Closed', labelKey: 'matter.status.closed', tone: 'default' },
  *     ],
- *     makePageTranslator('contoso.matters'),
+ *     makePageTranslator('crm.matters'),
  *   )
  *   // <NSelect :options="MatterStatus.options.value" />
  *   // <TStatusBadge :value="row.status" :mapping="MatterStatus.badgeMapping" />

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+﻿import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import type { AdminRouteRecord } from '../../src/stores/useAdminRouteStore'
@@ -325,12 +325,12 @@ describe('useAdminRouteStore', () => {
   it('module gate: string moduleGate matches an explicit short name (normalized)', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes([
-      { name: 'blog', path: '/blog', meta: { title: 'Blog', order: 1, moduleGate: 'Acme.Blog' } },
+      { name: 'blog', path: '/blog', meta: { title: 'Blog', order: 1, moduleGate: 'Shop.Blog' } },
     ])
     login([], true)
-    store.setAvailableModules(new Set(['identity'])) // no acme-blog
+    store.setAvailableModules(new Set(['identity'])) // no shop-blog
     expect(store.menus.map((m) => m.key)).not.toContain('blog')
-    store.setAvailableModules(new Set(['acme-blog'])) // 'Acme.Blog' normalizes to 'acme-blog'
+    store.setAvailableModules(new Set(['shop-blog'])) // 'Shop.Blog' normalizes to 'shop-blog'
     expect(store.menus.map((m) => m.key)).toContain('blog')
   })
 
@@ -393,7 +393,7 @@ describe('useAdminRouteStore', () => {
       path: '/blog',
       meta: { title: 'Blog', order: 2 },
       children: [
-        { name: 'blog.posts', path: 'posts', meta: { title: 'Posts', permission: 'acme.blog.post.view' } },
+        { name: 'blog.posts', path: 'posts', meta: { title: 'Posts', permission: 'shop.blog.post.view' } },
       ],
     },
   ]

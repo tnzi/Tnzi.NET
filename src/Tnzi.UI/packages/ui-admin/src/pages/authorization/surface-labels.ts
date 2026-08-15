@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Localized display names for the permission matrix (`TPermissionMatrix`
  * `labelOverrides`). Keys are surface prefixes (`user`, `finance.account`)
  * plus `module:{code}` keys for module headers; values are the zh-cn names,
@@ -152,8 +152,8 @@ export const ZH_SURFACE_LABELS: Record<string, string> = {
 }
 
 /**
- * Merge consumer-supplied labels over the built-in zh map (e.g. a Acme
- * `acme.blog.post: '博客文章'` entry). Later maps win.
+ * Merge consumer-supplied labels over the built-in zh map (e.g. a consumer's
+ * `blog.post: '博客文章'` entry). Later maps win.
  */
 export function mergeSurfaceLabels(
   ...maps: Array<Record<string, string> | null | undefined>

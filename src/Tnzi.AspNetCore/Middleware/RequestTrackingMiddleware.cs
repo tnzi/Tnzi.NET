@@ -188,7 +188,10 @@ public class RequestTrackingMiddleware
                     Method = context.Request.Method,
                     Path = context.Request.Path.Value ?? "",
                     QueryString = RedactQueryString(context.Request.Query, context.Request.QueryString.Value, trackingOptions),
-                    IpAddress = context.Connection.RemoteIpAddress?.ToString(),
+                    // 走 GetClientIp 而不是直接读 Connection：一来它支持反向代理（直接读连接
+                    // 在代理后面拿到的是代理地址，没有价值），二来它是隐私开关
+                    // AspNetCoreOptions.CollectClientIpAddress 的唯一判定点。
+                    IpAddress = context.Request.GetClientIp(),
                     UserAgent = context.Request.Headers["User-Agent"].ToString(),
                     RequestBody = requestBody,
                     StatusCode = context.Response.StatusCode,

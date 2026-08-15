@@ -1,4 +1,4 @@
-# @tnzi/ui-admin
+﻿# @tnzi/ui-admin
 
 Production-grade Vue 3 admin framework built on Naive UI + Pinia. Ships
 **59 preset admin pages**, **6 layout modes**, **5-tab theme drawer**,
@@ -521,7 +521,7 @@ pnpm --filter @tnzi/ui-admin build
 rm -rf path/to/consumer/node_modules/.vite
 ```
 
-The bundled `/acme-up` skill (in the Tnzi monorepo) handles this
+The monorepo ships a dev-stack skill that handles this
 incrementally — rebuilds only `@tnzi/*` packages whose `src/` is newer
 than `dist/` and clears the consumer's `.vite` cache before restarting.
 

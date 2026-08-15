@@ -211,7 +211,8 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
             UserId = CurrentUserId,
             UserName = CurrentUserName,
             ConnectedAt = DateTime.UtcNow,
-            IpAddress = httpContext?.Connection?.RemoteIpAddress?.ToString(),
+            // 受 AspNetCoreOptions.CollectClientIpAddress 约束（连接元数据会被持久化与展示）。
+            IpAddress = httpContext?.Request?.GetClientIp(),
             UserAgent = httpContext?.Request?.Headers["User-Agent"].ToString(),
             HubName = GetType().Name,
         };
@@ -234,7 +235,7 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
                 ConnectionId = Context.ConnectionId,
                 HubName = GetType().Name,
                 UserName = CurrentUserName,
-                IpAddress = Context.GetHttpContext()?.Connection?.RemoteIpAddress?.ToString(),
+                IpAddress = Context.GetHttpContext()?.Request?.GetClientIp(),
                 TotalConnections = connectionCount,
             });
         }

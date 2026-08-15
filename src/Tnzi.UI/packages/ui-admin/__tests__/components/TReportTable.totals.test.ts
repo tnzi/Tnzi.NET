@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+﻿import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TReportTable from '../../src/components/data/TReportTable.vue'
 
@@ -9,7 +9,7 @@ import TReportTable from '../../src/components/data/TReportTable.vue'
  * 服务端分页的报表上，那是「当前页的合计」——它看起来和「报表的合计」一模一样，
  * 所以没有人会去质疑它。
  *
- * 缺陷由消费应用（Contoso）在拒绝采用本组件时指出：它的账龄与往来方分类账都从
+ * 缺陷由某消费应用在拒绝采用本组件时指出：它的账龄与往来方分类账都从
  * 服务端取整个报表的合计，采纳当时的实现会安静地把数字换成页合计。
  */
 describe('TReportTable totals', () => {

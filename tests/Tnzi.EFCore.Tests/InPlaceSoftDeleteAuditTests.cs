@@ -1,4 +1,4 @@
-namespace Tnzi.EFCore.Tests;
+﻿namespace Tnzi.EFCore.Tests;
 
 /// <summary>
 /// 直接把 <see cref="ISoftDelete.IsDeleted"/> 置 true 的软删除（不经仓储 <c>DeleteAsync</c>）
@@ -13,7 +13,7 @@ namespace Tnzi.EFCore.Tests;
 /// 「没有人、在没有时间删掉的」软删行：<c>IsDeleted</c> 为真，而事后追责唯一想看的那两列是 null。
 /// </para>
 /// <para>
-/// 这个缺陷是消费应用（Contoso）在被建议改用 <c>ReplaceChildren</c> 时发现并拒绝执行的 ——
+/// 这个缺陷是某消费应用在被建议改用 <c>ReplaceChildren</c> 时发现并拒绝执行的 ——
 /// 它宁可保留自己那份手写删除，也不肯写出没有删除人的软删行。
 /// </para>
 /// </remarks>

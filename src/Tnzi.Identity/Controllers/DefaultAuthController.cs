@@ -330,7 +330,9 @@ public class DefaultAuthController : ApiControllerBase
 
             // 添加IP地址和UserAgent到Claims
             var claims = authenticateResult.Principal.Claims.ToList();
-            claims.Add(new Claim("ip_address", HttpContext.Connection.RemoteIpAddress?.ToString() ?? ""));
+            // 走 GetClientIp：支持反向代理，且受 AspNetCoreOptions.CollectClientIpAddress 约束
+            // （该 claim 会流向登录日志，声明不采集地址的部署这里应当是空）。
+            claims.Add(new Claim("ip_address", HttpContext.Request.GetClientIp() ?? ""));
             claims.Add(new Claim("user_agent", HttpContext.Request.Headers["User-Agent"].ToString()));
 
             var claimsPrincipal = new ClaimsPrincipal(

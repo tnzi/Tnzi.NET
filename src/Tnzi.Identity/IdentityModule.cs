@@ -137,16 +137,26 @@ public class IdentityModule : TnziApplicationModule
                 var jwtConfig = identityOptions.Value.Jwt;
                 var jwtSecret = jwtConfig.SecretKey;
 
-                // 安全检查：生产环境必须配置 JWT 密钥
+                // 安全检查：只有开发环境允许回落到内置默认密钥。
+                //
+                // 判据刻意是「不是 Development」而不是「是 Production」，两处理由：
+                // ① `EnvironmentName == "Production"` 是**大小写敏感**的字符串比较，
+                //    `ASPNETCORE_ENVIRONMENT=production` 就绕过去了。`IsDevelopment()`
+                //    走 OrdinalIgnoreCase，框架其余 8 处判断环境用的都是它。
+                // ② 只拦 Production 不够。Staging 通常也是真实部署、连真实数据，
+                //    自定义环境名（Prod / Live / prod-eu）更是一个都拦不住。
+                //    拒绝列表只挡住想得到的那个，允许列表挡住所有没想到的。
                 if (string.IsNullOrEmpty(jwtSecret))
                 {
-                    if (environment.EnvironmentName == "Production")
+                    if (!environment.IsDevelopment())
                     {
                         throw new InvalidOperationException(
-                            "JWT SecretKey must be configured in production environment. " +
-                            "Please set 'Identity:Jwt:SecretKey' in your configuration.");
+                            $"JWT SecretKey must be configured outside the Development environment "
+                            + $"(current: '{environment.EnvironmentName}'). "
+                            + "Set 'Identity:Jwt:SecretKey' in your configuration. "
+                            + "The built-in default key is public knowledge and must never sign real tokens.");
                     }
-                    // 仅在非生产环境使用默认密钥
+                    // 仅开发环境使用默认密钥
                     jwtSecret = "Tnzi_Default_Secret_Key_For_Dev_Only_123456";
                 }
                 var key = Encoding.UTF8.GetBytes(jwtSecret);

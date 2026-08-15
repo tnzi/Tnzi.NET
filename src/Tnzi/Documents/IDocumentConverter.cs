@@ -51,6 +51,23 @@ public interface IDocumentConverter
     bool CanConvert(string fileName);
 
     /// <summary>
+    /// <b>这个文件</b>此刻转不转得动。
+    /// </summary>
+    /// <param name="fileName">源文件名（只取扩展名）。</param>
+    /// <remarks>
+    /// <para>
+    /// 即 <see cref="CanConvert"/> 与 <see cref="IsAvailable"/> 的合取，**要决定「显不显示入口」问这一个就够了**。
+    /// </para>
+    /// <para>
+    /// ★ 存在的理由是「一个实现背后可能有多个引擎」：框架的默认实现把 HTML 交给浏览器、
+    /// 其余交给 LibreOffice，此时 <see cref="IsAvailable"/> 只能回答「有没有任何引擎能干活」，
+    /// 单独拿它去判断 <c>.docx</c> 会在「装了浏览器但没装 LibreOffice」的宿主上答成能预览、点开才 500。
+    /// 默认实现是那个合取，只有一个引擎的转换器无需覆盖。
+    /// </para>
+    /// </remarks>
+    bool IsAvailableFor(string fileName) => IsAvailable && CanConvert(fileName);
+
+    /// <summary>
     /// 把源文档转成 PDF。
     /// </summary>
     /// <param name="source">源文档字节。</param>

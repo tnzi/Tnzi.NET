@@ -81,10 +81,22 @@ public static class HttpContextExtensions
     /// 获取客户端IP地址（支持反向代理场景）
     /// </summary>
     /// <param name="request">HTTP 请求</param>
-    /// <returns>客户端IP地址</returns>
+    /// <returns>
+    /// 客户端IP地址；当 <see cref="AspNetCoreOptions.CollectClientIpAddress"/> 为 <c>false</c> 时恒为 <c>null</c>。
+    /// </returns>
+    /// <remarks>
+    /// 这是全框架采集来源地址的唯一入口，因此隐私开关也判在这里：
+    /// 关闭后请求日志、访问日志、审计上下文与限流一次性全部拿不到地址，
+    /// 不需要每个消费者各自记得处理。见 <see cref="AspNetCoreOptions.CollectClientIpAddress"/>。
+    /// </remarks>
     public static string? GetClientIp(this HttpRequest request)
     {
         Check.NotNull(request);
+
+        if (!IsClientIpCollectionEnabled(request.HttpContext))
+        {
+            return null;
+        }
 
         // 优先从 X-Forwarded-For 头获取（反向代理场景）
         var ipAddress = request.Headers["X-Forwarded-For"].FirstOrDefault();
@@ -112,6 +124,20 @@ public static class HttpContextExtensions
         }
 
         return ipAddress;
+    }
+
+    /// <summary>
+    /// 判断当前部署是否允许采集来源地址。
+    /// </summary>
+    /// <remarks>
+    /// 取不到配置时按<strong>允许</strong>处理：这是既有行为，
+    /// 不能因为解析不到选项就静默改变一个已发布 API 的返回值。
+    /// 真正要关闭采集的部署会显式配置它，而那种部署里选项一定解析得到。
+    /// </remarks>
+    private static bool IsClientIpCollectionEnabled(HttpContext context)
+    {
+        var options = context.RequestServices?.GetService<IOptionsMonitor<AspNetCoreOptions>>();
+        return options?.CurrentValue.CollectClientIpAddress ?? true;
     }
 
     /// <summary>

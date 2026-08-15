@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Entry point for @tnzi/ui-admin styles. Imported by `createTnziUiAdmin` so
  * the layout + transition primitives are guaranteed available even when
  * the consumer hasn't manually imported `@tnzi/ui-admin/style.css`.
@@ -11,7 +11,7 @@
  *   - `.t-widget-card` / `.t-widget-card__*` (TWidgetCard scoped styles)
  *   - `.t-workbench-layout--draggable` grid (TWorkbenchLayout scoped styles)
  * Without this @import, those rules ship only inside `@tnzi/ui/dist/style.css`,
- * and a consumer (e.g. Acme) that imports only `@tnzi/ui-admin/style.css`
+ * and a consumer that imports only `@tnzi/ui-admin/style.css`
  * would render the layout/modal chrome with naive-ui defaults - modals
  * overflow, widget cards lose shadow + ellipsis, draggable grid collapses
  * to a single column.

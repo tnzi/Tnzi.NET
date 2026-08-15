@@ -26,6 +26,11 @@ export { default as TWidgetKpiStrip } from './TWidgetKpiStrip.vue'
 export { default as TWidgetActivityTimeline } from './TWidgetActivityTimeline.vue'
 export { default as TWidgetLineChart } from './TWidgetLineChart.vue'
 export { default as TWidgetPieChart } from './TWidgetPieChart.vue'
+export type {
+  PieLegendPosition,
+  PieSliceClickEvent,
+  PieLegendClickEvent,
+} from './TWidgetPieChart.vue'
 export { default as TWidgetList } from './TWidgetList.vue'
 export type { WidgetListTone } from './TWidgetList.vue'
 export { default as TWidgetQuickActions } from './TWidgetQuickActions.vue'

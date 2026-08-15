@@ -1,4 +1,4 @@
-# @tnzi/mobile
+﻿# @tnzi/mobile
 
 > Tnzi UI components based on Vant 4 for Vue 3 + Vite mobile SPA applications.
 
@@ -47,7 +47,7 @@ createApp(App)
 pnpm -C packages/mobile dev
 ```
 
-本包目前没有对应的 Acme 应用（Acme 只有 admin / chat / site 三个 Web 端），
+本包目前没有对应的消费应用（现有消费方只有 admin / chat / site 三个 Web 端），
 改动靠 `pnpm -C packages/mobile test` 与消费方项目验证。
 
 ## 内置依赖

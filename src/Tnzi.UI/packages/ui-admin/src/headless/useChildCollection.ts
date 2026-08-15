@@ -1,4 +1,4 @@
-/**
+﻿/**
  * `useChildCollection` - the detail-page analogue of `useCrudPage` for a nested
  * child collection (matter parties / key-dates / documents / notes …).
  *
@@ -15,7 +15,7 @@
  *     create: (d) => bridge.parties.create({ ...d, matterId }),
  *     update: (id, d) => bridge.parties.update(id, d),
  *     remove: (id) => bridge.parties.delete(id),
- *     permission: 'contoso.matter.party',
+ *     permission: 'crm.matter.party',
  *   })
  */
 import { computed, ref, type ComputedRef, type Ref } from 'vue'

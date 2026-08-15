@@ -1,7 +1,23 @@
-namespace Tnzi.AI.Tests.Tools;
+﻿namespace Tnzi.AI.Tests.Tools;
 
 public class ApprovalToolWrapperTests
 {
+    /// <summary>路径规则测试用的"受保护根目录"，按运行平台取。</summary>
+    /// <remarks>
+    /// 这几个测试验的是<b>路径前缀规则 + 相对路径按工作目录解析</b>，不是 Windows 路径语法本身。
+    /// 此前写死开发机的真实路径：在 Linux 上反斜杠不是目录分隔符，
+    /// <c>Path.Combine(工作目录, 相对路径)</c> 拼出的形态与 PathPrefix 对不上，
+    /// 规则不命中 → 工具被放行 → 断言拿到 <c>should-not-run</c>。
+    /// 这从未被发现，因为后端 full-suite 在 CI 上一直挂在更早的 restore 阶段
+    /// （消费应用的 NuGet.config 里有 Windows 本地源,runner 上不存在）。
+    /// </remarks>
+    private static readonly string ProtectedRoot =
+        OperatingSystem.IsWindows() ? @"D:\repo\Framework" : "/repo/framework";
+
+    /// <summary><see cref="ProtectedRoot"/> 下的路径，用当前平台的分隔符拼。</summary>
+    private static string Under(params string[] parts)
+        => Path.Combine([ProtectedRoot, .. parts]);
+
     [Fact]
     public async Task InvokeAsync_DenyDecision_ReturnsRejectedMessage_WithoutCallingHandler()
     {
@@ -101,7 +117,7 @@ public class ApprovalToolWrapperTests
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>
         {
             ["command"] = "git status && rm temp.txt",
-            ["working_directory"] = "D:\\My\\Tnzi.NET"
+            ["working_directory"] = ProtectedRoot
         }));
 
         result.ShouldBe("Tool call rejected: rm blocked");
@@ -222,7 +238,7 @@ public class ApprovalToolWrapperTests
             {
                 ToolPattern = "write_file",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = Under("src"),
                 Behavior = PermissionBehavior.Deny,
                 Reason = "Protected source tree"
             }
@@ -237,7 +253,7 @@ public class ApprovalToolWrapperTests
 
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>
         {
-            ["path"] = "C:/src/Tnzi.NET/src/Tnzi.AI/test.txt"
+            ["path"] = Under("src", "Tnzi.AI", "test.txt")
         }));
 
         result.ShouldBe("Tool call rejected: Protected source tree");
@@ -259,7 +275,7 @@ public class ApprovalToolWrapperTests
             {
                 ToolPattern = "write_file",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = Under("src"),
                 Behavior = PermissionBehavior.Deny,
                 Reason = "Protected source tree"
             }
@@ -274,8 +290,8 @@ public class ApprovalToolWrapperTests
 
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>
         {
-            ["path"] = "src\\Tnzi.AI\\test.txt",
-            ["working_directory"] = "D:\\My\\Tnzi.NET"
+            ["path"] = Path.Combine("src", "Tnzi.AI", "test.txt"),
+            ["working_directory"] = ProtectedRoot
         }));
 
         result.ShouldBe("Tool call rejected: Protected source tree");
@@ -297,7 +313,7 @@ public class ApprovalToolWrapperTests
             {
                 ToolPattern = "write_file",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = Under("src"),
                 Behavior = PermissionBehavior.Deny,
                 Reason = "Protected source tree"
             }
@@ -309,7 +325,7 @@ public class ApprovalToolWrapperTests
             {
                 Metadata = new Dictionary<string, object>
                 {
-                    ["working_directory"] = "D:\\My\\Tnzi.NET"
+                    ["working_directory"] = ProtectedRoot
                 }
             }
         };
@@ -324,7 +340,7 @@ public class ApprovalToolWrapperTests
 
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>
         {
-            ["path"] = "src\\Tnzi.AI\\test.txt"
+            ["path"] = Path.Combine("src", "Tnzi.AI", "test.txt")
         }));
 
         result.ShouldBe("Tool call rejected: Protected source tree");
@@ -342,7 +358,7 @@ public class ApprovalToolWrapperTests
             {
                 ToolPattern = "list_files",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = Under("src"),
                 Behavior = PermissionBehavior.Deny,
                 Reason = "Protected working directory"
             }
@@ -354,7 +370,7 @@ public class ApprovalToolWrapperTests
             {
                 Metadata = new Dictionary<string, object>
                 {
-                    ["working_directory"] = "C:/src/Tnzi.NET/src/Tnzi.AI"
+                    ["working_directory"] = Under("src", "Tnzi.AI")
                 }
             }
         };

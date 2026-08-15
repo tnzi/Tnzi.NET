@@ -8,7 +8,7 @@ All notable changes to the `@tnzi/*` frontend packages are documented here. The 
 
 - `@tnzi/ui-admin`: `TListShell` composable list shell + `TCardPage`/`TCardRenderer` (card lists) + `TTableRenderer`. `page`/`container` height modes for embedding lists as page sections. `useCrudPage` write callbacks are now optional (pure-display lists need only `fetchData`; create/edit/delete affordances auto-hide).
 
-## [unreleased] — `@tnzi/ui-admin` page-consistency overhaul
+### `@tnzi/ui-admin` page-consistency overhaul
 
 Follow-up to the responsive batch — user reported that custom pages drift from the standard NCard / token vocabulary that TCrudPage pages enforce: "用量统计页面没有白色背景容器 / 评测页面的容器似乎不是同一风格,外边距偏大". Comprehensive audit found 15 custom (non-TCrudPage) pages with five categories of drift; this commit set unifies all five.
 
@@ -65,7 +65,7 @@ Centralised into `src/pages/_shared/safeMessage.ts` returning the full naive-ui 
 - Updated `__tests__/integration/UsageDashboard.test.ts` — mocks `@tnzi/ui` `useTheme` because the rewrite now wraps `TDashboardPage` → `useEcharts`.
 - Suite now: **703 pass** (687 → 703, no regression).
 
-## [unreleased] — `@tnzi/ui-admin` responsive overhaul (375px-friendly)
+### `@tnzi/ui-admin` responsive overhaul (375px-friendly)
 
 User-driven full audit of cross-resolution behaviour. Found 20 issues across the shell, layout chrome, CRUD widgets, dashboard scaffold, and login page; six broke layout outright on phones / iPad portrait, the rest left UX gaps below `lg`. All fixed in one batch.
 
@@ -317,9 +317,9 @@ Round 2 of full 62-item deep-audit follow-up. 8 P1 items.
 - **B4 — TAdminShell default-renders TAdminUserAvatar in #user slot.**
   New `:builtin-user-avatar="true"` prop (default true); consumers can
   opt out via `:builtin-user-avatar="false"` and supply their own
-  `#header-user` slot content. Zero-config user dropdown for Music /
-  webshop / Fabrikam consumers. (Note: pulls in `useDialog()` so the host
-  app must wrap with `NDialogProvider`; Acme / Music already do.)
+  `#header-user` slot content. Zero-config user dropdown for
+  consumer apps. (Note: pulls in `useDialog()` so the host
+  app must wrap with `NDialogProvider`; existing consumers already do.)
 - **C6 — TAdminMixRail default-renders TMenuToggler in #footer slot.**
   When TAdminShell uses the rail (vertical-mix mode), the rail now
   shows a built-in collapse toggle at its bottom — soybean's
@@ -939,7 +939,7 @@ Remaining polish (not yet shipped):
 ## [0.2.35] — 2026-05-15 (`@tnzi/ui-admin` soybean-detail polish: header/sidebar/tabs)
 
 Side-by-side review against `localhost:9527/manage/user` surfaced a
-batch of styling details where Acme diverged from the soybean
+batch of styling details where the reference consumer diverged from the soybean
 reference. All fixed in this patch (no API changes).
 
 **Changed** (`@tnzi/ui-admin`):
@@ -1193,7 +1193,7 @@ matching soybean's `Copyright MIT © 2021 Soybean` baseline.
   `<TAdminShell>`.
 
 Visual verification (Chrome): the footer now reads "Copyright © 2026
-Acme Admin" in muted text at the bottom of the content column.
+the app name" in muted text at the bottom of the content column.
 
 Tests: 659 (`@tnzi/ui-admin`) — green.
 
@@ -1259,7 +1259,7 @@ structural gap before the visual side-by-side matches end-to-end.
   click dropdown with "User Center" / "Logout", confirms logout via
   `NDialog`. Has a "Sign in" button mode for unsigned users.
 - `AdminLoginConfig.user` config slot: `{ userName, avatarIcon,
-  onUserCenter, onLogout, signedIn, onSignIn }`. Consumers (Acme
+  onUserCenter, onLogout, signedIn, onSignIn }`. Consumers (the reference app
   et al.) configure once via `defineAdminApp({ login: { user: … } })`
   and the header dropdown wires up.
 - Components exported from `@tnzi/ui-admin/components`:
@@ -1282,7 +1282,7 @@ structural gap before the visual side-by-side matches end-to-end.
   `(key, fallback?) => string` so missing-key paths return the
   caller's fallback instead of the raw key.
 
-**Cross-repo** (Acme):
+**Cross-repo** (reference consumer):
 
 - `admin/src/main.ts` adds `login.user.onLogout` (calls
   `auth.logout()` then redirects to `/login`) so the header
@@ -1353,13 +1353,13 @@ review against `localhost:9527`. Three structural gaps closed.
 - Menu options now carry an `icon` render function pointing to
   `TSvgIcon` so icons appear left of each label.
 
-**Cross-repo** (Acme):
+**Cross-repo** (reference consumer):
 
 - `admin/vite.config.ts` adds `resolve.alias` + `resolve.dedupe` for
   `vue` / `vue-router` / `pinia` / `naive-ui` so the pnpm `link:` to
   the ui-admin package doesn't load duplicate copies of those modules.
   Without this, ui-admin's internal `useRoute()` reads from a router
-  that Acme never installed (always returns `name: undefined`),
+  that the consumer never installed (always returns `name: undefined`),
   which silently breaks active-menu highlighting and parent expansion.
 
 **Test fixes**:
@@ -1410,7 +1410,7 @@ three visual gaps the I.7.2 commit shipped wrong, all fixed here.
 - `TLoginPage` no longer applies the `--t-login-wave-tint` inline CSS
   var to `TWaveBg` (the prop is now `themeColor` and reactive).
 
-**Cross-repo** (Acme):
+**Cross-repo** (reference consumer):
 
 - `admin/src/App.vue` now consumes `useTheme()` from `@tnzi/ui` to
   forward the admin theme context to `NConfigProvider`'s
@@ -1486,7 +1486,7 @@ module to use the same atom vocabulary soybean-admin-example does
 
 **Cross-repo**:
 
-- Acme `admin/src/main.ts` now configures the built-in login via
+- The reference app's `admin/src/main.ts` now configures the built-in login via
   `defineAdminApp({ login: … })` instead of overriding the route
   component. `pages/LoginPage.vue` deleted. Smoke-tested: Admin demo
   account quick-fill → `/auth/login-with-refresh-token` → JWT issued →
@@ -1761,7 +1761,7 @@ commits. Future Phase I.6.x patches will document their changes here.
 
 ## [0.2.5] — 2026-05-15 (`@tnzi/ui-admin` Phase A.5: visual polish, CSS var alignment)
 
-Patch inserted before Phase C after a live consumer (Acme) flagged the
+Patch inserted before Phase C after a live consumer flagged the
 "basically no visible change" issue. Phase A's drawer + layout work was
 landing in source but the rendered components looked identical to pre-A
 because of two compounding bugs:
@@ -1769,7 +1769,7 @@ because of two compounding bugs:
 1. **Critical theme-context-missing bug (already shipped in `7bf20274`)** —
    `AdminShellRoot` was eagerly mounting `TThemeDrawer`, which calls
    `useTheme()` from `@tnzi/ui`. Consumers that don't install
-   `createTnziUi()` (Acme pattern: uses Naive UI directly + only
+   `createTnziUi()` (consumer pattern: uses Naive UI directly + only
    `@tnzi/ui-admin`) hit "no theme context found" during drawer setup, the
    whole route subtree silently failed, and none of the Phase A features
    reached the DOM. Fix landed before this release: `createTnziUiAdmin()`
@@ -1825,7 +1825,7 @@ because of two compounding bugs:
 
 ### Live consumer validation
 
-Acme admin (5175, fresh dev) shows:
+The reference admin app (fresh dev) shows:
 - 6 SVG icon buttons rendered (was 0 SVG + 5 emoji)
 - Sidebar background `rgb(255, 255, 255)` (was `rgba(0,0,0,0)` transparent)
 - Sidebar shadow `2px 0 8px rgba(29,35,41,0.05)` (was `none`)
@@ -1884,7 +1884,7 @@ Existing consumers using `createTnziUiAdmin()` directly are unaffected
 (no breaking changes). Consumers can opt into `defineAdminApp()` to
 remove route-filtering / store-hydration / login-replacement boilerplate.
 
-Acme's `admin/main.ts` reference migration: ~110 lines → ~50 lines
+The reference `admin/main.ts` migration: ~110 lines → ~50 lines
 (the residual ~50 lines is `vue-router` setup + `beforeEach` auth guard +
 `pnpm link:` Vue typedef casts; those don't belong in the framework
 factory).
@@ -2099,10 +2099,10 @@ change despite the patch-level number.
 ### Verification
 
 `pnpm install` resolves workspace links cleanly; `pnpm --filter
-@tnzi/ui-ai build` + `typecheck` pass; the Acme chat product
-(`C:\src\Acme`) consumes `@tnzi/ui-ai` via `link:` and stays green
-because the `TChatApp` migration in `AcmeChatShell.vue` shipped in
-the same session (Acme `main` `111023c`).
+@tnzi/ui-ai build` + `typecheck` pass; the reference chat product
+consumes `@tnzi/ui-ai` via `link:` and stays green
+because the `TChatApp` migration in the consumer's chat shell shipped in
+the same session (consumer `main` `111023c`).
 
 ## [0.2.0-preview.3] — 2026-04-14
 

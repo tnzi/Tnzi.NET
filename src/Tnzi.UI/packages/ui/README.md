@@ -38,7 +38,7 @@ createApp(App).use(createPinia()).use(createTnziUi()).mount('#app')
 | 子路径 | 内容 |
 | --- | --- |
 | `@tnzi/ui` | 插件工厂 `createTnziUi`、组件、stores、headless 逻辑的合集入口 |
-| `@tnzi/ui/components` | 61 个 `T*` 组件（card / data / display / feedback / form / layout / list / navigation / utility） |
+| `@tnzi/ui/components` | 60 个 `T*` 组件（card / data / display / feedback / form / layout / list / navigation / overlay / utility） |
 | `@tnzi/ui/stores` | `useAuthStore` / `useUserStore` / `useAppStore`（`@tnzi/core` state manager 的薄包装） |
 | `@tnzi/ui/headless` | `useTheme` / `usePalette` / `useBreakpoints` / `useConfirm` / `useDrawer` / `useSafeMessage` / `useFocusTrap` … |
 | `@tnzi/ui/adapters/*` | `createMessageAdapter` / `createDialogAdapter` / `createThemeAdapter` … |
@@ -52,15 +52,12 @@ createApp(App).use(createPinia()).use(createTnziUi()).mount('#app')
 ## 主题
 
 单一真值源是 `--tnzi-*` CSS 变量；明暗切换是文档根元素上的 class 切换，不是 token 拷贝。
-详见 [组件覆盖指南](../../../../docs/frontend/component-override.md)。
 
 ## 文档
 
-- [快速开始](../../../../docs/frontend/getting-started.md)
-- [架构](../../../../docs/frontend/architecture.md)
-- [组件覆盖](../../../../docs/frontend/component-override.md)
-- [排错](../../../../docs/frontend/troubleshooting.md)
-- 包内设计约束与踩坑：`packages/ui/CLAUDE.md`
+- [@tnzi/ui 包文档](https://tnzi.cc/docs/modules/ui) — 组件清单、主题令牌、覆盖方式
+- [快速开始](https://tnzi.cc/docs/getting-started) — 安装与首个组件
+- [架构](https://tnzi.cc/docs/architecture) — 五包分层与依赖方向
 
 ## License
 

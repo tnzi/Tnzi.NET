@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+﻿import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getLocaleMessages } from '../i18n/messages'
 import { DEFAULT_ROUTE_ICONS } from '../router/route-icons'
@@ -221,7 +221,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     // Role gate source - consumer routes only (no framework route sets
     // `meta.roles`), so this is zero-impact for existing apps. Same OR /
     // super-user-bypass / fail-open semantics as the permission gate: it lets a
-    // role-driven app (e.g. Contoso's Owner/Management-only Staff pages) declare
+    // role-driven app (e.g. one with Owner/Management-only Staff pages) declare
     // `meta.roles` on a route instead of hand-mutating `hideInMenu` after every
     // navigation.
     const grantedRoles = new Set(authStore.userRoles.map((r) => r.toLowerCase()))
@@ -281,7 +281,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     }
     // Host-app messages registered via `extendLocaleMessages`. Passed
     // through to `resolveI18nKey` so consumer-owned route titles
-    // (e.g. `tnzi.admin.modules.acme.blog.posts.title`) resolve in the
+    // (e.g. `tnzi.admin.modules.blog.posts.title`) resolve in the
     // active locale instead of humanising to English.
     const overrides = appStore.messageOverrides?.[locale] as
       | Record<string, unknown>

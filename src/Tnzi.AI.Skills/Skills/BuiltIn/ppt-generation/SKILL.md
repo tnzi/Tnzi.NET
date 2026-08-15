@@ -13,8 +13,8 @@ agents: "*"
 |------|-------|
 | Generate new presentation (AI images) | [Step 1-4 below](#workflow-generate-new-presentation) |
 | Read/analyze content | `python -m markitdown presentation.pptx` |
-| Edit or create from template | Read [editing.md](editing.md) |
-| Create from scratch (code) | Read [pptxgenjs.md](pptxgenjs.md) |
+| Edit or create from template | Read [editing.md](references/editing.md) |
+| Create from scratch (code) | Read [pptxgenjs.md](references/pptxgenjs.md) |
 
 ## Workflow: Generate New Presentation
 
@@ -151,14 +151,14 @@ python /mnt/skills/office/scripts/unpack.py presentation.pptx unpacked/
 
 ## Workflow: Edit Existing PPTX
 
-**Read [editing.md](editing.md) for full details.**
+**Read [editing.md](references/editing.md) for full details.**
 
 1. Analyze template with `thumbnail.py`
 2. Unpack → manipulate slides → edit content → clean → pack
 
 ## Workflow: Create from Code
 
-**Read [pptxgenjs.md](pptxgenjs.md) for full details.**
+**Read [pptxgenjs.md](references/pptxgenjs.md) for full details.**
 
 Use PptxGenJS when no template or reference presentation is available and you need programmatic control.
 

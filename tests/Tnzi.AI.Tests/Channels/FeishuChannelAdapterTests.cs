@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using Moq.Protected;
 using Tnzi.AI.Channels.Adapters.Feishu;
@@ -216,7 +216,7 @@ public class FeishuChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersFeishu()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("FeishuChannelAdapter");
         source.ShouldContain("options.Feishu.Enabled");
     }
@@ -224,7 +224,7 @@ public class FeishuChannelAdapterTests
     [Fact]
     public void FeishuOptions_HasRequiredFields()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Adapters/Feishu/FeishuAdapterOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Adapters/Feishu/FeishuAdapterOptions.cs");
         source.ShouldContain("AppId");
         source.ShouldContain("AppSecret");
         source.ShouldContain("EncryptKey");

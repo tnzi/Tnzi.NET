@@ -100,6 +100,35 @@ internal static class TemplatePathHelper
     }
 
     /// <summary>
+    /// 判断已规范化的绝对路径是否位于某个根目录内。
+    /// 与 <see cref="TryResolveWithinRoot"/> 用同一套前缀比较规则（带目录分隔符），
+    /// 供调用方拿到一个绝对路径后反向校验其归属。
+    /// </summary>
+    public static bool IsWithinRoot(string? root, string normalizedFullPath)
+    {
+        if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(normalizedFullPath))
+            return false;
+
+        try
+        {
+            var normalizedRoot = Path.GetFullPath(root);
+            var rootPrefix = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? normalizedRoot
+                : normalizedRoot + Path.DirectorySeparatorChar;
+
+            return normalizedFullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 把相对路径解析为搜索根内的绝对路径；越界或路径非法时返回 false。
     /// 前缀比较带上目录分隔符，否则同级的兄弟目录（root 为 "…/app" 时的 "…/app_bak"）会被误判为在根内。
     /// </summary>

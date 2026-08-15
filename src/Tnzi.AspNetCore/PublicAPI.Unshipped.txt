@@ -87,3 +87,14 @@ Tnzi.AspNetCore.Http.HttpClientCapabilities.HttpClientCapabilities(Microsoft.Asp
 Tnzi.AspNetCore.Http.HttpClientCapabilities.Supports(string! capability) -> bool
 readonly Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.Catalog -> Tnzi.Capabilities.ICapabilityCatalog!
 virtual Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.GetCapabilities() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto!>!
+Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.set -> void
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Allow = 0 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Deny = 1 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Global = 2 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.get -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.set -> void
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.GetPartitionKey(Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.Order.get -> int

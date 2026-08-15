@@ -15,21 +15,25 @@ public interface ITemplateEngine
     Task<string> RenderAsync(string templateContent, object? model = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 从文件渲染模板
+    /// 从文件渲染模板。
+    /// 文件开头的 YAML front matter（<c>--- ... ---</c> 块）在编译前被剥离：不进入输出，
+    /// 其中的 <c>@</c> 也不会被当作 Razor 表达式求值。
     /// </summary>
     /// <param name="filePath">模板文件路径</param>
     /// <param name="model">模板模型</param>
-    /// <param name="layoutPath">布局文件路径（可选）</param>
+    /// <param name="layoutPath">布局文件路径（可选）。front matter 里的 <c>layout:</c> 在本路径上不生效——引擎只剥离不解析元数据，需要元数据驱动请用 <c>ITemplateRenderService</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>渲染后的内容</returns>
     Task<string> RenderFromFileAsync(string filePath, object? model = null, string? layoutPath = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 从模板名称渲染（从模板存储加载）
+    /// 按模板名称渲染：在 <c>TemplateRootPath</c> 下把名称解析为文件路径后渲染。
+    /// 走的是文件系统，不查数据库（数据库优先的加载在 <c>ITemplateRenderService</c>）。
+    /// front matter 的处理同 <see cref="RenderFromFileAsync"/>。
     /// </summary>
-    /// <param name="templateName">模板名称</param>
+    /// <param name="templateName">模板名称（相对模板根目录的路径，如 <c>Notification/Email/WelcomeEmail</c>）</param>
     /// <param name="model">模板模型</param>
-    /// <param name="layoutName">布局名称（可选）</param>
+    /// <param name="layoutName">布局路径（可选，同样相对模板根目录）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>渲染后的内容</returns>
     Task<string> RenderFromNameAsync(string templateName, object? model = null, string? layoutName = null, CancellationToken cancellationToken = default);

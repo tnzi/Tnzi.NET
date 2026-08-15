@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.AI.Tests.Security;
 
 public class ToolPermissionTests
@@ -324,7 +324,7 @@ public class ToolPermissionTests
             {
                 ToolPattern = "*",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = "D:\\repo\\Framework\\src",
                 Behavior = PermissionBehavior.Ask,
                 Reason = "Source tree requires approval"
             }
@@ -334,12 +334,12 @@ public class ToolPermissionTests
         {
             ToolName = "write_file",
             ToolGroup = "file",
-            CandidatePaths = ["C:/src/Tnzi.NET/src/Tnzi.AI/Tool.cs"]
+            CandidatePaths = ["D:/repo/Framework/src/Tnzi.AI/Tool.cs"]
         });
 
         decision.Behavior.ShouldBe(PermissionBehavior.Ask);
         decision.Reason.ShouldBe("Source tree requires approval");
-        decision.MatchedPathPrefix.ShouldBe("D:\\My\\Tnzi.NET\\src");
+        decision.MatchedPathPrefix.ShouldBe("D:\\repo\\Framework\\src");
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public class ToolPermissionTests
             {
                 ToolPattern = "*",
                 ToolGroup = "file",
-                PathPrefix = "D:\\My\\Tnzi.NET\\src",
+                PathPrefix = "D:\\repo\\Framework\\src",
                 Behavior = PermissionBehavior.Ask,
                 Reason = "Source tree requires approval"
             }

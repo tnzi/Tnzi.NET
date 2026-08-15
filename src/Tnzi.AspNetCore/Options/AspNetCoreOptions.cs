@@ -7,6 +7,33 @@ namespace Tnzi.AspNetCore.Options;
 public class AspNetCoreOptions
 {
     /// <summary>
+    /// 获取或设置 是否采集客户端来源地址。默认 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 置为 <c>false</c> 后，<c>GetClientIp()</c> 一律返回 <c>null</c>，
+    /// 于是请求日志、访问日志、审计上下文、限流告警等<strong>全部下游一次性拿不到地址</strong>——
+    /// 这是唯一的采集入口，在这里切断比给每个消费者各加一个开关可靠得多。
+    /// </para>
+    /// <para>
+    /// <strong>与「脱敏」的区别。</strong>脱敏是把已经取到的值替换掉，它是一行可以被误删的代码；
+    /// 这个开关让值<em>从来没有被取到过</em>。对匿名举报、举报人保护一类的场景，
+    /// 「日志里没有这个字段」和「日志里这个字段是星号」是两件事：前者在被强制要求交出日志时也无从交出。
+    /// </para>
+    /// <para>
+    /// <strong>关闭它会影响限流。</strong>匿名请求的限流分区默认就是按来源地址做的，
+    /// 关掉之后匿名请求将没有分区键，行为由 <see cref="RateLimitOptions.MissingPartitionKey"/> 决定。
+    /// 需要同时保住限流的部署，应注册自己的 <c>IRateLimitPartitionKeyProvider</c>
+    /// （例如按一次性提交票据分区），或把该选项设为拒绝。
+    /// </para>
+    /// <para>
+    /// <strong>刻意不做成运行时可改的设置项。</strong>它是部署级的隐私决策：
+    /// 若能从管理端热改，等于给「悄悄把地址采集打开」留了一扇不留痕迹的门。
+    /// </para>
+    /// </remarks>
+    public bool CollectClientIpAddress { get; set; } = true;
+
+    /// <summary>
     /// 获取或设置 是否启用全局模型验证过滤器
     /// </summary>
     public bool EnableGlobalModelValidation { get; set; } = true;

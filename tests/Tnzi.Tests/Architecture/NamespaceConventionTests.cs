@@ -20,6 +20,9 @@ namespace Tnzi.Tests.Architecture;
 /// <c>Data/Filtering/</c>、<c>Extensions/Primitives/</c>、<c>Controllers/Admin/</c> 里的文件
 /// 仍属父命名空间 —— 命名空间是消费方的**导入单位**，不该让消费方为「我们怎么分文件」
 /// 多写 N 行 using。
+///
+/// 扫描范围见 <see cref="ScanRoots"/>（<c>src/</c> 与 <c>tools/</c>），
+/// 由 <see cref="Scan_CoversEveryRoot"/> 守着「扫描面没塌」。
 /// </summary>
 public class NamespaceConventionTests
 {
@@ -73,7 +76,7 @@ public class NamespaceConventionTests
             if (RegisteredExceptions.ContainsKey(rel)) continue;
 
             var segments = rel.Split('/');
-            // segments: src / {Proj} / [dir1 / dir2 / ...] / File.cs
+            // segments: {root} / {Proj} / [dir1 / dir2 / ...] / File.cs   （root = src 或 tools）
             if (segments.Length < 4) continue;      // 项目根下的文件 -> 允许根命名空间
             var topDir = segments[2];
 
@@ -90,6 +93,30 @@ public class NamespaceConventionTests
             + string.Join("\n  ", violations));
     }
 
+    /// <summary>
+    /// 每个扫描根都必须真的扫到文件。
+    /// </summary>
+    /// <remarks>
+    /// R1/R2 两条都是「找不到违规即通过」，所以**扫描面塌掉与没有违规不可区分**：
+    /// 路径写错、目录改名、枚举抛异常，表现全都是一片绿。这条守卫把两者分开 ——
+    /// 它是这个仓库反复兑现过的教训（模块依赖门禁曾长年只审 10/54 个模块而全绿）。
+    /// </remarks>
+    [Fact]
+    public void Scan_CoversEveryRoot()
+    {
+        var repoRoot = RepoRoot.Locate();
+
+        var byRoot = EnumerateDeclarations(repoRoot)
+            .GroupBy(d => d.Rel.Split('/')[0], StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
+        var empty = ScanRoots.Where(r => !byRoot.ContainsKey(r) || byRoot[r] == 0).ToList();
+
+        Assert.True(empty.Count == 0,
+            $"以下扫描根一个命名空间声明都没扫到，是扫描坏了而不是没有违规: {string.Join(", ", empty)}\n"
+            + $"实际扫到: {string.Join(", ", byRoot.Select(kv => $"{kv.Key}={kv.Value}"))}");
+    }
+
     [Fact]
     public void RegisteredExceptions_AreNotStale()
     {
@@ -103,10 +130,19 @@ public class NamespaceConventionTests
             "以下登记的例外所指文件已不存在，应从 RegisteredExceptions 移除:\n  " + string.Join("\n  ", stale));
     }
 
+    /// <summary>
+    /// 扫描根。<c>tools/</c> 于 2026-08-15 工具链合并回本仓时加入：它下面的
+    /// <c>Tnzi.Cli</c> / <c>Tnzi.Mcp</c> / <c>Tnzi.Scaffold</c> 同样是 <c>Tnzi.*</c> 程序集，
+    /// R1（不得跨程序集占名）对它们一样成立。合并当天核对过三者都符合 R1/R2，
+    /// 所以纳入门禁的成本是零 —— 而不纳入的代价，那次合并刚好给出了实例：
+    /// 分居两仓、没有门禁盯着的东西（模板、笔记、MCP 能力清单的数字）全都漂了。
+    /// </summary>
+    private static readonly string[] ScanRoots = ["src", "tools"];
+
     private static IEnumerable<(string Proj, string File, string Rel, string Ns)> EnumerateDeclarations(string repoRoot)
     {
-        var srcDir = Path.Combine(repoRoot, "src");
-        foreach (var projDir in Directory.GetDirectories(srcDir))
+        foreach (var root in ScanRoots)
+        foreach (var projDir in EnumerateProjectDirs(repoRoot, root))
         {
             var proj = Path.GetFileName(projDir);
             // Tnzi.UI 是前端 pnpm monorepo，不含 C# 项目
@@ -128,6 +164,13 @@ public class NamespaceConventionTests
                 yield return (proj, file, rel, m.Groups[1].Value);
             }
         }
+    }
+
+    /// <summary>缺失的扫描根返回空，交给 <c>Scan_CoversEveryRoot</c> 报错，而不是在这里静默跳过。</summary>
+    private static IEnumerable<string> EnumerateProjectDirs(string repoRoot, string root)
+    {
+        var dir = Path.Combine(repoRoot, root);
+        return Directory.Exists(dir) ? Directory.GetDirectories(dir) : [];
     }
 
     /// <summary>

@@ -58,8 +58,32 @@ public class RateLimitingMiddleware
         var key = GetRateLimitKey(context, rule, matchedPath);
         if (string.IsNullOrEmpty(key))
         {
-            await _next(context);
-            return;
+            // 拿不到分区键：无法把请求归到任何额度上，按配置处置。
+            // 默认放行是为了兼容既有行为，但那意味着限流在此静默失效，故记一条警告。
+            switch (options.MissingPartitionKey)
+            {
+                case MissingPartitionKeyBehavior.Deny:
+                    // 必须记日志：这条 429 与「真的超限」在响应上完全一样，
+                    // 不记的话运维分不清是配额用尽还是分区判定失灵，而后者是要去修的。
+                    _logger.LogWarning(
+                        "Request rejected: no rate limit partition key available - Path: {Path}. "
+                        + "Register an IRateLimitPartitionKeyProvider if anonymous requests must be served.",
+                        context.Request.Path);
+                    await WriteRateLimitedAsync(context, ResolveWindowSeconds(rule, options));
+                    return;
+
+                case MissingPartitionKeyBehavior.Global:
+                    key = $"global:{matchedPath ?? context.Request.Path.Value ?? string.Empty}";
+                    break;
+
+                default:
+                    _logger.LogWarning(
+                        "Rate limiting skipped: no partition key available for an anonymous request - Path: {Path}. "
+                        + "Configure AspNetCore:RateLimit:MissingPartitionKey or register an IRateLimitPartitionKeyProvider.",
+                        context.Request.Path);
+                    await _next(context);
+                    return;
+            }
         }
 
         // 检查白名单
@@ -83,16 +107,13 @@ public class RateLimitingMiddleware
 
             if (count > rule.Limit)
             {
+                // IP 由 GetClientIp 统一判定是否采集，关闭采集的部署这里自然是空，
+                // 不需要在日志处再判一次（见 AspNetCoreOptions.CollectClientIpAddress）。
                 _logger.LogWarning(
                     "Rate limit exceeded - Key: {Key}, Count: {Count}, Limit: {Limit}, Window: {Window} seconds, Path: {Path}, IP: {IP}",
                     key, count, rule.Limit, rule.WindowSeconds, context.Request.Path, context.Request.GetClientIp());
 
-                context.Response.StatusCode = 429; // Too Many Requests
-                context.Response.ContentType = "application/json";
-                context.Response.Headers["Retry-After"] = rule.WindowSeconds.ToString();
-
-                var errorResult = ApiResult.Error("Rate limit exceeded. Please try again later.", 429);
-                await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
+                await WriteRateLimitedAsync(context, rule.WindowSeconds);
                 return;
             }
         }
@@ -121,6 +142,25 @@ public class RateLimitingMiddleware
 
         await _next(context);
     }
+
+    /// <summary>
+    /// 写出 429 响应。
+    /// </summary>
+    private static async Task WriteRateLimitedAsync(HttpContext context, int retryAfterSeconds)
+    {
+        context.Response.StatusCode = 429; // Too Many Requests
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+
+        var errorResult = ApiResult.Error("Rate limit exceeded. Please try again later.", 429);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
+    }
+
+    /// <summary>
+    /// 取窗口秒数，规则缺失时回退默认值（用于分区键缺失且配置为拒绝的分支）。
+    /// </summary>
+    private static int ResolveWindowSeconds(RateLimitRule? rule, RateLimitOptions options)
+        => rule?.WindowSeconds ?? (options.DefaultWindowSeconds > 0 ? options.DefaultWindowSeconds : 60);
 
     /// <summary>
     /// 检查路径是否排除限流
@@ -182,21 +222,40 @@ public class RateLimitingMiddleware
     }
 
     /// <summary>
-    /// 获取限流键
+    /// 获取限流键。
     /// </summary>
+    /// <remarks>
+    /// 分区来源依次是：注册的 <see cref="IRateLimitPartitionKeyProvider"/>、已登录用户、来源地址。
+    /// 三者都拿不到时返回空串，由调用方按 <see cref="RateLimitOptions.MissingPartitionKey"/> 处置。
+    /// <para>
+    /// 自定义提供者排在最前面，是为了让「不采集来源地址」的部署有办法在不牺牲限流的前提下成立；
+    /// 排在用户之前而不是之后，则是因为一个部署既然给出了自己的分区维度，就应当由它说了算。
+    /// </para>
+    /// </remarks>
     private static string GetRateLimitKey(HttpContext context, RateLimitRule? rule, string? matchedPath = null)
     {
         var path = context.Request.Path.Value ?? string.Empty;
         var keyPath = matchedPath ?? path; // 使用匹配的路径，如果没有则使用完整路径
 
-        // 优先使用用户ID（如果已认证）
+        // 优先使用自定义分区（未注册任何提供者时 DI 给出空集合，不产生开销）
+        var providers = context.RequestServices.GetServices<IRateLimitPartitionKeyProvider>();
+        foreach (var provider in providers.OrderBy(p => p.Order))
+        {
+            var partition = provider.GetPartitionKey(context);
+            if (!string.IsNullOrEmpty(partition))
+            {
+                return $"{partition}:{keyPath}";
+            }
+        }
+
+        // 其次使用用户ID（如果已认证）
         var currentUser = context.RequestServices.GetService<ICurrentUser>();
         if (currentUser?.Id != null)
         {
             return $"user:{currentUser.Id}:{keyPath}";
         }
 
-        // 否则使用 IP
+        // 最后使用来源地址；部署关闭采集时这里恒为空
         var ip = context.Request.GetClientIp();
         if (string.IsNullOrEmpty(ip))
         {

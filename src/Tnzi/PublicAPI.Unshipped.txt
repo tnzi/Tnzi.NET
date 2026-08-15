@@ -52,6 +52,7 @@ Tnzi.Documents.IDocumentConverter
 Tnzi.Documents.IDocumentConverter.CanConvert(string! fileName) -> bool
 Tnzi.Documents.IDocumentConverter.ConvertToPdfAsync(byte[]! source, string! sourceFileName, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<byte[]!>!
 Tnzi.Documents.IDocumentConverter.IsAvailable.get -> bool
+Tnzi.Documents.IDocumentConverter.IsAvailableFor(string! fileName) -> bool
 Tnzi.Domain.Entities.AuditIgnoreAttribute
 Tnzi.Domain.Entities.AuditIgnoreAttribute.AuditIgnoreAttribute() -> void
 Tnzi.Domain.Entities.ChildCollectionSync

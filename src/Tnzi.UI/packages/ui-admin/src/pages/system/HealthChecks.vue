@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <!--
     HealthChecks - read-only viewer for `Tnzi.HealthChecks` JSON output.
     Tnzi.HealthChecks doesn't ship a controller (it uses `MapHealthChecks`
@@ -195,7 +195,7 @@ async function refresh(): Promise<void> {
     // .RequireAuthorization()). `credentials: 'include'` covers cookie
     // auth. For cross-origin deployments (admin on a different host than
     // the API) consumers must either proxy /health* in their dev/prod
-    // gateway (see Acme's vite.config.ts) or override the endpoint
+    // gateway (see the consumer's vite.config.ts) or override the endpoint
     // via the route prop.
     const token = client.getAccessToken?.() ?? null
     const headers: Record<string, string> = { Accept: 'application/json' }

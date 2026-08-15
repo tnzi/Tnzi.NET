@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Moq.Protected;
 using Tnzi.AI.Channels.Adapters.Slack;
 using Tnzi.AI.Channels.Bus;
@@ -397,7 +397,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public void ChannelsModule_RegistersSlack()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/AIChannelsModule.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/AIChannelsModule.cs");
         source.ShouldContain("SlackChannelAdapter");
         source.ShouldContain("options.Slack.Enabled");
     }
@@ -405,7 +405,7 @@ public class SlackChannelAdapterTests
     [Fact]
     public void SlackOptions_HasRequiredFields()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Adapters/Slack/SlackAdapterOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Adapters/Slack/SlackAdapterOptions.cs");
         source.ShouldContain("BotToken");
         source.ShouldContain("AppToken");
         source.ShouldContain("SigningSecret");
@@ -417,14 +417,14 @@ public class SlackChannelAdapterTests
     [Fact]
     public void ChannelsModuleOptions_HasSlackProperty()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptions.cs");
         source.ShouldContain("SlackAdapterOptions Slack");
     }
 
     [Fact]
     public void OptionsValidator_RequiresSlackBotToken()
     {
-        var source = File.ReadAllText("C:/src/Tnzi.NET/src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
+        var source = RepoRoot.ReadText("src/Tnzi.AI.Channels/Options/ChannelsModuleOptionsValidator.cs");
         source.ShouldContain("options.Slack.Enabled");
         source.ShouldContain("Slack.BotToken");
     }

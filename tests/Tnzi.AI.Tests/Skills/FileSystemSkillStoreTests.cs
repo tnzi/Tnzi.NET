@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
@@ -291,7 +291,7 @@ public class FileSystemSkillStoreTests : IDisposable
             tool-blacklist: dangerous_tool
             model: claude-3-opus
             provider: anthropic
-            agents: rpi-*, finance-agent
+            agents: demo-*, finance-agent
             ---
 
             ## When to Use
@@ -325,7 +325,7 @@ public class FileSystemSkillStoreTests : IDisposable
         skill.RequiredModel.ShouldBe("claude-3-opus");
         skill.RequiredProvider.ShouldBe("anthropic");
         skill.Agents.ShouldNotBeNull();
-        skill.Agents!.ShouldContain("rpi-*");
+        skill.Agents!.ShouldContain("demo-*");
         skill.Agents!.ShouldContain("finance-agent");
     }
 
@@ -428,17 +428,17 @@ public class FileSystemSkillStoreTests : IDisposable
     [Fact]
     public void IsAgentAllowed_WildcardMatch()
     {
-        var skill = new SkillDefinition { Agents = ["rpi-*"] };
-        SkillContextProvider.IsAgentAllowed(skill, "rpi-assistant").ShouldBeTrue();
-        SkillContextProvider.IsAgentAllowed(skill, "rpi-finance").ShouldBeTrue();
+        var skill = new SkillDefinition { Agents = ["demo-*"] };
+        SkillContextProvider.IsAgentAllowed(skill, "demo-assistant").ShouldBeTrue();
+        SkillContextProvider.IsAgentAllowed(skill, "demo-finance").ShouldBeTrue();
         SkillContextProvider.IsAgentAllowed(skill, "other-agent").ShouldBeFalse();
     }
 
     [Fact]
     public void IsAgentAllowed_CaseInsensitive()
     {
-        var skill = new SkillDefinition { Agents = ["Fabrikam-Assistant"] };
-        SkillContextProvider.IsAgentAllowed(skill, "rpi-assistant").ShouldBeTrue();
+        var skill = new SkillDefinition { Agents = ["Demo-Assistant"] };
+        SkillContextProvider.IsAgentAllowed(skill, "demo-assistant").ShouldBeTrue();
     }
 
     [Fact]

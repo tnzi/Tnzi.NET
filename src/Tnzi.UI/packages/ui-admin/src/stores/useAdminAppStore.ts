@@ -1,4 +1,4 @@
-import { defineStore } from 'pinia'
+﻿import { defineStore } from 'pinia'
 import { ref, watch, nextTick } from 'vue'
 import { useBreakpoints, breakpointsTailwind } from '@vueuse/core'
 import 'pinia-plugin-persistedstate'
@@ -24,7 +24,7 @@ export const useAdminAppStore = defineStore('admin-app', () => {
   /**
    * Consumer-supplied locale messages, deep-merged on top of ui-admin's
    * bundled `en`/`zh-cn` dictionaries by `useAdminRouteStore.resolveI18nKey`.
-   * Lets a host app (e.g. Acme) register its own
+   * Lets a host app register its own
    * `admin.modules.{module}.{page}.title` keys so the sidebar / breadcrumb
    * / tabs resolve them in the active locale - without this slot, custom
    * route titles would only humanise to English regardless of locale.

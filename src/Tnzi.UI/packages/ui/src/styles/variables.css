@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Default CSS variable values for Tnzi UI.
  *
  * These are the initial values - `createTnziUi()` plugin overrides them at runtime
@@ -17,7 +17,7 @@
   --tnzi-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   --tnzi-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 
-  /* Primary color ramp (default brand teal #0d9488 - Fabrikam Manus green) */
+  /* Primary color ramp (default brand teal #0d9488) */
   --tnzi-primary: #0d9488;
   --tnzi-primary-rgb: 13 148 136;
   --tnzi-primary-50: #f3f9f8;

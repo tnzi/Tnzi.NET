@@ -1,4 +1,4 @@
-# Git worktrees
+﻿# Git worktrees
 .worktrees/
 
 # Build output directory
@@ -68,8 +68,22 @@ node_modules/
 
 # Vite temp files
 *.timestamp-*.mjs
+
+# npm 的 lock 不要 —— 本仓统一用 pnpm,出现它通常意味着有人误用了 npm install
 package-lock.json
-pnpm-lock.yaml
+
+# pnpm-lock.yaml 刻意**不**忽略。
+#
+# 它曾经在这里被忽略,后果是两条:
+#   1. ui-frontend-quality.yml 里 setup-node 的依赖缓存指向 pnpm-lock.yaml,
+#      checkout 后文件不存在 → "Some specified paths were not resolved" →
+#      该 workflow 在缓存步骤就退出,install / typecheck / lint / build / test
+#      一个都没跑过。它每次只用 17-23 秒就"失败",没人细看过为什么。
+#   2. 消费方以 link: 引用 @tnzi/*,两边各自解析 ^ 范围,
+#      谁先重装 node_modules 谁就漂到不同的 vue 补丁版,
+#      然后跨包传递的类型全部不兼容 —— 而这在 node_modules 被重装前不可见。
+#
+# 两条都要求 lock 进版本控制。
 .pnpm-store/
 .npm/
 .pnpm-debug.log*
@@ -95,6 +109,25 @@ coverage/
 *.pubxml.user
 
 
+# 证书与私钥,一律不进版本控制(build/Tnzi.snk 是唯一的例外,它是签名标识不是凭据)
+*.pfx
+*.pem
+*.key
+*.p12
+*.cer
+
+# 本机配置覆盖
+appsettings.local.json
+appsettings.*.local.json
+
+# 测试产物
+TestResults/
+*.coverage
+*.coveragexml
+
+# tools/Tnzi.Mcp 发布时会把 docs/ 复制进输出目录;源码树里不该出现这份副本
+tools/Tnzi.Mcp/docs/
+
 # VS Code
 .vscode/
 
@@ -105,52 +138,3 @@ Thumbs.db
 *.swo
 
 /.playwright-mcp
-
-# >>> Cloud Sync (managed by cloud-sync)
-.cloud-sync
-CLAUDE.md
-.claude/
-.cursor
-.windsurf
-.aider
-.codeium
-.continue
-.playwright/
-.superpowers/
-src/Tnzi.AI/CLAUDE.md
-src/Tnzi.UI/packages/core/CLAUDE.md
-src/Tnzi.UI/packages/ui-admin/CLAUDE.md
-src/Tnzi.UI/packages/ui-ai/CLAUDE.md
-src/Tnzi.UI/packages/ui/CLAUDE.md
-projects/acme/CLAUDE.md
-src/Tnzi.UI/packages/mobile/CLAUDE.md
-projects/acme/.claude/
-src/Tnzi.AI.Channels/CLAUDE.md
-src/Tnzi.Hangfire/CLAUDE.md
-src/Tnzi.Feature/CLAUDE.md
-src/Tnzi.Performance/CLAUDE.md
-src/Tnzi.Template/CLAUDE.md
-src/Tnzi.Audit/CLAUDE.md
-src/Tnzi.AI.Mcp/CLAUDE.md
-src/Tnzi.Chat/CLAUDE.md
-src/Tnzi.EFCore/CLAUDE.md
-src/Tnzi.Kafka/CLAUDE.md
-src/Tnzi.SignalR/CLAUDE.md
-src/Tnzi/CLAUDE.md
-src/Tnzi.AI.Workflow/CLAUDE.md
-src/Tnzi.Hosting/CLAUDE.md
-src/Tnzi.Authorization/CLAUDE.md
-src/Tnzi.Identity/CLAUDE.md
-src/Tnzi.Notification/CLAUDE.md
-src/Tnzi.Payment/CLAUDE.md
-src/Tnzi.AI.Rag/CLAUDE.md
-src/Tnzi.Storage/CLAUDE.md
-src/Tnzi.System/CLAUDE.md
-src/Tnzi.AspNetCore/CLAUDE.md
-src/Tnzi.AI.Sandbox/CLAUDE.md
-src/Tnzi.AI.Skills/CLAUDE.md
-src/Tnzi.Finance.Ai/CLAUDE.md
-src/Tnzi.Finance.Documents/CLAUDE.md
-src/Tnzi.Finance.Payroll/CLAUDE.md
-# <<< Cloud Sync (managed by cloud-sync)
-/projects/tailspin

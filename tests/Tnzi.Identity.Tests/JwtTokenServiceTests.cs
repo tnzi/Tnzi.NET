@@ -20,6 +20,71 @@ public class JwtTokenServiceTests
         return new JwtTokenService(Microsoft.Extensions.Options.Options.Create(identityOptions), null, serviceProvider.Object, null);
     }
 
+    /// <summary>没有配置 SecretKey 时，按给定环境名构造服务。</summary>
+    private static JwtTokenService CreateServiceWithoutSecret(string? environmentName)
+    {
+        var identityOptions = new IdentityOptions();
+        identityOptions.Jwt.SecretKey = null!;
+
+        // 完全限定以消歧义：Microsoft.Extensions.Hosting 下有同名接口，
+        // 而 JwtTokenService 的构造参数是 AspNetCore 那个。
+        Microsoft.AspNetCore.Hosting.IWebHostEnvironment? environment = null;
+        if (environmentName is not null)
+        {
+            var env = new Mock<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+            env.SetupGet(x => x.EnvironmentName).Returns(environmentName);
+            environment = env.Object;
+        }
+
+        // Development 分支会 LogWarning，而 ApplicationService 的 logger 是
+        // GetRequiredService<ILoggerFactory> 拿的 —— 裸 Mock 会在那里抛。
+        var serviceProvider = new Mock<IServiceProvider>();
+        serviceProvider
+            .Setup(x => x.GetService(typeof(Microsoft.Extensions.Logging.ILoggerFactory)))
+            .Returns(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+
+        return new JwtTokenService(
+            Microsoft.Extensions.Options.Options.Create(identityOptions),
+            null,
+            serviceProvider.Object,
+            environment);
+    }
+
+    /// <summary>
+    /// 缺少 SecretKey 时，只有 Development 允许回落到内置默认密钥。
+    /// </summary>
+    /// <remarks>
+    /// 判据曾是 <c>EnvironmentName == "Production"</c>，有两个洞：大小写敏感
+    /// （<c>production</c> 直接绕过），以及 Staging 和任何自定义环境名都不在拦截范围内 ——
+    /// 而它们同样是真实部署。默认密钥是写在源码里的公开字符串，一旦签了真 token，
+    /// 任何人都能伪造身份。这组用例把「哪些环境会被拒绝」钉死。
+    /// </remarks>
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("production")]   // 大小写敏感的旧判据在这里失守
+    [InlineData("PRODUCTION")]
+    [InlineData("Staging")]
+    [InlineData("Prod")]         // 自定义环境名
+    [InlineData("prod-eu")]
+    [InlineData(null)]           // 没有 IWebHostEnvironment：未知环境按拒绝处理
+    public void Constructor_WithoutSecretKey_OutsideDevelopment_Throws(string? environmentName)
+    {
+        var ex = Should.Throw<InvalidOperationException>(() => CreateServiceWithoutSecret(environmentName));
+        ex.Message.ShouldContain("JWT SecretKey must be configured");
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("development")]
+    public void Constructor_WithoutSecretKey_InDevelopment_FallsBackToDefault(string environmentName)
+    {
+        var service = CreateServiceWithoutSecret(environmentName);
+
+        // 能签出 token 就说明回落生效了（开发便利是这个分支存在的唯一理由）。
+        var token = service.GenerateToken(CreateUser(), []);
+        token.ShouldNotBeNullOrWhiteSpace();
+    }
+
     private static User CreateUser() => new() { Id = Guid.NewGuid(), UserName = "testuser" };
 
     private static IReadOnlyList<Claim> Decode(string token) =>
