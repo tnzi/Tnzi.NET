@@ -94,12 +94,24 @@ public class NamespaceConventionTests
     }
 
     /// <summary>
-    /// 每个扫描根都必须真的扫到文件。
+    /// 每个<b>在场的</b>扫描根都必须真的扫到文件。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// R1/R2 两条都是「找不到违规即通过」，所以**扫描面塌掉与没有违规不可区分**：
     /// 路径写错、目录改名、枚举抛异常，表现全都是一片绿。这条守卫把两者分开 ——
     /// 它是这个仓库反复兑现过的教训（模块依赖门禁曾长年只审 10/54 个模块而全绿）。
+    /// </para>
+    /// <para>
+    /// ★ 「在场」这个限定是 2026-08-30 为公开镜像加的。镜像只投影 <c>src/</c> +
+    /// <c>tests/</c> 与几个根文件，<c>tools/</c> 整个不去，于是这条断言在那边**必红**，
+    /// 而红的原因与代码质量无关。判据因此收窄成「每个<b>存在</b>的根都要扫到文件，
+    /// 且必需根必须存在」：<c>src/</c> 扫空仍然当场红，镜像里缺席的 <c>tools/</c> 安静跳过。
+    /// </para>
+    /// <para>
+    /// 代价写在明处：私有仓里 <c>tools/</c> 被整个删掉或改名，这条不再变红。那是 git
+    /// 层面一眼可见的事件，与「扫描面悄悄塌掉」不是一类风险 —— 后者恰恰无声，才要它守。
+    /// </para>
     /// </remarks>
     [Fact]
     public void Scan_CoversEveryRoot()
@@ -110,7 +122,17 @@ public class NamespaceConventionTests
             .GroupBy(d => d.Rel.Split('/')[0], StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
-        var empty = ScanRoots.Where(r => !byRoot.ContainsKey(r) || byRoot[r] == 0).ToList();
+        var missingRequired = RequiredScanRoots
+            .Where(r => !Directory.Exists(Path.Combine(repoRoot, r)))
+            .ToList();
+
+        Assert.True(missingRequired.Count == 0,
+            $"以下扫描根在仓库里不存在，是路径写错或目录改名: {string.Join(", ", missingRequired)}");
+
+        var empty = ScanRoots
+            .Where(r => Directory.Exists(Path.Combine(repoRoot, r)))
+            .Where(r => !byRoot.ContainsKey(r) || byRoot[r] == 0)
+            .ToList();
 
         Assert.True(empty.Count == 0,
             $"以下扫描根一个命名空间声明都没扫到，是扫描坏了而不是没有违规: {string.Join(", ", empty)}\n"
@@ -139,6 +161,12 @@ public class NamespaceConventionTests
     /// </summary>
     private static readonly string[] ScanRoots = ["src", "tools"];
 
+    /// <summary>
+    /// 必须在场的扫描根。<c>tools/</c> 刻意不在其中 —— 公开镜像不投影它，
+    /// 理由见 <see cref="Scan_CoversEveryRoot"/>。
+    /// </summary>
+    private static readonly string[] RequiredScanRoots = ["src"];
+
     private static IEnumerable<(string Proj, string File, string Rel, string Ns)> EnumerateDeclarations(string repoRoot)
     {
         foreach (var root in ScanRoots)
@@ -166,7 +194,10 @@ public class NamespaceConventionTests
         }
     }
 
-    /// <summary>缺失的扫描根返回空，交给 <c>Scan_CoversEveryRoot</c> 报错，而不是在这里静默跳过。</summary>
+    /// <summary>
+    /// 缺失的扫描根返回空，判定留给 <see cref="Scan_CoversEveryRoot"/>，不在这里静默跳过 ——
+    /// 必需根缺席在那里是错误，可选根（<c>tools/</c>，公开镜像不投影）缺席才是跳过。
+    /// </summary>
     private static IEnumerable<string> EnumerateProjectDirs(string repoRoot, string root)
     {
         var dir = Path.Combine(repoRoot, root);
