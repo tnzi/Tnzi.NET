@@ -8,13 +8,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="8.0.0">
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -73,6 +73,17 @@
     <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification.Push\Tnzi.Notification.Push.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage.Cloud\Tnzi.Storage.Cloud.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Stripe\Tnzi.Payment.Stripe.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.PayPal\Tnzi.Payment.PayPal.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage.Workspace\Tnzi.Storage.Workspace.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Feature\Tnzi.Feature.csproj" />
@@ -100,5 +111,12 @@
     <ProjectReference Include="..\..\src\Tnzi.AI.Channels\Tnzi.AI.Channels.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI.Cli\Tnzi.AI.Cli.csproj" />
   </ItemGroup>
+
+
+  <!--
+    本项目引用了每一个模块，其中 Tnzi.Documents 带 PDFium/SkiaSharp 的原生资产：
+    只为当前主机 RID 构建（不设的话二十来个 RID 全带进 bin，实测 599 MB），并剔除原生 pdb。
+  -->
+  <Import Project="..\TnziNativeAssets.props" />
 
 </Project>

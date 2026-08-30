@@ -155,6 +155,103 @@ public class InformationalAndYtdAggregateTests : PayrollIntegrationTestBase
         result.Code.ShouldBe(400);
     }
 
+    // ---------- 备注组件的舍入口径 ----------
+
+    [Fact]
+    public async Task Informational_IsNotRoundedToCurrency_SoItStaysSubstitutableForItsOwnExpression()
+    {
+        await SeedCoaAsync();
+        var basic = await ComponentWithAccountsAsync("BASIC", SalaryComponentType.Earning, "BASE", expenseAccountCode: "5300");
+        // 具名中间量：1000 / 3 = 333.333…，舍到 2 位就是 333.33。
+        var mid = await ComponentWithAccountsAsync("MID", SalaryComponentType.Informational, "BASE / 3");
+        // 引用中间量：舍了 → 999.99；没舍 → 1000.00。
+        var viaMid = await ComponentWithAccountsAsync("TAX_VIA_MID", SalaryComponentType.Deduction, "MID * 3", liabilityAccountCode: "2200");
+        // 把同一条子表达式原文内联——"具名中间量可以替换成它自己的表达式"正是这个类型的存在理由。
+        var inline = await ComponentWithAccountsAsync("TAX_INLINE", SalaryComponentType.Informational, "(BASE / 3) * 3");
+
+        var structure = await CreateStructureAsync("Rounding",
+            new SalaryStructureLineInputDto { ComponentId = basic, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = mid, Sequence = 2 },
+            new SalaryStructureLineInputDto { ComponentId = viaMid, Sequence = 3 },
+            new SalaryStructureLineInputDto { ComponentId = inline, Sequence = 4 });
+        structure.Succeeded.ShouldBeTrue(structure.Message);
+
+        var emp = await CreateEmployeeAsync("EMP1", "One");
+        await AssignAsync(emp.Id, structure.Data!.Id, 1000m, new DateTime(2026, 1, 1));
+
+        var run = await CreateRunAsync(new DateTime(2026, 6, 1), new DateTime(2026, 6, 30), new DateTime(2026, 6, 30));
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+
+        var list = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(run));
+        var slip = await InScopeAsync<IPayRunService, Result<PayslipDto>>(s => s.GetPayslipAsync(run, list.Data!.Single().Id));
+        var lines = slip.Data!.Lines.ToDictionary(l => l.ComponentCode, l => l.Amount);
+
+        // 中间量保留了小数（存储列是 decimal(19,4)，故对到 4 位）。
+        Math.Round(lines["MID"], 4).ShouldBe(333.3333m);
+        // ★ 具名与内联给出同一个数——舍到 2 位时这里是 999.99 对 1000.00，差 1 分。
+        lines["TAX_VIA_MID"].ShouldBe(lines["TAX_INLINE"]);
+        lines["TAX_VIA_MID"].ShouldBe(1000m);
+    }
+
+    [Fact]
+    public async Task MonetaryComponents_KeepTheirCurrencyRounding()
+    {
+        await SeedCoaAsync();
+        // 三个货币类型用同一条会产生无穷小数的公式：它们是要进合计、进分录、印在工资条上的钱，
+        // 必须仍舍到本位币精度。
+        var earn = await ComponentWithAccountsAsync("EARN", SalaryComponentType.Earning, "1000 / 3", expenseAccountCode: "5300");
+        var ded = await ComponentWithAccountsAsync("DED", SalaryComponentType.Deduction, "1000 / 3", liabilityAccountCode: "2200");
+        var emp = await ComponentWithAccountsAsync("EMPC", SalaryComponentType.EmployerContribution, "1000 / 3",
+            expenseAccountCode: "5300", liabilityAccountCode: "2100");
+
+        var structure = await CreateStructureAsync("MoneyRounding",
+            new SalaryStructureLineInputDto { ComponentId = earn, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = ded, Sequence = 2 },
+            new SalaryStructureLineInputDto { ComponentId = emp, Sequence = 3 });
+        structure.Succeeded.ShouldBeTrue(structure.Message);
+
+        var employee = await CreateEmployeeAsync("EMP1", "One");
+        await AssignAsync(employee.Id, structure.Data!.Id, 1000m, new DateTime(2026, 1, 1));
+
+        var run = await CreateRunAsync(new DateTime(2026, 6, 1), new DateTime(2026, 6, 30), new DateTime(2026, 6, 30));
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+
+        var list = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(run));
+        var slip = await InScopeAsync<IPayRunService, Result<PayslipDto>>(s => s.GetPayslipAsync(run, list.Data!.Single().Id));
+        var lines = slip.Data!.Lines.ToDictionary(l => l.ComponentCode, l => l.Amount);
+
+        lines["EARN"].ShouldBe(333.33m);
+        lines["DED"].ShouldBe(333.33m);
+        lines["EMPC"].ShouldBe(333.33m);
+        slip.Data.GrossPay.ShouldBe(333.33m);
+        slip.Data.TotalDeductions.ShouldBe(333.33m);
+        slip.Data.EmployerCost.ShouldBe(333.33m);
+    }
+
+    [Fact]
+    public async Task Informational_CanStillBeRoundedOnPurpose_WithRoundInTheFormula()
+    {
+        await SeedCoaAsync();
+        var basic = await ComponentWithAccountsAsync("BASIC", SalaryComponentType.Earning, "BASE", expenseAccountCode: "5300");
+        // 法规要求在某一步舍入时，写出来即可——白名单函数，看得见、可逐行核对。
+        var mid = await ComponentWithAccountsAsync("MID", SalaryComponentType.Informational, "round(BASE / 3, 2)");
+
+        var structure = await CreateStructureAsync("ExplicitRound",
+            new SalaryStructureLineInputDto { ComponentId = basic, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = mid, Sequence = 2 });
+        structure.Succeeded.ShouldBeTrue(structure.Message);
+
+        var emp = await CreateEmployeeAsync("EMP1", "One");
+        await AssignAsync(emp.Id, structure.Data!.Id, 1000m, new DateTime(2026, 1, 1));
+
+        var run = await CreateRunAsync(new DateTime(2026, 6, 1), new DateTime(2026, 6, 30), new DateTime(2026, 6, 30));
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+
+        var list = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(run));
+        var slip = await InScopeAsync<IPayRunService, Result<PayslipDto>>(s => s.GetPayslipAsync(run, list.Data!.Single().Id));
+        slip.Data!.Lines.Single(l => l.ComponentCode == "MID").Amount.ShouldBe(333.33m);
+    }
+
     // ---------- Ytd() 聚合键 ----------
 
     [Fact]

@@ -19,11 +19,26 @@ export {
   maybeTranslate,
   maybeTranslateKey,
   resolveBackendLabel,
+  translateChromeKey,
 } from './translate'
 
 export {
   getLocaleMessages,
   setLocaleMessages,
+  setLocaleLoader,
   loadLocaleMessages,
+  BUNDLED_LOCALES,
   type AdminLocale,
 } from './messages'
+
+export {
+  registerAdminLocale,
+  registerAdminLocales,
+  getRegisteredAdminLocale,
+  getRegisteredAdminLocales,
+  isAdminLocaleRegistered,
+  getDefaultAdminLocale,
+  resetAdminLocalesForTest,
+  type AdminLocaleDefinition,
+  type RegisteredAdminLocale,
+} from './locale-registry'

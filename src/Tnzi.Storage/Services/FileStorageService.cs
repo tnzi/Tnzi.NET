@@ -1,4 +1,4 @@
-﻿namespace Tnzi.Storage.Services;
+namespace Tnzi.Storage.Services;
 
 /// <summary>
 /// 文件存储服务实现（核心文件操作）
@@ -17,7 +17,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// 上传净化管线。<strong>未注册任何净化器时为空集合</strong>，
     /// 整条管线不执行、不读流、零开销——这是该能力保持可选的方式。
     /// </summary>
-    private readonly IReadOnlyList<IUploadSanitizer> _sanitizers;
+    private readonly UploadGuard _guard;
 
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
@@ -30,7 +30,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IPublicFileFieldResolver publicFieldResolver,
         IFileUrlSigner urlSigner,
         IServiceProvider serviceProvider,
-        IEnumerable<IUploadSanitizer>? sanitizers = null)
+        UploadGuard guard)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -40,113 +40,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
         _accessAuthorizer = Check.NotNull(accessAuthorizer);
         _publicFieldResolver = Check.NotNull(publicFieldResolver);
         _urlSigner = Check.NotNull(urlSigner);
-        _sanitizers = sanitizers?.OrderBy(s => s.Order).ToArray() ?? [];
+        // 两道闸门（体积/扩展名 + 净化管线）收在 UploadGuard 里，由容器给同一份，
+        // 三条写路径共用，避免各抄一遍后逐条漂移。
+        _guard = Check.NotNull(guard);
     }
 
-    /// <summary>
-    /// 依次运行已注册的净化器，返回最终要落库的流。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 流的所有权按本模块既有约定处理：<strong>传入的原始流始终归调用方</strong>，
-    /// 本方法只 dispose 由净化器创建的中间流（<c>disposables</c>）。
-    /// 因此调用方拿到的返回流可能不是它传进来的那个。
-    /// </para>
-    /// <para>
-    /// 每个净化器执行前把流复位到起点：上一个净化器读到哪里是它的自由
-    /// （见 <see cref="IUploadSanitizer"/> 的约定），不复位会让下一个读到半截内容。
-    /// </para>
-    /// </remarks>
-    private async Task<SanitizedUpload> RunSanitizersAsync(
-        string fileName, string extension, string contentType, Stream stream)
-    {
-        if (_sanitizers.Count == 0)
-        {
-            return SanitizedUpload.Passthrough(stream);
-        }
-
-        var owned = new List<Stream>();
-        var current = stream;
-
-        foreach (var sanitizer in _sanitizers)
-        {
-            if (current.CanSeek)
-            {
-                current.Position = 0;
-            }
-
-            var result = await sanitizer.SanitizeAsync(
-                new UploadSanitizationContext(fileName, extension, contentType, current));
-
-            if (result.Rejected)
-            {
-                LogWarning(
-                    "Upload rejected by {Sanitizer} for file {FileName}: {Reason}",
-                    sanitizer.GetType().Name, fileName, result.Reason);
-                return SanitizedUpload.Rejected(current, owned, result.Reason!);
-            }
-
-            if (result.Replacement != null && !ReferenceEquals(result.Replacement, current))
-            {
-                owned.Add(result.Replacement);
-                current = result.Replacement;
-            }
-        }
-
-        if (current.CanSeek)
-        {
-            current.Position = 0;
-        }
-
-        return SanitizedUpload.Accepted(current, owned);
-    }
-
-    /// <summary>
-    /// 净化管线的产物，负责释放管线自己创建的中间流。
-    /// </summary>
-    /// <remarks>
-    /// 做成 <see cref="IAsyncDisposable"/> 是为了配合 <c>await using</c>：
-    /// <c>SaveAsync</c> 有多个提前 return 的分支（校验失败、MD5 命中去重…），
-    /// 用 try/finally 逐个照顾容易漏掉一条。
-    /// <strong>传入的原始流不在释放范围内</strong>，它始终归调用方。
-    /// </remarks>
-    private sealed class SanitizedUpload : IAsyncDisposable
-    {
-        private readonly List<Stream> _owned;
-
-        private SanitizedUpload(Stream content, List<Stream> owned, bool rejected, string? reason)
-        {
-            Content = content;
-            _owned = owned;
-            IsRejected = rejected;
-            Reason = reason;
-        }
-
-        /// <summary>最终应交给存储提供者的流。</summary>
-        public Stream Content { get; }
-
-        /// <summary>是否被某个净化器拒绝。</summary>
-        public bool IsRejected { get; }
-
-        /// <summary>拒绝原因。</summary>
-        public string? Reason { get; }
-
-        public static SanitizedUpload Passthrough(Stream stream) => new(stream, [], false, null);
-
-        public static SanitizedUpload Accepted(Stream content, List<Stream> owned)
-            => new(content, owned, false, null);
-
-        public static SanitizedUpload Rejected(Stream content, List<Stream> owned, string reason)
-            => new(content, owned, true, reason);
-
-        public async ValueTask DisposeAsync()
-        {
-            foreach (var stream in _owned)
-            {
-                await stream.DisposeAsync();
-            }
-        }
-    }
 
     public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
     {
@@ -169,7 +67,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // 而 MD5 既用于去重也用于完整性校验——基于原始内容算出的哈希
         // 与实际落库的字节对不上，会让去重命中错误的记录、让完整性校验永远失败。
         // 未注册任何净化器时 Passthrough，不读流也不产生开销。
-        await using var sanitized = await RunSanitizersAsync(originalFileName, extension, contentType, stream);
+        await using var sanitized = await _guard.RunAsync(originalFileName, extension, contentType, stream);
         if (sanitized.IsRejected)
         {
             return Fail<FileRecord>(sanitized.Reason!, 400);
@@ -828,6 +726,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 if (string.IsNullOrEmpty(entry.Name))
                     continue;
 
+                // 解包等于把 zip 里的每一条都写成一条独立的文件记录，所以它是一条真正的
+                // 写入路径，必须过和直传同一道闸门 —— 否则把 payload.exe 塞进一个 .zip
+                // 就绕开了扩展名白名单。★ 单条不合规只跳过它，不作废整包：一个压缩包里
+                // 混进一个不允许的类型，不该让其余几十条合规内容也解不出来。
+                if (_guard.ValidateExtension<FileRecord>(entry.Name) != null)
+                {
+                    LogWarning(
+                        "Skipped zip entry {EntryName} from {FileId}: file type is not allowed.",
+                        entry.Name, fileId);
+                    continue;
+                }
+
                 // 使用临时文件而非 MemoryStream，避免大条目占用大量内存
                 var tempFilePath = Path.GetTempFileName();
                 try
@@ -1270,36 +1180,29 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// 验证文件（大小和类型）
     /// </summary>
     private Result<T>? ValidateFile<T>(string fileName, Stream stream)
-    {
-        // 不可 seek 的流量不出大小，这里就不拦（拦不住也不该为此抛 NotSupportedException）。
-        // 这类请求的兜底在更外层：StorageModule 已按 MaxFileSize 放开并限制了请求体上限，
-        // 超限的 HTTP 上传由 Kestrel / IIS 先行截断。
-        var size = TryGetStreamLength(stream);
-        if (size > Options.MaxFileSize)
-        {
-            return Fail<T>($"File size ({size} bytes) exceeds maximum allowed size ({Options.MaxFileSize} bytes).", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        var extension = Path.GetExtension(fileName);
-        if (Options.AllowedExtensions.Any() &&
-            !Options.AllowedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-        {
-            return Fail<T>($"File type '{extension}' is not allowed. Allowed types: {string.Join(", ", Options.AllowedExtensions)}", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        return null;
-    }
+        // 不可 seek 的流量不出大小，此时 TryGetStreamLength 返回 null、闸门放行
+        // （拦不住也不该为此抛 NotSupportedException）。这类请求的兜底在更外层：
+        // StorageModule 已按 MaxFileSize 放开并限制了请求体上限。
+        => _guard.Validate<T>(fileName, TryGetStreamLength(stream));
 
     /// <summary>
     /// 尝试通过 MD5 获取已存在的文件
     /// </summary>
     private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(string md5Hash, string originalFileName, Stream stream, bool isPublic = false)
     {
-        var existing = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
-        if (existing == null)
+        var match = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
+        if (match == null)
         {
             return null;
         }
+
+        // 按 id 再取一次（GetAsync → DbSet.FindAsync 先问变更跟踪器，命中就不发查询）。
+        // 上面那句按谓词查走的是 AsNoTracking，拿到的是脱离跟踪的**新实例**，
+        // 它的 ReferenceCount 是数据库里的值 —— 同一个作用域内第二次命中同一行时，
+        // 前一次的 ++ 可能还没落库（调用方开着事务就一定没有），在这个旧值上再 ++
+        // 只会把上一次的递增覆盖掉：引用计数少算，清理任务随后删掉仍被引用的文件。
+        // 与 FileShareService.LoadForUpdateAsync 同一路子。
+        var existing = await _repository.GetAsync(match.Id) ?? match;
 
         // 内容相同但可见性诉求不同：本次上传要公开，命中的记录却是私密的。
         // 复用它等于把**别人的**私密文件一并改成人人可读 —— 上传者持有相同的字节

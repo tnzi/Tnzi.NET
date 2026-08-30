@@ -103,8 +103,10 @@ public class QuotaMiddlewareTests
         // Arrange
         var userId = Guid.NewGuid();
         var quotaService = new Mock<IQuotaService>();
+        // 错误码是「是否真的超限」的判据（见 QuotaMiddleware.IsQuotaExceeded），
+        // 真实服务始终带码，测试也照真实形态给
         quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Daily quota exceeded"));
+            .ReturnsAsync(Result.Failure<QuotaReservation>("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded));
 
         var middleware = CreateMiddleware(quotaService: quotaService);
         var context = CreateContext(userId);
@@ -121,6 +123,101 @@ public class QuotaMiddlewareTests
         nextCalled.ShouldBeFalse();
         result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
         result.Response.ShouldBe("Daily quota exceeded");
+    }
+
+    [Theory]
+    [InlineData(ErrorCodes.QuotaCheckFailed)]
+    [InlineData(ErrorCodes.QuotaConcurrencyConflict)]
+    public async Task InvokeAsync_ReservationFailsForNonQuotaReason_DoesNotReportQuotaExceeded(string errorCode)
+    {
+        // 配额记录缺失 / 并发冲突都不是「配额用完了」。贴成 quota_exceeded 会把排查方向
+        // 一路带到配额配置上去，而那里什么问题都没有。
+        var userId = Guid.NewGuid();
+        var quotaService = new Mock<IQuotaService>();
+        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<QuotaReservation>("Quota record is unavailable.", 500, errorCode));
+
+        var eventBus = new Mock<IEventBus>();
+        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
+        var context = CreateContext(userId);
+        var nextCalled = false;
+
+        var result = await middleware.InvokeAsync(context, (ctx, ct) =>
+        {
+            nextCalled = true;
+            return Task.FromResult(CreateSuccessResult());
+        });
+
+        nextCalled.ShouldBeFalse();
+        result.FinishReason.ShouldBe(FinishReasons.Error);
+        result.FinishReason.ShouldNotBe(FinishReasons.QuotaExceeded);
+        result.Response.ShouldBe("Quota record is unavailable.");
+
+        // 服务层错误码必须带上结果：HTTP 边界靠它把并发冲突还原成可重试的 409
+        result.ErrorCode.ShouldBe(errorCode);
+
+        // QuotaExceededEvent 喂告警与用量分析，混进基础设施故障会让超限统计失真
+        eventBus.Verify(
+            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ReplaceableService429WithoutErrorCode_TreatsAsQuotaExceeded()
+    {
+        // IQuotaService 是可替换契约：自定义实现按 HTTP 语义返回 429 而不带框架错误码，
+        // 完全合法。只认框架常量会把这类超限贴成通用错误——429 丢了，告警事件也不发。
+        var userId = Guid.NewGuid();
+        var quotaService = new Mock<IQuotaService>();
+        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<QuotaReservation>("Quota exceeded", 429));
+
+        var eventBus = new Mock<IEventBus>();
+        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
+        var context = CreateContext(userId);
+        var nextCalled = false;
+
+        var result = await middleware.InvokeAsync(context, (ctx, ct) =>
+        {
+            nextCalled = true;
+            return Task.FromResult(CreateSuccessResult());
+        });
+
+        nextCalled.ShouldBeFalse();
+        result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
+        result.ErrorCode.ShouldBe(ErrorCodes.QuotaExceeded);
+
+        eventBus.Verify(
+            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_ReservationFailsForNonQuotaReason_DoesNotReportQuotaExceeded()
+    {
+        var userId = Guid.NewGuid();
+        var quotaService = new Mock<IQuotaService>();
+        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure<QuotaReservation>(
+                "Quota record is unavailable.", 500, ErrorCodes.QuotaCheckFailed));
+
+        var eventBus = new Mock<IEventBus>();
+        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
+        var context = CreateContext(userId);
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in middleware.InvokeStreamingAsync(context, (ctx, ct) => AsyncEnumerable.Empty<AgentStreamChunk>()))
+        {
+            chunks.Add(chunk);
+        }
+
+        chunks.Count.ShouldBe(1);
+        chunks[0].FinishReason.ShouldBe(FinishReasons.Error);
+        chunks[0].FinishReason.ShouldNotBe(FinishReasons.QuotaExceeded);
+
+        eventBus.Verify(
+            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -180,7 +277,7 @@ public class QuotaMiddlewareTests
         var userId = Guid.NewGuid();
         var quotaService = new Mock<IQuotaService>();
         quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Monthly quota exceeded"));
+            .ReturnsAsync(Result.Failure<QuotaReservation>("Monthly quota exceeded", 429, ErrorCodes.QuotaExceeded));
 
         var middleware = CreateMiddleware(quotaService: quotaService);
         var context = CreateContext(userId);

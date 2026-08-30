@@ -57,6 +57,18 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{ 'update:modelValue': [value: number | null] }>()
 
+/**
+ * ⚠️ The `'en-US'` tag is LOAD-BEARING, not an un-internationalised leftover.
+ * This formats the EDITABLE text of an input, and `parse()` below is its
+ * inverse - it assumes `,` is the grouping separator and `.` the decimal
+ * point. Following the interface language here corrupts the round-trip:
+ * `fr-FR` renders `1 234,56`, which `parse()` turns into `NaN` (the field
+ * silently empties); `de-DE` renders `1.234,56`, which parses to `1.23456` -
+ * a valid-looking number off by a factor of 1000.
+ *
+ * Locale-aware money ENTRY is a real gap, but it needs a matching
+ * locale-aware `parse()`; changing only this line is a data-loss bug.
+ */
 function format(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return ''
   if (!props.thousands) return value.toFixed(props.precision)

@@ -3,6 +3,11 @@ using Tnzi.MultiTenancy;
 
 namespace Tnzi.Identity.IntegrationTests;
 
+// ★ 必须写在命名空间体内：本项目的命名空间落在 Tnzi.Identity 之下，而组织包让
+// Tnzi.Identity 多了一个名叫 `Organization` 的**命名空间**成员，裸写会报 CS0118。
+// global using 属于编译单元层，在这条查找路径上永远抢不到。
+using Tnzi.Identity.Organization.Entities;
+
 /// <summary>
 /// 测试用的具体 DbContext 实现
 /// </summary>
@@ -16,7 +21,10 @@ public class TestIdentityDbContext : IdentityDbContext<TestIdentityDbContext>
     {
     }
 
-    // 显式定义 DbSet 以便测试使用
+    // 显式定义 DbSet 以便测试使用。
+    // ★ Organizations 这个 DbSet 名**刻意保留**：EF 的默认表名取自 DbSet 属性名，
+    //   于是这里的表一直叫 Identity_Organizations（复数）。改掉它会让快照产生一次
+    //   rename，而这个项目正是用来证明拆分**不产生迁移**的。
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();

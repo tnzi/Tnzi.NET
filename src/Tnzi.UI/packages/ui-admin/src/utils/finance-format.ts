@@ -219,6 +219,20 @@ export function isoDateToLocalTs(iso: string): number {
  * `percent` is `null` when the base is 0 - an "infinite % change" is a lie
  * that comparison tables love to print; the caller renders `-` instead.
  */
+/**
+ * 由生效的账龄切分点生成四个范围标签（`1-30` / `31-60` / `61-90` / `90+` 形态）。
+ *
+ * 桶已由后端 `Finance:AgingBucketDays` 参数化，`AgingBucketsDto.agingBucketDays`
+ * 随桶下发；`days1To30` 等字段名是历史固定标识符，不描述真实边界——
+ * 写死标签会在配了 [7,14,21] 的部署里让列名与列里的数不符。
+ * 数字区间是语言中立的，不走 i18n；"Current" 一列仍由调用方翻译。
+ * 缺省（旧后端 / 字段缺失）按 30/60/90 显示，与历史行为逐字一致。
+ */
+export function agingBucketLabels(days?: readonly number[] | null): [string, string, string, string] {
+  const [a = 30, b = 60, c = 90] = Array.isArray(days) && days.length === 3 ? days : []
+  return [`1-${a}`, `${a + 1}-${b}`, `${b + 1}-${c}`, `${c}+`]
+}
+
 export function variance(current?: number | null, previous?: number | null): { delta: number; percent: number | null } {
   const c = current ?? 0
   const p = previous ?? 0

@@ -8,16 +8,21 @@
     <!-- 强命名以匹配 Tnzi.Documents 的 InternalsVisibleTo 公钥声明（friend 程序集必须同钥） -->
     <SignAssembly>true</SignAssembly>
     <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
+    <!-- 与被测项目同源：PDFtoImage 的 API 带 [SupportedOSPlatform] 标注，见该项目 csproj 的说明。 -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
+  <!-- 被测项目带 PDFium/SkiaSharp 的原生资产：只为当前主机 RID 构建，并剔除原生 pdb。 -->
+  <Import Project="..\TnziNativeAssets.props" />
+
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="8.0.0">
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -28,6 +33,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Documents\Tnzi.Documents.csproj" />
+    <!--
+      被测项目本身不引用 Tnzi.Imaging —— 这里引用是为了让验收级的那条测试写得出来：
+      造码（Tnzi.Imaging）→ 盖进 PDF（IPdfStamper）→ 光栅化（IPdfRasterizer）→ 读回（Tnzi.Imaging）。
+      这条纸质回路才是这几个原语存在的理由，拆开各测各的证明不了它闭合。
+    -->
+    <ProjectReference Include="..\..\src\Tnzi.Imaging\Tnzi.Imaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

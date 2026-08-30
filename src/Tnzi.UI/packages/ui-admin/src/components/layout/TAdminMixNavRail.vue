@@ -29,6 +29,8 @@ import { computed, h, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'v
 import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { TSvgIcon } from '@tnzi/ui'
 import { TMenuToggler } from '@tnzi/ui'
+import { NBadge } from 'naive-ui'
+import { normalizeNavBadge } from '../../utils/nav-badge'
 import { translatePageKey } from '../../i18n/translate'
 
 function resolveLabel(label: string): string {
@@ -94,6 +96,16 @@ function renderIcon(icon: string | undefined): ReturnType<typeof h> | null {
   return h(TSvgIcon, { icon, size: props.isMini ? 16 : 24 })
 }
 
+/**
+ * Count chip for a rail entry, or null when there is nothing to paint.
+ * The rail stacks icon over label, so the chip rides the icon's corner
+ * (there is no trailing edge to hang it off) - matching how the collapsed
+ * sider renders it.
+ */
+function badgeText(menu: AdminMenuItem): string | null {
+  return normalizeNavBadge(menu.badge)
+}
+
 // ── Scroll-aware edge shadows (mirrors TAdminSidebar) - header/footer only
 // cast their elevation shadow while the rail list is actually scrolled. ──
 const listRef = ref<HTMLElement | null>(null)
@@ -148,7 +160,22 @@ watch(() => props.isMini, () => void nextTick(updateScrollShadows))
         :title="resolveLabel(menu.label)"
         @click="handleClick(menu.key)"
       >
-        <component :is="renderIcon(menu.icon)" v-if="menu.icon" class="t-admin-mix-rail__icon" />
+        <!-- Count chip rides the icon's corner. An icon-less entry gets the
+             chip on its own, standing in for the icon, rather than an empty
+             badge wrapper naive would place off the label's left edge. -->
+        <NBadge
+          v-if="menu.icon && badgeText(menu)"
+          :value="badgeText(menu)!"
+          class="t-admin-mix-rail__badge"
+        >
+          <component :is="renderIcon(menu.icon)" class="t-admin-mix-rail__icon" />
+        </NBadge>
+        <component :is="renderIcon(menu.icon)" v-else-if="menu.icon" class="t-admin-mix-rail__icon" />
+        <NBadge
+          v-else-if="badgeText(menu)"
+          :value="badgeText(menu)!"
+          class="t-admin-mix-rail__badge t-admin-mix-rail__badge--solo"
+        />
         <p class="t-admin-mix-rail__label">{{ resolveLabel(menu.label) }}</p>
       </div>
     </div>
@@ -215,6 +242,13 @@ watch(() => props.isMini, () => void nextTick(updateScrollShadows))
   overflow-y: auto;
   overflow-x: hidden;
   /* Scrollbar styling delegated to styles/polish.css macOS-style overlay rules. */
+}
+
+/* The chip wraps the icon, so the wrapper takes over the icon's box in the
+   column (the label's own `padding-top` still supplies the gap below). */
+.t-admin-mix-rail__badge {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
 /* Item: icon stacked on top of a small label. This is soybean's

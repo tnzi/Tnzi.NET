@@ -29,8 +29,12 @@ public class TwoFactorCodeConfiguration : EntityTypeConfigurationBase<TwoFactorC
 
         // 索引配置
         builder.HasIndex(tfc => new { tfc.UserId, tfc.Type, tfc.CreationTime });
-        builder.HasIndex(tfc => new { tfc.Address, tfc.Type, tfc.CreationTime })
-            .HasDatabaseName("IX_TwoFactorCode_Address_Type_CreationTime");
+        // ★ Purpose 进这个索引而不是**另建**一个：加上用途之后，两类查询的谓词都以
+        // (Address, Type, Purpose) 打头 —— 验码是 (… Code, IsUsed, ExpiresAt)，
+        // 无缓存时的重发节流是 (… IsUsed) + 按 CreationTime 倒序。一个索引同时覆盖过滤与排序；
+        // 再留一个前缀重叠的旧索引只会白付写入成本，且它已经不精确匹配任何查询了。
+        builder.HasIndex(tfc => new { tfc.Address, tfc.Type, tfc.Purpose, tfc.CreationTime })
+            .HasDatabaseName("IX_TwoFactorCode_Address_Type_Purpose_CreationTime");
         builder.HasIndex(tfc => tfc.Code);
         builder.HasIndex(tfc => tfc.ExpiresAt);
     }

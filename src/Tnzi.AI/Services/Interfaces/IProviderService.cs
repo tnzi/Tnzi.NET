@@ -40,4 +40,15 @@ public interface IProviderService
     /// 失败时按 ProviderType 返回静态精选兜底列表。
     /// </summary>
     Task<Result<ProviderModelsDto>> ListModelsAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// 重排 Provider 的展示顺序（管理端拖拽排序）。
+    /// </summary>
+    /// <remarks>
+    /// 只动 <c>SortOrder</c>，不碰 <c>Priority</c>——后者决定同名时运行时实际连哪个 provider，
+    /// 调整列表顺序不该改变那件事。配置来源（<c>AI:Providers</c>）的条目没有实体行，不参与重排。
+    /// </remarks>
+    /// <param name="ids">按新顺序排列的 Provider Id，可以只是当前可见的一段</param>
+    /// <param name="ct">取消令牌</param>
+    Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default);
 }

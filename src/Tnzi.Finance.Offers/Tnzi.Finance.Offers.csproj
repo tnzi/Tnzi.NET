@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Commercial offer documents for the Tnzi.NET finance module: estimates (quotes) and purchase orders, with their own status machine, their own number series and conversion into an invoice / bill draft. Optional module - these documents never post to the ledger, so a consumer that only keeps books never sees the four tables, the twenty endpoints or the eight permission codes.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Finance\Tnzi.Finance.csproj" />
+  </ItemGroup>
+
+</Project>

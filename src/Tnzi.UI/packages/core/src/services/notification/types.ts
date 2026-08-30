@@ -169,6 +169,22 @@ export interface DeliveryReportDto {
   recipients: RecipientOutput[];
 }
 
+/**
+ * What a one-click unsubscribe link would act on.
+ * Backend: UnsubscribePreviewDto
+ */
+export interface UnsubscribePreviewDto {
+  /**
+   * Masked address (`a***@example.com`). The link may have been forwarded, so
+   * the full address is never echoed back - the mask keeps just enough for the
+   * recipient to recognise themselves.
+   */
+  maskedAddress: string;
+  channel: NotificationType;
+  /** null means the whole channel, not one category of it. */
+  category?: string | null;
+}
+
 // ============================================
 // Admin - Statistics Types
 // ============================================

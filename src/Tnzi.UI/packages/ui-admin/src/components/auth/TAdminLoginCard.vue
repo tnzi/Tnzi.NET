@@ -317,9 +317,10 @@ function fillDemo(account: DemoAccount): void {
   max-width: 92vw;
   background: rgb(var(--tnzi-container-bg-rgb, 255 255 255) / 1);
   border-radius: 12px;
-  box-shadow:
-    0 12px 32px rgb(0 21 41 / 0.08),
-    0 4px 12px rgb(0 21 41 / 0.04);
+  /* Overlay tier: this card floats over the login background art, so it keeps
+     real separation under every surface style. */
+  border: var(--tnzi-surface-overlay-border);
+  box-shadow: var(--tnzi-surface-overlay-shadow);
 }
 .t-admin-login--page .t-admin-login__card {
   flex: 0 0 420px;

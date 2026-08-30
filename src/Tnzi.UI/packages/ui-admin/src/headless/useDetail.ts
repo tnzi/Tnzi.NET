@@ -44,6 +44,17 @@ export interface DetailSection {
   icon?: string
   group?: string
   disabled?: boolean
+  /**
+   * Live count / short marker for this section - "N items behind this door
+   * are waiting on you". Reactive like every other field here: the page owns
+   * the number and re-renders the nav by handing over a new value, nothing
+   * remounts.
+   *
+   * `TDetailLayout` paints it in the `side` nav and on the `tabs` strip.
+   * Nullish, `0`, negative and blank render NOTHING; counts cap at 99. The
+   * framework never fetches, polls or interprets the value.
+   */
+  badge?: string | number | null
 }
 
 /**

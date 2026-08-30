@@ -50,6 +50,12 @@ export function createPayrollOptionSources(bridge: PayrollBridge) {
     return page.items
   })
 
+  // 一次性输入的录入面要按人选：只列在册员工，后端会再核他在不在这个批次里。
+  const employees = lazy<SelectOption>(async () => {
+    const page = await bridge.employees.fetch({ pageIndex: 1, pageSize: 500, filters: { isActive: true } })
+    return page.items.map((e) => ({ label: `${e.code} · ${e.name}`, value: e.id }))
+  })
+
   const cashAccounts = lazy<SelectOption>(async () => {
     const tree = await financeBridge.accounts.tree(false)
     const options: SelectOption[] = []
@@ -87,6 +93,8 @@ export function createPayrollOptionSources(bridge: PayrollBridge) {
     componentList: components.options,
     ensureComponents: components.ensure,
     refreshComponents: components.refresh,
+    employeeOptions: employees.options,
+    ensureEmployees: employees.ensure,
     cashAccountOptions: cashAccounts.options,
     ensureCashAccounts: cashAccounts.ensure,
     leafAccountOptions: leafAccounts.options,

@@ -46,7 +46,8 @@ public partial class AIModule : TnziApplicationModule
     {
         // 绑定配置选项
         BindAndValidate<AIOptions, AIOptionsValidator>(context, "AI");
-        BindAndValidate<AiUtilityOptions, AiUtilityOptionsValidator>(context, "AI:Utility");
+        // AiUtilityOptions 由核心的 CoreServicesModule 绑定（契约与默认实现已下沉到核心），
+        // 此处重复绑定会让同一个验证器注册两次，故刻意不绑。
         BindAndValidate<ThreadOptions, ThreadOptionsValidator>(context, "AI:Thread");
         BindAndValidate<LoopDetectionOptions, LoopDetectionOptionsValidator>(context, "AI:LoopDetection");
         BindAndValidate<SubAgentOptions, SubAgentOptionsValidator>(context, "AI:SubAgent");
@@ -122,6 +123,9 @@ public partial class AIModule : TnziApplicationModule
         // TryAdd 回退，回退见「已存在」即跳过 → 结构性消灭「先注册的 NoOp 抢占子模块 TryAdd」整类
         // bug（ced3e778），子模块不需要 RemoveAll+Add 约定，用任意常规注册方式即可。
         RegisterOptionalSubmoduleFallbacks(context.Services);
+
+        // SQL 工具套件的连接工厂回退（同样依赖 Post 阶段的时序，理由见该方法注释）。
+        RegisterSqlConnectionFactoryFallback(context.Services);
 
         return Task.CompletedTask;
     }

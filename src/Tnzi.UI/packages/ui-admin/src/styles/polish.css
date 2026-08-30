@@ -237,8 +237,9 @@ body *::-webkit-scrollbar-thumb:active {
   /* The tab container is a content card - follow the theme drawer's
      "Card / List" background (`--tnzi-admin-card-bg`); base container color
      when unset. */
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
-  border: 1px solid var(--tnzi-border);
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   padding: 0 12px 12px;
 }
@@ -751,4 +752,86 @@ body *::-webkit-scrollbar-thumb:active {
 .fin-offer-lapsed {
   color: var(--tnzi-error);
   font-weight: 600;
+}
+
+/* ── Nav count badge (expanded rows) ──────────────────────────────────────
+   The trailing chip on a sidebar row, a top-menu entry and a detail-section
+   nav row. Built by `components/layout/nav-badge.ts` - ONE class for all
+   three, so tuning it here moves all three at once.
+
+   It is NOT `NBadge`. A slotless naive badge renders as `<sup class="n-badge-sup">`
+   sized for a corner overlay, and all three things wrong with it are hardcoded
+   there rather than reachable through props:
+     - `<sup>` keeps the UA default `vertical-align: super` (naive overrides
+       `font-size` but never `vertical-align`), so the count floats above the
+       label's line;
+     - `height/line-height: 18px` against a 14px label reads as an alert, not
+       a count;
+     - `display: flex` puts it in its own anonymous block, swallowing the
+       space naive itself emits before the extra region, so it ends up glued
+       to the last letter of the label.
+   `NBadge` is still what paints the COLLAPSED rail, where a corner overlay on
+   an icon is exactly the right shape.
+
+   Lives here rather than in a scoped block because it renders inside naive's
+   own DOM (the menu row's extra region, a tab pane's label), which scoped
+   styles cannot reach. */
+.t-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  /* 16/11 keeps naive's own 18/12 chip proportions, one step down so the
+     count sits under the 14px label rather than shouting over it. */
+  height: 16px;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  /* Optical centre against the label's line - the whole point of not being
+     a `<sup>`. */
+  vertical-align: middle;
+  /* The gap. In a naive MENU row the rendered gap is a touch wider than this,
+     because naive emits its own space text node before the extra region and
+     we cannot select a text node to remove it; in a tab label it is exactly
+     this. Both read as a clear gap - do not "fix" the difference by
+     special-casing one surface. */
+  margin-left: 6px;
+  background: var(--tnzi-nav-badge-bg, var(--tnzi-error, #d03050));
+  color: var(--tnzi-nav-badge-fg, #fff);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── The chat window is a WINDOW, not a modal ──
+ *
+ * It is built on `NModal` for the teleport, the centring and the transition,
+ * but it must not behave like one: a modal lays a full-viewport mask and
+ * container over the page and swallows every click, so while chat was open no
+ * other part of the admin could be reached at all. On the desktop layout that
+ * reads as "chat is exclusive" - you cannot open a second feature without
+ * closing it first - and it is wrong everywhere else too. Chat is a companion
+ * surface you leave open while you work, the way a desktop IM client is.
+ *
+ * `:has()` is what lets us reach naive's own chrome from here: the class we
+ * control sits on the content, while the mask and the container that intercept
+ * the clicks are its ancestors, and scoped styles cannot cross the Teleport.
+ *
+ * The window itself takes pointer events back, so it stays fully interactive
+ * while everything around it is click-through. `trap-focus` / `block-scroll`
+ * are turned off on the component side - CSS alone would leave Tab cycling
+ * inside chat and the page scroll locked.
+ */
+.n-modal-container:has(.t-chat-window) {
+  pointer-events: none;
+}
+
+.n-modal-container:has(.t-chat-window) .n-modal-mask {
+  display: none;
+}
+
+.n-modal-container:has(.t-chat-window) .t-chat-window {
+  pointer-events: auto;
 }

@@ -1,4 +1,4 @@
-namespace Tnzi.Exceptions;
+﻿namespace Tnzi.Exceptions;
 
 /// <summary>
 /// 错误码常量定义
@@ -74,6 +74,7 @@ public static class ErrorCodes
     public const string IDENTITY_SESSION_LIMIT_REACHED = "IDENTITY_SESSION_LIMIT_REACHED";
     public const string IDENTITY_SESSION_REVOKED = "IDENTITY_SESSION_REVOKED";
     public const string IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED";
+    public const string IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED";
 
     // ==================== FileStorage 模块错误码 ====================
     public const string FILE_STORAGE_ERROR = "FILE_STORAGE_ERROR";

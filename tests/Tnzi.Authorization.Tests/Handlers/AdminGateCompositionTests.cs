@@ -50,7 +50,6 @@ public class AdminGateCompositionTests
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultRoleFunctionAdminController), "authorization.roleFunction.view")]
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultModuleAdminController), "authorization.functionModule.view")]
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultModuleFunctionAdminController), "authorization.permission.view")]
-    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultDataAuthAdminController), "authorization.entityRole.view")]
     public void Gated_admin_controller_carries_its_module_code(Type controllerType, string moduleCode)
     {
         var permissionNames = controllerType

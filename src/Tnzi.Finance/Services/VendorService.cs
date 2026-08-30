@@ -6,11 +6,17 @@ namespace Tnzi.Finance.Services;
 public class VendorService : ApplicationService, IVendorService
 {
     private readonly IRepository<Vendor, Guid> _vendorRepository;
+    private readonly IEnumerable<IMasterDataUsageProvider> _usageProviders;
 
-    public VendorService(IServiceProvider serviceProvider, IRepository<Vendor, Guid> vendorRepository)
+    public VendorService(
+        IServiceProvider serviceProvider,
+        IRepository<Vendor, Guid> vendorRepository,
+        IEnumerable<IMasterDataUsageProvider>? usageProviders = null)
         : base(serviceProvider)
     {
         _vendorRepository = Check.NotNull(vendorRepository);
+        // 可选：一个实现都没有时删除守卫回到"只有会计单据算数"，与引入契约之前逐字一致。
+        _usageProviders = usageProviders ?? Enumerable.Empty<IMasterDataUsageProvider>();
     }
 
     public async Task<Result<IPagedList<VendorDto>>> GetPagedAsync(VendorQueryDto query, CancellationToken cancellationToken = default)
@@ -105,6 +111,12 @@ public class VendorService : ApplicationService, IVendorService
             await paymentRepository.AnyAsync(p => p.PartyType == FinancePartyType.Vendor && p.PartyId == id, cancellationToken);
         if (referenced)
             return Fail("Cannot delete a vendor referenced by bills, expenses, or payments. Deactivate it instead.", 409);
+
+        // 同 CustomerService：采购订单住在 Tnzi.Finance.Offers，经契约提问保持依赖单向。
+        var usage = await MasterDataUsageAsker.AskAsync(
+            _usageProviders, FinanceMasterDataKind.Vendor, id, cancellationToken);
+        if (usage != null)
+            return Fail(usage.Detail, 409);
 
         await _vendorRepository.DeleteAsync(vendor, cancellationToken);
         return Ok();

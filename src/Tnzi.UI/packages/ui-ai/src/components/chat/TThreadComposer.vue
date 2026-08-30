@@ -21,7 +21,7 @@
  */
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
-import { formatFileSize } from '@tnzi/core'
+import { formatFileSize } from '@tnzi/core/utils'
 import { useAiI18n, formatAiMessage } from '../../i18n/index'
 import { useVoiceInput } from '../../headless/useVoiceInput'
 import { useComposerAttachments } from '../../headless/useComposerAttachments'

@@ -4,23 +4,21 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Description>Payment processing module for Tnzi.NET framework with Stripe and PayPal integration, order management, and webhook handling</Description>
+    <Description>Payment processing module for Tnzi.NET framework: charging, refunds, stored payment methods, callbacks and reconciliation, with the offline (manually confirmed) channel built in. The Stripe and PayPal channels ship separately in Tnzi.Payment.Stripe and Tnzi.Payment.PayPal, issuing invoices ships separately in Tnzi.Payment.Billing, recurring billing ships separately in Tnzi.Payment.Subscriptions, and discounting (promotions, coupons, redemption codes) ships separately in Tnzi.Payment.Promotions - so neither vendor SDK nor the PDF rendering, file storage and notification stack is in this package's dependency closure.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
-    <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" />
-    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Stripe.net" Version="52.1.0" />
-    <PackageReference Include="PayPalCheckoutSdk" Version="1.0.4" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="Templates\**\*.cshtml" CopyToOutputDirectory="PreserveNewest" />
+    <!--
+      本模块的依赖闭包被连续两次拆分收窄到只剩 EFCore + AspNetCore：
+      · Tnzi.Storage 随发票域去了 Tnzi.Payment.Billing（那里它只有发票服务一个使用者）。
+      · Tnzi.Template 从来就没在这里声明过 —— 拆分前 GlobalUsings 用着它，靠 Tnzi.Notification
+        的传递引用编译。那条潜在缺陷随发票搬迁修好了（子模块显式声明了它）。
+      · Tnzi.Notification 随续费域去了 Tnzi.Payment.Subscriptions：续费提醒与扣款失败告警是
+        订阅服务发的，搬走之后本模块**一处都不用它**了。少这条引用，只做一次性收款的应用
+        不再背通知模块（以及它自己那一串）。
+    -->
   </ItemGroup>
 
 </Project>

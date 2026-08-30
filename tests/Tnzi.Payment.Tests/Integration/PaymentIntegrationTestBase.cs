@@ -9,8 +9,6 @@ using Tnzi.EFCore;
 using Tnzi.EventBus;
 using Tnzi.Mapster;
 using Tnzi.Payment.Entities;
-using Tnzi.Payment.Events;
-using Tnzi.Payment.Events.Handlers;
 using Tnzi.Payment.Options;
 using Tnzi.Payment.Providers;
 using Tnzi.Payment.Services;
@@ -20,9 +18,17 @@ using PaymentEntity = Tnzi.Payment.Entities.Payment;
 namespace Tnzi.Payment.Tests.Integration;
 
 /// <summary>
-/// Payment 集成测试基类：真实 SQLite + 仓储 + EventBus + 订阅状态机处理器 + NullProvider，
-/// 用于验证只能在真实 DbContext 下生效的原子 CAS 与端到端 off-session 计费流程。
+/// Payment 集成测试基类：真实 SQLite + 仓储 + EventBus + NullProvider，
+/// 用于验证只能在真实 DbContext 下生效的原子 CAS 与端到端支付 / 退款 / 优惠券流程。
 /// </summary>
+/// <remarks>
+/// 刻意<b>不</b>注册订阅侧的任何东西（三个仓储、<c>ISubscriptionService</c>、三个回流处理器、
+/// 四个扩展点实现），也<b>不</b>注册促销侧的任何东西（四个仓储、<c>IPromotionService</c>、
+/// <c>ICouponService</c>、<c>IPromotionAnalyticsProvider</c>）—— 本测试项目不引用
+/// <c>Tnzi.Payment.Subscriptions</c> 也不引用 <c>Tnzi.Payment.Promotions</c>，跑的是
+/// 「两个包都没装」的真实现场。各自的集成测试在 <c>Tnzi.Payment.Subscriptions.Tests</c>
+/// 与 <c>Tnzi.Payment.Promotions.Tests</c>。
+/// </remarks>
 public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTestDbContext>
 {
     protected PaymentIntegrationTestBase()
@@ -45,22 +51,13 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
             // 线下渠道与其它真实渠道一样需要显式启用
             o.Channels["Offline"] = new ChannelOptions { Enabled = true, Currency = "USD" };
         });
-        services.Configure<PromotionOptions>(_ => { });
+        // PromotionOptions 随折扣域去了 Tnzi.Payment.Promotions，本项目里没有这个类型。
         services.Configure<TaxOptions>(_ => { });
 
         // 仓储
         AddRepo<PaymentEntity>(services);
         AddRepo<Refund>(services);
-        AddRepo<Subscription>(services);
-        AddRepo<SubscriptionPlan>(services);
-        AddRepo<SubscriptionChange>(services);
-        AddRepo<Promotion>(services);
-        AddRepo<CouponUsage>(services);
-        AddRepo<RedemptionCode>(services);
-        AddRepo<UserCoupon>(services);
         AddRepo<StoredPaymentMethod>(services);
-        AddRepo<Invoice>(services);
-        AddRepo<InvoiceLineItem>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -74,21 +71,18 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         services.AddScoped<IPaymentProvider, OfflineProvider>();
         services.AddScoped<IPaymentProviderFactory, PaymentProviderFactory>();
 
-        // EventBus + 订阅状态机回流处理器
+        // EventBus（订阅状态机的三个回流处理器随续费域去了 Tnzi.Payment.Subscriptions，
+        // 由它自己注册；这里不注册正是「没装续费包」的现场）
         services.AddSingleton<IEventBus>(sp =>
             new LocalEventBus(sp, sp.GetRequiredService<ILogger<LocalEventBus>>()));
-        services.AddScoped<IEventHandler<PaymentCompletedEvent>, SubscriptionPaymentCompletedHandler>();
-        services.AddScoped<IEventHandler<PaymentFailedEvent>, SubscriptionPaymentFailedHandler>();
-        services.AddScoped<IEventHandler<PaymentExpiredEvent>, SubscriptionPaymentExpiredHandler>();
 
         // 业务服务
         services.AddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentMethodService, PaymentMethodService>();
-        services.AddScoped<ISubscriptionService, SubscriptionService>();
         services.AddScoped<IRefundService, RefundService>();
-        services.AddScoped<IPromotionService, PromotionService>();
-        services.AddScoped<ICouponService, CouponService>();
+        // IPromotionService / ICouponService 随折扣域去了 Tnzi.Payment.Promotions，由它自己注册。
+        // 这里不注册 ICouponService 正是「没装折扣包」的现场：带券码的建单会被拒。
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

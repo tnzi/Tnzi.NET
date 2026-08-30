@@ -6,6 +6,19 @@ namespace Tnzi.Identity.Metadata;
 public static class IdentityConstants
 {
     /// <summary>
+    /// 本模块的表名前缀（不含下划线）。
+    /// </summary>
+    /// <remarks>
+    /// ★ <strong>绝大多数实体不需要引用它</strong>：框架的 <c>TableNamePrefixConfiguration</c>
+    /// 会按实体所在程序集反查模块，自动把前缀加上，所以 <c>ToTable("User")</c> 就够了。
+    /// 它存在是为了那些<strong>不住在本程序集里的实体</strong> —— 运行时自带的
+    /// <c>IdentityUserPasskey&lt;TKey&gt;</c> 属于 <c>Microsoft.Extensions.Identity.Stores</c>，
+    /// 自动前缀对它不生效，表名必须在配置里写全。有这个常量，写全的那处才不会与
+    /// <see cref="IdentityModule.TableNamePrefix"/> 脱钩。
+    /// </remarks>
+    public const string TablePrefix = "Identity";
+
+    /// <summary>
     /// Token提供者类型常量
     /// </summary>
     public static class TokenProvider
@@ -34,6 +47,9 @@ public static class IdentityConstants
         public const string JWT = "JWT";
         public const string CodeLogin = "CodeLogin";
         public const string Registration = "Registration";
+
+        /// <summary>Passkey（WebAuthn）。也是 passkey 注册令牌在 <c>AuthToken</c> 里的归属标记。</summary>
+        public const string Passkey = "Passkey";
     }
 
     /// <summary>

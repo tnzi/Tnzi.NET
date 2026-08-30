@@ -3,8 +3,9 @@ import UnoCSS from 'unocss/vite';
 import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { preservedModuleFileName } from '../../tools/vite/preserved-module-filename.mjs';
 
-const packageJson = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as {
+const packageJson = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as {
   dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
 };
@@ -23,14 +24,14 @@ export default defineConfig({
   build: {
     lib: {
       entry: {
-        index: resolve(__dirname, 'src/index.ts'),
-        'components/index': resolve(__dirname, 'src/components/index.ts'),
-        'stores/index': resolve(__dirname, 'src/stores/index.ts'),
+        index: resolve(import.meta.dirname, 'src/index.ts'),
+        'components/index': resolve(import.meta.dirname, 'src/components/index.ts'),
+        'stores/index': resolve(import.meta.dirname, 'src/stores/index.ts'),
         // Declared as an entry so the barrel survives: a pure re-export module
         // that is not an entry gets folded into the importer and the
         // `./headless` subpath export would resolve to a missing file.
-        'headless/index': resolve(__dirname, 'src/headless/index.ts'),
-        'adapters/index': resolve(__dirname, 'src/adapters/index.ts'),
+        'headless/index': resolve(import.meta.dirname, 'src/headless/index.ts'),
+        'adapters/index': resolve(import.meta.dirname, 'src/adapters/index.ts'),
       },
       name: 'TnziMobile',
       formats: ['es'],
@@ -48,8 +49,9 @@ export default defineConfig({
       },
       output: {
         preserveModules: true,
-        preserveModulesRoot: resolve(__dirname, 'src'),
+        preserveModulesRoot: resolve(import.meta.dirname, 'src'),
         exports: 'named',
+        entryFileNames: preservedModuleFileName,
         globals: {
           vue: 'Vue',
           pinia: 'Pinia',

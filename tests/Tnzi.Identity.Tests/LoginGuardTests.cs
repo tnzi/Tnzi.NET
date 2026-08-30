@@ -1,5 +1,3 @@
-using Tnzi.Identity.Events;
-
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;

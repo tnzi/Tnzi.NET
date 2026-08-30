@@ -9,7 +9,7 @@ namespace Tnzi.AI.Entities;
 /// 数据库为空时回退到 appsettings.json 配置，保持向后兼容。
 /// API Key 通过 <c>IDataProtectionProvider</c> 加密存储于 <see cref="ApiKeyEncrypted"/>。
 /// </remarks>
-public class Provider : FullAuditedEntity<Guid>, IScopedResource
+public class Provider : FullAuditedEntity<Guid>, IScopedResource, IHasOrder
 {
     /// <summary>
     /// Single source of truth for the IDataProtectionProvider purpose string used to
@@ -51,7 +51,21 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource
     /// <summary>
     /// Priority - 用于同类型多 Provider 排序
     /// </summary>
+    /// <remarks>
+    /// ★ 这是<b>运行时</b>取舍，不是展示顺序：同名多行时 <c>ChatClientFactory</c> 取
+    /// Priority 最大的那一行去连。改它会换掉实际生效的 provider，所以拖拽排序
+    /// <b>不</b>写这个字段——那是 <see cref="SortOrder"/> 的事。
+    /// </remarks>
     public int Priority { get; set; }
+
+    /// <summary>
+    /// 展示顺序（管理端拖拽排序写入，值越小越靠前）
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="Priority"/> 刻意分开：一个回答「列表怎么摆」，一个回答「实际连哪个」。
+    /// 合成一个字段会让调整列表顺序悄悄改掉运行时行为。
+    /// </remarks>
+    public int SortOrder { get; set; }
 
     /// <summary>
     /// Whether enabled

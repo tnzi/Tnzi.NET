@@ -136,4 +136,20 @@ public class DefaultProviderAdminController : ApiAdminControllerBase
         var result = await ProviderService.TestConnectionAsync(id, HttpContext.RequestAborted);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 重排 Provider 的展示顺序（拖拽排序）
+    /// </summary>
+    /// <remarks>
+    /// 请求体是当前可见的顺序，不必是全量：范围外的记录保持原位。只写展示顺序，
+    /// 不改 <c>Priority</c>（那决定同名时运行时连哪个 provider）。配置来源的条目
+    /// 没有实体行，不能参与重排。
+    /// </remarks>
+    [HttpPost("reorder")]
+    [ApiAuthorize(PermissionName = "ai.provider.update")]
+    public virtual async Task<ApiResult> Reorder([FromBody] ReorderRequestDto request)
+    {
+        var result = await ProviderService.ReorderAsync(request.Ids, HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
 }

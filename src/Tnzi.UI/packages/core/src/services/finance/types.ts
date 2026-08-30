@@ -893,6 +893,13 @@ export interface AgingBucketsDto {
   days61To90: number;
   over90: number;
   total: number;
+  /**
+   * 生效的账龄切分点（天，恒 3 个，升序）。桶已由 `Finance:AgingBucketDays` 参数化
+   * （默认 30/60/90），`days1To30` 等字段名是历史固定标识符，不再描述真实边界——
+   * 呈现端 MUST 用本字段生成标签（`agingBucketLabels`），不得写死 1-30/31-60/61-90/90+。
+   * 旧后端可能缺失；缺失按 30/60/90 处理。
+   */
+  agingBucketDays?: number[];
 }
 
 export interface AgingRowDto extends AgingBucketsDto {
@@ -967,6 +974,111 @@ export interface TransferQueryDto extends PagedQueryDto {
   accountId?: string;
   from?: string;
   to?: string;
+}
+
+/**
+ * Bank deposit - the exit from Undeposited Funds.
+ *
+ * Groups N posted inbound receipts sitting on a clearing account into one
+ * document. Posting debits the destination bank account in a SINGLE line for
+ * the total (so a bank statement line can match it 1:1) and credits the source
+ * account once per receipt (so the ledger still shows what made up the deposit).
+ */
+export interface DepositDto {
+  id: string;
+  number?: string | null;
+  status: FinanceDocumentStatus;
+  /** Where the receipts were sitting (usually the UndepositedFunds role account) */
+  fromAccountId: string;
+  /** Filled by the service ("code name") */
+  fromAccountName?: string | null;
+  /** Destination bank account - the single debit line */
+  toAccountId: string;
+  toAccountName?: string | null;
+  depositDate: string;
+  currency: string;
+  exchangeRate: number;
+  amount: number;
+  baseAmount: number;
+  reference?: string | null;
+  memo?: string | null;
+  journalEntryId?: string | null;
+  voidJournalEntryId?: string | null;
+  concurrencyStamp: string;
+  creationTime: string;
+  /** Detail only; the list projection returns an empty array */
+  lines: DepositLineDto[];
+}
+
+export interface DepositLineDto {
+  id: string;
+  lineNumber: number;
+  /** Non-null = receipt line */
+  paymentEntryId?: string | null;
+  paymentNumber?: string | null;
+  partyName?: string | null;
+  /** Non-null = other-funds line (the credit account) */
+  accountId?: string | null;
+  accountName?: string | null;
+  amount: number;
+  description?: string | null;
+  reference?: string | null;
+  /** False once the deposit is voided - the receipt is available again */
+  isClaimActive: boolean;
+}
+
+export interface CreateDepositDto {
+  fromAccountId: string;
+  toAccountId: string;
+  depositDate: string;
+  /** Null = base currency; one deposit is one currency */
+  currency?: string | null;
+  exchangeRate?: number | null;
+  reference?: string | null;
+  memo?: string | null;
+  /** Receipt lines: the posted inbound payments to take to the bank */
+  paymentEntryIds: string[];
+  /** Money that did not arrive as a payment entry (interest, refunds, owner contributions) */
+  otherFunds: CreateDepositFundsLineDto[];
+}
+
+export interface CreateDepositFundsLineDto {
+  /** Credit account; must not be the AR/AP control account nor either side of the deposit */
+  accountId: string;
+  amount: number;
+  description?: string | null;
+  reference?: string | null;
+}
+
+export interface DepositQueryDto extends PagedQueryDto {
+  keyword?: string;
+  status?: FinanceDocumentStatus;
+  /** Matches either side of the deposit */
+  accountId?: string;
+  from?: string;
+  to?: string;
+}
+
+/** Query for the deposit editor's candidate list */
+export interface UndepositedReceiptQueryDto {
+  accountId: string;
+  currency?: string | null;
+  from?: string | null;
+  to?: string | null;
+}
+
+/** A posted inbound receipt not yet claimed by any live deposit */
+export interface UndepositedReceiptDto {
+  paymentEntryId: string;
+  paymentNumber?: string | null;
+  partyType: FinancePartyType;
+  partyId: string;
+  partyName?: string | null;
+  docDate: string;
+  currency: string;
+  amount: number;
+  paymentMethod?: string | null;
+  reference?: string | null;
 }
 
 /** Bank reconciliation header */

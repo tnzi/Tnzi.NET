@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.AI.Channels.Permissions;
 using Tnzi.AI.Channels;
@@ -35,6 +35,10 @@ using Tnzi.Finance.Payroll;
 using Tnzi.Finance.Permissions;
 using Tnzi.Finance.Recurring.Permissions;
 using Tnzi.Finance.Recurring;
+using Tnzi.Authorization.DataAuth.Permissions;
+using Tnzi.Authorization.DataAuth;
+using Tnzi.Finance.Offers.Permissions;
+using Tnzi.Finance.Offers;
 using Tnzi.Finance;
 using Tnzi.Hangfire.Permissions;
 using Tnzi.Hangfire;
@@ -42,6 +46,8 @@ using Tnzi.HealthChecks.Permissions;
 using Tnzi.HealthChecks;
 using Tnzi.Identity.Permissions;
 using Tnzi.Identity;
+using Tnzi.Identity.Organization.Permissions;
+using Tnzi.Identity.Organization;
 using Tnzi.Localization.Permissions;
 using Tnzi.Localization;
 using Tnzi.Modules;
@@ -49,6 +55,12 @@ using Tnzi.Notification.Permissions;
 using Tnzi.Notification;
 using Tnzi.Payment.Permissions;
 using Tnzi.Payment;
+using Tnzi.Payment.Billing.Permissions;
+using Tnzi.Payment.Billing;
+using Tnzi.Payment.Subscriptions.Permissions;
+using Tnzi.Payment.Subscriptions;
+using Tnzi.Payment.Promotions.Permissions;
+using Tnzi.Payment.Promotions;
 using Tnzi.Performance.Permissions;
 using Tnzi.Performance;
 using Tnzi.Security.Authorization;
@@ -90,6 +102,7 @@ public class PermissionProviderRegistrationTests
     public static TheoryData<Type, Type> ModulesWithCatalogues() => new()
     {
         { typeof(IdentityModule), typeof(IdentityPermissions) },
+        { typeof(IdentityOrganizationModule), typeof(IdentityOrganizationPermissions) },
         { typeof(AuthorizationModule), typeof(AuthorizationPermissions) },
         { typeof(SystemModule), typeof(SystemPermissions) },
         { typeof(StorageModule), typeof(StoragePermissions) },
@@ -97,6 +110,9 @@ public class PermissionProviderRegistrationTests
         { typeof(NotificationModule), typeof(NotificationPermissions) },
         { typeof(ChatModule), typeof(ChatPermissions) },
         { typeof(PaymentModule), typeof(PaymentPermissions) },
+        { typeof(PaymentBillingModule), typeof(PaymentBillingPermissions) },
+        { typeof(PaymentSubscriptionsModule), typeof(PaymentSubscriptionsPermissions) },
+        { typeof(PaymentPromotionsModule), typeof(PaymentPromotionsPermissions) },
         { typeof(FinanceModule), typeof(FinancePermissions) },
         { typeof(PayrollModule), typeof(PayrollPermissions) },
         { typeof(TemplateModule), typeof(TemplatePermissions) },
@@ -111,6 +127,8 @@ public class PermissionProviderRegistrationTests
         { typeof(FeatureModule), typeof(FeaturePermissions) },
         { typeof(FinanceBankingModule), typeof(FinanceBankingPermissions) },
         { typeof(FinanceRecurringModule), typeof(FinanceRecurringPermissions) },
+        { typeof(AuthorizationDataAuthModule), typeof(AuthorizationDataAuthPermissions) },
+        { typeof(FinanceOffersModule), typeof(FinanceOffersPermissions) },
         { typeof(AIMcpModule), typeof(AIMcpPermissions) },
         { typeof(AISkillsModule), typeof(AISkillsPermissions) },
         { typeof(AIWorkflowModule), typeof(AIWorkflowPermissions) },

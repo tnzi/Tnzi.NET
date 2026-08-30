@@ -323,4 +323,46 @@ describe('useAdminShellLayout', () => {
     app.setSiderCollapse(true)
     expect(layout.drawerOpen.value).toBe(false)
   })
+
+  // --- desktop layout --------------------------------------------------------
+
+  it('desktop renders no sider and no top menu', () => {
+    const layout = setupShell({ mode: 'desktop' })
+    expect(layout.showMainSider.value).toBe(false)
+    expect(layout.topMenuVariant.value).toBeNull()
+    expect(layout.showSubSider.value).toBe(false)
+  })
+
+  it('desktop suppresses the header entirely, theme toggle notwithstanding', () => {
+    // A desktop rendered under a page header reads as a widget embedded in an
+    // admin page, which is the opposite of what the mode is for. The header's
+    // actions are not lost - the taskbar tray carries the same set.
+    const theme = useAdminThemeStore()
+    theme.headerVisible = true
+    expect(setupShell({ mode: 'desktop' }).headerVisible.value).toBe(false)
+  })
+
+  it('desktop renders no header logo - the brand lives in the taskbar', () => {
+    expect(setupShell({ mode: 'desktop' }).shouldRenderHeaderLogo.value).toBe(false)
+  })
+
+  it('desktop hides the tab bar and the footer', () => {
+    const layout = setupShell({ mode: 'desktop' })
+    // The taskbar is the open-things bar there, and it owns the bottom edge.
+    // Two bars for one job would compete while disagreeing (a tab per route vs
+    // a button per window).
+    expect(layout.tabsVisible.value).toBe(false)
+    expect(layout.footerVisible.value).toBe(false)
+  })
+
+  it('desktop falls back to vertical on a phone', () => {
+    // Floating, draggable, resizable windows are unusable at 375px, and this
+    // package's mobile conventions (tables collapsing to card lists,
+    // master-detail stacking) assume one full-width content area. So the
+    // metaphor is dropped rather than shrunk - and with it, the tab bar and
+    // footer come back under the ordinary vertical rules.
+    const layout = setupShell({ mode: 'desktop', isMobile: true })
+    expect(layout.effectiveMode.value).toBe('vertical')
+    expect(layout.footerVisible.value).toBe(true)
+  })
 })

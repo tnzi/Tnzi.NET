@@ -25,6 +25,11 @@ public class NotificationOptions
     public PushSenderOptions? PushSender { get; set; }
 
     /// <summary>
+    /// 获取或设置 传真发送配置（email-to-fax 网关）
+    /// </summary>
+    public FaxSenderOptions? FaxSender { get; set; }
+
+    /// <summary>
     /// 获取或设置 队列配置
     /// </summary>
     public QueueOptions Queue { get; set; } = new();
@@ -81,6 +86,40 @@ public class OptOutOptions
     /// <para>密钥即配置，可跨环境迁移；与 <c>AesGcmHelper</c> 的取舍一致。</para>
     /// </remarks>
     public string? TokenSecret { get; set; }
+
+    /// <summary>
+    /// 退订落地页的<b>绝对</b> URL，例如 <c>https://app.example.com/unsubscribe</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 配了它，框架才会在群发邮件上写 RFC 8058 的 <c>List-Unsubscribe</c> /
+    /// <c>List-Unsubscribe-Post</c> 信头 —— 也就是 Gmail / Outlook / Apple Mail 顶部那个
+    /// 「退订」按钮。没有它就没有信头（不猜、不用相对地址）：一个指向错主机的退订链接
+    /// 比没有退订更糟，因为它看着能用。
+    /// </para>
+    /// <para>
+    /// ★ <b>为什么本模块自己存一份 URL，而不去读 <c>Application:FrontendUrl</c></b>：那个选项住在
+    /// <c>Tnzi.System</c>，为一个字符串让通知模块依赖它，会把两个本来无关的模块绑在一起。
+    /// </para>
+    /// <para>
+    /// 令牌以查询参数附在这个地址后面。落地页负责回显、确认、以及调
+    /// <c>POST notifications/unsubscribe</c>；邮件服务商的一键退订则直接 POST 到
+    /// <c>{ApiBaseUrl}/api/notifications/unsubscribe/one-click?token=…</c>（见 <see cref="OneClickEndpoint"/>）。
+    /// </para>
+    /// </remarks>
+    public string? LandingUrl { get; set; }
+
+    /// <summary>
+    /// 一键退订端点的<b>绝对</b> URL，例如 <c>https://api.example.com/api/notifications/unsubscribe/one-click</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <see cref="LandingUrl"/> <b>分开</b>是必须的：RFC 8058 的 <c>List-Unsubscribe-Post</c>
+    /// 让邮件服务商<b>直接 POST</b> 到这个地址，收件人根本不会打开浏览器，所以它必须是 API 的
+    /// 地址而不是前端页面的。两者同源的部署里它们只差一个路径，但那不能假设 ——
+    /// 前后端分开部署是常态。
+    /// <para>留空则只写 <c>List-Unsubscribe</c>（落地页链接），不声明一键 POST。</para>
+    /// </remarks>
+    public string? OneClickEndpoint { get; set; }
 }
 
 /// <summary>
@@ -314,16 +353,169 @@ public class PushSenderOptions
 }
 
 /// <summary>
+/// 传真发送配置选项（email-to-fax 网关）
+/// </summary>
+/// <remarks>
+/// 网关把「传真号码 + 网关域名」当成一个邮箱地址收信，所以整条渠道只需要一个域名 ——
+/// 没有账号、没有密钥，凭据是承载它的那套 SMTP 的。
+/// </remarks>
+public class FaxSenderOptions
+{
+    /// <summary>
+    /// 获取或设置 是否启用传真渠道（默认 true）
+    /// </summary>
+    /// <remarks>
+    /// 配了这一节就说明想用，所以默认为 true；这个开关是给「配置留着但这个环境先别发」用的。
+    /// 关掉时回退到 <see cref="Services.UnconfiguredFaxSender"/>，也就是**发传真会失败**，
+    /// 而不是安静地当作发过了。
+    /// </remarks>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 网关域名，例如 <c>fax.example.com</c>（可带前导 <c>@</c>）
+    /// </summary>
+    public string GatewayDomain { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Development override: when set, every outbound fax is delivered to this mailbox instead of
+    /// the gateway. Configure via "Notification:FaxSender:DevOverrideEmail".
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <see cref="MailSenderOptions.DevOverrideEmail"/> 分开是必要的：演示租户的传真号是假的，
+    /// 而邮件通常仍要真发。原本的网关地址（含传真号码）会写进主题，所以在收件箱里看得出
+    /// 这份传真本来要发给谁。重定向**不改变**发送路径本身，只换收件人。
+    /// </remarks>
+    public string? DevOverrideEmail { get; set; }
+
+    /// <summary>
+    /// 获取或设置 回执收件箱配置。**不配就是这个部署不收回执**，整条链一个后台线程都不起。
+    /// </summary>
+    public FaxConfirmationOptions? Confirmation { get; set; }
+}
+
+/// <summary>
+/// 传真回执收件箱配置（IMAP）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// email-to-fax 网关在拨号完成后（通常几分钟）回一封邮件说这份传真到没到。收下并判读它，
+/// 一份没拨通的传真才不会永远显示成"已发送"。
+/// </para>
+/// <para>
+/// ★ <b>整节可缺省</b>：<see cref="Host"/> 为空就当作"这个部署不收回执" —— 不报错、不起服务。
+/// 回执是附加能力，没有它发传真一切照旧，所以它的缺省方向与
+/// <see cref="FaxSenderOptions.GatewayDomain"/>（缺了就报错）刻意相反。
+/// 但<b>填了一半要报错</b>：写了 <see cref="Host"/> 却漏了账号密码是笔误，不是"不想用"。
+/// </para>
+/// <para>
+/// <b>建议用一个专用邮箱</b>：默认实现只取未读、处理完标已读，与人共用一个收件箱会互相把对方的信标掉。
+/// </para>
+/// </remarks>
+public class FaxConfirmationOptions
+{
+    /// <summary>
+    /// 获取或设置 是否启用回执收取（默认 true；配了收件箱就说明想用）。
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 IMAP 主机。**留空 = 这个部署不收回执**。
+    /// </summary>
+    public string? Host { get; set; }
+
+    /// <summary>
+    /// 获取或设置 IMAP 端口（默认 993）
+    /// </summary>
+    public int Port { get; set; } = 993;
+
+    /// <summary>
+    /// 获取或设置 是否使用 SSL（默认 true）
+    /// </summary>
+    public bool UseSsl { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 IMAP 账号
+    /// </summary>
+    public string? UserName { get; set; }
+
+    /// <summary>
+    /// 获取或设置 IMAP 密码
+    /// </summary>
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// 获取或设置 邮件夹（默认 <c>INBOX</c>）
+    /// </summary>
+    public string Folder { get; set; } = "INBOX";
+
+    /// <summary>
+    /// 获取或设置 轮询间隔秒数（默认 300 = 5 分钟）
+    /// </summary>
+    /// <remarks>
+    /// 网关的回执本来就要几分钟才回，秒级轮询只是白白敲人家的 IMAP。下限 30 秒。
+    /// </remarks>
+    public int PollIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// 获取或设置 每轮最多处理多少封（默认 50）
+    /// </summary>
+    public int MaxMessagesPerPoll { get; set; } = 50;
+
+    /// <summary>
+    /// 获取或设置 按号码对号时往回看多少小时（默认 72）
+    /// </summary>
+    /// <remarks>
+    /// ★ 号码是**不精确**的对号方式：同一个号码可能这个月发过好几份。窗口限制了认错的范围 ——
+    /// 一份三天前的传真不会被今天的回执改掉。精确对号（<c>In-Reply-To</c> 指向承载邮件的
+    /// Message-ID）不受这个窗口约束，因为它不会认错。
+    /// </remarks>
+    public int LookbackHours { get; set; } = 72;
+
+    /// <summary>
+    /// 获取或设置 处理后是否标记为已读（默认 true）
+    /// </summary>
+    /// <remarks>
+    /// 这是默认实现避免重复处理的全部机制 —— 不必另建一张"处理过哪些邮件"的表，重启也不会重来。
+    /// 关掉它就要自己保证幂等（<see cref="Services.IFaxConfirmationService"/> 本身是幂等的，
+    /// 所以最坏后果只是每轮都白判读一遍同样的邮件）。
+    /// </remarks>
+    public bool MarkAsRead { get; set; } = true;
+
+    /// <summary>
+    /// 这一节到底配全了没有 —— <b>注册后台服务与配置校验共用这一个判据</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 两处各写一遍是这类开关最典型的漂移点：校验说"配好了"而注册说"没配"，
+    /// 症状是配置完全正确、日志干净、回执就是不进来。
+    /// </remarks>
+    public bool IsUsable =>
+        Enabled
+        && !string.IsNullOrWhiteSpace(Host)
+        && !string.IsNullOrWhiteSpace(UserName)
+        && !string.IsNullOrWhiteSpace(Password);
+}
+
+/// <summary>
 /// Notification配置验证器
 /// </summary>
 public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOptions>
 {
+    /// <summary>
+    /// 邮箱地址的形状检查：本地部分 + <c>@</c> + 带点的域名，三段都不含空白。
+    /// </summary>
+    /// <remarks>
+    /// 刻意宽松 —— 这里要挡的是配置写错（漏了域名、写了两个 <c>@</c>、粘进了空格），
+    /// 不是判定一个地址收不收得到信，那只有真发一封才知道。
+    /// </remarks>
+    private const string EmailShape = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+
     protected override void ValidateOptions(NotificationOptions options, List<string> errors)
     {
         // 验证各个配置部分
         ValidateMailSenderOptions(options.MailSender, errors);
         ValidateSmsSenderOptions(options.SmsSender, errors);
         ValidatePushSenderOptions(options.PushSender, errors);
+        ValidateFaxSenderOptions(options.FaxSender, errors);
         ValidateQueueOptions(options.Queue, errors);
         ValidateCommonOptions(options, errors);
     }
@@ -346,8 +538,7 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
             errors.Add("MailSender.FromEmail is required.");
 
         if (!string.IsNullOrWhiteSpace(mailSender.FromEmail) &&
-            !Regex.IsMatch(mailSender.FromEmail,
-                @"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.IgnoreCase))
+            !Regex.IsMatch(mailSender.FromEmail, EmailShape, RegexOptions.IgnoreCase))
             errors.Add("MailSender.FromEmail must be a valid email address.");
 
         // 如果启用了 SSL，验证用户名和密码
@@ -445,6 +636,74 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
         {
             errors.Add($"PushSender.Provider '{pushSender.Provider}' is not supported. Supported providers: fcm, firebase.");
         }
+    }
+
+    /// <summary>
+    /// 验证传真发送配置
+    /// </summary>
+    /// <remarks>
+    /// 网关域名写成邮箱地址（<c>fax@example.com</c>）是最容易犯的一个错，而它的后果是
+    /// 拼出 <c>9055551234@fax@example.com</c> —— 一个投递失败的地址。这里当场拦掉。
+    /// </remarks>
+    private static void ValidateFaxSenderOptions(FaxSenderOptions? faxSender, List<string> errors)
+    {
+        if (faxSender == null || !faxSender.Enabled)
+            return;
+
+        var domain = faxSender.GatewayDomain?.Trim().TrimStart('@') ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            errors.Add("FaxSender.GatewayDomain is required when FaxSender.Enabled is true.");
+        }
+        else if (domain.Contains('@') || domain.Any(char.IsWhiteSpace) || !domain.Contains('.'))
+        {
+            errors.Add($"FaxSender.GatewayDomain '{faxSender.GatewayDomain}' must be a bare domain such as 'fax.example.com', not an email address.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(faxSender.DevOverrideEmail) &&
+            !Regex.IsMatch(faxSender.DevOverrideEmail, EmailShape, RegexOptions.IgnoreCase))
+        {
+            errors.Add("FaxSender.DevOverrideEmail must be a valid email address.");
+        }
+
+        ValidateFaxConfirmationOptions(faxSender.Confirmation, errors);
+    }
+
+    /// <summary>
+    /// 验证传真回执收件箱配置
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>整节缺省是合法的</b>（这个部署不收回执），所以 <c>Host</c> 为空直接放行。
+    /// 但填了 <c>Host</c> 就必须填全账号密码：那是笔误，而它的症状是"配了却不生效"——
+    /// 没有报错、没有日志、回执就是不进来。宁可在启动时炸。
+    /// </remarks>
+    private static void ValidateFaxConfirmationOptions(FaxConfirmationOptions? confirmation, List<string> errors)
+    {
+        if (confirmation == null || !confirmation.Enabled || string.IsNullOrWhiteSpace(confirmation.Host))
+            return;
+
+        if (string.IsNullOrWhiteSpace(confirmation.UserName))
+            errors.Add("FaxSender.Confirmation.UserName is required when a Host is configured.");
+
+        if (string.IsNullOrWhiteSpace(confirmation.Password))
+            errors.Add("FaxSender.Confirmation.Password is required when a Host is configured.");
+
+        if (confirmation.Port is < 1 or > 65535)
+            errors.Add($"FaxSender.Confirmation.Port '{confirmation.Port}' must be between 1 and 65535.");
+
+        if (string.IsNullOrWhiteSpace(confirmation.Folder))
+            errors.Add("FaxSender.Confirmation.Folder cannot be blank; the usual value is 'INBOX'.");
+
+        // 网关的回执本来就要几分钟才回，秒级轮询只是白白敲人家的 IMAP（还可能被限流）。
+        if (confirmation.PollIntervalSeconds < 30)
+            errors.Add($"FaxSender.Confirmation.PollIntervalSeconds '{confirmation.PollIntervalSeconds}' is too small; 30 is the minimum.");
+
+        if (confirmation.MaxMessagesPerPoll < 1)
+            errors.Add($"FaxSender.Confirmation.MaxMessagesPerPoll '{confirmation.MaxMessagesPerPoll}' must be at least 1.");
+
+        if (confirmation.LookbackHours < 1)
+            errors.Add($"FaxSender.Confirmation.LookbackHours '{confirmation.LookbackHours}' must be at least 1.");
     }
 
     /// <summary>

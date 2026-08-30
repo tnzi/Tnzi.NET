@@ -317,4 +317,88 @@ public class SalaryFormulaEvaluatorTests
         result.Succeeded.ShouldBeTrue(result.Message);
         result.Data.ShouldBe(0m);
     }
+
+    // ---------- Input()：本组件本期的一次性金额 ----------
+
+    [Fact]
+    public void Input_ReturnsTheAmountBoundToThisLine()
+    {
+        var context = new SalaryFormulaContext { InputAmount = 5000m };
+        var result = CreateEvaluator().Evaluate("Input()", context);
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data.ShouldBe(5000m);
+    }
+
+    [Fact]
+    public void Input_WithoutAnEnteredAmount_IsZero_NotAnError()
+    {
+        // 没录入是绝大多数员工绝大多数期间的正常状态——不是"上下文不可用"。
+        var result = CreateEvaluator().Evaluate("Input()", EmptyContext());
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data.ShouldBe(0m);
+    }
+
+    [Fact]
+    public void Input_AcceptsAnExplicitDefault()
+    {
+        var evaluator = CreateEvaluator();
+        evaluator.Evaluate("Input(150)", EmptyContext()).Data.ShouldBe(150m);
+        evaluator.Evaluate("Input(150)", new SalaryFormulaContext { InputAmount = 0m }).Data.ShouldBe(0m);
+    }
+
+    [Fact]
+    public void Input_ParticipatesInOrdinaryArithmetic()
+    {
+        var context = new SalaryFormulaContext
+        {
+            Variables = new Dictionary<string, decimal>(StringComparer.Ordinal) { ["BASE"] = 4000m },
+            InputAmount = 1000m
+        };
+        var result = CreateEvaluator().Evaluate("BASE + Input()", context);
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data.ShouldBe(5000m);
+    }
+
+    [Fact]
+    public void Input_UsableAsACondition_SoAnUnusedComponentProducesNoLine()
+    {
+        var evaluator = CreateEvaluator();
+        evaluator.EvaluateCondition("Input() > 0", new SalaryFormulaContext { InputAmount = 250m }).Data.ShouldBeTrue();
+        evaluator.EvaluateCondition("Input() > 0", EmptyContext()).Data.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Input_RejectsMoreThanOneArgument()
+    {
+        var result = CreateEvaluator().Evaluate("Input('BONUS', 0)", EmptyContext());
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
+
+    // ---------- GetFunctions：一次性输入录入端的静态判定 ----------
+
+    [Fact]
+    public void GetFunctions_ReportsTheCalledFunctions()
+    {
+        var result = CreateEvaluator().GetFunctions("max(0, Input()) + Ytd('BONUS')");
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ShouldContain("Input", StringComparer.OrdinalIgnoreCase);
+        result.Data!.ShouldContain("Ytd", StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetFunctions_OnAFormulaThatNeverReadsInput_DoesNotReportIt()
+    {
+        var result = CreateEvaluator().GetFunctions("BASE * 0.05");
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ShouldNotContain("Input", StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void GetFunctions_RejectsANonWhitelistedFunction()
+    {
+        var result = CreateEvaluator().GetFunctions("Environment('PATH')");
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
 }

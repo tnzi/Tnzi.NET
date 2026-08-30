@@ -339,6 +339,12 @@ export interface PayslipLineDto {
   amount: number
   /** Year-to-date accumulated amount for this component (incl. this period). */
   ytdAmount: number
+  /**
+   * One-time amount entered for this component this period (null = none).
+   * The formula may be `BASE + Input()`, so `amount` alone does not tell you
+   * how much of the line was a one-off.
+   */
+  inputAmount?: number | null
   formulaSnapshot?: string | null
   expenseAccountId?: string | null
   liabilityAccountId?: string | null
@@ -383,6 +389,46 @@ export interface PayslipListDto {
 export interface UpdatePayslipInputsDto {
   /** Actual days worked (formula variable WORKED_DAYS). */
   workedDays: number
+}
+
+// ============================================
+// One-time inputs (run x employee x component)
+// ============================================
+
+/**
+ * A one-time amount for this run only - bonus, back pay, one-off deduction,
+ * advance repayment, correction. Read by the component formula through `Input()`,
+ * so it goes through the ordered evaluation (a bonus lands inside GROSS and is
+ * therefore taxed) rather than being appended after the fact.
+ */
+export interface PayRunInputDto {
+  id: string
+  payRunId: string
+  employeeId: string
+  employeeCode: string
+  employeeName: string
+  componentId: string
+  componentCode: string
+  componentName: string
+  componentType: SalaryComponentType
+  amount: number
+  /** Why this one-off was entered (the component name gives the kind). */
+  note?: string | null
+  creationTime: string
+}
+
+/**
+ * Enter or overwrite a one-time input (Draft | Calculated).
+ * In the Calculated state the employee's payslip is recalculated immediately.
+ * The component's effective formula must call `Input()`, otherwise the request
+ * is rejected - an amount stored and then silently ignored is worse than an error.
+ */
+export interface SetPayRunInputDto {
+  employeeId: string
+  componentId: string
+  /** Base currency. Negative amounts are rejected except on Informational components. */
+  amount: number
+  note?: string | null
 }
 
 // ============================================

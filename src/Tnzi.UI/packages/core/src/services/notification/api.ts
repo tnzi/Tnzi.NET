@@ -21,12 +21,22 @@ import type {
   NotificationPreferenceDto,
   NotificationPreferenceQueryDto,
   SetNotificationPreferenceDto,
+  UnsubscribePreviewDto,
 } from './types';
 import type { TrendInterval } from './metadata';
+import type {
+  TemplateInfoDto,
+  TemplateEntityDto,
+  CreateTemplateDto,
+  UpdateTemplateDto,
+  TemplateQueryDto,
+} from '../template';
 
 const ADMIN_BASE = '/admin/notifications';
 const PREFERENCES_BASE = '/admin/notification-preferences';
+const TEMPLATES_BASE = '/admin/notification-templates';
 const USER_BASE = '/notifications';
+const UNSUBSCRIBE_BASE = '/notifications/unsubscribe';
 
 /**
  * Admin Notification Management API
@@ -128,6 +138,44 @@ export function useAdminNotificationApi(client: HttpClient) {
 }
 
 /**
+ * Admin Notification Template Management API.
+ * Backend: DefaultNotificationTemplateAdminController.
+ *
+ * A notification-scoped view over the generic template store: the server pins
+ * Module="Notification", so callers pass the ordinary template DTO shapes and
+ * never set the module themselves. Kept here rather than in services/template
+ * because the route lives on the notification module and carries notification
+ * permission codes.
+ */
+export function useAdminNotificationTemplateApi(client: HttpClient) {
+  return {
+    /** Paged list of this module's templates */
+    getPagedList: (query?: TemplateQueryDto) =>
+      client.get<PagedList<TemplateInfoDto>>(TEMPLATES_BASE, { params: query }),
+
+    /** Get one template by id */
+    getById: (id: string) =>
+      client.get<TemplateEntityDto>(`${TEMPLATES_BASE}/${id}`),
+
+    /** Create a notification template */
+    create: (data: CreateTemplateDto) =>
+      client.post<TemplateEntityDto>(TEMPLATES_BASE, data),
+
+    /** Update a notification template */
+    update: (id: string, data: UpdateTemplateDto) =>
+      client.put<TemplateEntityDto>(`${TEMPLATES_BASE}/${id}`, data),
+
+    /** Delete a notification template */
+    delete: (id: string) =>
+      client.delete<void>(`${TEMPLATES_BASE}/${id}`),
+
+    /** Delete several notification templates */
+    batchDelete: (ids: string[]) =>
+      client.delete<void>(`${TEMPLATES_BASE}/batch`, { body: ids }),
+  };
+}
+
+/**
  * Admin Notification Preference (Subscription) Management API.
  * Backend: DefaultNotificationPreferenceAdminController.
  */
@@ -152,6 +200,34 @@ export function useAdminNotificationPreferenceApi(client: HttpClient) {
     /** Reset a user's preferences to platform defaults */
     resetToDefault: (userId: string) =>
       client.post<void>(`${PREFERENCES_BASE}/user/${userId}/reset`),
+  };
+}
+
+/**
+ * One-click unsubscribe API - ANONYMOUS.
+ *
+ * The recipient of a bulk message is not necessarily a user of this system
+ * (imported contact lists, former customers, closed accounts), and requiring a
+ * login before someone can stop receiving mail defeats the point of one-click
+ * unsubscribe. Identity comes from the signed token in the link itself.
+ *
+ * The GET preview is deliberately separate from the POST that acts: mail
+ * clients prefetch links, and a prefetcher must not be able to unsubscribe
+ * someone on their behalf.
+ */
+export function useUnsubscribeApi(client: HttpClient) {
+  return {
+    /** Echo back what this link would unsubscribe. No side effects. */
+    preview: (token: string) =>
+      client.get<UnsubscribePreviewDto>(`${UNSUBSCRIBE_BASE}`, { params: { token } }),
+
+    /** Act on the link. */
+    unsubscribe: (token: string, reason?: string) =>
+      client.post<void>(`${UNSUBSCRIBE_BASE}`, { token, reason }),
+
+    /** Undo, for someone who clicked by mistake. */
+    resubscribe: (token: string) =>
+      client.post<void>(`${UNSUBSCRIBE_BASE}/resubscribe`, { token }),
   };
 }
 

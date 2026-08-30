@@ -154,7 +154,7 @@
   max-height: 240px;
   overflow: auto;
   padding: 8px 10px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: var(--tnzi-admin-radius-sm, 6px);
   background: var(--tnzi-bg-deep, #f6f8fa);
   font-size: 12.5px;

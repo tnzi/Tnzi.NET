@@ -18,7 +18,11 @@
  *   historyBase: import.meta.env.BASE_URL,
  *   addModules: myRoutes,
  *   login: { brand: 'My App', … },
- *   locales: { en, 'zh-cn' },
+ *   locales: { en, fr },                  // messages, keyed by locale code
+ *   localeOptions: [                      // which languages the switcher offers
+ *     { code: 'en', label: 'English' },
+ *     { code: 'fr', label: 'Français', naive: { locale: frFR, dateLocale: dateFrFR } },
+ *   ],
  * }).mount('#app')
  * ```
  *
@@ -60,13 +64,6 @@ export interface CreateAdminAppOptions extends DefineAdminAppOptions {
    * root (`createWebHistory()`).
    */
   historyBase?: string
-
-  /**
-   * Extra ROOT-level routes (siblings of `/admin`, not under it) - e.g. public
-   * standalone pages with no admin shell / auth. The root redirect and the 404
-   * catch-all are added automatically after these.
-   */
-  rootRoutes?: RouteRecordRaw[]
 
   /**
    * Redirect target for the automatically-added `/:pathMatch(.*)*` catch-all.
@@ -113,12 +110,10 @@ export function createAdminApp(options: CreateAdminAppOptions): AdminAppHandle {
     redirect: options.notFoundRedirect ?? { name: 'not-found' },
   } as RouteRecordRaw
 
-  const routes: RouteRecordRaw[] = [
-    ...def.routes,
-    ...(options.rootRoutes ?? []),
-    ...rootRedirect,
-    catchAll,
-  ]
+  // `def.routes` already ends with the consumer's `rootRoutes` - `defineAdminApp`
+  // appends them inside the pipeline so they get the basePath prefix. Appending
+  // them here instead is what used to leave them outside the app's own prefix.
+  const routes: RouteRecordRaw[] = [...def.routes, ...rootRedirect, catchAll]
 
   const router = createRouter({
     history: createWebHistory(options.historyBase),

@@ -133,6 +133,16 @@ public class EnableTotpDto
 public class SendCodeLoginCodeDto
 {
     /// <summary>
+    /// 图形验证码ID（当启用登录图形验证码时必填，发短信/邮箱验证码前先校验）
+    /// </summary>
+    public string? CaptchaId { get; set; }
+
+    /// <summary>
+    /// 图形验证码（当启用登录图形验证码时必填）
+    /// </summary>
+    public string? CaptchaCode { get; set; }
+
+    /// <summary>
     /// 邮箱地址（邮箱登录时必填）
     /// </summary>
     [EmailAddress]

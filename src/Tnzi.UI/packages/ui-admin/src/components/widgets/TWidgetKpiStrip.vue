@@ -170,8 +170,10 @@ watch(
     <NGi v-for="kpi in displayKpis" :key="kpi.key" :span="kpiSpan">
       <NCard
         size="small"
+        :bordered="false"
         :class="[
           't-widget-kpi__card',
+          't-surface-card',
           { 't-widget-kpi__card--gradient': !!kpi.gradient },
         ]"
         :content-style="
@@ -216,19 +218,19 @@ watch(
 <style scoped>
 .t-widget-kpi__card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
   /* Clip the inner gradient/content so the parent border-radius actually
      rounds the visible corners. Without this, NCard's `.n-card__content`
      paints its background-image right up to the rectangular bounding box
      and the 8px radius is invisible on gradient tiles. */
   overflow: hidden;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  transition:
-    transform var(--tnzi-admin-motion-duration-fast, 0.15s) ease,
-    box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
+  transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
 .t-widget-kpi__card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-widget-kpi__card--gradient :deep(.n-card-header) {
   display: none;

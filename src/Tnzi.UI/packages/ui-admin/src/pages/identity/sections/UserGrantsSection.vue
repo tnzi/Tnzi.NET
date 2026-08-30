@@ -141,7 +141,10 @@ async function load(): Promise<void> {
     await Promise.all(
       list.map(async (m) => {
         try {
-          next.set(m.id, await bridge.permissions.getByModule(m.id))
+          // 退役的码排除在分配矩阵之外（同 RoleFunctions.vue）：后端本就会拒绝授予它们，
+          // 呈现出来只会给出一个必然让整次保存 404 的勾选框。
+          const fns = await bridge.permissions.getByModule(m.id)
+          next.set(m.id, fns.filter((f) => !f.isRetired))
         } catch {
           // One unreadable module must not blank the whole matrix.
           next.set(m.id, [])

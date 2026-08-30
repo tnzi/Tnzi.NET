@@ -1,4 +1,4 @@
-﻿using Mapster;
+using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -28,6 +28,13 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
     /// </summary>
     protected bool UseBalanceSummaryOption { get; set; }
 
+    /// <summary>
+    /// 未指定存入科目的 Inbound 收款是否回退到待存款项角色科目。默认 false（须显式给科目）；
+    /// 存款单测试翻转它以走真实的「收款自己落到待存款项上」路径。
+    /// 与 <see cref="UseBalanceSummaryOption"/> 同机制：<c>IOptionsSnapshot</c> 每 scope 重算。
+    /// </summary>
+    protected bool PostToUndepositedFundsOption { get; set; }
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         services.AddOptions();
@@ -37,6 +44,7 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
             o.JournalNumberPrefix = "JE-";
             o.JournalNumberPadding = 6;
             o.UseBalanceSummary = UseBalanceSummaryOption;
+            o.PostToUndepositedFunds = PostToUndepositedFundsOption;
         });
         // 全 0 的 32 字节测试密钥（AES-GCM 对任意 32 字节密钥成立）；确定性便于往返断言。
         services.Configure<FinanceEncryptionOptions>(o => o.EncryptionKey = Convert.ToBase64String(new byte[32]));
@@ -58,14 +66,10 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<TaxCodeComponent>(services);
         AddRepo<DocumentAttachment>(services);
         AddRepo<DocumentComment>(services);
-        AddRepo<Estimate>(services);
-        AddRepo<EstimateLine>(services);
         // 周期性单据（Tnzi.Finance.Recurring）
         AddRepo<RecurringDocument>(services);
         AddRepo<RecurringLine>(services);
         AddRepo<RecurringRun>(services);
-        AddRepo<PurchaseOrder>(services);
-        AddRepo<PurchaseOrderLine>(services);
         AddRepo<Invoice>(services);
         AddRepo<InvoiceLine>(services);
         AddRepo<Bill>(services);
@@ -77,6 +81,8 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         AddRepo<PaymentEntry>(services);
         AddRepo<PaymentApplication>(services);
         AddRepo<Transfer>(services);
+        AddRepo<Deposit>(services);
+        AddRepo<DepositLine>(services);
         AddRepo<LedgerLock>(services);
         AddRepo<Reconciliation>(services);
         AddRepo<ReconciliationLine>(services);
@@ -141,14 +147,11 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         services.AddScoped<IDunningPolicy, DefaultDunningPolicy>();
         services.AddScoped<IDocumentAttachmentService, DocumentAttachmentService>();
         services.AddScoped<IDocumentCommentService, DocumentCommentService>();
-        services.AddScoped<OfferComposer>();
-        services.AddScoped<IEstimateService, EstimateService>();
         // 周期性单据：排期契约可整体替换，测试里用默认公历实现
         services.AddScoped<IRecurrenceSchedule, CalendarRecurrenceSchedule>();
         services.AddScoped<RecurringDocumentBuilder>();
         services.AddScoped<IRecurringDocumentService, RecurringDocumentService>();
         services.AddScoped<IRecurringGeneratorService, RecurringGeneratorService>();
-        services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<IBillService, BillService>();
         services.AddScoped<IExpenseService, ExpenseService>();
@@ -158,6 +161,10 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
 
         // P3a 银行域
         services.AddScoped<ITransferService, TransferService>();
+        services.AddScoped<IDepositService, DepositService>();
+        // 镜像 FinanceModule：拒绝作废「已被某张存活存款单收走」的收款。
+        // 不注册它，PostingGuardRunner 就是在空集合上跑，恒放行。
+        services.AddScoped<IFinancePostingGuard, DepositClaimPaymentGuard>();
         services.AddScoped<IReconciliationService, ReconciliationService>();
 
         // 多币种深化：期末重估

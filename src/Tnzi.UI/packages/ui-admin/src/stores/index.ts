@@ -1,5 +1,6 @@
 export * from './useAdminAppStore'
 export * from './useAdminAuthStore'
+export * from './useAdminDesktopStore'
 export * from './useAdminRouteStore'
 export * from './useAdminTabStore'
 export * from './useAdminThemeStore'

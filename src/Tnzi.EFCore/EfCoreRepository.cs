@@ -635,6 +635,20 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         var entry = DbContext.Entry(entity);
         if (entry.State == EntityState.Detached)
         {
+            // 同一主键已被本 DbContext 跟踪时 Attach 会抛 identity conflict，
+            // 合并到已跟踪的那一条（缘由见 TrackedDuplicateResolver）。
+            var tracked = TrackedDuplicateResolver.Find(DbContext, entity);
+            if (TrackedDuplicateResolver.CanMergeInto(tracked))
+            {
+                TrackedDuplicateResolver.Merge(tracked!, entity);
+
+                if (ShouldSaveImmediately())
+                {
+                    await DbContext.SaveChangesAsync(cancellationToken);
+                }
+                return;
+            }
+
             DbSet.Attach(entity);
         }
 
@@ -661,7 +675,30 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         var entityList = entities as ICollection<TEntity> ?? entities.ToList();
 
         // 尚未持久化的新实体（Added）必须保持 Added，不能被 UpdateRange 降级为 Modified（见 UpdateAsync）
-        var toUpdate = entityList.Where(e => DbContext.Entry(e).State != EntityState.Added).ToList();
+        var toUpdate = new List<TEntity>(entityList.Count);
+        foreach (var item in entityList)
+        {
+            var state = DbContext.Entry(item).State;
+            if (state == EntityState.Added)
+            {
+                continue;
+            }
+
+            // 与 UpdateAsync 同理：同主键已被跟踪时 UpdateRange 会抛 identity conflict，
+            // 合并到已跟踪的那一条，不再进批。
+            if (state == EntityState.Detached)
+            {
+                var tracked = TrackedDuplicateResolver.Find(DbContext, item);
+                if (TrackedDuplicateResolver.CanMergeInto(tracked))
+                {
+                    TrackedDuplicateResolver.Merge(tracked!, item);
+                    continue;
+                }
+            }
+
+            toUpdate.Add(item);
+        }
+
         var batchSize = GetBatchSize();
 
         // 对于大量实体（超过批次大小），分批处理

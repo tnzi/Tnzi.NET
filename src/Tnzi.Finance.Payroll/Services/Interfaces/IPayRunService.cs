@@ -46,6 +46,18 @@ public interface IPayRunService
     /// <summary>修改单张工资单输入并单独重算（仅 Calculated 态）</summary>
     Task<Result<PayslipDto>> UpdatePayslipInputsAsync(Guid id, Guid payslipId, UpdatePayslipInputsDto input, CancellationToken cancellationToken = default);
 
+    /// <summary>列出批次的一次性输入（奖金/补发/罚扣…）</summary>
+    Task<Result<List<PayRunInputDto>>> GetInputsAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 录入/覆盖一次性输入（Draft|Calculated 态）；Calculated 时立即重算该员工的工资单。
+    /// 组件的生效公式必须调用 <c>Input()</c>，否则 400（存下来却不生效比报错危险）。
+    /// </summary>
+    Task<Result<PayRunInputDto>> SetInputAsync(Guid id, SetPayRunInputDto input, CancellationToken cancellationToken = default);
+
+    /// <summary>删除一次性输入（Draft|Calculated 态）；Calculated 时立即重算该员工的工资单</summary>
+    Task<Result> DeleteInputAsync(Guid id, Guid inputId, CancellationToken cancellationToken = default);
+
     /// <summary>外部批次幂等摄取（External/OpeningBalance；AutoPost 半完成自愈）</summary>
     Task<Result<PayRunDto>> CreateFromExternalAsync(ExternalPayRunIngestDto input, CancellationToken cancellationToken = default);
 }

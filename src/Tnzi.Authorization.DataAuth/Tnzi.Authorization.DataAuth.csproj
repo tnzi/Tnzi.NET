@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Row-level data authorization for the Tnzi.NET authorization module: the entity registry, per-role data scopes and the query filter they compile into. Optional; function-level authorization (permission checks, the policy provider, the catalogue, role and user grants) lives in Tnzi.Authorization and works without it.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+  </ItemGroup>
+
+</Project>

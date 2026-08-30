@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  agingBucketLabels,
   formatAccountingDate,
   formatAccountingDateRange,
   formatAmount,
@@ -135,5 +136,18 @@ describe('variance', () => {
   it('measures the change against the magnitude of the base', () => {
     // Going from -100 to -50 is a 50% improvement, not -50%.
     expect(variance(-50, -100)).toEqual({ delta: 50, percent: 50 })
+  })
+})
+
+describe('agingBucketLabels', () => {
+  it('derives the range labels from the effective cut points', () => {
+    // Finance:AgingBucketDays is configurable; hardcoded 1-30/31-60/61-90/90+
+    // labels would lie about which bucket a 15-day-overdue invoice sits in.
+    expect(agingBucketLabels([7, 14, 21])).toEqual(['1-7', '8-14', '15-21', '21+'])
+  })
+
+  it('falls back to the historical 30/60/90 labels when the field is missing', () => {
+    expect(agingBucketLabels(undefined)).toEqual(['1-30', '31-60', '61-90', '90+'])
+    expect(agingBucketLabels([30, 60])).toEqual(['1-30', '31-60', '61-90', '90+'])
   })
 })

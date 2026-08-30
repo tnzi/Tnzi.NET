@@ -14,16 +14,13 @@ public class PaymentMappingConfig : IMappingConfig
         context.NewConfig<Refund, RefundDto>()
             .Map(dest => dest.TradeNo, src => src.Payment != null ? src.Payment.TradeNo : null);
 
-        // 订阅实体映射：映射关联的 PlanName；
-        // HasPaymentMethod 由 token 是否存在推导（可翻译成 SQL，列表查询走 ProjectTo 也成立），
-        // 前端据此提示"未绑卡将无法自动续费"。
-        context.NewConfig<Subscription, SubscriptionDto>()
-            .Map(dest => dest.PlanName, src => src.Plan != null ? src.Plan.PlanName : null)
-            .Map(dest => dest.HasPaymentMethod, src => src.PaymentMethodToken != null);
+        // 订阅实体的映射随续费域搬去了可选子模块 Tnzi.Payment.Subscriptions
+        // （SubscriptionMappingConfig，规则一字不变）。IMappingConfig 是按程序集发现的，
+        // 不加载那个包时那条规则连同它引用的两个类型一起不存在。
 
-        // 优惠券使用记录映射：映射关联的 CouponCode，使用 CreationTime 作为 UsedTime
-        context.NewConfig<CouponUsage, CouponUsageDto>()
-            .Map(dest => dest.CouponCode, src => src.Coupon != null ? src.Coupon.PromotionCode : null)
-            .Map(dest => dest.UsedTime, src => src.CreationTime);
+        // 优惠券核销记录的映射随促销域搬去了可选子模块 Tnzi.Payment.Promotions
+        // （PromotionMappingConfig，规则一字不变）。源类型是那边的实体，目标 CouponUsageDto
+        // 留在本模块（它在 ICouponService 的签名上）—— 子模块把自己的实体映到父模块的 DTO，
+        // 方向正确。IMappingConfig 按程序集发现，不加载那个包时这条规则不存在。
     }
 }

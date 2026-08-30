@@ -66,7 +66,12 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
         }
         catch (OperationCanceledException)
         {
-            // 服务停止：未到期的延迟项丢弃（内存队列本就不跨进程持久化）
+            // 服务停止：未到期的延迟项丢弃（内存队列本就不跨进程持久化）。
+            // ★ 必须留一行：丢掉的可能是一条已经答复过"已排期"的定时消息。行还在库里，
+            // 由 NotificationDispatchBackgroundService 的到期扫描接手 —— 但那要等一个
+            // StuckAfterMinutes 的宽限，中间这段时间里没有这条日志就完全看不出发生过什么。
+            _logger.LogInformation(
+                "A delayed notification work item was dropped on shutdown. A scheduled message is not lost: its row stays in the database and the dispatch recovery scan will send it once it is overdue.");
         }
         catch (Exception ex)
         {

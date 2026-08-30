@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Discounting for the Tnzi.NET payment module: promotions and coupon codes, per-user and total quotas, redemption codes, the user's coupon wallet, and admin-issued grants. Optional - a host that always charges list price never carries the four Payment_ promotion tables, fifteen endpoints or three permission codes. Without it charging, refunds, stored payment methods, callbacks and reconciliation are byte-for-byte unchanged; a request that names a coupon code is simply refused, because on that host no coupon code exists.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <!--
+      引用清单只有父模块一条，而且这是本次拆分的既定结果而非巧合：折扣是纯粹的算术与配额，
+      不发通知、不出 PDF、不落文件。父模块的闭包（EFCore + AspNetCore）已经够用。
+    -->
+  </ItemGroup>
+
+</Project>

@@ -14,7 +14,7 @@
   <NCard
     size="small"
     :bordered="false"
-    class="t-stat-card"
+    class="t-stat-card t-surface-card"
     :class="{ 't-stat-card--clickable': clickable }"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable ? 0 : undefined"
@@ -135,17 +135,17 @@ const precision = computed<number>(() => {
 <style scoped>
 .t-stat-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-stat-card--clickable {
   cursor: pointer;
-  transition:
-    transform var(--tnzi-admin-motion-duration-fast, 0.15s) ease,
-    box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+  transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
 .t-stat-card--clickable:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-stat-card--clickable:focus-visible {
   outline: 2px solid var(--tnzi-primary);

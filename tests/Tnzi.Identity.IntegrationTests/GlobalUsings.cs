@@ -7,5 +7,6 @@ global using System.Threading.Tasks;
 global using Tnzi.Identity.Data;
 global using Tnzi.Identity.Dtos;
 global using Tnzi.Identity.Entities;
+global using Tnzi.Identity.Metadata;
 global using Tnzi.Security.Claims;
 global using Xunit;

@@ -42,5 +42,6 @@ global using Tnzi.Finance.Documents.Models;
 global using Tnzi.Finance.Documents.Services;
 global using Tnzi.Finance.Documents.Services.Internal;
 global using Tnzi.Finance.Dtos;
+global using Tnzi.Finance.Options;
 global using Tnzi.Finance.Services;
 global using Tnzi.Finance.Banking.Services;

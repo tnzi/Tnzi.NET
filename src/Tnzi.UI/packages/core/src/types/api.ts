@@ -87,3 +87,17 @@ export interface UploadOptions extends RequestOptions {
   /** Additional form data fields */
   additionalData?: Record<string, string | Blob>;
 }
+
+/**
+ * Reorder request body, shared by every module's `reorder` endpoint.
+ *
+ * `ids` is the visible order, not necessarily the full set: the server merges
+ * it back by slot, so records outside the submitted positions keep theirs. The
+ * scope of a reorder (parent folder, setting group, ...) travels as a query
+ * parameter on the endpoint, not in this body - it locates the sequence rather
+ * than being part of the payload.
+ */
+export interface ReorderRequest {
+  /** Record ids in their new order. No duplicates; all must be inside the scope. */
+  ids: string[];
+}

@@ -1,10 +1,10 @@
 namespace Tnzi.Storage.Services;
 
 /// <summary>
-/// 文件清理服务，负责临时文件、孤岛文件、无效引用和过期分片会话的清理。
+/// 文件清理服务，负责临时文件、孤岛文件、无效引用的清理，并驱动别的程序集挂进来的 <see cref="IStorageCleanupContributor"/>。
 ///
 /// 多租户隔离（T3）：
-/// FileRecord/FileReference/FileUploadSession/FileChunk 均为 IMultiTenant。后台清理任务运行在
+/// FileRecord/FileReference 均为 IMultiTenant。后台清理任务运行在
 /// 无 HttpContext 的 scope 中，CurrentTenant 通常为空，若直接查询，框架在「启用多租户」时的全局
 /// 租户过滤器（e.TenantId == CurrentTenant.Id）会因当前租户为 null 而放行/错配所有租户的数据，
 /// 存在跨租户误删风险。
@@ -20,8 +20,6 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
 {
     private readonly IRepository<FileRecord, Guid> _fileRepository;
     private readonly IRepository<FileReference, Guid> _referenceRepository;
-    private readonly IRepository<FileUploadSession, Guid> _sessionRepository;
-    private readonly IRepository<FileChunk, Guid> _chunkRepository;
     private readonly IFileStorage _storage;
     private readonly ICurrentTenant _currentTenant;
     private readonly IOptionsMonitor<StorageOptions> _options;
@@ -29,25 +27,28 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     private readonly IOrphanReferenceValidator? _orphanReferenceValidator;
 
     /// <summary>
+    /// 别的程序集挂进来的清理趟次。<b>没有任何实现时 DI 给空集合</b>，整段跳过。
+    /// </summary>
+    private readonly IReadOnlyList<IStorageCleanupContributor> _contributors;
+
+    /// <summary>
     /// 初始化 <see cref="FileCleanupService"/>
     /// </summary>
     public FileCleanupService(
         IRepository<FileRecord, Guid> fileRepository,
         IRepository<FileReference, Guid> referenceRepository,
-        IRepository<FileUploadSession, Guid> sessionRepository,
-        IRepository<FileChunk, Guid> chunkRepository,
         IFileStorage storage,
         ICurrentTenant currentTenant,
         IOptionsMonitor<StorageOptions> options,
         IServiceProvider serviceProvider,
+        IEnumerable<IStorageCleanupContributor>? contributors = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         IOrphanReferenceValidator? orphanReferenceValidator = null)
         : base(serviceProvider)
     {
         _fileRepository = Check.NotNull(fileRepository);
         _referenceRepository = Check.NotNull(referenceRepository);
-        _sessionRepository = Check.NotNull(sessionRepository);
-        _chunkRepository = Check.NotNull(chunkRepository);
+        _contributors = contributors?.ToArray() ?? [];
         _storage = Check.NotNull(storage);
         _currentTenant = Check.NotNull(currentTenant);
         _options = Check.NotNull(options);
@@ -56,7 +57,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     }
 
     /// <summary>
-    /// 执行完整清理：临时文件、孤岛文件、无效引用、过期分片会话
+    /// 执行完整清理：临时文件、孤岛文件、无效引用，最后跑一遍贡献者
     /// </summary>
     public async Task<CleanupResult> CleanupAsync(CancellationToken cancellationToken = default)
     {
@@ -84,9 +85,9 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                 LogInformation("Cleaned orphan references: {Count}", result.OrphanReferencesDeleted);
             }
 
-            // 4. 清理过期分片上传会话及残留分片
-            result.ExpiredSessionsDeleted = await CleanupExpiredUploadSessionsAsync(cancellationToken);
-            LogInformation("Cleaned expired upload sessions: {Count}", result.ExpiredSessionsDeleted);
+            // 4. 别的程序集挂进来的趟次（工作区子模块的过期分片上传会话就在这里）
+            result.ContributedDeleted = await RunContributorsAsync(result, cancellationToken);
+            LogInformation("Cleaned by contributors: {Count}", result.ContributedDeleted);
 
             LogInformation("File cleanup task completed, total cleaned: {Total}", result.TotalDeleted);
         }
@@ -259,74 +260,42 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
             cancellationToken);
     }
 
+    /// <inheritdoc />
+    public Task<int> RunContributorsAsync(CancellationToken cancellationToken = default)
+        => RunContributorsAsync(result: null, cancellationToken);
+
     /// <summary>
-    /// 清理过期的分片上传会话（ExpiresAt 已过）及其残留分片（含物理文件，按租户隔离）。
-    /// 用户 init 后放弃的会话/分片若不清理会永久滞留。
+    /// 逐个跑贡献者，把每个的失败**单独**记下来。
     /// </summary>
-    public async Task<int> CleanupExpiredUploadSessionsAsync(CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// 一个贡献者抛异常不该把其它趟次和父模块自己的三趟一起带走 —— 那正是
+    /// 「一个坏的贡献者让整次清理停摆」的形态。所以逐个 catch，记 Warning，
+    /// 有结果对象时再往 <see cref="CleanupResult.Errors"/> 里追加一条。
+    /// </remarks>
+    private async Task<int> RunContributorsAsync(CleanupResult? result, CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
-        var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
+        if (_contributors.Count == 0)
+            return 0;
 
-        return await ForEachTenantAsync(
-            () => _sessionRepository.AsQueryable()
-                .IgnoreQueryFilters()
-                .Where(s => s.ExpiresAt < now)
-                .Select(s => s.TenantId)
-                .Distinct(),
-            async () =>
+        var maxItems = _options.CurrentValue.Cleanup.MaxFilesPerRun;
+        var total = 0;
+
+        foreach (var contributor in _contributors)
+        {
+            try
             {
-                var sessions = await _sessionRepository.AsQueryable()
-                    .Where(s => s.ExpiresAt < now)
-                    .Take(maxFiles)
-                    .ToListAsync(cancellationToken);
+                var deleted = await contributor.CleanupAsync(maxItems, cancellationToken);
+                total += deleted;
+                Logger.LogDebug("Cleanup contributor {Contributor} removed {Count} items", contributor.Name, deleted);
+            }
+            catch (Exception ex)
+            {
+                LogWarning("Cleanup contributor {Contributor} failed: {Error}", contributor.Name, ex.Message);
+                result?.Errors.Add($"{contributor.Name}: {ex.Message}");
+            }
+        }
 
-                var count = 0;
-                foreach (var session in sessions)
-                {
-                    try
-                    {
-                        // 查出该会话的所有分片
-                        var chunks = await _chunkRepository.AsQueryable()
-                            .Where(c => c.UploadSessionId == session.Id)
-                            .ToListAsync(cancellationToken);
-
-                        // 删除分片物理文件
-                        foreach (var chunk in chunks)
-                        {
-                            if (!string.IsNullOrEmpty(chunk.ChunkPath))
-                            {
-                                try
-                                {
-                                    await _storage.DeleteAsync(chunk.ChunkPath);
-                                }
-                                catch (Exception ex)
-                                {
-                                    LogWarning("Failed to delete chunk file: {Path}, Error={Error}", chunk.ChunkPath, ex.Message);
-                                }
-                            }
-                        }
-
-                        // 删除分片记录
-                        if (chunks.Count > 0)
-                        {
-                            await _chunkRepository.DeleteManyAsync(chunks, cancellationToken);
-                        }
-
-                        // 删除会话记录
-                        await _sessionRepository.DeleteAsync(session, cancellationToken);
-                        count++;
-
-                        Logger.LogDebug("Cleaned expired upload session: {SessionId}", session.Id);
-                    }
-                    catch (Exception ex)
-                    {
-                        LogWarning("Failed to clean expired upload session: SessionId={SessionId}, Error={Error}", session.Id, ex.Message);
-                    }
-                }
-                return count;
-            },
-            cancellationToken);
+        return total;
     }
 
     /// <summary>

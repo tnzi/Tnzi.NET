@@ -18,6 +18,23 @@
     <PackageReference Include="SixLabors.Fonts" Version="2.1.3" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+    <!--
+      QR 原语的两个依赖，都是纯托管、零传递依赖、无原生二进制：
+      - Net.Codecrete.QrCodeGenerator (MIT)：编码 + 自带 PNG 写出。刻意不用 QRCoder ——
+        它在 net6.0 这一档带 System.Drawing.Common，而 .NET 10 正好解析到那一档，
+        于是每个消费应用都会凭空多出一个仅限 Windows 的过时包。
+      - ZXing.Net (Apache-2.0)：解码。亮度源由本包手写（Services/Internal/BitmapLuminanceSource），
+        不引 ZXing.ImageSharp.Bindings —— 那个绑定包会握住 ImageSharp 的版本下限，
+        而上面那条授权铁律要求这条线由本框架自己控制。
+    -->
+    <PackageReference Include="Net.Codecrete.QrCodeGenerator" Version="3.1.0" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 解码器的配置（尤其是「PURE_BARCODE 这个键绝不能出现」）必须能被断言，
+         而它是 internal 的 —— src 下全部强命名同一 key，故须带 PublicKey。 -->
+    <InternalsVisibleTo Include="Tnzi.Imaging.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
   <ItemGroup>

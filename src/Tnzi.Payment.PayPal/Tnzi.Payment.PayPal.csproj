@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>PayPal payment channel for the Tnzi.NET payment module: the IPaymentProvider implementation (Orders v2, refunds, webhook verification, Vault v3 account storage and merchant-initiated charges) and the Payment:PayPal options. Load it only when the application actually charges through PayPal; splitting it out also removed the unused PayPalCheckoutSdk reference (and its transitive PayPalHttp) from Tnzi.Payment, so the channel now costs exactly one package and no vendor SDK at all.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" />
+  </ItemGroup>
+
+  <!--
+    刻意没有厂商 PackageReference。父模块此前引着 PayPalCheckoutSdk 1.0.4（连带传递依赖
+    PayPalHttp 1.0.1），而整个渠道实现从头到尾走的是 HttpClient + System.Text.Json 直连 REST API，
+    对那个 SDK 零引用 —— 拆包时核实过（全仓没有一行 using PayPalCheckoutSdk），
+    所以它是被删掉而不是搬过来的：把一个没人用的包搬进子模块只是换个地方背着它。
+    于是这次拆分对依赖闭包的净效果是「父模块少两个包、子模块不新增包」。
+    真要改用官方 SDK 是另一次决策，本包是它该落地的位置，但今天不欠这笔依赖。
+  -->
+
+</Project>

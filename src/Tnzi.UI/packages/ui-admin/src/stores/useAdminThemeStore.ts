@@ -6,13 +6,19 @@ import { surfaceTone, isDarkSurface, type SurfaceTone } from '../theme/surfaceTo
 import 'pinia-plugin-persistedstate'
 
 /**
- * Admin layout modes - 4 variants modeled after soybean-admin.
+ * Admin layout modes - 4 menu-driven variants modeled after soybean-admin,
+ * plus one desktop-metaphor shell.
  *
  * - `vertical` - left sidebar (default)
  * - `horizontal` - top menu only, no sidebar
  * - `vertical-mix` - narrow first-level sidebar + sub-sidebar with children
  * - `top-hybrid-header-first` - top first-level menu + sidebar with the active
  *                               first-level's children (sider hides when it has none)
+ * - `desktop` - Windows-style desktop: icon grid + floating windows + taskbar.
+ *               Unlike the four above (which only rearrange the chrome around a
+ *               single content area), this one replaces the content area's
+ *               mounting model entirely - N page instances mount side by side
+ *               instead of one. See `components/desktop/`.
  *
  * The two header-first/sidebar-first hybrid variants soybean ships were
  * dropped (2026-06-26): `vertical-hybrid-header-first` rendered an empty
@@ -27,6 +33,7 @@ export type AdminLayoutMode =
   | 'horizontal'
   | 'vertical-mix'
   | 'top-hybrid-header-first'
+  | 'desktop'
 
 /**
  * Page transition names. The first six match soybean-admin's signature route
@@ -55,6 +62,31 @@ export type PageTransition =
 export type TabStyle = 'chrome' | 'button' | 'slider'
 
 /**
+ * How every container in the shell separates itself from what is behind it.
+ *
+ * A surface's chrome is a PAIR - a border and a shadow - and the two only read
+ * as one design language when they are decided together. Half of a flat design
+ * is not a flatter design, it is a mixed one: a card that drops its shadow but
+ * grows no outline dissolves into the canvas, and a card that grows an outline
+ * while the card beside it keeps a shadow makes two peers look like different
+ * kinds of thing. So this is one setting, not a border toggle plus a shadow
+ * toggle - the combinations that read wrong are simply not expressible.
+ *
+ *  - `outlined` - a 1px outline, no shadow. Depth comes from the line. THE
+ *                 DEFAULT, and the only one whose values are all
+ *                 mode-independent, which is why it is the one the theme
+ *                 setting expresses by clearing its overrides.
+ *  - `elevated` - no outline, a soft drop shadow. Depth comes from light.
+ *  - `flat`     - neither. Depth comes only from the card being a lighter
+ *                 (or darker) material than the canvas behind it.
+ *
+ * Popovers, drawers, modals and floating windows are deliberately NOT flattened
+ * by any of these: their shadow is not decoration, it is the only thing telling
+ * a reader they float over arbitrary content underneath.
+ */
+export type AdminSurfaceStyle = 'elevated' | 'outlined' | 'flat'
+
+/**
  * Theme color schema (light / dark / auto). The LIVE value is owned by the
  * `@tnzi/ui` theme context (`settings.mode` - header cycle button and theme
  * drawer mutate it via `setMode`), but that context has no persistence of its
@@ -74,11 +106,15 @@ export interface WatermarkSettings {
   fontSize: number
 }
 
+// Runtime mirror of `AdminLayoutMode`. The type system does NOT keep these two
+// in sync - a mode missing here makes `setLayoutMode` a silent no-op (it
+// neither throws nor takes effect), which is the hardest failure mode to spot.
 const VALID_LAYOUT_MODES: AdminLayoutMode[] = [
   'vertical',
   'horizontal',
   'vertical-mix',
   'top-hybrid-header-first',
+  'desktop',
 ]
 const VALID_TRANSITIONS: PageTransition[] = [
   'fade',
@@ -94,6 +130,87 @@ const VALID_TRANSITIONS: PageTransition[] = [
 ]
 const VALID_TAB_STYLES: TabStyle[] = ['chrome', 'button', 'slider']
 const VALID_THEME_SCHEMAS: AdminThemeSchema[] = ['light', 'dark', 'auto']
+export const VALID_SURFACE_STYLES: AdminSurfaceStyle[] = ['outlined', 'elevated', 'flat']
+
+/**
+ * The surface-tier token overrides each style writes onto `:root`.
+ *
+ * `elevated` is the empty object on purpose rather than a copy of the default
+ * values: it REMOVES the overrides, handing the tokens back to the stylesheet
+ * in `@tnzi/ui`. That matters because the stylesheet carries a `.dark` variant
+ * whose shadow alphas are ~8x the light ones, and an inline `:root` value wins
+ * over it. Writing the light defaults inline as "the default" would pin every
+ * card to a 5% black shadow that is invisible on a dark canvas - a reset that
+ * quietly breaks dark mode.
+ *
+ * The non-default styles must therefore spell out BOTH modes' worth of
+ * behaviour themselves, which they do trivially: `none` is mode-independent,
+ * and the outlined border follows `--tnzi-border`, which already flips.
+ */
+const SURFACE_STYLE_VARS: Record<AdminSurfaceStyle, Record<string, string>> = {
+  // The default is the EMPTY one, and which style that is decides the shape of
+  // this table. `outlined` can be the empty entry because every value it needs
+  // is mode-independent - a line that follows `--tnzi-border`, `none`, and a
+  // ring that follows the accent - so the stylesheet can hold them and this
+  // can simply clear its overrides to get back there.
+  //
+  // `elevated` cannot be written the same way: its shadows differ between
+  // light and dark, and `injectCssVars` puts theme variables inline on `:root`
+  // where they outrank the stylesheet's `.dark` block. Writing a light shadow
+  // inline would pin every card to a shadow that is invisible on a dark canvas.
+  // So it switches BY REFERENCE to the mode-varying `*-raised` tokens, and the
+  // `.dark` twin still decides which value those resolve to.
+  outlined: {},
+  elevated: {
+    '--tnzi-surface-card-border': 'none',
+    '--tnzi-surface-card-shadow': 'var(--tnzi-surface-card-shadow-raised)',
+    '--tnzi-surface-card-shadow-hover': 'var(--tnzi-surface-card-shadow-raised-hover)',
+    // No border means the visible separating signal is the card's own
+    // material, and a card nested in a card shares it - so it steps.
+    '--tnzi-surface-card-step': '1.5%',
+    '--tnzi-surface-chrome-border': 'none',
+    '--tnzi-surface-chrome-shadow-header': 'var(--tnzi-shadow-header)',
+    '--tnzi-surface-chrome-shadow-tab': 'var(--tnzi-shadow-tab)',
+    '--tnzi-surface-chrome-shadow-footer': 'var(--tnzi-shadow-footer)',
+    '--tnzi-surface-chrome-shadow-sider': 'var(--tnzi-shadow-sider)',
+  },
+  flat: {
+    '--tnzi-surface-card-border': 'none',
+    '--tnzi-surface-card-shadow': 'none',
+    // A style with no shadow cannot cue hover with a shadow, and must not cue
+    // it with a translate. Same accent ring the default uses.
+    '--tnzi-surface-card-shadow-hover': '0 0 0 1px rgb(var(--tnzi-primary-rgb) / 55%)',
+    // Material is the only channel left, so the nested step does more work here
+    // than anywhere else - hence a bigger one.
+    '--tnzi-surface-card-step': '2%',
+    // With no outline and no shadow an inset block inside a flat card would be
+    // invisible without its line.
+    '--tnzi-surface-inset-border': '1px solid var(--tnzi-border)',
+    // The rails keep their divider even here. Cards can afford to dissolve into
+    // the page - they are content, and the page tells you where they are. The
+    // header, the footer and the sider ARE the page's frame; drop their edges
+    // and the shell stops having a shape.
+    '--tnzi-surface-chrome-border': '1px solid var(--tnzi-border)',
+    '--tnzi-surface-chrome-shadow-header': 'none',
+    '--tnzi-surface-chrome-shadow-tab': 'none',
+    '--tnzi-surface-chrome-shadow-footer': 'none',
+    '--tnzi-surface-chrome-shadow-sider': 'none',
+  },
+}
+
+/** Taskbar height, in px. Mirrors `--tnzi-desktop-taskbar-height` in the CSS. */
+const DEFAULT_TASKBAR_HEIGHT = 40
+
+/**
+ * How frosted the desktop chrome is, 0-100. Mirrors the `--tnzi-desktop-solidity`
+ * / `--tnzi-desktop-backdrop` pair in the CSS, which is why the default is a
+ * number and not "on": at 0 the surfaces go fully opaque and the backdrop
+ * filter is dropped entirely rather than left as a no-op `blur(0px)` (that
+ * still promotes every chrome surface to its own backdrop root and pays for a
+ * composite that changes nothing).
+ */
+export const DEFAULT_DESKTOP_VIBRANCY = 60
+const DEFAULT_VIBRANCY = DEFAULT_DESKTOP_VIBRANCY
 
 const DEFAULT_WATERMARK: WatermarkSettings = {
   enabled: false,
@@ -158,7 +275,12 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const autoSelectFirstMenu = ref(true)
   const headerHeight = ref(50)
   const tabHeight = ref(44)
-  const footerHeight = ref(42)
+  /* 28px, matching `--tnzi-admin-footer-height`. These two used to disagree -
+   * the token said 32 and this said 42 - and because the watcher below writes
+   * the token from here with `immediate: true`, the CSS value was dead on
+   * arrival and the real default was 42. A footer is one muted line of
+   * copyright; 42px of it is height taken from the content above. */
+  const footerHeight = ref(28)
 
   // Tab style (chrome / button / slider) - defaults to `button` (the
   // rounded-chip style; least visual noise, no SVG-arc geometry).
@@ -171,6 +293,10 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   // Theme radius (Phase I.6.6) - drives --tnzi-admin-radius* globally
   // (sm/md/lg derived by scale in setThemeRadius). 0-16px range.
   const themeRadius = ref(4)
+
+  // Container chrome - drives the `--tnzi-surface-*` tier tokens globally.
+  // See `AdminSurfaceStyle` for why border and shadow are one setting.
+  const surfaceStyle = ref<AdminSurfaceStyle>('outlined')
 
   // Background color overrides - `null` = fall back to default token value.
   // When non-null the value is written to the corresponding CSS custom
@@ -233,6 +359,46 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   const contentTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(contentBg.value, contentTextColor.value))
   const pageHeaderTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(pageHeaderBg.value, pageHeaderTextColor.value))
   const cardTone = computed<SurfaceTone | null>(() => resolveSurfaceTone(cardBg.value, cardTextColor.value))
+
+  // ── Desktop layout surfaces ───────────────────────────────────────────────
+  // Only these three are custom-colourable, because only these three are
+  // surfaces the desktop OWNS. The page inside a window is ordinary content and
+  // keeps following `contentBg` / `cardBg` like every other layout.
+  //
+  // Each behaves exactly like the chrome surfaces above - same setter shape,
+  // same `null` = "follow the theme", same tone-driven foreground flip - so a
+  // consumer that already understands `siderBg` understands these for free.
+  const desktopWallpaperBg = ref<string | null>(null)
+  const desktopTaskbarBg = ref<string | null>(null)
+  const desktopWindowBarBg = ref<string | null>(null)
+  /** Optional photo behind the icons. Sanitised on write - see `applyWallpaperImage`. */
+  const desktopWallpaperImage = ref<string | null>(null)
+  /**
+   * How hard to darken a wallpaper photo, 0-80.
+   *
+   * Not decoration: the icon labels are painted on the wallpaper, and on a
+   * bright photo white text on a light sky is unreadable no matter what the
+   * text-shadow does. The scrim is what keeps the desktop legible over an
+   * arbitrary image.
+   */
+  const desktopWallpaperScrim = ref<number>(40)
+  /** Taskbar height - the desktop's counterpart to `headerHeight`. */
+  const desktopTaskbarHeight = ref(DEFAULT_TASKBAR_HEIGHT)
+  const desktopVibrancy = ref(DEFAULT_VIBRANCY)
+
+  const desktopTaskbarTone = computed<SurfaceTone | null>(() => surfaceTone(desktopTaskbarBg.value))
+  const desktopWindowBarTone = computed<SurfaceTone | null>(() =>
+    surfaceTone(desktopWindowBarBg.value),
+  )
+  /**
+   * Tone of what the icon labels sit on: the scrim wins when there is a photo
+   * (a heavy scrim is dark whatever the picture), otherwise the wallpaper
+   * colour decides.
+   */
+  const desktopWallpaperTone = computed<SurfaceTone | null>(() => {
+    if (desktopWallpaperImage.value) return desktopWallpaperScrim.value >= 35 ? 'dark' : null
+    return surfaceTone(desktopWallpaperBg.value)
+  })
 
   // Inverted color scheme for sider (orthogonal to global dark mode).
   // Note: soybean only inverts the sider - the header always follows the
@@ -393,6 +559,13 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     // and user setter calls take the same path.
   }
 
+  function setSurfaceStyle(s: AdminSurfaceStyle): void {
+    if (VALID_SURFACE_STYLES.includes(s)) {
+      surfaceStyle.value = s
+      // CSS variables written by the `watch(surfaceStyle, ...)` block below.
+    }
+  }
+
   // Shared surface-bg applier - writes (or clears) a single CSS custom
   // property on documentElement. `null` removes the override so the surface
   // falls back to its component-level default token.
@@ -428,6 +601,181 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
   function resetSiderBg(): void {
     setSiderBg(null)
   }
+  /**
+   * Foreground token for a desktop surface, derived from its own tone.
+   *
+   * A light taskbar with the default light tray text is unreadable, and the
+   * tray hosts consumer components that paint themselves with the standard
+   * text token - so the flip has to happen at the surface, not in each of them.
+   */
+  function applyDesktopSurface(
+    bgVar: string,
+    fgVar: string,
+    bg: string | null,
+    tone: SurfaceTone | null,
+  ): void {
+    applySurfaceBg(bgVar, bg)
+    if (!bg || !tone) {
+      applySurfaceBg(fgVar, null)
+      return
+    }
+    applySurfaceBg(
+      fgVar,
+      tone === 'dark'
+        ? 'var(--tnzi-admin-inverted-text, rgba(255, 255, 255, 0.92))'
+        : 'var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88))',
+    )
+  }
+
+  function applyDesktopWallpaper(): void {
+    const bg = desktopWallpaperBg.value
+    applySurfaceBg('--tnzi-desktop-wallpaper', bg)
+    // The built-in blooms are tuned for the built-in blue; on an arbitrary hue
+    // they read as a second colour smeared across it. Swap them for neutral
+    // light/dark radials, which add the same depth on any base.
+    applySurfaceBg(
+      '--tnzi-desktop-glow-1',
+      bg ? 'radial-gradient(900px 700px at 46% 52%, rgb(255 255 255 / 10%), transparent 60%)' : null,
+    )
+    applySurfaceBg(
+      '--tnzi-desktop-glow-2',
+      bg ? 'radial-gradient(1300px 900px at 78% 96%, rgb(0 0 0 / 22%), transparent 66%)' : null,
+    )
+    const tone = desktopWallpaperTone.value
+    applySurfaceBg(
+      '--tnzi-desktop-icon-color',
+      tone === 'light' ? 'var(--tnzi-admin-surface-light-text, rgba(0, 0, 0, 0.88))' : null,
+    )
+  }
+  function setDesktopWallpaperBg(v: string | null): void {
+    desktopWallpaperBg.value = v
+    applyDesktopWallpaper()
+  }
+  function resetDesktopWallpaperBg(): void {
+    setDesktopWallpaperBg(null)
+  }
+
+  /**
+   * Only a URL shape we are willing to put inside `url(...)`.
+   *
+   * The value reaches every user through the global theme snapshot, so it is
+   * not the author's own browser it can break. Quotes, parentheses and newlines
+   * would let it terminate the `url()` token and inject further declarations;
+   * an unexpected scheme (`javascript:`) has no business here either.
+   */
+  function sanitizeWallpaperImage(v: string | null): string | null {
+    const url = v?.trim()
+    if (!url) return null
+    // Quotes, parentheses, backslash and whitespace are the characters that
+    // could terminate the `url("...")` token and start a new declaration.
+    if (/["'()\\]|\s/.test(url)) return null
+    if (!/^(https?:\/\/|\/|data:image\/)/i.test(url)) return null
+    return url
+  }
+
+  function applyWallpaperImage(): void {
+    const url = sanitizeWallpaperImage(desktopWallpaperImage.value)
+    applySurfaceBg('--tnzi-desktop-wallpaper-image', url ? `url("${url}")` : null)
+    applySurfaceBg(
+      '--tnzi-desktop-wallpaper-scrim',
+      url ? String(Math.min(Math.max(desktopWallpaperScrim.value, 0), 80) / 100) : null,
+    )
+    applyDesktopWallpaper()
+  }
+  function setDesktopWallpaperImage(v: string | null): void {
+    desktopWallpaperImage.value = v?.trim() ? v.trim() : null
+    applyWallpaperImage()
+  }
+  function setDesktopWallpaperScrim(v: number): void {
+    desktopWallpaperScrim.value = Math.min(Math.max(Math.round(v), 0), 80)
+    applyWallpaperImage()
+  }
+  function resetDesktopWallpaperImage(): void {
+    desktopWallpaperImage.value = null
+    desktopWallpaperScrim.value = 40
+    applyWallpaperImage()
+  }
+
+  /**
+   * Solidity and blur move together, so one slider covers the whole material.
+   * Transparency without the blur is not frosted glass - it is a muddy surface
+   * with the wallpaper's own detail legible straight through the text on top.
+   *
+   * Solidity bottoms out at 60%, not 0: below roughly that, taskbar labels and
+   * window titles stop meeting contrast against a wallpaper the user is free to
+   * replace with any photograph. The slider buys you glass, not invisibility.
+   *
+   * The travel matters as much as the floor. A first cut only spanned 100%->70%
+   * and read as broken: a quarter of the way along is 92.5% opaque, which is
+   * indistinguishable from solid, so most of the control did nothing anyone
+   * could see. A slider whose first half is imperceptible is a broken slider.
+   */
+  function applyDesktopVibrancy(v: number): void {
+    // At the default the CSS already says this; writing it inline would beat a
+    // consumer's own override for a user who never touched the slider.
+    if (v === DEFAULT_VIBRANCY) {
+      applySurfaceBg('--tnzi-desktop-solidity', null)
+      applySurfaceBg('--tnzi-desktop-backdrop', null)
+      return
+    }
+    applySurfaceBg('--tnzi-desktop-solidity', `${100 - v * 0.4}%`)
+    applySurfaceBg(
+      '--tnzi-desktop-backdrop',
+      v <= 0 ? 'none' : `blur(${Math.round(v * 0.5)}px) saturate(150%)`,
+    )
+  }
+  function setDesktopVibrancy(v: number): void {
+    desktopVibrancy.value = Math.min(Math.max(Math.round(v), 0), 100)
+    applyDesktopVibrancy(desktopVibrancy.value)
+  }
+
+  function applyDesktopTaskbarHeight(v: number): void {
+    // At the default, REMOVE the property rather than writing the same number
+    // inline. An inline `:root` style beats any stylesheet, so writing it
+    // unconditionally would stomp a consumer's own token override for every
+    // user who never touched the slider.
+    applySurfaceBg(
+      '--tnzi-desktop-taskbar-height',
+      v === DEFAULT_TASKBAR_HEIGHT ? null : `${v}px`,
+    )
+  }
+  function setDesktopTaskbarHeight(v: number): void {
+    desktopTaskbarHeight.value = Math.min(Math.max(Math.round(v), 32), 72)
+    applyDesktopTaskbarHeight(desktopTaskbarHeight.value)
+  }
+
+  function applyDesktopTaskbarBg(): void {
+    applyDesktopSurface(
+      '--tnzi-desktop-taskbar-bg',
+      '--tnzi-desktop-taskbar-fg',
+      desktopTaskbarBg.value,
+      desktopTaskbarTone.value,
+    )
+  }
+  function setDesktopTaskbarBg(v: string | null): void {
+    desktopTaskbarBg.value = v
+    applyDesktopTaskbarBg()
+  }
+  function resetDesktopTaskbarBg(): void {
+    setDesktopTaskbarBg(null)
+  }
+
+  function applyDesktopWindowBarBg(): void {
+    applyDesktopSurface(
+      '--tnzi-desktop-window-bar-bg',
+      '--tnzi-desktop-window-bar-fg',
+      desktopWindowBarBg.value,
+      desktopWindowBarTone.value,
+    )
+  }
+  function setDesktopWindowBarBg(v: string | null): void {
+    desktopWindowBarBg.value = v
+    applyDesktopWindowBarBg()
+  }
+  function resetDesktopWindowBarBg(): void {
+    setDesktopWindowBarBg(null)
+  }
+
   function applyHeaderBg(v: string | null): void {
     applySurfaceBg('--tnzi-admin-header-bg', v)
   }
@@ -676,6 +1024,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     themeSchema.value = null
     lastAppliedDefaultMode.value = null
     themeRadius.value = 4
+    surfaceStyle.value = 'outlined'
     headerVisible.value = true
     tabVisible.value = true
     footerVisible.value = true
@@ -688,7 +1037,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     autoSelectFirstMenu.value = true
     headerHeight.value = 50
     tabHeight.value = 44
-    footerHeight.value = 42
+    footerHeight.value = 28
     tabStyle.value = 'button'
     pageTransition.value = 'fade-slide'
     pageAnimate.value = true
@@ -727,6 +1076,16 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setContentTextColor(null)
     setPageHeaderTextColor(null)
     setCardTextColor(null)
+    // The desktop surfaces reset with everything else. Skipping them is not a
+    // smaller reset, it is a wrong one: under the global-theme flow Reset also
+    // PUBLISHES the factory snapshot to every user, so a wallpaper left behind
+    // here would be pushed out as if the admin had chosen it.
+    resetDesktopWallpaperBg()
+    resetDesktopWallpaperImage()
+    resetDesktopTaskbarBg()
+    setDesktopTaskbarHeight(DEFAULT_TASKBAR_HEIGHT)
+    setDesktopVibrancy(DEFAULT_VIBRANCY)
+    resetDesktopWindowBarBg()
     if (typeof document !== 'undefined') {
       document.documentElement.style.filter = ''
     }
@@ -751,6 +1110,22 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
         style.setProperty('--tnzi-admin-radius-sm', `${Math.max(0, Math.floor(clamped * 0.5))}px`)
         style.setProperty('--tnzi-admin-radius-md', `${clamped}px`)
         style.setProperty('--tnzi-admin-radius-lg', `${clamped + 4}px`)
+      },
+      { immediate: true },
+    )
+    watch(
+      surfaceStyle,
+      (s) => {
+        const style = document.documentElement.style
+        const next = SURFACE_STYLE_VARS[s] ?? SURFACE_STYLE_VARS.outlined
+        // Clear every token any style can own before writing the new set, so
+        // switching outlined → flat never leaves an outlined-only token behind.
+        for (const key of new Set(Object.values(SURFACE_STYLE_VARS).flatMap(Object.keys))) {
+          style.removeProperty(key)
+        }
+        for (const [key, value] of Object.entries(next)) {
+          style.setProperty(key, value)
+        }
       },
       { immediate: true },
     )
@@ -785,6 +1160,15 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     watch(contentBg, applyContentBg, { immediate: true })
     watch(pageHeaderBg, applyPageHeaderBg, { immediate: true })
     watch(cardBg, applyCardBg, { immediate: true })
+    // Desktop surfaces. `immediate` covers persisted-state hydration, which
+    // bypasses the setters - without it a saved wallpaper would sit in the
+    // store and never reach the screen until the user touched the picker.
+    watch(desktopWallpaperBg, applyDesktopWallpaper, { immediate: true })
+    watch([desktopWallpaperImage, desktopWallpaperScrim], applyWallpaperImage, { immediate: true })
+    watch(desktopTaskbarBg, applyDesktopTaskbarBg, { immediate: true })
+    watch(desktopTaskbarHeight, applyDesktopTaskbarHeight, { immediate: true })
+    watch(desktopVibrancy, applyDesktopVibrancy, { immediate: true })
+    watch(desktopWindowBarBg, applyDesktopWindowBarBg, { immediate: true })
     // Custom text-color overrides - same hydration story (persisted-state
     // bypasses the setters, so write the CSS var here on restore).
     watch(siderTextColor, (v) => applySurfaceBg('--tnzi-admin-sider-fg', v), { immediate: true })
@@ -881,6 +1265,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     tabHeight,
     footerHeight,
     tabStyle,
+    surfaceStyle,
     pageTransition,
     pageAnimate,
     themeRadius,
@@ -906,6 +1291,16 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     tabScrollAnimation,
     scrollMode,
     siderBg,
+    desktopWallpaperBg,
+    desktopWallpaperImage,
+    desktopWallpaperScrim,
+    desktopTaskbarBg,
+    desktopTaskbarHeight,
+    desktopVibrancy,
+    desktopWindowBarBg,
+    desktopWallpaperTone,
+    desktopTaskbarTone,
+    desktopWindowBarTone,
     headerBg,
     tabBg,
     footerBg,
@@ -943,6 +1338,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setTabHeight,
     setFooterHeight,
     setTabStyle,
+    setSurfaceStyle,
     setPageTransition,
     setPageAnimate,
     setThemeRadius,
@@ -972,6 +1368,17 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
     setScrollMode,
     setSiderBg,
     resetSiderBg,
+    setDesktopWallpaperBg,
+    resetDesktopWallpaperBg,
+    setDesktopWallpaperImage,
+    setDesktopWallpaperScrim,
+    resetDesktopWallpaperImage,
+    setDesktopTaskbarBg,
+    resetDesktopTaskbarBg,
+    setDesktopTaskbarHeight,
+    setDesktopVibrancy,
+    setDesktopWindowBarBg,
+    resetDesktopWindowBarBg,
     setHeaderBg,
     resetHeaderBg,
     setTabBg,
@@ -1017,6 +1424,7 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'pageTransition',
       'pageAnimate',
       'themeRadius',
+      'surfaceStyle',
       'invertSider',
       'fixedHeader',
       'fixedTab',
@@ -1033,6 +1441,13 @@ export const useAdminThemeStore = defineStore('admin-theme', () => {
       'presetPickerVisible',
       'userPresetColor',
       'userPresetLook',
+      'desktopWallpaperBg',
+      'desktopWallpaperImage',
+      'desktopWallpaperScrim',
+      'desktopTaskbarBg',
+      'desktopTaskbarHeight',
+      'desktopVibrancy',
+      'desktopWindowBarBg',
       'grayscale',
       'colourWeakness',
       'closeTabByMiddleClick',

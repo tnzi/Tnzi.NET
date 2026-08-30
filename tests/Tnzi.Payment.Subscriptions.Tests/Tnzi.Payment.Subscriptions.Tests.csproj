@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="MockQueryable.Moq" Version="10.0.8" />
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" />
+    <!--
+      折扣包只在**测试**里引用，src 侧两个包互不引用。理由有二：
+      · SubscriptionSeamRedLineTests 要断言「FirstSubscriptionOnly 券的提问方仍然经
+        ISubscriptionHistoryProbe 提问」，而那个提问方（PromotionService）现在住在折扣包。
+        两个包同时装上、探针却漏注册，是这条缝合线上唯一一处会把「少一项能力」变成
+        「守卫失效」的地方 —— 只有在这里才测得到。
+      · 订阅 + 优惠券的集成用例（带券开通订阅）本来就跨两个包。
+    -->
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+</Project>

@@ -22,7 +22,9 @@ public class IdentityPermissions : IPermissionDefinitionProvider
         context.AddCrudPermissions("user", "Users", parentName: "identity");
         context.AddCrudPermissions("role", "Roles", parentName: "identity");
         context.AddCrudPermissions("tenant", "Tenants", parentName: "identity", category: PermissionCategory.Technical);
-        context.AddCrudPermissions("organization", "Organizations", parentName: "identity");
+        // organization.* moved to Tnzi.Identity.Organization's own provider with the
+        // code strings unchanged and this same parent group - a host without an org
+        // tree never seeds four codes it can never grant.
         // Sessions: no create (sessions are born by signing in); revoke/clean = delete.
         context.AddCrudPermissions("session", "Sessions", parentName: "identity", category: PermissionCategory.Technical, actions: CrudActions.View | CrudActions.Update | CrudActions.Delete);
         // Login logs (IP / user-agent / failure reasons) are the same genre as

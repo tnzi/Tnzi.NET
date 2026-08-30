@@ -93,6 +93,15 @@ export interface ModuleFunctionDto {
    * operators granting permissions can tell ops surfaces from business ones.
    */
   category?: PermissionCategory
+  /**
+   * True when no module loaded by this deployment declares the code any more.
+   * The row and every grant referencing it are kept, but it grants nothing and
+   * is hidden from the assignment tree until the declaring module is loaded
+   * again (the commonest cause is a host that has not added the sub-module's
+   * `[DependsOn]` after a module split). Render it as a greyed "retired" row
+   * rather than offering it for assignment.
+   */
+  isRetired?: boolean
 }
 
 /** Create a custom permission point (POST /admin/module-functions). */
@@ -234,4 +243,73 @@ export interface UpdateEntityRoleDto {
   operation: DataAuthOperation
   filter?: string
   isEnabled?: boolean
+}
+
+// ============================================
+// Dual control (four-eyes)
+// ============================================
+
+/** Lifecycle of a dual-control request. */
+export enum DualControlStatus {
+  Pending = 'Pending',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
+  Cancelled = 'Cancelled',
+}
+
+/**
+ * An action that needs a second person's approval before it can run.
+ *
+ * Approve produces a permit; the *requester* then comes back and executes.
+ * That is why there is no "execute" call here - the framework does not know
+ * how any given business action is performed.
+ */
+export interface DualControlRequestDto {
+  id: string;
+  /** Business action identifier, e.g. `finance.payrun.void`. */
+  operation: string;
+  targetId?: string | null;
+  /**
+   * The parameter snapshot that was approved. Execution compares against it
+   * byte for byte - approving "transfer 100" must not authorise "transfer 1M".
+   */
+  payloadJson?: string | null;
+  description?: string | null;
+  status: DualControlStatus;
+  requesterId: string;
+  /**
+   * Requester's user name, resolved server-side at read time. Null when the
+   * Identity module is not loaded or the user no longer exists.
+   *
+   * The second pair of eyes has to judge whether *this person* should be doing
+   * *this thing* - a column of GUIDs cannot answer that.
+   */
+  requesterName?: string | null;
+  approverId?: string | null;
+  /** Deciding user's name, same resolution rules as `requesterName`. */
+  approverName?: string | null;
+  creationTime: string;
+  decidedAt?: string | null;
+  decisionComment?: string | null;
+  expiresAt: string;
+  isConsumed: boolean;
+  /** Computed server-side: approved, unused and not yet expired. */
+  isUsable: boolean;
+}
+
+/** Query filter for dual-control requests. */
+export interface DualControlQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  operation?: string;
+  targetId?: string;
+  status?: DualControlStatus;
+  requesterId?: string;
+  /** Only the ones that can still be used. */
+  usableOnly?: boolean;
+}
+
+/** Comment carried with an approve/reject. */
+export interface DualControlDecisionDto {
+  comment?: string;
 }

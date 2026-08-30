@@ -51,6 +51,7 @@ public class NotificationServiceTests
             _emailSenderMock.Object,
             _smsSenderMock.Object,
             _pushSenderMock.Object,
+            new Mock<IFaxSender>().Object,
             _unitOfWorkMock.Object,
             _optionsMock.Object,
             serviceProviderMock.Object,

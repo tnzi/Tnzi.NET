@@ -8,9 +8,8 @@ namespace Tnzi.Notification.Services;
 public class NotificationService : ApplicationService, INotificationService
 {
     private readonly IRepository<Message, Guid> _notificationRepository;
-    private readonly IEmailSender _emailSender;
-    private readonly ISmsSender _smsSender;
-    private readonly IPushSender _pushSender;
+    private readonly RecipientChannelDispatcher _dispatcher;
+    private readonly RecipientEligibility _eligibility;
     private readonly INotificationQueueService? _queueService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IOptionsMonitor<NotificationOptions> _optionsMonitor;
@@ -29,6 +28,7 @@ public class NotificationService : ApplicationService, INotificationService
         IEmailSender emailSender,
         ISmsSender smsSender,
         IPushSender pushSender,
+        IFaxSender faxSender,
         IUnitOfWork unitOfWork,
         IOptionsMonitor<NotificationOptions> optionsMonitor,
         IServiceProvider serviceProvider,
@@ -39,17 +39,27 @@ public class NotificationService : ApplicationService, INotificationService
         : base(serviceProvider)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
-        _emailSender = Check.NotNull(emailSender);
-        _smsSender = Check.NotNull(smsSender);
-        _pushSender = Check.NotNull(pushSender);
         _unitOfWork = Check.NotNull(unitOfWork);
         _optionsMonitor = Check.NotNull(optionsMonitor);
+        // 四条渠道都是必需的：本模块无条件注册它们（传真未配置时是 UnconfiguredFaxSender），
+        // 缺了就该在容器里立刻炸，而不是让 Type=Fax 的消息在运行时落进 default 分支。
+        _dispatcher = new RecipientChannelDispatcher(
+            Check.NotNull(emailSender),
+            Check.NotNull(smsSender),
+            Check.NotNull(pushSender),
+            Check.NotNull(faxSender),
+            _optionsMonitor,
+            Check.NotNull(optOutService),
+            Logger);
         // 必需而非可选：本模块自己无条件注册它，缺了就该在容器里立刻炸，
         // 而不是让退订在运行时静默失效 —— 后者恰恰是这条修复要终结的形态。
         _optOutService = Check.NotNull(optOutService);
         // 同上：本模块自己无条件注册它，缺了就该在容器里立刻炸，
         // 而不是让「用户关掉的通知照发」在运行时静默成立。
         _preferenceService = Check.NotNull(preferenceService);
+        // 「谁还应该收到这条消息」的三道过滤全在这里，顺序表只有一份。
+        _eligibility = new RecipientEligibility(
+            _notificationRepository, _unitOfWork, _optOutService, _preferenceService, Logger);
         _queueService = queueService;
         _templateRenderService = templateRenderService;
 
@@ -302,6 +312,18 @@ public class NotificationService : ApplicationService, INotificationService
         notification.Status = NotificationStatus.Sending;
         notification.RetryCount++;
 
+        // ★★ 这一句必须**立刻落库**，不能等到方法末尾那次 SaveChanges。
+        // 「正在发送」在这一刻就已经是事实，而库里的行在整个收件人循环期间（一次千人群发
+        // 可能几十分钟）都还写着 Scheduled / Pending —— 于是：
+        //  ① 到期扫描的条件认领（`WHERE Status = Scheduled`）会**合法地**抢到一条正在发送的
+        //     消息，第二次 SendAsync 看到全部收件人仍是 Pending，把已经发出去的那些再发一遍。
+        //     那正是本轮一直在消灭的形态，而它是「宽限期能挡住本进程定时器」这个**错误前提**
+        //     的后果：定时器到点只是**入队**，队列单读者串行执行，真正开发的时刻取决于积压。
+        //  ② 进程在循环中途退出时，行仍停在发送前的状态，于是卡住批次那一遍也扫不到它 ——
+        //     两道恢复都够不着，消息永远停在那里。
+        await _notificationRepository.UpdateAsync(notification, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         var pendingRecipients = notification.Recipients
             .Where(r => r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Failed)
             .ToList();
@@ -309,19 +331,21 @@ public class NotificationService : ApplicationService, INotificationService
         // 退订与偏好都在发送那一刻判定（见两个 Exclude* 方法）：定时与排队的消息可能
         // 几天后才发出去，这两件事随时可能发生在这中间。
         var candidateCount = pendingRecipients.Count;
-        pendingRecipients = await ExcludeOptedOutAsync(notification, pendingRecipients, cancellationToken);
-        pendingRecipients = await ExcludePreferenceDisabledAsync(notification, pendingRecipients, cancellationToken);
-        var everyoneOptedOut = pendingRecipients.Count == 0 && candidateCount > 0;
+        pendingRecipients = await _eligibility.FilterAsync(notification, pendingRecipients, cancellationToken);
+        // 三道过滤把人全部拦光了（退订 / 关掉了这个渠道 / 到了每小时上限），
+        // 与「本来就没有待发收件人」不是一回事。
+        var everyoneFilteredOut = pendingRecipients.Count == 0 && candidateCount > 0;
 
         if (pendingRecipients.Count == 0)
         {
-            // ★ 全员退订时不能报 Sent —— 一封谁也没收到的消息在列表里显示"已发送"，
+            // ★ 全员被拦时不能报 Sent —— 一封谁也没收到的消息在列表里显示"已发送"，
             // 正是这轮修复要终结的那种会被当真的谎。原有的"本来就无待发收件人"语义不变。
-            notification.Status = everyoneOptedOut ? NotificationStatus.Cancelled : NotificationStatus.Sent;
+            notification.Status = everyoneFilteredOut ? NotificationStatus.Cancelled : NotificationStatus.Sent;
             notification.SentTime = DateTime.UtcNow;
             await _notificationRepository.UpdateAsync(notification, cancellationToken);
-            return everyoneOptedOut
-                ? Ok("Every recipient has opted out; nothing was sent")
+            return everyoneFilteredOut
+                // 具体是哪一道拦下了谁，逐条写在收件人的 FailureReason 里。
+                ? Ok("No recipient was eligible; nothing was sent. See the delivery report for the reason per recipient.")
                 : Ok("No pending recipients to send to");
         }
 
@@ -334,27 +358,21 @@ public class NotificationService : ApplicationService, INotificationService
             await _sendSemaphore!.WaitAsync(cancellationToken);
             try
             {
-                var sendResult = await SendToRecipientAsync(notification, recipient, cancellationToken);
+                var sendResult = await _dispatcher.DispatchAsync(notification, recipient, cancellationToken);
                 if (sendResult.Success)
                 {
-                    recipient.Status = NotificationStatus.Sent;
-                    recipient.SentTime = DateTime.UtcNow;
-                    recipient.ExternalMessageId = sendResult.ExternalMessageId;
+                    RecordSent(recipient, sendResult);
                     successCount++;
                 }
                 else
                 {
-                    recipient.Status = NotificationStatus.Failed;
-                    recipient.FailureReason = sendResult.FailureReason;
-                    lastError = sendResult.FailureReason;
+                    lastError = RecordFailed(recipient, sendResult.FailureReason);
                     failureCount++;
                 }
             }
             catch (Exception ex)
             {
-                recipient.Status = NotificationStatus.Failed;
-                recipient.FailureReason = ex.Message;
-                lastError = ex.Message;
+                lastError = RecordFailed(recipient, ex.Message);
                 failureCount++;
                 Logger.LogError(ex, "Error sending notification {NotificationId} to {Address}", messageId, recipient.Address);
             }
@@ -365,6 +383,7 @@ public class NotificationService : ApplicationService, INotificationService
         }
 
         // 更新消息统计
+        // lastError 只可能来自 RecordFailed 的返回值，已经收敛到 FailureReason 的列宽。
         notification.SuccessCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Sent);
         notification.FailureCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Failed);
 
@@ -521,8 +540,7 @@ public class NotificationService : ApplicationService, INotificationService
             .ToList();
 
         // 重发同样要过退订：上次失败之后对方可能已经退订，而这条路径绕开 SendAsync。
-        failedRecipients = await ExcludeOptedOutAsync(notification, failedRecipients, cancellationToken);
-        failedRecipients = await ExcludePreferenceDisabledAsync(notification, failedRecipients, cancellationToken);
+        failedRecipients = await _eligibility.FilterAsync(notification, failedRecipients, cancellationToken);
 
         if (failedRecipients.Count == 0)
             return Ok(0, "No failed recipients to resend to");
@@ -536,24 +554,20 @@ public class NotificationService : ApplicationService, INotificationService
             await _sendSemaphore!.WaitAsync(cancellationToken);
             try
             {
-                var sendResult = await SendToRecipientAsync(notification, recipient, cancellationToken);
+                var sendResult = await _dispatcher.DispatchAsync(notification, recipient, cancellationToken);
                 if (sendResult.Success)
                 {
-                    recipient.Status = NotificationStatus.Sent;
-                    recipient.SentTime = DateTime.UtcNow;
-                    recipient.ExternalMessageId = sendResult.ExternalMessageId;
+                    RecordSent(recipient, sendResult);
                     successCount++;
                 }
                 else
                 {
-                    recipient.Status = NotificationStatus.Failed;
-                    recipient.FailureReason = sendResult.FailureReason;
+                    RecordFailed(recipient, sendResult.FailureReason);
                 }
             }
             catch (Exception ex)
             {
-                recipient.Status = NotificationStatus.Failed;
-                recipient.FailureReason = ex.Message;
+                RecordFailed(recipient, ex.Message);
                 Logger.LogError(ex, "Error resending notification {NotificationId} to {Address}", messageId, recipient.Address);
             }
             finally
@@ -585,6 +599,47 @@ public class NotificationService : ApplicationService, INotificationService
     }
 
     #region Private Methods
+
+
+    /// <summary>
+    /// 把一次成功投递记到收件人上。
+    /// </summary>
+    /// <remarks>
+    /// ★ 网关给回的外部消息号超长即<b>丢弃</b>而不截断（理由见
+    /// <see cref="NotificationFieldLimits"/>），但这不改变「已经发出去了」这件事 ——
+    /// 只是回执再也对不上这一次投递，所以要留一条警告。
+    /// </remarks>
+    private void RecordSent(Recipient recipient, SendResult sendResult)
+    {
+        recipient.Status = NotificationStatus.Sent;
+        recipient.SentTime = DateTime.UtcNow;
+        recipient.ExternalMessageId =
+            NotificationFieldLimits.AcceptExternalMessageId(sendResult.ExternalMessageId, out var dropped);
+
+        if (dropped != null)
+        {
+            Logger.LogWarning(
+                "Sender returned a {Length}-character external message id for recipient {RecipientId}, past the {Limit}-character column. It was dropped, so delivery confirmations can no longer be matched to this send.",
+                dropped.Length, recipient.Id, NotificationFieldLimits.ExternalMessageIdMaxLength);
+        }
+    }
+
+    /// <summary>
+    /// 把一次失败记到收件人上，返回<b>已收敛到列宽</b>的原因，供消息级的 lastError 复用。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这里是所有失败原因共同的落库出口，收敛必须发生在这一处而不是各个发送器里：
+    /// 发送器契约是公开可替换的，消费应用换一个实现就绕过去了。整批投递结果由一次
+    /// SaveChanges 落库，一条越界会连带丢掉这一批已经真的发出去的那些人的状态，
+    /// 后果是<b>重复投递</b>而不只是少一行原因。
+    /// </remarks>
+    private static string? RecordFailed(Recipient recipient, string? reason)
+    {
+        var bounded = NotificationFieldLimits.TruncateFailureReason(reason);
+        recipient.Status = NotificationStatus.Failed;
+        recipient.FailureReason = bounded;
+        return bounded;
+    }
 
     private static void EnsureSemaphoreInitialized(int maxConcurrency)
     {
@@ -673,122 +728,6 @@ public class NotificationService : ApplicationService, INotificationService
         }
     }
 
-    /// <summary>
-    /// 从待发列表里剔除已退订的收件人，并把他们就地标记为
-    /// <see cref="NotificationStatus.Cancelled"/>。返回仍应当发送的那些。
-    /// </summary>
-    /// <remarks>
-    /// 判定规则在 <see cref="OptOutRecipientFilter"/>（纯函数，含"为什么这么定"的完整说明）；
-    /// 这里只负责问一次退订名单并把结果套上去。
-    /// </remarks>
-    private async Task<List<Recipient>> ExcludeOptedOutAsync(
-        Message notification, List<Recipient> candidates, CancellationToken cancellationToken)
-    {
-        if (!OptOutRecipientFilter.ShouldConsultOptOutList(notification, candidates.Count))
-            return candidates;
-
-        var allowed = await _optOutService.FilterAllowedAsync(
-            candidates.Select(r => r.Address),
-            notification.Type,
-            notification.Category,
-            cancellationToken);
-
-        var remaining = OptOutRecipientFilter.Apply(candidates, allowed);
-        if (remaining.Count != candidates.Count)
-        {
-            Logger.LogInformation(
-                "Notification {NotificationId}: skipped {SkippedCount} of {TotalCount} recipient(s) that opted out",
-                notification.Id, candidates.Count - remaining.Count, candidates.Count);
-
-            // ★ 就地落库，不指望调用方。「因退订而未发」是要拿去交差的记录，
-            // 而两条调用路径都有「过滤完就什么都不剩 → 提前 return」的分支：
-            // SendAsync 那条只 UpdateAsync 不 SaveChanges，ResendToFailedRecipientsAsync
-            // 那条**两样都没有** —— 标记就只活在被跟踪的实体里，随请求一起消失。
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        return remaining;
-    }
-
-    /// <summary>
-    /// 把「该渠道已被本人在偏好里关掉」的收件人择出去，就地标记为
-    /// <see cref="NotificationStatus.Cancelled"/>。返回仍应当发送的那些。
-    /// </summary>
-    /// <remarks>
-    /// 判定规则在 <see cref="PreferenceRecipientFilter"/>（纯函数，含"为什么这么定"的完整说明）；
-    /// 这里只负责问一次偏好表并把结果套上去。
-    /// <para>
-    /// ★ <b>与退订并列而不是二选一</b>：退订按地址（收件人未必是注册用户），
-    /// 偏好按人（同一个人在多个渠道上的开关）—— 两者管的是不同的东西，
-    /// 任一说「别发」就不发。
-    /// </para>
-    /// </remarks>
-    private async Task<List<Recipient>> ExcludePreferenceDisabledAsync(
-        Message notification, List<Recipient> candidates, CancellationToken cancellationToken)
-    {
-        if (!PreferenceRecipientFilter.ShouldConsultPreferences(notification, candidates))
-            return candidates;
-
-        var enabled = await _preferenceService.FilterEnabledUsersAsync(
-            PreferenceRecipientFilter.UserIdsToCheck(candidates),
-            notification.Type,
-            notification.Category,
-            cancellationToken);
-
-        var remaining = PreferenceRecipientFilter.Apply(candidates, enabled);
-        if (remaining.Count != candidates.Count)
-        {
-            Logger.LogInformation(
-                "Notification {NotificationId}: skipped {SkippedCount} of {TotalCount} recipient(s) who disabled this channel in their preferences",
-                notification.Id, candidates.Count - remaining.Count, candidates.Count);
-
-            // ★ 就地落库，理由与 ExcludeOptedOutAsync 逐字相同：两条调用路径都有
-            // 「过滤完就什么都不剩 → 提前 return」的分支，不在这里落库标记就只活在
-            // 被跟踪的实体里、随请求一起消失。
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-
-        return remaining;
-    }
-
-    private async Task<SendResult> SendToRecipientAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(Options.SendTimeoutSeconds));
-
-        return notification.Type switch
-        {
-            NotificationType.Email => await SendEmailAsync(notification, recipient, cts.Token),
-            NotificationType.Sms => await _smsSender.SendToAsync(recipient.Address, notification.Content, cts.Token),
-            NotificationType.Push => await _pushSender.SendToAsync(recipient.Address, notification.Subject, notification.Content, cts.Token),
-            _ => new SendResult { Success = false, FailureReason = $"Unsupported notification type: {notification.Type}" }
-        };
-    }
-
-    private async Task<SendResult> SendEmailAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
-    {
-        List<EmailAttachment>? emailAttachments = null;
-        if (notification.Attachments?.Count > 0)
-        {
-            emailAttachments = notification.Attachments.Select(a => new EmailAttachment
-            {
-                FileName = a.FileName,
-                FilePath = a.FilePath,
-                ContentType = a.ContentType
-            }).ToList();
-        }
-
-        return await _emailSender.SendToAsync(
-            recipient.Address,
-            recipient.Name,
-            notification.Subject,
-            notification.Content,
-            notification.IsHtml,
-            emailAttachments,
-            cancellationToken);
-    }
 
     #endregion
 }

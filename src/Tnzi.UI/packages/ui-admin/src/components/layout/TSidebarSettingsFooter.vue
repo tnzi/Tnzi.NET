@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance } from 'vue'
-import { useRoute, type RouteLocationNormalizedLoaded, type Router } from 'vue-router'
+import { computed } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
-import { useAdminRouteStore, type AdminMenuItem } from '../../stores/useAdminRouteStore'
-import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
-import { usePermissionGuard } from '../../headless/usePermissionGuard'
-import { translatePageKey } from '../../i18n/translate'
+import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
+import { useSettingsEntry } from '../../headless/useSettingsEntry'
 
 /**
  * `TSidebarSettingsFooter` - the sidebar's built-in bottom actions (Settings
@@ -15,6 +11,10 @@ import { translatePageKey } from '../../i18n/translate'
  * (`TAdminMixNavRail`, via its `#footer` slot) render the same footer instead
  * of the rail silently dropping it.
  *
+ * The gating and the navigation come from `useSettingsEntry`, shared with the
+ * desktop layout's start menu - which has no sidebar to put these in, and where
+ * a plain `router.push` would go nowhere.
+ *
  * Adaptive layout (container query on the root): with enough width the actions
  * sit on a single row - Settings (first) shows icon + label left-aligned, the
  * icon-only built-in toggle hugs the right; when the container is too narrow
@@ -22,17 +22,9 @@ import { translatePageKey } from '../../i18n/translate'
  * centered icon-only buttons.
  */
 
-function resolveLabel(label: string): string {
-  if (!label) return ''
-  if (label.startsWith('admin.') || label.startsWith('tnzi.')) {
-    return translatePageKey('', label)
-  }
-  return label
-}
-
 interface Props {
   /**
-   * Render the built-in Settings entry (gear → `router.push({ name: 'settings' })`).
+   * Render the built-in Settings entry (gear -> the settings route).
    * Mirrors `TAdminSidebar`'s prop of the same name.
    */
   showSettingsEntry?: boolean
@@ -49,72 +41,20 @@ const emit = defineEmits<{
   menuSelect: [menu: AdminMenuItem]
 }>()
 
-const routeStore = useAdminRouteStore()
-const appStore = useAdminAppStore()
-const authStore = useAdminAuthStore()
+const settings = useSettingsEntry({ enabled: () => props.showSettingsEntry })
 
-// `useRoute`/`$router` throw / are absent when no router is installed (unit
-// tests mounting in isolation). Detect via getCurrentInstance and fall back.
-function safeUseRoute(): RouteLocationNormalizedLoaded | null {
-  const instance = getCurrentInstance()
-  const hasRouter = !!instance?.appContext.config.globalProperties.$router
-  if (!hasRouter) return null
-  try {
-    return useRoute()
-  } catch {
-    return null
-  }
-}
-const route = safeUseRoute()
-
-function safeUseRouter(): Router | null {
-  const instance = getCurrentInstance()
-  const router = instance?.appContext.config.globalProperties.$router as Router | undefined
-  return router ?? null
-}
-const router = safeUseRouter()
-
-const { can, canAny, canAnySettings } = usePermissionGuard()
-
-// Built-in-menus toggle (super admin only): show/hide the framework's preset
-// admin menus. Gated on isSuperUser - mirrors `useAdminRouteStore.hideBuiltIn`.
-const showBuiltInToggle = computed(() => authStore.isSuperUser)
-const builtInTip = computed(() => resolveLabel('admin.common.builtInMenusTip'))
-
-// The built-in gear obeys the settings ROUTE's reachability with the same
-// fail-open semantics as the menu filter (see the long-form note that used to
-// live in TAdminSidebar): bundled route uses `meta.anySettingsPermission`; older
-// custom routes with a plain `meta.permission` / `meta.permissions` still work;
-// it also obeys module availability via `unavailableRouteNames`.
-const hasSettingsRoute = computed(() => {
-  if (!props.showSettingsEntry) return false
-  if (!router?.hasRoute('settings')) return false
-  if (routeStore.unavailableRouteNames.has('settings')) return false
-  if (typeof router.resolve !== 'function') return true
-  const meta = (router.resolve({ name: 'settings' }).meta ?? {}) as {
-    permission?: unknown
-    permissions?: unknown
-    anySettingsPermission?: unknown
-  }
-  if (meta.anySettingsPermission === true) return canAnySettings()
-  if (typeof meta.permission === 'string' && meta.permission) return can(meta.permission)
-  if (Array.isArray(meta.permissions)) {
-    const plural = meta.permissions.filter((p): p is string => typeof p === 'string' && p !== '')
-    if (plural.length > 0) return canAny(plural)
-  }
-  return true
-})
-const isSettingsActive = computed(() => route?.name === 'settings')
-const settingsLabel = computed(() => resolveLabel('admin.common.settings'))
+const hasSettingsRoute = settings.available
+const settingsLabel = settings.label
+const isSettingsActive = settings.isActive
+const showBuiltInToggle = settings.canToggleBuiltIn
+const builtInTip = settings.builtInTip
 
 const hasContent = computed(() => showBuiltInToggle.value || hasSettingsRoute.value)
 
 function goSettings(): void {
-  if (!router) return
-  void router.push({ name: 'settings' })
+  settings.open()
   // Route through menuSelect so the host's mobile-drawer collapse logic fires.
-  const path = typeof router.resolve === 'function' ? router.resolve({ name: 'settings' }).path : '/settings'
-  emit('menuSelect', { key: 'settings', label: settingsLabel.value, path })
+  emit('menuSelect', { key: 'settings', label: settingsLabel.value, path: settings.path.value })
 }
 </script>
 
@@ -148,9 +88,9 @@ function goSettings(): void {
         v-if="showBuiltInToggle"
         type="button"
         class="t-sidebar-settings-footer__btn t-sidebar-settings-footer__ops"
-        :class="{ 'is-active': appStore.showBuiltInMenus }"
+        :class="{ 'is-active': settings.builtInEnabled.value }"
         :title="builtInTip"
-        @click="appStore.toggleBuiltInMenus()"
+        @click="settings.toggleBuiltIn()"
       >
         <TSvgIcon icon="mdi:cube-outline" :size="18" />
       </button>

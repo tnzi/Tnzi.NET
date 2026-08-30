@@ -38,6 +38,15 @@ public class PayslipLine : EntityBase<Guid>, IMultiTenant
     /// 计算时按 (员工, 组件Code) 从历史已提交批次预取上期 YTD 后加本期额落列快照。</summary>
     public decimal YtdAmount { get; set; }
 
+    /// <summary>
+    /// 本期为该组件录入的一次性金额（<see cref="PayRunInput"/>；未录入为 null）。
+    /// </summary>
+    /// <remarks>
+    /// 单看 Amount 分不出"这 5,000 里有多少是一次性的"——公式可以是 <c>BASE + Input()</c>。
+    /// 落一列快照，工资条与事后审计才能指着说"这一笔是本期批准的"。
+    /// </remarks>
+    public decimal? InputAmount { get; set; }
+
     /// <summary>生效公式快照（固定额组件为 null）</summary>
     public string? FormulaSnapshot { get; set; }
 

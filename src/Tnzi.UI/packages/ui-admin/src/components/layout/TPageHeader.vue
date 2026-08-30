@@ -4,6 +4,7 @@
     :class="{
       't-page-header--bordered': bordered,
       't-page-header--surface': surface,
+      't-surface-card': surface,
       't-page-header--inline-actions': effectiveInlineActions,
     }"
   >
@@ -231,7 +232,8 @@ function onBack(): void {
      in polish.css (`[data-tnzi-ph-tone]`). */
   background: var(--tnzi-admin-page-header-bg, var(--tnzi-container-bg, #fff));
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   padding: 12px 16px;
 }
 /* Three columns - [back] [identity + subtitle] [actions] - vertically centred

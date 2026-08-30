@@ -1,33 +1,52 @@
 namespace Tnzi.Payment.Services;
 
 /// <summary>
-/// 支付统计服务实现
+/// 支付统计服务实现：支付与退款两块由本模块自己算，订阅那一块向
+/// <see cref="IPaymentStatisticsContributor"/> 提问，促销那一块向
+/// <see cref="IPromotionAnalyticsProvider"/> 提问。
 /// </summary>
 public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsService
 {
+    /// <summary>未加载续费包时，订阅指标端点给出的答复。指名要加载哪个包，而不是只说"没实现"。</summary>
+    private const string SubscriptionMetricsMissingMessage =
+        "Subscription metrics require the recurring-billing package. "
+        + "Load the Tnzi.Payment.Subscriptions module ([DependsOn(typeof(PaymentSubscriptionsModule))]) "
+        + "or register your own IPaymentStatisticsContributor.";
+
+    /// <summary>未加载促销包时，促销效果分析端点给出的答复。指名要加载哪个包，而不是只说"没实现"。</summary>
+    private const string PromotionAnalyticsMissingMessage =
+        "Promotion analytics require the discounting package. "
+        + "Load the Tnzi.Payment.Promotions module ([DependsOn(typeof(PaymentPromotionsModule))]) "
+        + "or register your own IPromotionAnalyticsProvider.";
+
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IRepository<Refund, Guid> _refundRepository;
-    private readonly IRepository<Subscription, Guid> _subscriptionRepository;
-    private readonly IRepository<SubscriptionPlan, Guid> _planRepository;
-    private readonly IRepository<CouponUsage, Guid> _couponUsageRepository;
-    private readonly IRepository<Promotion, Guid> _promotionRepository;
+
+    /// <summary>
+    /// 订阅那一半统计的供给方。未加载续费包时为 null：总览里的活跃订阅数变成 <c>null</c>
+    /// （前端渲染"不适用"，而不是一个与"生意崩了"无法区分的 0），
+    /// 整块订阅指标端点回 501。
+    /// </summary>
+    private readonly IPaymentStatisticsContributor? _subscriptionStatistics;
+
+    /// <summary>
+    /// 促销那一块统计的供给方。未加载促销包时为 null，此时促销效果分析端点回 501
+    /// 并指名要加载哪个包 —— 而不是一个与"这段时间没人用券"无法区分的空列表。
+    /// </summary>
+    private readonly IPromotionAnalyticsProvider? _promotionAnalytics;
 
     public PaymentStatisticsService(
         IRepository<PaymentEntity, Guid> paymentRepository,
         IRepository<Refund, Guid> refundRepository,
-        IRepository<Subscription, Guid> subscriptionRepository,
-        IRepository<SubscriptionPlan, Guid> planRepository,
-        IRepository<CouponUsage, Guid> couponUsageRepository,
-        IRepository<Promotion, Guid> promotionRepository,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IPaymentStatisticsContributor? subscriptionStatistics = null,
+        IPromotionAnalyticsProvider? promotionAnalytics = null)
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
         _refundRepository = Check.NotNull(refundRepository);
-        _subscriptionRepository = Check.NotNull(subscriptionRepository);
-        _planRepository = Check.NotNull(planRepository);
-        _couponUsageRepository = Check.NotNull(couponUsageRepository);
-        _promotionRepository = Check.NotNull(promotionRepository);
+        _subscriptionStatistics = subscriptionStatistics;
+        _promotionAnalytics = promotionAnalytics;
     }
 
     public async Task<Result<PaymentStatisticsDto>> GetStatisticsAsync(StatisticsQueryDto query, CancellationToken cancellationToken = default)
@@ -56,9 +75,11 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             ? Math.Round((decimal)refundCount / totalTransactions * 100, 2)
             : 0;
 
-        // 活跃订阅数
-        var activeSubscriptions = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial, cancellationToken);
+        // 活跃订阅数：向续费域提问。没有供给方时是 null 而**不是 0** ——
+        // 「这台宿主不做订阅」和「所有订阅一夜之间全没了」不能在界面上长成同一个样子。
+        int? activeSubscriptions = _subscriptionStatistics == null
+            ? null
+            : await _subscriptionStatistics.GetActiveSubscriptionCountAsync(cancellationToken);
 
         // 渠道分布（数据库级 GroupBy）
         var channelDistribution = await paymentQuery
@@ -153,79 +174,27 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
         return Ok(result);
     }
 
+    /// <summary>
+    /// 整块订阅指标：全部由续费域计算。
+    /// </summary>
+    /// <remarks>
+    /// 这个端点<b>整个</b>只讲订阅，没有任何一半是本模块的，所以未加载续费包时
+    /// 501「本服务器不提供此功能」才是准确答复，并在文案里指名要加载哪个包。
+    /// <b>不是 503</b>：503 意味着暂时故障，会让监控和客户端不停重试一件永远不会恢复的事。
+    /// 与之相对，总览端点 <see cref="GetStatisticsAsync"/> 的支付与退款那一半是本模块自己的，
+    /// 因此它照常 200，只把活跃订阅数留空。
+    /// </remarks>
     public async Task<Result<SubscriptionMetricsDto>> GetSubscriptionMetricsAsync(CancellationToken cancellationToken = default)
     {
-        var now = DateTime.UtcNow;
-        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        if (_subscriptionStatistics == null)
+            return Fail<SubscriptionMetricsDto>(SubscriptionMetricsMissingMessage, 501);
 
-        // 活跃与试用订阅数
-        var activeCount = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.Status == SubscriptionStatus.Active, cancellationToken);
-        var trialCount = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.Status == SubscriptionStatus.Trial, cancellationToken);
+        var metrics = await _subscriptionStatistics.GetSubscriptionMetricsAsync(cancellationToken);
 
-        // 本月新增订阅
-        var newThisMonth = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.CreationTime >= monthStart
-                && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial),
-                cancellationToken);
-
-        // 本月取消订阅
-        var cancelledThisMonth = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.Status == SubscriptionStatus.Cancelled
-                && s.CancelTime != null && s.CancelTime >= monthStart,
-                cancellationToken);
-
-        // 上月活跃数（用于流失率计算）：创建时间在本月前 + 当时活跃或本月才取消
-        var lastMonthActive = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.CreationTime < monthStart
-                && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial
-                    || (s.Status == SubscriptionStatus.Cancelled && s.CancelTime >= monthStart)),
-                cancellationToken);
-
-        var churnRate = lastMonthActive > 0
-            ? Math.Round((decimal)cancelledThisMonth / lastMonthActive * 100, 2)
-            : 0;
-
-        // MRR：活跃订阅的计划价格折算为月度等值金额。
-        // 数据库级 GroupBy 按 (价格,周期类型,周期值) 归并，避免把每条活跃订阅都加载到内存（行数收敛到不同计划配置数）
-        var mrrGroups = await _subscriptionRepository.AsNoTracking()
-            .Where(s => s.Status == SubscriptionStatus.Active && s.Plan != null)
-            .GroupBy(s => new { s.Plan!.Price, s.Plan.CycleType, s.Plan.CycleValue })
-            .Select(g => new { g.Key.Price, g.Key.CycleType, g.Key.CycleValue, Count = g.Count() })
-            .ToListAsync(cancellationToken);
-
-        var mrr = mrrGroups.Sum(g => CalculateMonthlyEquivalent(g.Price, g.CycleType, g.CycleValue) * g.Count);
-
-        // ARPU
-        var arpu = activeCount > 0 ? Math.Round(mrr / activeCount, 2) : 0;
-
-        // 计划分布（数据库级 GroupBy，通过导航属性 JOIN）
-        var planDistribution = await _subscriptionRepository.AsNoTracking()
-            .Where(s => (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial) && s.Plan != null)
-            .GroupBy(s => s.Plan!.PlanName)
-            .Select(g => new PlanDistributionDto
-            {
-                PlanName = g.Key,
-                SubscriptionCount = g.Count(),
-                Revenue = g.Sum(s => s.PaidAmount)
-            })
-            .OrderByDescending(p => p.SubscriptionCount)
-            .ToListAsync(cancellationToken);
-
-        var result = new SubscriptionMetricsDto
-        {
-            MonthlyRecurringRevenue = mrr,
-            ActiveSubscriptions = activeCount,
-            TrialSubscriptions = trialCount,
-            NewSubscriptionsThisMonth = newThisMonth,
-            CancelledThisMonth = cancelledThisMonth,
-            ChurnRate = churnRate,
-            AverageRevenuePerUser = arpu,
-            PlanDistribution = planDistribution
-        };
-
-        return Ok(result);
+        // 供给方注册了却给不出答案：仍然是"本服务器不提供此功能"，不是一份全零的报表。
+        return metrics == null
+            ? Fail<SubscriptionMetricsDto>(SubscriptionMetricsMissingMessage, 501)
+            : Ok(metrics);
     }
 
     /// <inheritdoc />
@@ -321,60 +290,30 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 这个端点<b>整个</b>只讲促销，因此缺席时回 501（本服务器不提供此功能）并指名要加载哪个包。
+    /// 不是空列表：空列表是一个答案（"有促销，只是这段时间没人用"），会把一次部署疏漏
+    /// 伪装成一条业务结论。也不是 503：503 意味着暂时故障，会让监控和客户端不停重试
+    /// 一件永远不会恢复的事。
+    /// <c>topN</c> 的入参校验留在这里而不是下放给供给方 —— 一个非法请求是 400，
+    /// 这一点不该随「装没装促销包」而变。
+    /// </remarks>
     public async Task<Result<List<PromotionAnalyticsDto>>> GetPromotionAnalyticsAsync(int topN = 10, DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
     {
         if (topN <= 0)
             return Fail<List<PromotionAnalyticsDto>>("topN must be greater than 0", 400);
 
-        // 构建优惠券使用查询（含时间范围过滤）+ 数据库级 GroupBy
-        var usageStats = await _couponUsageRepository.AsNoTracking()
-            .Where(u => (!startDate.HasValue || u.CreationTime >= startDate.Value)
-                && (!endDate.HasValue || u.CreationTime <= endDate.Value))
-            .GroupBy(u => u.CouponId)
-            .Select(g => new
-            {
-                PromotionId = g.Key,
-                UsageCount = g.Count(),
-                UniqueUsers = g.Select(u => u.UserId).Distinct().Count(),
-                TotalDiscountAmount = g.Sum(u => u.DiscountAmount)
-            })
-            .OrderByDescending(s => s.UsageCount)
-            .Take(topN)
-            .ToListAsync(cancellationToken);
+        var analytics = _promotionAnalytics == null
+            ? null
+            : await _promotionAnalytics.GetTopPromotionsAsync(topN, startDate, endDate, cancellationToken);
 
-        if (usageStats.Count == 0)
-            return Ok(new List<PromotionAnalyticsDto>());
-
-        // 批量加载关联促销信息
-        var promotionIds = usageStats.Select(s => s.PromotionId).ToList();
-        var promotions = await _promotionRepository.AsNoTracking()
-            .Where(p => promotionIds.Contains(p.Id))
-            .ToListAsync(cancellationToken);
-
-        var promotionLookup = promotions.ToDictionary(p => p.Id);
-
-        var result = usageStats.Select(s =>
+        if (analytics == null)
         {
-            var promotion = promotionLookup.GetValueOrDefault(s.PromotionId);
-            return new PromotionAnalyticsDto
-            {
-                PromotionId = s.PromotionId,
-                Name = promotion?.Name ?? string.Empty,
-                PromotionCode = promotion?.PromotionCode ?? string.Empty,
-                DiscountType = promotion?.DiscountType.ToString() ?? string.Empty,
-                DiscountValue = promotion?.DiscountValue ?? 0,
-                UsageCount = s.UsageCount,
-                UniqueUsers = s.UniqueUsers,
-                TotalDiscountAmount = s.TotalDiscountAmount,
-                AverageDiscountPerUse = s.UsageCount > 0 ? Math.Round(s.TotalDiscountAmount / s.UsageCount, 2) : 0,
-                RedemptionRate = promotion?.TotalUsageLimit > 0
-                    ? Math.Round((decimal)(promotion.UsedCount) / promotion.TotalUsageLimit.Value * 100, 2)
-                    : -1,
-                IsActive = promotion?.IsActive ?? false
-            };
-        }).ToList();
+            Logger.LogWarning("Promotion analytics refused. {Guidance}", PromotionAnalyticsMissingMessage);
+            return Fail<List<PromotionAnalyticsDto>>(PromotionAnalyticsMissingMessage, 501);
+        }
 
-        return Ok(result);
+        return Ok(analytics);
     }
 
     /// <inheritdoc />
@@ -458,24 +397,6 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
         };
 
         return Ok(result);
-    }
-
-    /// <summary>
-    /// 将计划价格折算为月度等值金额
-    /// </summary>
-    private static decimal CalculateMonthlyEquivalent(decimal price, BillingCycleType cycleType, int cycleValue)
-    {
-        if (cycleValue <= 0) return 0;
-
-        return cycleType switch
-        {
-            BillingCycleType.Day => price / cycleValue * 30,
-            BillingCycleType.Week => price / cycleValue * (30m / 7),
-            BillingCycleType.Month => price / cycleValue,
-            BillingCycleType.Year => price / (cycleValue * 12),
-            BillingCycleType.OneTime => 0,
-            _ => 0
-        };
     }
 
     private static List<RevenueTrendPointDto> AggregateByWeek(List<RevenueTrendPointDto> dailyPoints)

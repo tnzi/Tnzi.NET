@@ -4,6 +4,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { ReorderRequest } from '../../types/api';
 import type {
   PaymentDto,
   PaymentOrderResultDto,
@@ -411,6 +412,13 @@ export function useAdminSubscriptionApi(client: HttpClient) {
     /** Delete subscription plan */
     deletePlan: (id: string) =>
       client.delete<void>(`${ADMIN_SUBSCRIPTION_BASE}/plans/${id}`),
+
+    /**
+     * Reorder subscription plans (drag-and-drop). Plans form one global
+     * sequence - the pricing page reads top to bottom in this order.
+     */
+    reorderPlans: (data: ReorderRequest) =>
+      client.post<void>(`${ADMIN_SUBSCRIPTION_BASE}/plans/reorder`, data),
 
     /** Cancel subscription */
     cancel: (id: string, data: CancelSubscriptionDto) =>

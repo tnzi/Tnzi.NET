@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Services;
+﻿namespace Tnzi.Payment.Services;
 
 /// <summary>
 /// 已保存支付方式（绑卡）服务实现
@@ -6,22 +6,28 @@ namespace Tnzi.Payment.Services;
 public class PaymentMethodService : ApplicationService, IPaymentMethodService
 {
     private readonly IRepository<StoredPaymentMethod, Guid> _methodRepository;
-    private readonly IRepository<Subscription, Guid> _subscriptionRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
 
+    /// <summary>
+    /// 「卡被绑上 / 被解绑」的下游接收方。本模块不认识订阅 —— 续费域自己来接
+    /// （<c>Tnzi.Payment.Subscriptions</c>）。没有任何实现时是空集合，什么都不发生，
+    /// 而那正是事实：没有订阅表就没有要同步或要清理的行。
+    /// </summary>
+    private readonly IReadOnlyList<IStoredPaymentMethodBindingSink> _bindingSinks;
+
     public PaymentMethodService(
         IRepository<StoredPaymentMethod, Guid> methodRepository,
-        IRepository<Subscription, Guid> subscriptionRepository,
         IPaymentProviderFactory paymentProviderFactory,
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IEnumerable<IStoredPaymentMethodBindingSink>? bindingSinks = null)
         : base(serviceProvider)
     {
         _methodRepository = Check.NotNull(methodRepository);
-        _subscriptionRepository = Check.NotNull(subscriptionRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
         _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
+        _bindingSinks = bindingSinks?.ToList() ?? [];
     }
 
     public async Task<Result<SetupSessionDto>> CreateSetupSessionAsync(Guid userId, CreateSetupSessionDto request, CancellationToken cancellationToken = default)
@@ -183,9 +189,9 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         Logger.LogInformation("Payment method bound. UserId: {UserId}, Channel: {Channel}, Brand: {Brand}, Last4: {Last4}",
             userId, channelCode, stored.Data.Brand, stored.Data.Last4);
 
-        // 新绑的默认卡同步到该用户尚未绑卡的订阅，让"绑了卡就能自动续费"成立
+        // 通知下游：新绑的默认卡可以同步到该用户尚未绑卡的记录，让"绑了卡就能自动续费"成立
         if (stored.Data.IsDefault)
-            await SyncToUnboundSubscriptionsAsync(userId, stored.Data, cancellationToken);
+            await NotifyBoundAsync(userId, stored.Data, cancellationToken);
 
         return stored;
     }
@@ -221,7 +227,7 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             return Ok();
         }, cancellationToken);
 
-        await SyncToUnboundSubscriptionsAsync(userId, method, cancellationToken);
+        await NotifyBoundAsync(userId, method, cancellationToken);
 
         Logger.LogInformation("Default payment method changed. UserId: {UserId}, MethodId: {MethodId}", userId, paymentMethodId);
         return Ok();
@@ -248,13 +254,24 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
                 return Fail(detach.Message ?? ErrorCodes.PaymentMethodBindingFailed, detach.Code ?? 400);
         }
 
-        // 保留记录只置失效：历史扣款需要溯源到具体卡，物理删除会让对账断链
-        method.IsActive = false;
-        method.IsDefault = false;
-        await _methodRepository.UpdateAsync(method, cancellationToken);
+        await ExecuteInUnitOfWorkAsync<Result>(async ct =>
+        {
+            // 同渠道吊销回调那条路径：下游的清理是裸 SQL，物理事务延迟开启，
+            // 不先强开它会在自动提交模式执行——调用方事务回滚时「置失效」被撤销而
+            // 「清下游快照」已永久落库：订阅没了卡，支付方式却还显示可用。
+            // 拆包后这一条从「同文件内的约定」升级成了 IStoredPaymentMethodBindingSink 的
+            // 明文事务契约（实现方不得自开事务），因为清理的代码已经不在本程序集里。
+            await _methodRepository.EnsureTransactionStartedAsync(ct);
 
-        // 清掉引用该卡的订阅快照，否则后台会拿一个已解绑的 token 反复扣款失败
-        await ClearSubscriptionBindingAsync(paymentMethodId, cancellationToken);
+            // 保留记录只置失效：历史扣款需要溯源到具体卡，物理删除会让对账断链
+            method.IsActive = false;
+            method.IsDefault = false;
+            await _methodRepository.UpdateAsync(method, ct);
+
+            // 通知下游清掉引用该卡的快照，否则后台会拿一个已解绑的 token 反复扣款失败
+            await NotifyUnboundAsync(paymentMethodId, ct);
+            return Ok();
+        }, cancellationToken);
 
         Logger.LogInformation("Payment method removed. UserId: {UserId}, MethodId: {MethodId}", userId, paymentMethodId);
         return Ok();
@@ -294,16 +311,16 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
 
         var affected = await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            // ClearSubscriptionBindingAsync 是裸 SQL：物理事务延迟开启，不先强开它会在自动提交模式执行，
-            // 于是"清订阅快照"落库而"置失效"随异常回滚——订阅没了卡，支付方式却还显示可用
+            // 下游的清理是裸 SQL：物理事务延迟开启，不先强开它会在自动提交模式执行，
+            // 于是"清下游快照"落库而"置失效"随异常回滚——订阅没了卡，支付方式却还显示可用
             await _methodRepository.EnsureTransactionStartedAsync(ct);
 
             method.IsActive = false;
             method.IsDefault = false;
             await _methodRepository.UpdateAsync(method, ct);
 
-            // 不清掉订阅上的快照，后台会拿一个已经作废的凭据反复扣款失败
-            var count = await ClearSubscriptionBindingAsync(method.Id, ct);
+            // 不清掉下游的快照，后台会拿一个已经作废的凭据反复扣款失败
+            var count = await NotifyUnboundAsync(method.Id, ct);
             return Ok(count);
         }, cancellationToken);
 
@@ -350,40 +367,35 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     }
 
     /// <summary>
-    /// 把新绑定的默认支付方式同步到该用户尚未绑卡的有效订阅。
-    /// 已显式绑过其它卡的订阅不动，避免覆盖用户的明确选择。
+    /// 广播「这张（默认）卡刚刚绑上了」。
     /// </summary>
-    private async Task SyncToUnboundSubscriptionsAsync(Guid userId, StoredPaymentMethod method, CancellationToken cancellationToken)
+    /// <remarks>
+    /// 拆分前这里直接改订阅行（把卡同步给该用户尚未绑卡的有效订阅）。那段逻辑连同它对
+    /// 订阅表的认知一起搬去了 <c>Tnzi.Payment.Subscriptions</c>；本模块只负责说出发生了什么。
+    /// 没有接收方时什么都不发生 —— 没有订阅表，就没有要同步的行。
+    /// </remarks>
+    private async Task NotifyBoundAsync(Guid userId, StoredPaymentMethod method, CancellationToken cancellationToken)
     {
-        var affected = await _subscriptionRepository.AsQueryable()
-            .Where(s => s.UserId == userId
-                && s.ChannelCode == method.ChannelCode
-                && s.StoredPaymentMethodId == null
-                && s.Status != SubscriptionStatus.Cancelled
-                && s.Status != SubscriptionStatus.Expired)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.StoredPaymentMethodId, method.Id)
-                .SetProperty(x => x.PaymentMethodToken, method.Token)
-                .SetProperty(x => x.ProviderCustomerId, method.ProviderCustomerId)
-                .SetProperty(x => x.PaymentMethodBrand, method.Brand)
-                .SetProperty(x => x.PaymentMethodLast4, method.Last4), cancellationToken);
-
-        if (affected > 0)
-            Logger.LogInformation("Bound payment method to {Count} subscriptions without one. UserId: {UserId}", affected, userId);
+        foreach (var sink in _bindingSinks)
+            await sink.OnBoundAsync(userId, method, cancellationToken);
     }
 
     /// <summary>
-    /// 清掉引用该支付方式的订阅快照，返回受影响的订阅数。
+    /// 广播「这张卡失效了」，返回各接收方清理掉的记录条数之和。
     /// </summary>
-    private Task<int> ClearSubscriptionBindingAsync(Guid paymentMethodId, CancellationToken cancellationToken)
+    /// <remarks>
+    /// ★ <b>必须在调用方已经开启的物理事务里调用</b>：两个调用点都先
+    /// <c>EnsureTransactionStartedAsync</c> 再进来。「置卡失效」与「清下游快照」只落一半的后果是
+    /// 订阅没了卡，而支付方式却还显示可用。
+    /// 无接收方时返回 0，而 0 是事实（这台宿主没有引用这张卡的记录），不是「查不到」。
+    /// </remarks>
+    private async Task<int> NotifyUnboundAsync(Guid paymentMethodId, CancellationToken cancellationToken)
     {
-        return _subscriptionRepository.AsQueryable()
-            .Where(s => s.StoredPaymentMethodId == paymentMethodId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.StoredPaymentMethodId, (Guid?)null)
-                .SetProperty(x => x.PaymentMethodToken, (string?)null)
-                .SetProperty(x => x.PaymentMethodBrand, (string?)null)
-                .SetProperty(x => x.PaymentMethodLast4, (string?)null), cancellationToken);
+        var affected = 0;
+        foreach (var sink in _bindingSinks)
+            affected += await sink.OnUnboundAsync(paymentMethodId, cancellationToken);
+
+        return affected;
     }
 
     private static StoredPaymentMethodDto ToDto(StoredPaymentMethod method) => new()

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import UnoCSS from 'unocss/vite';
 import { resolve } from 'path';
+import { preservedModuleFileName } from '../../tools/vite/preserved-module-filename.mjs';
 
 export default defineConfig({
   plugins: [
@@ -15,23 +16,23 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src'),
+      '@': resolve(import.meta.dirname, 'src'),
     },
   },
   build: {
     lib: {
       entry: {
-        index: resolve(__dirname, 'src/index.ts'),
-        components: resolve(__dirname, 'src/components/index.ts'),
-        headless: resolve(__dirname, 'src/headless/index.ts'),
-        pages: resolve(__dirname, 'src/pages/index.ts'),
-        router: resolve(__dirname, 'src/router/index.ts'),
-        stores: resolve(__dirname, 'src/stores/index.ts'),
-        presets: resolve(__dirname, 'src/presets/index.ts'),
+        index: resolve(import.meta.dirname, 'src/index.ts'),
+        components: resolve(import.meta.dirname, 'src/components/index.ts'),
+        headless: resolve(import.meta.dirname, 'src/headless/index.ts'),
+        pages: resolve(import.meta.dirname, 'src/pages/index.ts'),
+        router: resolve(import.meta.dirname, 'src/router/index.ts'),
+        stores: resolve(import.meta.dirname, 'src/stores/index.ts'),
+        presets: resolve(import.meta.dirname, 'src/presets/index.ts'),
         // locales barrel needs its own entry - consumers import the
         // aggregate `@tnzi/ui-admin/locales`; without this entry,
         // preserveModules tree-shakes the barrel and the subpath 404s.
-        'locales/index': resolve(__dirname, 'src/locales/index.ts'),
+        'locales/index': resolve(import.meta.dirname, 'src/locales/index.ts'),
       },
       name: 'TnziUiAdmin',
       formats: ['es'],
@@ -59,8 +60,9 @@ export default defineConfig({
         id.startsWith('@tnzi/ui-ai'),
       output: {
         preserveModules: true,
-        preserveModulesRoot: resolve(__dirname, 'src'),
+        preserveModulesRoot: resolve(import.meta.dirname, 'src'),
         exports: 'named',
+        entryFileNames: preservedModuleFileName,
         globals: {
           vue: 'Vue',
           pinia: 'Pinia',

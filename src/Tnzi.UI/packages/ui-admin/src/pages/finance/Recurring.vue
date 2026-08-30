@@ -428,7 +428,7 @@ function toUpdate(model: Record<string, unknown> | unknown) {
     display: block;
     margin-bottom: 2px;
     font-size: 12px;
-    color: var(--tnzi-text-3, #999);
+    color: var(--tnzi-base-text-muted);
   }
 }
 </style>

@@ -9,6 +9,7 @@ export type {
   RequestOptions,
   UploadProgressCallback,
   UploadOptions,
+  ReorderRequest,
 } from './api';
 
 // Common Types

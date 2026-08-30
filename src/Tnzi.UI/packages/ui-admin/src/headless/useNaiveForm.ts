@@ -43,11 +43,11 @@ export function useNaiveForm(): UseNaiveFormReturn {
     if (!formRef.value) {
       throw new Error('useNaiveForm: NForm ref not yet bound')
     }
-    // Naive's FormItemRule.key is the field path; older naive versions also
-    // expose `path`. Treat both as opt-in.
-    await formRef.value.validate(undefined, (rule: { key?: string; path?: string }) =>
-      paths.includes((rule.key ?? rule.path ?? '') as string),
-    )
+    // naive-ui 2.45 added a path filter to `validate`. It selects FORM ITEMS by
+    // their `path` prop, which is what a caller means by "validate these fields".
+    // The predicate form this replaced filtered RULES by `rule.key`, so a field
+    // whose rule carried no key was silently skipped instead of validated.
+    await formRef.value.validate(undefined, paths)
   }
 
   function reset(): void {

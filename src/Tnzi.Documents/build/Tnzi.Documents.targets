@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    SkiaSharp 的原生资产里带着 libSkiaSharp.pdb，Windows 每个 RID 89 MB
+    （一次 win-x64 发布：107 MB -> 22 MB）。它只在调试进 Skia 的 C++ 内部时有用，
+    而框架的消费者没有一个会那么做。默认剔除，设 TnziKeepNativeSymbols=true 可保留。
+  -->
+  <Target Name="TnziStripNativeSymbols"
+          Condition="'$(TnziKeepNativeSymbols)' != 'true'"
+          AfterTargets="ResolvePackageAssets"
+          BeforeTargets="_CopyFilesMarkedCopyLocal;ComputeFilesToPublish">
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)" Condition="'%(Extension)' == '.pdb'" />
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

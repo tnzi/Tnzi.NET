@@ -9,7 +9,12 @@
           <template #icon><TSvgIcon icon="mdi:format-list-bulleted" :size="14" /></template>
         </NButton>
       </NButtonGroup>
-      <NButton v-if="can('storage.file.create')" size="small" tertiary @click="openCreateFolder(currentFolderId)">
+      <NButton
+        v-if="foldersAvailable && can('storage.file.create')"
+        size="small"
+        tertiary
+        @click="openCreateFolder(currentFolderId)"
+      >
         <template #icon><TSvgIcon icon="mdi:folder-plus-outline" :size="14" /></template>
         {{ t('newFolder') }}
       </NButton>
@@ -114,7 +119,7 @@
 
         <div v-if="selectedIds.length" class="t-storage-file-page__batch">
           <span>{{ t('selected', { n: selectedIds.length }) }}</span>
-          <template v-if="can('storage.file.update')">
+          <template v-if="foldersAvailable && can('storage.file.update')">
             <NSelect
               v-model:value="moveTarget"
               :options="moveTargetOptions"
@@ -397,6 +402,7 @@ import { formatFileSize, formatDateTime } from '@tnzi/core'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { useFileUrl } from '../../headless/useFileUrl'
 import TFileExplorer from './components/TFileExplorer.vue'
 import TFilePreviewModal from './components/TFilePreviewModal.vue'
@@ -428,6 +434,18 @@ watch(viewMode, (v) => {
 })
 
 // ---- state ----
+/**
+ * 目录树来自可选包 `Tnzi.Storage.Workspace`。宿主没加载它时 `storage/folders`
+ * 这一整组路由根本不存在（404）—— 所以这不是一个路由级的门能表达的事：
+ * 本页的**主栏就是目录树**，路由被门掉等于整页消失，而文件列表本身照常可用。
+ *
+ * `has` 在信号未知时**放行**（老后端 / 探测未回），与侧边栏菜单同口径 —— 缺信号
+ * 绝不该把界面清空；`canActivate` 额外要求探测已落定，用于会发请求的地方。
+ */
+const { has, canActivate, pending: modulesPending, modules: loadedModules } = useModuleAvailability()
+const STORAGE_WORKSPACE = 'storage-workspace'
+const foldersAvailable = computed(() => has(STORAGE_WORKSPACE))
+
 const folders = ref<FileFolderDto[]>([])
 const files = ref<FileRecordDto[]>([])
 const totalFiles = ref(0)
@@ -727,6 +745,8 @@ const columns = computed<DataTableColumns<ExplorerRow>>(() => [
   },
   {
     key: 'size', title: t('columns.size'), width: 110,
+    // 没有工作区包时 tableRows 里不会出现 folder 行（subfolders 恒空），
+    // 这些分支因此不会被走到 —— 保留它们是为了让一份代码同时服务两种宿主。
     render: (row) => (row.kind === 'folder' ? t('itemCount', { n: row.folder.fileCount ?? 0 }) : formatFileSize(row.file.size)),
   },
   {
@@ -842,6 +862,12 @@ function onCtxSelect(key: string): void {
 
 // ---- data loading ----
 async function loadFolders(): Promise<void> {
+  // 用 canActivate 而不是 has：这里会**发请求**，而探测在飞的那一瞬 has 是放行的，
+  // 于是没加载工作区包的宿主每次进页面都会先打一发 404、再弹一个红色 toast。
+  if (!canActivate(STORAGE_WORKSPACE)) {
+    folders.value = []
+    return
+  }
   foldersLoading.value = true
   try {
     folders.value = await bridge.folders.getTree()
@@ -1020,6 +1046,7 @@ async function saveMetadata(): Promise<void> {
 
 // ---- batch ----
 async function batchMoveFiles(): Promise<void> {
+  if (!foldersAvailable.value) return
   if (!selectedIds.value.length || moveTarget.value === undefined) return
   moving.value = true
   try {
@@ -1049,7 +1076,7 @@ async function batchDeleteFiles(): Promise<void> {
 
 // ---- drag move ----
 async function onMoveFile(payload: { fileId: string; folderId: string }): Promise<void> {
-  if (!can('storage.file.update')) return
+  if (!foldersAvailable.value || !can('storage.file.update')) return
   try {
     await bridge.files.moveTo([payload.fileId], payload.folderId)
     message.success(t('moveSuccess'))
@@ -1068,7 +1095,7 @@ function isDescendantOf(folderId: string, candidateId: string): boolean {
   return false
 }
 async function onMoveFolder(payload: { folderId: string; newParentId: string }): Promise<void> {
-  if (!can('storage.file.update')) return
+  if (!foldersAvailable.value || !can('storage.file.update')) return
   if (payload.folderId === payload.newParentId || isDescendantOf(payload.folderId, payload.newParentId)) {
     message.warning(t('invalidMove'))
     return
@@ -1098,7 +1125,9 @@ async function chunkedUpload(file: File): Promise<void> {
 
 /** Upload one file; returns true when it went chunked-to-root despite a target folder. */
 async function uploadOne(file: File, target: string | null): Promise<boolean> {
-  if (file.size > CHUNK_THRESHOLD) {
+  // 分片上传同样属于工作区包。没加载它时**直传**而不是走分片：分片端点会回 501，
+  // 那是一条用户无从处理的错误；直传则由后端自己的 MaxFileSize 说话（超限就说超限）。
+  if (file.size > CHUNK_THRESHOLD && foldersAvailable.value) {
     await chunkedUpload(file)
     return target != null
   }
@@ -1221,6 +1250,18 @@ onMounted(async () => {
   await loadFolders()
   await loadFiles()
 })
+
+// ★ 挂载时探测可能还在飞：那一瞬 canActivate 为假，loadFolders 直接返回空目录树，
+// 而 onMounted 只跑一次、这条路由又是 keepAlive，于是**加载了工作区包的宿主也会**
+// 看到一棵永远空的目录树。探测落地后补跑一次（与 TWidgetKpiStrip 同款）。
+watch(
+  () => [modulesPending.value, loadedModules.value] as const,
+  () => {
+    if (!modulesPending.value && canActivate(STORAGE_WORKSPACE) && folders.value.length === 0) {
+      void loadFolders()
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -1319,7 +1360,7 @@ onMounted(async () => {
   border-radius: var(--tnzi-admin-radius-md, 4px);
 }
 .t-storage-file-page__list--drop {
-  box-shadow: inset 0 0 0 2px var(--tnzi-primary);
+  box-shadow: var(--tnzi-surface-ring-inset);
   background: rgb(var(--tnzi-primary-rgb) / 0.04);
 }
 .t-storage-file-page__table-spin {

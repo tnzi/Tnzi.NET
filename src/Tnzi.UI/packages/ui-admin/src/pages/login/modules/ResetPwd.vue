@@ -58,7 +58,7 @@ const rules = computed<FormRules>(() => ({
 
 async function handleSendCode(): Promise<void> {
   try {
-    await formRef.value?.validate(undefined, (rule) => rule.key === 'account')
+    await formRef.value?.validate(undefined, ['account'])
   } catch {
     return
   }

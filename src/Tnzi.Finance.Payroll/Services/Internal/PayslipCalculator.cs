@@ -19,6 +19,7 @@ public sealed class PayslipCalculator
     private readonly IRepository<PayRun, Guid> _runRepo;
     private readonly IRepository<Payslip, Guid> _payslipRepo;
     private readonly IRepository<PayslipLine, Guid> _lineRepo;
+    private readonly IRepository<PayRunInput, Guid> _inputRepo;
     private readonly IRepository<FiscalYear, Guid> _fiscalYearRepo;
     private readonly ISalaryFormulaEvaluator _evaluator;
     private readonly IReadOnlyList<IPayslipCalculationHook> _hooks;
@@ -35,6 +36,7 @@ public sealed class PayslipCalculator
         IRepository<PayRun, Guid> runRepo,
         IRepository<Payslip, Guid> payslipRepo,
         IRepository<PayslipLine, Guid> lineRepo,
+        IRepository<PayRunInput, Guid> inputRepo,
         IRepository<FiscalYear, Guid> fiscalYearRepo,
         ISalaryFormulaEvaluator evaluator,
         IEnumerable<IPayslipCalculationHook> hooks,
@@ -50,6 +52,7 @@ public sealed class PayslipCalculator
         _runRepo = Check.NotNull(runRepo);
         _payslipRepo = Check.NotNull(payslipRepo);
         _lineRepo = Check.NotNull(lineRepo);
+        _inputRepo = Check.NotNull(inputRepo);
         _fiscalYearRepo = Check.NotNull(fiscalYearRepo);
         _evaluator = Check.NotNull(evaluator);
         _hooks = Check.NotNull(hooks).OrderBy(h => h.Order).ToList();
@@ -97,18 +100,17 @@ public sealed class PayslipCalculator
 
         var resolvedAssignment = assignments
             .GroupBy(a => a.EmployeeId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.EffectiveFrom).First());
+            .ToDictionary(g => g.Key, g => PayRunEligibility.PickEffective(g, periodEnd));
 
+        // 判据在 PayRunEligibility ——「谁进这个批次」必须与一次性输入的录入端同口径，
+        // 两处各写一份的话，漂移的症状是输入被收下、跑批时那个人不在批次里。
         var eligible = new List<(Employee Employee, SalaryAssignment Assignment)>();
         foreach (var employee in employees)
         {
-            if (!resolvedAssignment.TryGetValue(employee.Id, out var assignment))
+            resolvedAssignment.TryGetValue(employee.Id, out var assignment);
+            if (PayRunEligibility.Evaluate(run, employee, assignment) != PayRunEligibilityStatus.Eligible)
                 continue;
-            if (run.StructureId.HasValue && assignment.StructureId != run.StructureId.Value)
-                continue;
-            if (employee.TerminationDate.HasValue && employee.TerminationDate.Value.ToUtcDate() < periodStart)
-                continue;
-            eligible.Add((employee, assignment));
+            eligible.Add((employee, assignment!));
         }
 
         if (eligible.Count > _payrollOptions.MaxEmployeesPerRun)
@@ -127,8 +129,13 @@ public sealed class PayslipCalculator
             .Where(s => structureIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, cancellationToken);
 
+        var inputMap = await BuildInputMapAsync(run.Id, cancellationToken);
+
+        // 组件预取覆盖"结构行引用的"∪"一次性输入引用的"——后者可能已经不在结构里了，
+        // 而那正是要报出来的情况，报的时候得说得出组件编码。
         var componentIds = structures.Values
             .SelectMany(s => s.Lines.Select(l => l.ComponentId))
+            .Concat(inputMap.Values.SelectMany(m => m.Keys))
             .Distinct().ToList();
         var components = await _componentRepo.AsNoTracking()
             .Where(c => componentIds.Contains(c.Id))
@@ -154,7 +161,7 @@ public sealed class PayslipCalculator
 
             var payslip = await ComputeOneAsync(
                 run, employee, assignment, structure, components,
-                bracketResolver, ytdMap, workedDays, periodDays, periodsPerYear, decimals, cancellationToken);
+                bracketResolver, ytdMap, inputMap, workedDays, periodDays, periodsPerYear, decimals, cancellationToken);
             payslips.Add(payslip);
         }
 
@@ -169,6 +176,7 @@ public sealed class PayslipCalculator
         IReadOnlyDictionary<Guid, SalaryComponent> components,
         Func<string, decimal, decimal> bracketResolver,
         IReadOnlyDictionary<(Guid, string), decimal> ytdMap,
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<Guid, decimal>> inputMap,
         decimal workedDays,
         decimal periodDays,
         int periodsPerYear,
@@ -200,13 +208,19 @@ public sealed class PayslipCalculator
         context.Variables[PayrollFormulaVariables.PeriodDays] = periodDays;
         context.Variables[PayrollFormulaVariables.PeriodsPerYear] = periodsPerYear;
 
-        var evalContext = new SalaryFormulaContext
+        // 求值上下文按**行**构造：Input() 绑定的是"当前这一行的那一笔一次性输入"。
+        // Variables 传的是同一个字典引用，所以逐行写入与钩子注入照旧对后续行可见。
+        var ytdResolver = (string code) => ytdMap.GetValueOrDefault((employee.Id, code.Trim().ToUpperInvariant()), 0m);
+        SalaryFormulaContext EvalContext(decimal? inputAmount) => new()
         {
             Variables = context.Variables,
             Attributes = attributes,
             BracketResolver = bracketResolver,
-            YtdResolver = code => ytdMap.GetValueOrDefault((employee.Id, code.Trim().ToUpperInvariant()), 0m)
+            YtdResolver = ytdResolver,
+            InputAmount = inputAmount
         };
+
+        inputMap.TryGetValue(employee.Id, out var employeeInputs);
 
         if (error == null)
         {
@@ -228,6 +242,11 @@ public sealed class PayslipCalculator
 
                 var formula = string.IsNullOrWhiteSpace(line.FormulaOverride) ? component.Formula : line.FormulaOverride;
                 var condition = string.IsNullOrWhiteSpace(line.ConditionOverride) ? component.Condition : line.ConditionOverride;
+
+                decimal? inputAmount = employeeInputs != null && employeeInputs.TryGetValue(component.Id, out var entered)
+                    ? entered
+                    : null;
+                var evalContext = EvalContext(inputAmount);
 
                 if (!string.IsNullOrWhiteSpace(condition))
                 {
@@ -268,7 +287,15 @@ public sealed class PayslipCalculator
                     amount = component.DefaultAmount ?? 0m;
                 }
 
-                amount = Math.Round(amount, decimals, MidpointRounding.AwayFromZero);
+                // ★备注项是**具名中间量**，不是钱：把它舍到货币精度，等于说 Round(expr, 2)
+                // 与 expr 可以互换——而"可互换"恰恰是这个类型值得存在的**唯一**理由
+                // （不然那条子表达式只能在后续每一处原文重抄一遍）。
+                // 实测：一条联邦 + 省两级的所得税链路，中间量舍到 2 位时，20,243 个场景里有 485 个
+                // 与"整条内联成一个表达式"的结果差 1 分；不舍则 20,243 个逐个相同。
+                // 法规要求在某一步舍入时，公式里显式写 Round(x, 2)——白名单函数，看得见、可核对。
+                // 收入/扣减/雇主承担三类仍必须舍：它们是要进合计、进分录、印在工资条上的钱。
+                if (component.Type != SalaryComponentType.Informational)
+                    amount = Math.Round(amount, decimals, MidpointRounding.AwayFromZero);
                 // 备注项参与不了任何合计，所以负数在它身上产生不了荒谬的净额，
                 // 而具名中间量（抵免、冲回）本来就是带符号的。其余三类仍必须为正：
                 // 一个负的扣减项就是一次没人申报的加薪。
@@ -297,6 +324,7 @@ public sealed class PayslipCalculator
                     ComponentType = component.Type,
                     Amount = amount,
                     YtdAmount = priorYtd + amount,
+                    InputAmount = inputAmount,
                     FormulaSnapshot = line.AmountOverride.HasValue ? null : (string.IsNullOrWhiteSpace(formula) ? null : formula),
                     ExpenseAccountId = component.ExpenseAccountId,
                     LiabilityAccountId = component.LiabilityAccountId
@@ -315,6 +343,9 @@ public sealed class PayslipCalculator
         var deductions = context.Lines.Where(l => l.ComponentType == SalaryComponentType.Deduction).Sum(l => l.Amount);
         var employerCost = context.Lines.Where(l => l.ComponentType == SalaryComponentType.EmployerContribution).Sum(l => l.Amount);
         var netPay = grossPay - deductions;
+
+        if (error == null && employeeInputs is { Count: > 0 })
+            error = DescribeOrphanedInputs(employeeInputs, structure, components);
 
         if (error == null && netPay < 0)
             error = $"Net pay is negative ({netPay}); deductions exceed gross earnings.";
@@ -440,6 +471,78 @@ public sealed class PayslipCalculator
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// 预取本批次的全部一次性输入（单次查询），按 员工 → (组件 → 金额) 喂给 <c>Input()</c>。
+    /// </summary>
+    /// <remarks>
+    /// 键用 ComponentId 而不是 Code：<c>Input()</c> 绑定"当前这一行的组件"，不经名字解析，
+    /// 所以组件改编码不会让一笔已批准的奖金对不上号。★按员工分组而不是拍平成 (员工, 组件)
+    /// 复合键，是因为算完之后还要**反过来**遍历这个员工的全部输入，找出没人读的那些。
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<Guid, decimal>>> BuildInputMapAsync(
+        Guid runId, CancellationToken cancellationToken)
+    {
+        var rows = await _inputRepo.AsNoTracking()
+            .Where(i => i.PayRunId == runId)
+            .Select(i => new { i.EmployeeId, i.ComponentId, i.Amount })
+            .ToListAsync(cancellationToken);
+
+        var map = new Dictionary<Guid, IReadOnlyDictionary<Guid, decimal>>();
+        foreach (var row in rows)
+        {
+            if (!map.TryGetValue(row.EmployeeId, out var byComponent))
+            {
+                byComponent = new Dictionary<Guid, decimal>();
+                map[row.EmployeeId] = byComponent;
+            }
+            ((Dictionary<Guid, decimal>)byComponent)[row.ComponentId] = row.Amount;
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// 本期为这个员工录了、但结构里没有任何一行会读它的一次性输入 —— 有则给出错误文案。
+    /// </summary>
+    /// <remarks>
+    /// 录入端已经逐条挡过一次，但那是**录入那一刻**的事实。之后改组件公式、改结构行、
+    /// 钉上 <c>AmountOverride</c>、把员工换到别的结构，任何一条都能让那笔钱重新变成孤儿。
+    /// 出口再核一次，落进 <c>CalculationError</c> —— 有错的批次过不了账，于是"少发一笔已批准
+    /// 的奖金"从静默错账变成一条挡在过账前面的消息。判据与录入端同源（<see cref="PayRunInputBinding"/>）。
+    /// </remarks>
+    private string? DescribeOrphanedInputs(
+        IReadOnlyDictionary<Guid, decimal> employeeInputs,
+        SalaryStructure structure,
+        IReadOnlyDictionary<Guid, SalaryComponent> components)
+    {
+        var orphans = new List<string>();
+        foreach (var (componentId, amount) in employeeInputs)
+        {
+            if (!components.TryGetValue(componentId, out var component))
+            {
+                orphans.Add($"{amount} (component {componentId} no longer exists)");
+                continue;
+            }
+
+            var line = structure.Lines.FirstOrDefault(l => l.ComponentId == componentId);
+            var binding = PayRunInputBinding.Evaluate(_evaluator, line, component);
+            if (binding == PayRunInputBindingStatus.Readable)
+                continue;
+
+            var reason = binding switch
+            {
+                PayRunInputBindingStatus.NotOnStructure => "the component is no longer part of this employee's salary structure",
+                PayRunInputBindingStatus.PinnedAmount => "the structure line pins a fixed amount that takes precedence over the formula",
+                _ => $"the effective formula no longer calls {PayrollFormulaFunctions.Input}()"
+            };
+            orphans.Add($"{component.Code} ({amount}): {reason}");
+        }
+
+        return orphans.Count == 0
+            ? null
+            : "One-time inputs entered for this pay run would be ignored - " + string.Join("; ", orphans) +
+              ". Fix the salary structure or remove the inputs, then recalculate.";
     }
 
     private async Task<DateTime> ResolveYtdWindowStartAsync(DateTime payDate, CancellationToken cancellationToken)

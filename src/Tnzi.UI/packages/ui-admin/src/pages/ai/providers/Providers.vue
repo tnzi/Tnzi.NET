@@ -17,6 +17,9 @@
     <TCardPage
       :state="crud"
       mode="page"
+      draggable
+      :drag-disabled="isConfigSource"
+      @reorder="onReorder"
       :title="t('title')"
       :title-help="t('banner')"
       :cols="{ xs: 1, sm: 2, md: 3, lg: 4 }"
@@ -139,6 +142,7 @@ import { reactive } from 'vue'
 import { NButton, NPopconfirm, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TCardPage from '../../../components/crud/TCardPage.vue'
+import type { CardReorderPayload } from '../../../components/crud/renderers/card-reorder'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
@@ -147,6 +151,7 @@ import { useAdminClient } from '../../../plugin/client'
 import { useAdminAuthStore } from '../../../stores/useAdminAuthStore'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
+import { useSafeMessage } from '../../_shared/safe-message'
 import {
   providerFormSchema,
   providerIcon,
@@ -161,6 +166,7 @@ import type {
 const t = (key: string) => translatePageKey('ai.providers', key)
 
 const bridge = createAiBridge({ client: useAdminClient() })
+const message = useSafeMessage()
 const authStore = useAdminAuthStore()
 const { can } = usePermissionGuard()
 
@@ -177,6 +183,30 @@ function isLocked(item: ProviderDto): boolean {
 // The card shows a source badge instead of the edit/delete/test actions.
 function isConfigSource(item: ProviderDto): boolean {
   return item.source === 'Configuration'
+}
+
+/**
+ * Persist a dragged order.
+ *
+ * Only database rows are submitted: configuration entries have no row to write a
+ * sort order onto, which is also why they are `dragDisabled` above. They still
+ * occupy their slots, so dragging a database row past one keeps working - the
+ * server merges the submitted sequence back by slot.
+ *
+ * On failure `revert()` puts the list back. Without it the screen would keep
+ * showing an order the server refused, and nothing would tell the operator their
+ * change was lost.
+ */
+async function onReorder(e: CardReorderPayload<ProviderDto>): Promise<void> {
+  const ids = e.items.filter((p) => !isConfigSource(p)).map((p) => String(p.id))
+  if (ids.length === 0) return
+
+  try {
+    await bridge.providers.reorder(ids)
+  } catch (err) {
+    e.revert()
+    message.error(err instanceof Error ? err.message : t('reorder.failed'))
+  }
 }
 
 

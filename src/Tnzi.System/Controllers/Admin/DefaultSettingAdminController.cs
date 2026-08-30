@@ -128,4 +128,16 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
         var result = await SettingService.GetSettingGroupsAsync();
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 重排同一分组内的配置项（拖拽排序）
+    /// </summary>
+    /// <remarks>请求体是当前可见的顺序，不必是全量：范围外的配置项保持原位。</remarks>
+    [HttpPost("reorder")]
+    [ApiAuthorize(PermissionName = "system.parameter.update")]
+    public virtual async Task<ApiResult> Reorder([FromBody] ReorderRequestDto request, [FromQuery] string? group = null)
+    {
+        var result = await SettingService.ReorderAsync(request.Ids, group);
+        return result.ToApiResult();
+    }
 }

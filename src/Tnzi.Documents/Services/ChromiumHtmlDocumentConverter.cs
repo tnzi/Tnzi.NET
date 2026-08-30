@@ -28,19 +28,17 @@ namespace Tnzi.Documents.Services;
 /// 与既有的 LibreOffice 路径同一个信任级别（那边同样是把任意字节交给外部进程解析）。
 /// 不要拿它渲染终端用户直接提交的 HTML。
 /// </para>
+/// <para>
+/// 进程启动、会话连接、导航等待、超时归类、临时目录清理都在 <see cref="ChromiumPageRunner"/>，
+/// 与出缩略图那条路（<see cref="ChromiumDocumentImageRenderer"/>）共用同一套骨架与同一个并发闸门。
+/// </para>
 /// </remarks>
 public sealed class ChromiumHtmlDocumentConverter : IDocumentConverter
 {
-    /// <summary>渲染用的临时工作目录根（逐次创建、用完即删，含浏览器 profile）。</summary>
-    private const string WorkRootName = "tnzi-html-pdf";
-
-    private const string WorkFileBaseName = "source";
-    private const string ProfileDirectoryName = "profile";
     private const double PointsPerInch = 72d;
 
     private readonly IOptions<HtmlPdfOptions> _options;
     private readonly ILogger<ChromiumHtmlDocumentConverter> _logger;
-    private readonly SemaphoreSlim _gate;
 
     /// <summary>初始化一个 <see cref="ChromiumHtmlDocumentConverter"/> 实例。</summary>
     /// <param name="options">HTML 渲染配置。</param>
@@ -49,142 +47,39 @@ public sealed class ChromiumHtmlDocumentConverter : IDocumentConverter
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
-
-        // 并发上限在构造时定死：信号量的容量本来就不能中途改，改这个配置要重启进程（已写进配置注释）。
-        var permits = Math.Clamp(options.Value.MaxConcurrency, 1, 16);
-        _gate = new SemaphoreSlim(permits, permits);
     }
 
     /// <inheritdoc />
     /// <remarks>即本机找不找得到浏览器。探测结果按配置值缓存，列表页逐行询问只有首次真正碰文件系统。</remarks>
-    public bool IsAvailable => ChromiumLocator.Resolve(_options.Value.BrowserPath) != null;
+    public bool IsAvailable => ChromiumPageRunner.IsAvailable(_options.Value);
 
     /// <inheritdoc />
     /// <remarks>
     /// 只认 <c>.htm</c> / <c>.html</c>。<c>Documents:Html:Enabled = false</c> 时一律返回 false ——
     /// 这样 <see cref="RoutingDocumentConverter"/> 会把 HTML 交回给 LibreOffice，即旧行为。
     /// </remarks>
-    public bool CanConvert(string fileName)
-    {
-        if (!_options.Value.Enabled || string.IsNullOrWhiteSpace(fileName))
-            return false;
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrEmpty(extension) && DocumentFormats.HtmlExtensions.Contains(extension);
-    }
+    public bool CanConvert(string fileName) => HtmlSource.IsHtml(_options.Value, fileName);
 
     /// <inheritdoc />
     public async Task<byte[]> ConvertToPdfAsync(byte[] source, string sourceFileName, CancellationToken ct = default)
     {
-        Check.NotNull(source);
-        Check.NotNullOrWhiteSpace(sourceFileName);
-
-        if (source.Length == 0)
-            throw new DocumentConversionException($"Source document '{sourceFileName}' is empty.");
-
         var options = _options.Value;
+        HtmlSource.Validate(options, source, sourceFileName);
 
-        if (!options.Enabled)
-        {
-            throw new DocumentConversionException(
-                "Browser-based HTML rendering is disabled ('Documents:Html:Enabled' is false).");
-        }
+        var pdf = await ChromiumPageRunner.RunAsync(
+            options,
+            source,
+            sourceFileName,
+            (session, sessionId, token) => PrintAsync(session, sessionId, options, token),
+            _logger,
+            ct);
 
-        if (!CanConvert(sourceFileName))
-        {
-            throw new DocumentConversionException(
-                $"'{Path.GetExtension(sourceFileName)}' is not an HTML document. " +
-                $"Supported: {string.Join(", ", DocumentFormats.HtmlExtensions.Order(StringComparer.Ordinal))}.");
-        }
-
-        var executable = ChromiumLocator.Resolve(options.BrowserPath)
-            ?? throw new DocumentConversionException(ChromiumLocator.NotFoundMessage(options.BrowserPath));
-
-        var workDirectory = Path.Combine(Path.GetTempPath(), WorkRootName, Guid.NewGuid().ToString("N"));
-        var profileDirectory = Path.Combine(workDirectory, ProfileDirectoryName);
-        var timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
-
-        try
-        {
-            Directory.CreateDirectory(profileDirectory);
-
-            // 扩展名已过白名单，且文件名不参与命令行：浏览器只拿到我们自己拼的工作路径。
-            var inputPath = Path.Combine(workDirectory, WorkFileBaseName + Path.GetExtension(sourceFileName));
-            await File.WriteAllBytesAsync(inputPath, source, ct);
-
-            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutSource.CancelAfter(timeout);
-
-            await _gate.WaitAsync(ct);
-            try
-            {
-                var pdf = await RenderAsync(executable, profileDirectory, inputPath, options, timeout, ct, timeoutSource.Token);
-                _logger.LogDebug("Rendered '{FileName}' to PDF ({Bytes} bytes) with '{Browser}'.", sourceFileName, pdf.Length, executable);
-                return pdf;
-            }
-            finally
-            {
-                _gate.Release();
-            }
-        }
-        finally
-        {
-            await TryDeleteDirectoryAsync(workDirectory);
-        }
+        _logger.LogDebug("Rendered '{FileName}' to PDF ({Bytes} bytes).", sourceFileName, pdf.Length);
+        return pdf;
     }
 
-    private static async Task<byte[]> RenderAsync(
-        string executable,
-        string profileDirectory,
-        string inputPath,
-        HtmlPdfOptions options,
-        TimeSpan timeout,
-        CancellationToken ct,
-        CancellationToken deadline)
+    private static async Task<byte[]> PrintAsync(DevToolsSession session, string sessionId, HtmlPdfOptions options, CancellationToken ct)
     {
-        using var browser = await Run(() => ChromiumProcess.StartAsync(executable, profileDirectory, options, timeout, deadline), timeout, ct);
-
-        await using var session = await Run(() => DevToolsSession.ConnectAsync(browser.Endpoint, deadline), timeout, ct);
-
-        return await Run(() => PrintAsync(session, inputPath, options, deadline), timeout, ct, browser);
-    }
-
-    private static async Task<byte[]> PrintAsync(DevToolsSession session, string inputPath, HtmlPdfOptions options, CancellationToken ct)
-    {
-        var target = await session.SendAsync("Target.createTarget", new { url = "about:blank" }, ct: ct);
-        var targetId = target.GetProperty("targetId").GetString();
-
-        var attached = await session.SendAsync("Target.attachToTarget", new { targetId, flatten = true }, ct: ct);
-        var sessionId = attached.GetProperty("sessionId").GetString();
-
-        await session.SendAsync("Page.enable", sessionId: sessionId, ct: ct);
-
-        // ★ 先登记事件再导航：页面可能快到 navigate 的响应还没回来 load 就已经发出了。
-        var loaded = session.WhenEventAsync("Page.loadEventFired");
-
-        var navigation = await session.SendAsync(
-            "Page.navigate", new { url = new Uri(inputPath).AbsoluteUri }, sessionId, ct);
-
-        if (navigation.TryGetProperty("errorText", out var errorText) && errorText.GetString() is { Length: > 0 } reason)
-            throw new DocumentConversionException($"The browser failed to load the document: {reason}");
-
-        await loaded.WaitAsync(ct);
-
-        // 字体没就位就打印会让文本按回退字形排版（行宽随之改变）。拿不到结果不是致命错误：
-        // 老浏览器可能没有 document.fonts，此时按「已就绪」继续。
-        try
-        {
-            await session.SendAsync(
-                "Runtime.evaluate",
-                new { expression = "document.fonts ? document.fonts.ready.then(() => true) : true", awaitPromise = true },
-                sessionId,
-                ct);
-        }
-        catch (DocumentConversionException)
-        {
-            // 忽略：字体就绪只是排版质量的优化，不值得让整次转换失败
-        }
-
         var printed = await session.SendAsync("Page.printToPDF", BuildPrintParameters(options), sessionId, ct);
 
         var data = printed.TryGetProperty("data", out var payload) ? payload.GetString() : null;
@@ -196,7 +91,7 @@ public sealed class ChromiumHtmlDocumentConverter : IDocumentConverter
 
     private static Dictionary<string, object?> BuildPrintParameters(HtmlPdfOptions options)
     {
-        var (widthPt, heightPt) = ResolvePaperSize(options);
+        var (widthPt, heightPt) = HtmlPageGeometry.ResolvePaperSizePt(options);
 
         // CDP 的纸张与边距单位是**英寸**，本框架对外一律用点（1pt = 1/72in），换算收口在这里。
         return new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -213,70 +108,5 @@ public sealed class ChromiumHtmlDocumentConverter : IDocumentConverter
             ["preferCSSPageSize"] = options.PreferCssPageSize,
             ["transferMode"] = "ReturnAsBase64"
         };
-    }
-
-    /// <summary>解析纸张尺寸（点）：显式宽高 &gt; 纸张名 &gt; US Letter。</summary>
-    internal static (double WidthPt, double HeightPt) ResolvePaperSize(HtmlPdfOptions options)
-    {
-        if (options.PaperWidthPt > 0 && options.PaperHeightPt > 0)
-            return (options.PaperWidthPt, options.PaperHeightPt);
-
-        // 名字非法在启动期就被验证器拦下了；这里的回退只为「验证器被绕过」留一条确定的路。
-        return PaperSizes.TryGet(options.PaperSize, out var named)
-            ? named
-            : (PaperSizes.LetterWidthPt, PaperSizes.LetterHeightPt);
-    }
-
-    /// <summary>
-    /// 把「超时」与「调用方取消」区分开：前者要给出可操作的提示，后者原样抛出。
-    /// </summary>
-    /// <remarks>
-    /// 超时后浏览器进程树由 <paramref name="browser"/> 的 <c>Dispose</c> 收拾（<c>using</c> 已经安排好），
-    /// 但抛出前先把它的诊断输出捞进消息里 —— 崩溃原因只在它的 stderr 上。
-    /// </remarks>
-    private static async Task<T> Run<T>(Func<Task<T>> action, TimeSpan timeout, CancellationToken ct, ChromiumProcess? browser = null)
-    {
-        try
-        {
-            return await action();
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            var diagnostics = browser?.Diagnostics;
-            var detail = string.IsNullOrEmpty(diagnostics) ? string.Empty : $" Browser output: {diagnostics}";
-
-            throw new DocumentConversionException(
-                $"HTML rendering timed out after {timeout.TotalSeconds:0} seconds. " +
-                $"Raise 'Documents:Html:TimeoutSeconds' if large documents or slow remote resources are expected.{detail}",
-                isRetryable: true);
-        }
-    }
-
-    private async Task TryDeleteDirectoryAsync(string directory)
-    {
-        // 浏览器刚被杀掉时 profile 里的文件可能还锁着几十毫秒，重试几次再放弃。
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            try
-            {
-                if (!Directory.Exists(directory))
-                    return;
-
-                Directory.Delete(directory, recursive: true);
-                return;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                if (attempt == 2)
-                {
-                    // 清理失败不影响渲染结果，但要留痕（临时目录堆积是可观测的运维问题）
-                    _logger.LogWarning(ex, "Failed to clean up the HTML rendering work directory '{Directory}'.", directory);
-                    return;
-                }
-
-                // 取消令牌刻意不传：清理跑在 finally 里，取消之后更要把临时目录收拾干净。
-                await Task.Delay(200);
-            }
-        }
     }
 }

@@ -13,7 +13,7 @@
 
 import { TwoFactorType } from '@tnzi/core/services/identity'
 import type { TnziClient } from '@tnzi/core/state'
-import type { LoginCallbacks } from './useLoginContext'
+import type { LoginCallbackHelpers, LoginCallbacks } from './useLoginContext'
 
 /**
  * The wired core runtime the framework drives the default auth flow from. This
@@ -95,6 +95,48 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     })
   }
 
+  /**
+   * Turn a 403 `2FA_REQUIRED` envelope into a challenge the login shell can
+   * render, and report whether that happened.
+   *
+   * Shared by password login and code login: **both** can be challenged now.
+   * Code login used to sign people in without ever asking for the second
+   * factor, so an account protected by TOTP could be entered with nothing but
+   * access to its mailbox. Keeping one copy of this matters for the same
+   * reason - the envelope will grow a field one day, and a hand-copied second
+   * reader would quietly stop understanding it.
+   */
+  async function offerTwoFactorChallenge(
+    res: { succeeded?: boolean; errorCode?: string | null; errorDetails?: unknown },
+    account: string,
+    helpers: LoginCallbackHelpers,
+  ): Promise<boolean> {
+    if (res.succeeded || res.errorCode !== '2FA_REQUIRED') return false
+
+    const details = (res.errorDetails ?? {}) as { tempToken?: string; supportedTypes?: unknown[] }
+    const tempToken = details.tempToken ?? ''
+    const types = (details.supportedTypes ?? []).map(twoFactorType)
+    const first = types[0] ?? TwoFactorType.Totp
+    pendingTwoFactor = { tempToken, type: first }
+    // All enabled methods → the challenge module renders a switcher when >1.
+    const methods = [...new Set(types.map(twoFactorMethod))]
+    // SMS / email require a code to be delivered; TOTP is read from the app.
+    // Capture the masked destination so the challenge prompt can show it.
+    let maskedAddress: string | undefined
+    if (first !== TwoFactorType.Totp) {
+      const sent = await authApi.sendTwoFactorCode({ tempToken, type: first }).catch(() => undefined)
+      maskedAddress = sent?.data?.maskedAddress ?? undefined
+    }
+    helpers.setTwoFactorRequired({
+      challengeId: tempToken,
+      userName: account,
+      method: twoFactorMethod(first),
+      methods,
+      maskedAddress,
+    })
+    return true
+  }
+
   return {
     // userName accepts username / email / phone - the backend resolves the
     // identifier (AuthService.FindUserByLoginInputAsync). On a 2FA-enabled
@@ -123,30 +165,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
         // No inline captcha (cache unavailable / older backend) → surface the message.
         throw new Error(res.message ?? 'Captcha verification is required')
       }
-      if (!res.succeeded && res.errorCode === '2FA_REQUIRED') {
-        const details = (res.errorDetails ?? {}) as { tempToken?: string; supportedTypes?: unknown[] }
-        const tempToken = details.tempToken ?? ''
-        const types = (details.supportedTypes ?? []).map(twoFactorType)
-        const first = types[0] ?? TwoFactorType.Totp
-        pendingTwoFactor = { tempToken, type: first }
-        // All enabled methods → the challenge module renders a switcher when >1.
-        const methods = [...new Set(types.map(twoFactorMethod))]
-        // SMS / email require a code to be delivered; TOTP is read from the app.
-        // Capture the masked destination so the challenge prompt can show it.
-        let maskedAddress: string | undefined
-        if (first !== TwoFactorType.Totp) {
-          const sent = await authApi.sendTwoFactorCode({ tempToken, type: first }).catch(() => undefined)
-          maskedAddress = sent?.data?.maskedAddress ?? undefined
-        }
-        helpers.setTwoFactorRequired({
-          challengeId: tempToken,
-          userName,
-          method: twoFactorMethod(first),
-          methods,
-          maskedAddress,
-        })
-        return
-      }
+      if (await offerTwoFactorChallenge(res, userName, helpers)) return
       if (!res.succeeded || !res.data?.accessToken) {
         throw new Error(res.message ?? 'Login failed')
       }
@@ -165,13 +184,14 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       }
     },
     // Send a verification code for code-login / password-recovery / register.
-    // The register flow carries the image-captcha (gates the send-code step when
-    // the backend enables the register captcha).
+    // Both the register and the code-login flows carry the image-captcha: those
+    // two endpoints each spend a real SMS / email per call, and the backend
+    // gates them on `EnableCaptchaOnRegister` / `EnableCaptchaOnLogin`.
     sendCode: async ({ account, type, purpose, captchaId, captchaCode }) => {
       const f = codeChannelFields(account, type)
       const res =
         purpose === 'code-login'
-          ? await authApi.sendCodeLoginCode(f)
+          ? await authApi.sendCodeLoginCode({ ...f, captchaId, captchaCode })
           : purpose === 'reset-pwd'
             ? await authApi.sendPasswordRecoveryCode(f)
             : await authApi.sendQuickRegisterCode({
@@ -184,9 +204,15 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     },
     // Verification-code login → establish a persisted session from the returned
     // tokens, then run the normal post-login flow (framework-wrapped `after()`).
-    codeLogin: async ({ account, code, type }) => {
+    //
+    // ★ This can be challenged too. The code proves the user can receive that
+    // address, so the backend drops the matching factor from the challenge -
+    // an email-2FA account is not asked for a second email code - but any other
+    // enabled method (TOTP, SMS) still comes back here as `2FA_REQUIRED`.
+    codeLogin: async ({ account, code, type }, helpers) => {
       const f = codeChannelFields(account, type)
       const res = await authApi.codeLogin({ email: f.email, phoneNumber: f.phoneNumber, code, type: f.type })
+      if (await offerTwoFactorChallenge(res, account, helpers)) return
       const accessToken = res.data?.accessToken
       if (!res.succeeded || !accessToken) {
         throw new Error(res.message ?? 'Verification code login failed')

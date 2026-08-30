@@ -1,9 +1,10 @@
 <template>
   <!--
     Diagnostics - surfaces `/admin/diagnostics/*` (ships with HostingModule).
-    Three tabs:
+    Four tabs:
       • Modules - loaded ModuleManifest list (assembly, deps, services, events, options)
       • Controllers - every Mvc controller route the runtime exposes
+      • Sensitive - the endpoints whose being enabled changes a security review
       • Exceptions - summary KPIs + recent ring buffer + clear
 
     Read-mostly. No edits, no per-row modal - this is an ops console, not a CRUD page.
@@ -15,10 +16,16 @@
     default-section="modules"
   >
     <template #kpis>
-      <TKpiRow cols="1 s:3">
+      <TKpiRow cols="1 s:2 l:4">
         <TKpiCard :label="t('kpi.modules')" :value="modules.length" icon="mdi:view-grid-outline" />
         <TKpiCard :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? null" icon="mdi:router-network" />
         <TKpiCard :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? null" icon="mdi:alert-circle-outline" />
+        <TKpiCard
+          :label="t('sensitive.kpi')"
+          :value="sensitiveReport?.totalCount ?? null"
+          icon="mdi:shield-alert-outline"
+          :tone="anonymousSensitiveCount > 0 ? 'warning' : undefined"
+        />
       </TKpiRow>
     </template>
 
@@ -82,6 +89,48 @@
         size="small"
         :flex-height="true"
       />
+    </template>
+
+    <!-- ─── Sensitive endpoints ─── -->
+    <template #sensitive>
+      <div class="t-table-tabs__toolbar">
+        <NInput
+          v-model:value="sensitiveFilter"
+          :placeholder="t('sensitive.filter')"
+          clearable size="small"
+          class="!w-280px max-w-full"
+        >
+          <template #prefix><TSvgIcon icon="mdi:magnify" :size="14" /></template>
+        </NInput>
+        <NButton size="small" @click="refreshSensitive">
+          <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+          {{ t('actions.refresh') }}
+        </NButton>
+      </div>
+
+      <!--
+        Two notes, not one. The first says what the list is; the second says what
+        it is not - and the second is the one that gets misread, so it does not
+        get folded into a tooltip.
+      -->
+      <NAlert type="default" :bordered="false" class="mb-12px">
+        <p class="m-0">{{ t('sensitive.intro') }}</p>
+        <p class="mb-0 mt-6px text-12px op-75">{{ t('sensitive.caveat') }}</p>
+      </NAlert>
+
+      <TResponsiveTable
+        :columns="sensitiveColumns"
+        :data="filteredSensitive"
+        :loading="sensitiveLoading"
+        :pagination="sensitivePagination"
+        :bordered="false"
+        size="small"
+        :flex-height="true"
+      >
+        <template #empty>
+          <TEmpty :text="t('sensitive.empty')" icon="mdi:shield-check-outline" />
+        </template>
+      </TResponsiveTable>
     </template>
 
     <!-- ─── Exceptions ─── -->
@@ -177,6 +226,7 @@ import { computed, h, onMounted, ref } from 'vue'
 import TResponsiveTable, { type TResponsivePagination } from '../../components/data/TResponsiveTable.vue'
 import { TKpiCard, TKpiRow } from '../../components/data'
 import {
+  NAlert,
   NButton,
   NCard,
   NEmpty,
@@ -189,7 +239,7 @@ import {
   NThing,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TEmpty, TSvgIcon } from '@tnzi/ui'
 import { formatDateTime as formatDate } from '@tnzi/core'
 import { useAdminClient } from '../../plugin/client'
 import {
@@ -199,6 +249,8 @@ import {
   type ExceptionEntryDto,
   type ExceptionSummaryDto,
   type ModuleDiagnosticsDto,
+  type SensitiveEndpointDto,
+  type SensitiveEndpointReportDto,
 } from '../../services/bridges/diagnostics-bridge'
 import { makePageTranslator } from '../_shared/translate'
 import { methodTone } from '../_shared/http-method'
@@ -217,6 +269,7 @@ const { can } = usePermissionGuard()
 const tabs: TabSection[] = [
   { name: 'modules', label: t('tabs.modules') },
   { name: 'controllers', label: t('tabs.controllers') },
+  { name: 'sensitive', label: t('tabs.sensitive') },
   // Exceptions mixes a breakdown card grid + a table, so the pane owns the
   // vertical scroll (the table flows at natural height, not flex-height).
   { name: 'exceptions', label: t('tabs.exceptions'), scroll: true },
@@ -238,6 +291,7 @@ function makeClientPagination(defaultPageSize: number): TResponsivePagination {
 const modulesPagination = makeClientPagination(20)
 const controllersPagination = makeClientPagination(25)
 const exceptionsPagination = makeClientPagination(20)
+const sensitivePagination = makeClientPagination(20)
 
 // ─── Modules tab ───────────────────────────────────────────────────
 const modules = ref<ModuleDiagnosticsDto[]>([])
@@ -397,6 +451,87 @@ async function refreshControllers(): Promise<void> {
   }
 }
 
+// ─── Sensitive endpoints tab ───────────────────────────────────────
+// Answers "what is this deployment actually exposing". Framework default
+// controllers activate on their own, so before this the only way to know was to
+// read each module's source - and the next framework version can add one
+// without anything prompting an already-reviewed app to look again.
+const sensitiveReport = ref<SensitiveEndpointReportDto | null>(null)
+const sensitiveLoading = ref(false)
+const sensitiveFilter = ref('')
+
+/** Anonymously reachable sensitive endpoints - the rows to read first. */
+const anonymousSensitiveCount = computed(
+  () => (sensitiveReport.value?.endpoints ?? []).filter((e) => e.allowsAnonymous).length,
+)
+
+const sensitiveColumns: DataTableColumns<SensitiveEndpointDto> = [
+  {
+    title: () => t('sensitive.cols.name'),
+    key: 'name',
+    width: 220,
+    render: (row) =>
+      h('div', { class: 'flex flex-col gap-2px' }, [
+        h('code', { class: 'tnzi-mono text-12px' }, row.name),
+        row.isDefaultController
+          ? h('span', { class: 'text-11px op-60' }, t('sensitive.frameworkDefault'))
+          : null,
+      ]),
+  },
+  {
+    title: () => t('sensitive.cols.access'),
+    key: 'allowsAnonymous',
+    width: 130,
+    render: (row) =>
+      h(
+        NTag,
+        { size: 'tiny', bordered: false, type: row.allowsAnonymous ? 'warning' : 'default' },
+        () => (row.allowsAnonymous ? t('sensitive.anonymous') : t('sensitive.authenticated')),
+      ),
+  },
+  {
+    title: () => t('sensitive.cols.route'),
+    key: 'route',
+    width: 260,
+    render: (row) =>
+      h('div', { class: 'flex items-center gap-6px' }, [
+        h(NTag, { size: 'tiny', bordered: false, type: methodTone(row.httpMethod) }, () => row.httpMethod),
+        h('code', { class: 'tnzi-mono text-12px' }, row.route || EMPTY_DASH),
+      ]),
+  },
+  // The reason is the column that makes the list usable for a review - a list of
+  // bare capability names cannot support one. Wrapped, not truncated.
+  {
+    title: () => t('sensitive.cols.reason'),
+    key: 'reason',
+    render: (row) => h('span', { class: 'text-12px' }, row.reason),
+  },
+  { title: () => t('sensitive.cols.module'), key: 'module', width: 170, ellipsis: { tooltip: true } },
+]
+
+const filteredSensitive = computed(() => {
+  const all = sensitiveReport.value?.endpoints ?? []
+  const q = sensitiveFilter.value.trim().toLowerCase()
+  if (!q) return all
+  return all.filter(
+    (e) =>
+      e.name.toLowerCase().includes(q) ||
+      e.route.toLowerCase().includes(q) ||
+      e.module.toLowerCase().includes(q),
+  )
+})
+
+async function refreshSensitive(): Promise<void> {
+  sensitiveLoading.value = true
+  try {
+    sensitiveReport.value = await bridge.sensitiveEndpoints.list()
+  } catch {
+    sensitiveReport.value = null
+  } finally {
+    sensitiveLoading.value = false
+  }
+}
+
 // ─── Exceptions tab ────────────────────────────────────────────────
 const summary = ref<ExceptionSummaryDto | null>(null)
 const exceptions = ref<ExceptionEntryDto[]>([])
@@ -498,6 +633,7 @@ async function clearExceptions(): Promise<void> {
 onMounted(() => {
   void refreshModules()
   void refreshControllers()
+  void refreshSensitive()
   void refreshExceptions()
 })
 </script>

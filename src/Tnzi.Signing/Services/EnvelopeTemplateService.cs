@@ -179,8 +179,23 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
 
         if (input.Source == TemplateSource.Composed && string.IsNullOrWhiteSpace(input.BodyTemplate))
             return Result.Failure("A composed template needs a body.", 400);
-        if (input.Source == TemplateSource.Uploaded && input.SourceFileId is null)
-            return Result.Failure("An uploaded template needs its source file.", 400);
+        if (input.Source == TemplateSource.Uploaded)
+        {
+            if (input.SourceFileId is null)
+                return Result.Failure("An uploaded template needs its source file.", 400);
+
+            // ★ 渲染稿也必须给。签署请求直接拿模板的 RenderedPdfFileId 当成品底稿
+            // （EnvelopeService 只对 Composed 模板现排版），缺了它建出来的请求会带着
+            // 一份空的 PDF 引用走完整个流程 —— 直到有人去签才发现没有文档可签。
+            // 原件已经是 PDF 时两者相同；不是 PDF 就得先转换（框架尚未接线，见下方消息）。
+            if (input.RenderedPdfFileId is null)
+            {
+                return Result.Failure(
+                    "An uploaded template needs a rendered PDF. When the source file is already a PDF, "
+                    + "send the same file id as RenderedPdfFileId; other formats must be converted to PDF first.",
+                    400);
+            }
+        }
 
         if (input.PageCount < 1)
             return Result.Failure("PageCount must be at least 1.", 400);

@@ -45,6 +45,7 @@ public abstract class PayrollIntegrationTestBase : IntegratedTestBase<PayrollTes
         AddRepo<PayRun>(services);
         AddRepo<Payslip>(services);
         AddRepo<PayslipLine>(services);
+        AddRepo<PayRunInput>(services);
         AddRepo<Vendor>(services);
         AddRepo<Account>(services);
         AddRepo<JournalEntry>(services);

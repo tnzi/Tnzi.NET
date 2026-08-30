@@ -192,4 +192,17 @@ public class AgingBucketsDto
     public decimal Days61To90 { get; set; }
     public decimal Over90 { get; set; }
     public decimal Total { get; set; }
+
+    /// <summary>
+    /// 生效的账龄切分点（天，恒 3 个，升序）。
+    /// </summary>
+    /// <remarks>
+    /// 桶的划分已由 <c>Finance:AgingBucketDays</c> 参数化（默认 30/60/90），而
+    /// <see cref="Days1To30"/> 等属性名是**历史固定的字段标识符**，不再描述真实边界——
+    /// 配了 [7,14,21] 的部署里 <see cref="Days1To30"/> 装的是「逾期 1-7 天」。
+    /// 呈现端（HTML 对账单、CSV、前端表头与图例）MUST 用本字段生成标签，
+    /// 不得写死 1-30/31-60/61-90/90+，否则列名与列里的数不符。
+    /// 切分点随桶一起下发（而不是让呈现端另查配置），标签与数字才不可能漂移。
+    /// </remarks>
+    public int[] AgingBucketDays { get; set; } = FinanceOptions.DefaultAgingBucketDays;
 }

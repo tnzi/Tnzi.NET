@@ -11,6 +11,7 @@ import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import TSidebarSettingsFooter from './TSidebarSettingsFooter.vue'
+import { navBadgeExtra, navBadgeIcon } from './nav-badge'
 import { translatePageKey } from '../../i18n/translate'
 
 /**
@@ -181,9 +182,21 @@ function toOption(item: AdminMenuItem): MenuOption {
     key: item.key,
     label: resolveLabel(item.label),
   }
-  if (item.icon) {
-    // NMenu accepts a `() => VNode` for the icon slot.
-    option.icon = () => h(TSvgIcon, { icon: item.icon as string, size: 18 })
+  // NMenu accepts a `() => VNode` for the icon slot.
+  const icon = item.icon
+    ? () => h(TSvgIcon, { icon: item.icon as string, size: 18 })
+    : undefined
+  // A collapsed row hides its trailing `extra` region (naive drops the whole
+  // header to opacity 0), so the count moves onto the icon there and sits at
+  // the row's trailing edge when the sider is open. Reading `siderCollapse`
+  // here is what makes it follow the toggle - `menuOptions` is a computed.
+  if (appStore.siderCollapse) {
+    const withBadge = navBadgeIcon(item.badge, icon)
+    if (withBadge) option.icon = withBadge
+  } else {
+    if (icon) option.icon = icon
+    const extra = navBadgeExtra(item.badge)
+    if (extra) option.extra = extra
   }
   if (item.children && item.children.length > 0 && props.mode !== 'vertical-mix') {
     option.children = item.children.map(toOption)
@@ -204,9 +217,13 @@ const menuOptions = computed<MenuOption[]>(() => {
     // affordance. Mirrors soybean's first-level-menu rendering.
     return sourceMenus.value.map((m) => {
       const opt: MenuOption = { key: m.key, label: resolveLabel(m.label) }
-      if (m.icon) {
-        opt.icon = () => h(TSvgIcon, { icon: m.icon as string, size: 20 })
-      }
+      // The rail is ~90px with the label under the icon - there is no trailing
+      // edge to hang a chip off, so the count always rides the icon here.
+      const icon = m.icon
+        ? () => h(TSvgIcon, { icon: m.icon as string, size: 20 })
+        : undefined
+      const withBadge = navBadgeIcon(m.badge, icon)
+      if (withBadge) opt.icon = withBadge
       return opt
     })
   }
@@ -353,7 +370,8 @@ watch(() => appStore.siderCollapse, () => void nextTick(updateScrollShadows))
   height: 100%;
   background: var(--tnzi-admin-sider-bg, var(--tnzi-container-bg, #ffffff));
   border-right: 1px solid var(--tnzi-border, #e5e7eb);
-  box-shadow: var(--tnzi-shadow-sider, 2px 0 8px 0 rgb(29 35 41 / 5%));
+  border-right: var(--tnzi-surface-chrome-border);
+  box-shadow: var(--tnzi-surface-chrome-shadow-sider);
   transition: width var(--tnzi-admin-motion-duration-base, 0.25s) var(--tnzi-admin-motion-ease-in-out, ease);
   overflow: hidden;
 }

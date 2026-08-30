@@ -16,7 +16,7 @@ global using System.Text;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.Domain.Repositories;
-global using Tnzi.Exceptions;
+global using Tnzi.TestBase;
 global using Tnzi.Storage.Dtos;
 global using Tnzi.Storage.Entities;
 global using Tnzi.Storage.Options;

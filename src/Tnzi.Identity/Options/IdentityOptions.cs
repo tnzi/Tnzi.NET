@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Options;
+﻿namespace Tnzi.Identity.Options;
 
 /// <summary>
 /// Tnzi Identity模块配置选项（统一入口）
@@ -67,6 +67,18 @@ public class IdentityOptions
     /// 配置路径：Identity:Session
     /// </summary>
     public SessionOptions Session { get; set; } = new();
+
+    /// <summary>
+    /// Passkey（WebAuthn）配置
+    /// 配置路径：Identity:Passkey
+    /// </summary>
+    public PasskeyOptions Passkey { get; set; } = new();
+
+    /// <summary>
+    /// 二次确认（step-up）配置
+    /// 配置路径：Identity:StepUp
+    /// </summary>
+    public StepUpOptions StepUp { get; set; } = new();
 }
 
 /// <summary>
@@ -146,6 +158,27 @@ public class TnziSignInOptions
     [RuntimeSetting(Label = "Allow SMS Login", I18n = "admin.modules.system.settings.fields.allowSmsLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
         Description = "Accept the phone number as the account identifier in the password form. Independent of verification codes: passwordless SMS code-login and SMS two-factor are controlled by 'Enable SMS Codes' in the OTP / Verification Codes group.")]
     public bool AllowSmsLogin { get; set; } = false;
+
+    /// <summary>
+    /// 是否允许免密的验证码登录（<c>POST /auth/code-login</c>）。默认 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这个开关存在的理由是<strong>解耦</strong>：在它之前，想关掉免密验证码登录只能把
+    /// <c>Otp.EnableEmail</c> / <c>Otp.EnableSms</c> 关掉，而那两个是**渠道总闸** ——
+    /// 会连带关掉邮箱/短信两步验证与邮箱/短信找回密码。想少一种登录方式的部署，
+    /// 不该被迫连 2FA 一起放弃。
+    /// <para>
+    /// 与渠道开关是**与**的关系：关掉任一边，验证码登录都不可用。默认 <c>true</c> 因此不改变
+    /// 既有部署的行为（此前的实际可用性完全由渠道开关决定）。
+    /// </para>
+    /// <para>
+    /// ⚠ 判定落在<strong>服务层</strong>（发码与登录两个入口都拒绝），不是只在
+    /// <c>/auth/config</c> 里报告一声 —— 前端据它隐藏入口，但端点必须自己挡得住。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Allow Code Login", I18n = "admin.modules.system.settings.fields.allowCodeLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
+        Description = "Allow passwordless sign-in with an emailed / texted verification code. Turning this off leaves email & SMS two-factor and code-based password recovery working - those are governed by the OTP channel switches, which this one is independent of. The delivery channel must also be on ('Enable Email Codes' / 'Enable SMS Codes').")]
+    public bool AllowCodeLogin { get; set; } = true;
 
     /// <summary>
     /// 是否要求唯一邮箱

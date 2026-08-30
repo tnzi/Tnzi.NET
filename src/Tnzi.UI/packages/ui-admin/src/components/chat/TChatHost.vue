@@ -4,14 +4,17 @@
       :unread-count="store.totalUnread"
       :effect="store.config.newMessageEffect"
       :attention="attentionSeq"
-      @open="show = true"
+      @open="openChat"
     />
-    <TChatWindow v-model:show="show" />
+    <!-- Desktop mode hosts chat inside a window instead; mounting this one too
+         would run every watcher twice (two "mark read", two notification
+         sounds) for one visible surface. -->
+    <TChatWindow v-if="!isDesktopLayout" v-model:show="show" />
   </template>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { createChatImBridge } from '../../services/bridges/chat-im-bridge'
 import { useChatRealtime } from '../../headless/useChatRealtime'
 import { useRealtimeHub } from '../../headless/useRealtimeHub'
@@ -20,7 +23,11 @@ import { useTitleFlash } from '../../headless/useTitleFlash'
 import { translatePageKey } from '../../i18n/translate'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminChatConfig } from '../../plugin/chat-config'
+import { registerDesktopPanel } from '../../headless/desktop-panels'
+import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
+import { useAdminDesktopStore } from '../../stores/useAdminDesktopStore'
+import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
 import { useChatStore } from '../../stores/useChatStore'
 import TChatLauncher from './TChatLauncher.vue'
 import TChatWindow from './TChatWindow.vue'
@@ -31,6 +38,53 @@ const client = useAdminClient(false)
 const store = useChatStore()
 const auth = useAdminAuthStore()
 const show = ref(false)
+
+/**
+ * On the desktop, chat is an ordinary window rather than a floating modal:
+ * taskbar button, z-order, focus and minimise all come from the window manager.
+ * As a modal it was permanently above every window and absent from the taskbar,
+ * which is what made it read as exclusive.
+ *
+ * Registered here, next to the launcher that opens it, so the panel and its
+ * entry point cannot drift apart.
+ */
+registerDesktopPanel('chat', TChatWindow, {
+  // WeChat green. Published values disagree (#07C160 in the current
+  // mini-program spec, #1AAD19 in Tencent's 2017 guidelines, older logo greens
+  // on the aggregator sites); this is the one picked against the real app.
+  // Declared here rather than passed when the window opens: window records are
+  // persisted, so a colour written into one would freeze today's brand value
+  // into localStorage.
+  color: '#06c863',
+})
+
+const themeStore = useAdminThemeStore()
+const appStore = useAdminAppStore()
+const desktopStore = useAdminDesktopStore()
+
+// Mirrors AdminShellRoot's rule: below `md` the desktop metaphor is dropped, so
+// chat goes back to being its own floating window.
+const isDesktopLayout = computed(
+  () => themeStore.layoutMode === 'desktop' && !appStore.isMobile,
+)
+
+function openChat(): void {
+  if (!isDesktopLayout.value) {
+    show.value = true
+    return
+  }
+  desktopStore.openOrFocusRoute({
+    // Not a route - `panel` is what tells the window host to render a shell
+    // surface, and what keys this window apart from the Chat admin MODULE (two
+    // different things that happen to share a word).
+    panel: 'chat',
+    name: 'chat-panel',
+    path: '',
+    title: translatePageKey('chat', 'launcher.title'),
+    icon: 'nimbus:chat-dots',
+    size: { preset: 'medium' },
+  })
+}
 // Bumped on each new message that arrives while the window is closed; drives the
 // launcher icon's attention animation. Top-level so the template can bind it.
 const attentionSeq = ref(0)

@@ -236,7 +236,7 @@ function msgPreview(m: ChatMessageDto): string {
 }
 .t-msg-item {
   padding: 8px 10px;
-  border: 1px solid var(--tnzi-border-color, #eee);
+  border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 6px);
 }
 .t-msg-head {
@@ -276,7 +276,7 @@ function msgPreview(m: ChatMessageDto): string {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border: 1px solid var(--tnzi-border-color, #eee);
+  border: 1px solid var(--tnzi-border);
   border-radius: var(--tnzi-admin-radius-md, 6px);
   text-decoration: none;
   color: var(--tnzi-text-color-2, #666);

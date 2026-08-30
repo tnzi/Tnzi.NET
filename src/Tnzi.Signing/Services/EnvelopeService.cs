@@ -1,4 +1,4 @@
-namespace Tnzi.Signing.Services;
+﻿namespace Tnzi.Signing.Services;
 
 /// <inheritdoc cref="IEnvelopeService" />
 public class EnvelopeService : ApplicationService, IEnvelopeService
@@ -252,8 +252,8 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         var issued = new List<IssuedSigningLink>(recipients.Count);
         foreach (var recipient in recipients)
         {
-            var token = SigningToken.Create();
-            recipient.TokenHash = SigningToken.Hash(token);
+            var token = OneTimeToken.Create();
+            recipient.TokenHash = OneTimeToken.Hash(token);
             // 顺序签署时只有第一位处于"已送达"，其余仍在排队。
             recipient.Status = !request.IsSequential || recipient.Order == recipients[0].Order
                 ? SigningRecipientStatus.Sent
@@ -645,7 +645,7 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         if (string.IsNullOrWhiteSpace(token)) return (null, null, null);
 
         // 比对哈希，不拿秘密做等值查询。
-        var hash = SigningToken.Hash(token);
+        var hash = OneTimeToken.Hash(token);
         var recipient = await _recipients.FirstOrDefaultAsync(r => r.TokenHash == hash, cancellationToken);
         if (recipient == null) return (null, null, null);
 

@@ -1,4 +1,4 @@
-// System（System / System.Collections.Generic / System.IO / System.Linq / System.Threading[.Tasks]
+﻿// System（System / System.Collections.Generic / System.IO / System.Linq / System.Threading[.Tasks]
 // 由 ImplicitUsings 提供，不在此重复）
 global using System.Collections.Concurrent;
 global using System.Diagnostics;
@@ -18,6 +18,7 @@ global using Microsoft.Extensions.Options;
 
 // Tnzi framework（命名空间 Tnzi 本身不必导入：本包的命名空间都在 Tnzi.* 之下，父命名空间天然可见）
 global using Tnzi.Exceptions;
+global using Tnzi.Geometry;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Settings;

@@ -7,14 +7,21 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!--
+    传递引用了 Tnzi.Documents（经 Tnzi.Signing / Tnzi.Hosting），于是也带上 PDFium/SkiaSharp
+    的原生资产：只为当前主机 RID 构建，并剔除原生 pdb。见该文件里的说明。
+  -->
+  <Import Project="..\TnziNativeAssets.props" />
+
+
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="8.0.0">
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -36,6 +43,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Hangfire\Tnzi.Hangfire.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Localization\Tnzi.Localization.csproj" />
@@ -48,9 +56,17 @@
     <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance\Tnzi.Finance.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Banking\Tnzi.Finance.Banking.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Recurring\Tnzi.Finance.Recurring.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" />
+    <!-- 有 admin 控制器但不自带权限码（复用父模块的 storage.file.*），
+         必须在场才能进控制器覆盖面那道门，见 PermissionCataloguePactTests.LoadAdminControllerAssemblies。 -->
+    <ProjectReference Include="..\..\src\Tnzi.Storage.Workspace\Tnzi.Storage.Workspace.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Finance.Payroll\Tnzi.Finance.Payroll.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Signing\Tnzi.Signing.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Template\Tnzi.Template.csproj" />

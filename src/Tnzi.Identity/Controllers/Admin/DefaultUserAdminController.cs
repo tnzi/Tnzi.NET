@@ -11,7 +11,32 @@ public class DefaultUserAdminController : ApiAdminControllerBase
 {
     protected readonly IUserService UserService;
     protected readonly IPasswordService PasswordService;
+
+    /// <summary>
+    /// 组织架构服务。实现住在可选包 <c>Tnzi.Identity.Organization</c> 里，
+    /// 未加载时为 null，两个组织端点答 <see cref="OrganizationModuleMissing"/> + 501。
+    /// </summary>
     protected readonly IOrganizationService? OrganizationService;
+
+    /// <summary>
+    /// 组织包缺席时的统一回答：<b>501 + 指名要加载什么</b>。
+    /// </summary>
+    /// <remarks>
+    /// 用 501 而不是 503：503 是「暂时不可用」，会让监控与客户端的重试逻辑照着它一直重试
+    /// 一件永远不会变好的事（这台宿主根本没装组织架构）。也不用 404：路由确实存在，
+    /// 404 会让调用方以为自己拼错了 URL，从而去查一个不存在的问题。501 恰好就是
+    /// 「这台服务器不提供这项功能」，也是框架内既有的同类回答（Storage 的工作区包、
+    /// Finance 的 ICheckDocumentRenderer / IReceiptExtractor 缺席时同样是 501）。
+    /// 消息里点名包名，是因为「少加载一个可选包」在日志里唯一能自证的方式就是它自己说出来。
+    ///
+    /// ★ 这两个端点**留在本控制器上**而不是搬去组织包：<c>[Route("admin/users")]</c> 是核心
+    /// 已经拥有的模板，在同一模板上新铸一个 <c>[DefaultController]</c>，会让继承本默认控制器的
+    /// 消费方（<c>[DefaultController]</c> 是 <c>Inherited=false</c>、<c>[Route]</c> 是
+    /// <c>Inherited=true</c>）把组织包的端点一并继承走；换个前缀又会为一次内部重构
+    /// 打断所有既有调用方的 URL。
+    /// </remarks>
+    protected const string OrganizationModuleMissing =
+        "Organization assignment requires the Tnzi.Identity.Organization module, which this host has not loaded.";
 
     /// <summary>
     /// 初始化用户管理控制器
@@ -224,10 +249,12 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     {
         if (OrganizationService == null)
         {
-            return Error("Organization service is not available", 503);
+            return Error(OrganizationModuleMissing, 501);
         }
-        await OrganizationService.AssignUserToOrganizationAsync(userId, input.OrganizationId);
-        return Ok("User assigned to organization successfully");
+        // ★ 结果必须回传：这两个方法返回 Result，丢弃它会让「分配到一个不存在的组织」
+        // 也回 200 successfully —— 与本端点自己的 501 守卫（少了包就明说）自相矛盾。
+        var assignResult = await OrganizationService.AssignUserToOrganizationAsync(userId, input.OrganizationId);
+        return assignResult.ToApiResult();
     }
 
     /// <summary>
@@ -241,10 +268,10 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     {
         if (OrganizationService == null)
         {
-            return Error("Organization service is not available", 503);
+            return Error(OrganizationModuleMissing, 501);
         }
-        await OrganizationService.RemoveUserFromOrganizationAsync(userId);
-        return Ok("User removed from organization successfully");
+        var removeResult = await OrganizationService.RemoveUserFromOrganizationAsync(userId);
+        return removeResult.ToApiResult();
     }
 
     /// <summary>

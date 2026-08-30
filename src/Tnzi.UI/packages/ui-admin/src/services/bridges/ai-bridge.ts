@@ -334,6 +334,12 @@ export interface AiBridge {
     getOptions(): Promise<ProviderOptionDto[]>
     /** Models for a provider entity (live /v1/models + static fallback). */
     listModels(id: string): Promise<ProviderModelsDto>
+    /**
+     * Persist a dragged order. Display order only - `priority` (which row wins at
+     * runtime when names collide) is untouched. Configuration-source entries have
+     * no row and must not be submitted.
+     */
+    reorder(ids: string[]): Promise<void>
   }
   usage: {
     summary(query: CrudPageQuery): Promise<UsageSummary>
@@ -716,6 +722,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrap<ProviderDefaultModelDto>(await providerApi.getDefaultModel(providerName)),
     getOptions: async () => unwrap<ProviderOptionDto[]>(await providerApi.getOptions()),
     listModels: async (id: string) => unwrap<ProviderModelsDto>(await providerApi.listModels(String(id))),
+    reorder: async (ids: string[]): Promise<void> => {
+      ensureOk(await providerApi.reorder({ ids }))
+    },
   }
 
   // ---- usage --------------------------------------------------------------

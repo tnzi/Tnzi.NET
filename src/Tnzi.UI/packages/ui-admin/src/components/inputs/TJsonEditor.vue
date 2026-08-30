@@ -164,7 +164,7 @@ defineExpose({ format, minify, isValid, errorMessage })
 .t-json-editor {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: 6px;
   overflow: hidden;
 }

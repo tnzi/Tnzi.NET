@@ -375,6 +375,9 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var second = cuts[1];
         var third = cuts[2];
 
+        // 切分点随桶下发：呈现端（渲染器/CSV/前端）据此生成标签，不得写死 30/60/90
+        report.Totals.AgingBucketDays = cuts;
+
         void AddToBucket(AgingBucketsDto buckets, int overdueDays, decimal amount)
         {
             if (overdueDays <= 0) buckets.Current += amount;
@@ -387,7 +390,12 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
 
         foreach (var group in items.GroupBy(i => i.PartyId).OrderBy(g => names.GetValueOrDefault(g.Key)))
         {
-            var row = new AgingRowDto { PartyId = group.Key, PartyName = names.GetValueOrDefault(group.Key) ?? group.Key.ToString() };
+            var row = new AgingRowDto
+            {
+                PartyId = group.Key,
+                PartyName = names.GetValueOrDefault(group.Key) ?? group.Key.ToString(),
+                AgingBucketDays = cuts
+            };
             foreach (var item in group)
             {
                 var amount = Math.Round(item.OutstandingBase, _options.BaseCurrencyDecimals, MidpointRounding.AwayFromZero);

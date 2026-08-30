@@ -57,6 +57,12 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
     {
+        var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
+        if (!organizationCheck.Succeeded)
+        {
+            return Fail<UserDto>(organizationCheck.Message!, organizationCheck.Code ?? 400, organizationCheck.ErrorCode);
+        }
+
         var user = input.MapTo<User>();
         if (_multiTenancyEnabled && user.TenantId == null)
         {
@@ -125,6 +131,12 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
+        if (!organizationCheck.Succeeded)
+        {
+            return Fail<UserDto>(organizationCheck.Message!, organizationCheck.Code ?? 400, organizationCheck.ErrorCode);
         }
 
         // 只更新非空字段，避免空字符串覆盖现有值
@@ -287,7 +299,6 @@ public class UserService : ApplicationService, IUserService
 
         var user = await _userRepository
             .Where(u => u.Id == id)
-            .Include(u => u.Organization)
             .FirstOrDefaultAsync();
 
         if (user == null)
@@ -309,9 +320,10 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<IPagedList<UserListItemDto>>> GetListAsync(UserListQueryDto query)
     {
+        // 拆分前这里 Include 了 Organization 导航属性以便 ProjectTo 出组织名；
+        // 导航属性随实体搬进可选包之后，组织名改为投影完成后按整页批量补一次（见下）。
         var queryable = _userRepository
             .Where(u => !u.IsDeleted)
-            .Include(u => u.Organization)
             .AsQueryable();
 
         // 关键词搜索（大小写不敏感）
@@ -396,6 +408,9 @@ public class UserService : ApplicationService, IUserService
         var paged = await queryable
             .ProjectTo<User, UserListItemDto>()
             .CreateAsync(query);
+
+        // 批量获取组织名，消除 N+1（未加载组织包时留空）
+        await FillOrganizationNamesAsync(paged.Items as IReadOnlyCollection<UserListItemDto> ?? paged.Items.ToList());
 
         // 批量获取用户角色，消除 N+1
         if (_userRoleService != null && paged.Items.Any())
@@ -967,12 +982,93 @@ public class UserService : ApplicationService, IUserService
     }
 
     /// <summary>
+    /// 未加载组织包时，凡是要求「把这个用户放进某个组织」的写入路径统一给出的回答。
+    /// </summary>
+    /// <remarks>
+    /// 501 而不是 503/500：这台宿主不提供组织架构，重试永远不会变好；消息点名要加载的包，
+    /// 因为「少加载一个可选包」在日志里唯一能自证的方式就是它自己说出来。
+    /// 与 <c>DefaultUserAdminController</c> 的两个组织端点同一口径。
+    /// </remarks>
+    private const string OrganizationModuleMissing =
+        "Assigning a user to an organization requires the Tnzi.Identity.Organization module, which this host has not loaded.";
+
+    /// <summary>
+    /// 写入 <c>OrganizationId</c> 之前的守卫：组织包在不在、这个组织存不存在。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这一条在拆分之前**不存在**：一个不存在的 OrganizationId 会一路走到外键，
+    /// 数据库抛异常，调用方收到一个不透明的 500。拆分之后外键随组织包走，
+    /// 不加载该包时连那道数据库级的兜底也没有了 —— 所以判定必须提前到服务层，
+    /// 而且必须**失败关闭**：问不到组织就拒绝写入，绝不"先写下去再说"。
+    /// </remarks>
+    /// <param name="organizationId">要写入的组织 Id；null 表示本次不改组织，直接放行</param>
+    private async Task<Result> CheckOrganizationAssignableAsync(Guid? organizationId)
+    {
+        if (!organizationId.HasValue)
+        {
+            return Ok();
+        }
+
+        if (_organizationService == null)
+        {
+            return Fail(OrganizationModuleMissing, 501, ErrorCodes.IDENTITY_ORGANIZATION_ERROR);
+        }
+
+        var organization = await _organizationService.GetByIdAsync(organizationId.Value);
+        if (!organization.Succeeded || organization.Data == null)
+        {
+            return Fail("Organization not found", 400, ErrorCodes.IDENTITY_ORGANIZATION_NOT_FOUND);
+        }
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// 给一页用户列表项补上组织名（一次批量查询，无 N+1）。
+    /// </summary>
+    /// <remarks>
+    /// 拆分前这一列来自 <c>User → Organization</c> 的 LEFT JOIN；导航属性随实体搬进可选包
+    /// 之后改成这里问一次。未加载该包时 <c>_organizationService</c> 为 null，
+    /// 名字留空 —— 少一列显示值，不改任何其它字段。
+    /// </remarks>
+    private async Task FillOrganizationNamesAsync(IReadOnlyCollection<UserListItemDto> rows)
+    {
+        if (_organizationService == null || rows.Count == 0)
+        {
+            return;
+        }
+
+        var ids = rows.Where(u => u.OrganizationId.HasValue)
+            .Select(u => u.OrganizationId!.Value)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var names = await _organizationService.GetNamesAsync(ids);
+        foreach (var row in rows)
+        {
+            if (row.OrganizationId.HasValue && names.TryGetValue(row.OrganizationId.Value, out var name))
+            {
+                row.OrganizationName = name;
+            }
+        }
+    }
+
+    /// <summary>
     /// 映射用户实体到DTO
     /// </summary>
     private async Task<UserDto> MapUserToDtoAsync(User user)
     {
         var userDto = user.MapTo<UserDto>();
         userDto.Roles = (await _userManager.GetRolesAsync(user)).ToList();
+
+        // 组织名：拆分前只有 GetByIdAsync 那条路径 Include 了导航属性，
+        // Create/Update 返回的 DTO 里这一列一直是空的。统一走这里之后三条路径一致
+        // （多一次有界查询，且仅在用户确实挂着组织时发生）。
+        await FillOrganizationNamesAsync(new[] { userDto });
 
         // 加载用户详情并合并到 DTO
         // Nickname、Avatar 等个人资料信息已从 User 移到 UserDetail

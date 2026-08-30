@@ -34,8 +34,11 @@ public class ProviderDto
     /// <summary>Default model name</summary>
     public string? DefaultModel { get; set; }
 
-    /// <summary>Priority - for ordering when multiple providers of same type exist</summary>
+    /// <summary>Priority - runtime tie-break when several rows share a name (NOT the list order)</summary>
     public int Priority { get; set; }
+
+    /// <summary>Display order (lower first). Written by drag-to-reorder; configuration entries always sort ahead of database rows.</summary>
+    public int SortOrder { get; set; }
 
     /// <summary>Whether enabled</summary>
     public bool IsEnabled { get; set; }

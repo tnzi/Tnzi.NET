@@ -184,7 +184,10 @@ function serializeValue(field: SettingsCenterFieldDto, value: FieldValue): strin
   if (value == null || value === '') return null
   if (field.type === 'Boolean') return value === true ? 'true' : 'false'
   if (typeof value === 'number') {
-    // 后端 decimal.TryParse 不接受科学计数法（1e-7）- 强制十进制展开
+    // 后端 decimal.TryParse 不接受科学计数法（1e-7）- 强制十进制展开。
+    // ⚠️ `'en-US'` 是承重的,不是漏掉的国际化:这里产出的是**发给后端的线缆字符串**,
+    // 必须是不变文化格式(`.` 作小数点、不分组)。跟随界面语言会让 `fr` 发出 `1,5`
+    // 而后端按不变文化解析 - 静默存错值。界面语言在这一行是 bug 不是特性。
     return value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 })
   }
   return String(value)

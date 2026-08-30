@@ -13,11 +13,28 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.23" />
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.24" />
     <PackageReference Include="Hangfire.InMemory" Version="1.0.0" />
     <PackageReference Include="Hangfire.Redis.StackExchange" Version="1.12.0" />
-    <PackageReference Include="Hangfire.SqlServer" Version="1.8.23" />
+    <PackageReference Include="Hangfire.SqlServer" Version="1.8.24" />
     <PackageReference Include="Hangfire.PostgreSql" Version="1.21.1" />
+
+    <!--
+      Hangfire.PostgreSql 1.21.1 (the latest release) declares Npgsql >= 6.0.11. That floor is four
+      majors behind the Npgsql that Npgsql.EntityFrameworkCore.PostgreSQL brings to any PostgreSQL
+      application on .NET 10 - including this framework's own Tnzi.AI.Rag. Leaving it alone puts two
+      majors of the same assembly in one closure: projects that reference Tnzi.Hangfire without also
+      referencing the EF provider compile against 6.0.11 while the host loads 10.x, and every project
+      in between emits MSB3277 "Found conflicts between different versions of Npgsql" - loud enough
+      to bury real warnings.
+
+      NuGet dependency versions are floors, not locks, so naming Npgsql directly here lifts the whole
+      closure to one version without pinning consumers: an application already on a higher Npgsql
+      still unifies upward. The version deliberately matches the EF provider's own dependency
+      (Npgsql.EntityFrameworkCore.PostgreSQL 10.0.2 -> Npgsql 10.0.3), so this raises the floor to
+      where PostgreSQL consumers already are rather than pushing them past it.
+    -->
+    <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
 </Project>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * `TLayoutModeCard` - soybean-parity preview card for one of the four
- * admin layout modes. Renders a 96x64 canvas with primary-tinted boxes
- * arranged to mimic each mode's chrome (sider/header/main combinations).
+ * `TLayoutModeCard` - soybean-parity preview card for one admin layout mode.
+ * Renders a 96x64 canvas with primary-tinted boxes arranged to mimic each
+ * mode's chrome (sider/header/main combinations).
  *
  * Phase G rewrite: dropped the previous `geometry switch + content-line`
  * abstraction in favour of explicit `v-if` blocks that mirror soybean's
@@ -13,6 +13,8 @@
  *
  * 2026-06-26: dropped the `vertical-hybrid-header-first` and
  * `top-hybrid-sidebar-first` cards along with their (buggy) layout modes.
+ * 2026-08-22: added `desktop` - the one card that is not a soybean shape,
+ * since it previews a window manager rather than an arrangement of chrome.
  *
  * Reference: D:\Github\soybean-admin-main\src\layouts\modules\theme-drawer\
  *   modules\layout\modules\layout-mode.vue
@@ -82,6 +84,19 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
           <span class="t-layout-card__main" />
         </span>
       </span>
+
+      <!-- desktop: header + a wallpaper area holding two overlapping windows +
+           a taskbar pinned to the bottom. The overlap is the whole point of the
+           glyph - it is what separates this mode from every other card here,
+           all of which show one content area. -->
+      <span v-else-if="mode === 'desktop'" class="t-layout-card__col">
+        <span class="t-layout-card__header t-layout-card__header--secondary" />
+        <span class="t-layout-card__desk">
+          <span class="t-layout-card__window t-layout-card__window--back" />
+          <span class="t-layout-card__window t-layout-card__window--front" />
+        </span>
+        <span class="t-layout-card__taskbar" />
+      </span>
     </span>
     <span v-if="label" class="t-layout-card__label">{{ label }}</span>
   </button>
@@ -121,19 +136,15 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
   border-radius: 4px;
   background: var(--tnzi-container-bg, #ffffff);
   box-shadow:
-    0 1px 2px 0 rgb(0 0 0 / 0.06),
+    var(--tnzi-surface-card-shadow),
     0 0 0 2px transparent;
   transition: box-shadow 0.18s ease;
 }
-.t-layout-card:hover .t-layout-card__canvas {
-  box-shadow:
-    0 1px 2px 0 rgb(0 0 0 / 0.06),
-    0 0 0 2px var(--tnzi-primary, #646cff);
-}
+.t-layout-card:hover .t-layout-card__canvas,
 .t-layout-card--active .t-layout-card__canvas {
   box-shadow:
-    0 1px 2px 0 rgb(0 0 0 / 0.06),
-    0 0 0 2px var(--tnzi-primary, #646cff);
+    var(--tnzi-surface-card-shadow),
+    var(--tnzi-surface-ring-selected);
 }
 
 /* Layout primitives - match soybean's atomic UnoCSS classes:
@@ -193,6 +204,40 @@ defineEmits<{ select: [mode: AdminLayoutMode] }>()
   flex: 1;
   border-radius: 4px;
   background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.20); /* primary-200 */
+}
+
+/* Desktop mode: wallpaper area that windows float on. Positioned so the two
+   window glyphs can overlap - a plain flex row would sit them side by side and
+   lose the one thing this card is trying to say. */
+.t-layout-card__desk {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 4px;
+  background: rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.20); /* primary-200 */
+}
+.t-layout-card__window {
+  position: absolute;
+  border-radius: 2px;
+  background: var(--tnzi-container-bg, #ffffff);
+  box-shadow: 0 0 0 1px rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.45);
+}
+.t-layout-card__window--back {
+  top: 12%;
+  left: 10%;
+  width: 52%;
+  height: 56%;
+}
+.t-layout-card__window--front {
+  top: 32%;
+  left: 36%;
+  width: 54%;
+  height: 56%;
+}
+.t-layout-card__taskbar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--tnzi-primary, #646cff);
 }
 
 .t-layout-card__label {

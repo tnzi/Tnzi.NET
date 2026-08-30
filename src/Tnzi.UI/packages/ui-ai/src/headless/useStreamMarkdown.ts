@@ -6,7 +6,10 @@
  */
 
 import { ref, readonly, type Ref, type DeepReadonly } from 'vue';
-import MarkdownIt from 'markdown-it';
+// markdown-it 15 ships its own declarations (`@types/markdown-it` is gone) and
+// splits the two meanings of the old name: the default export is the callable
+// factory/constructor, `MarkdownIt` is the instance type.
+import MarkdownIt, { type MarkdownIt as MarkdownItInstance } from 'markdown-it';
 import type { Highlighter } from 'shiki';
 import { scheduleFrame } from '../utils/scheduleFrame';
 
@@ -54,7 +57,7 @@ function ensureHighlighter(): Promise<Highlighter> {
 
 export interface UseStreamMarkdownOptions {
   /** Custom markdown-it instance (overrides built-in shared singleton). */
-  markdownIt?: MarkdownIt;
+  markdownIt?: MarkdownItInstance;
   /**
    * Allow raw HTML passthrough. Default false - raw `<tags>` in the markdown
    * source are escaped (`&lt;`), neutralising XSS from LLM/RAG output. Markdown
@@ -85,7 +88,7 @@ export interface UseStreamMarkdownReturn {
 // Markdown-it factory
 // ---------------------------------------------------------------------------
 
-function createMarkdownIt(allowHtml = false): MarkdownIt {
+function createMarkdownIt(allowHtml = false): MarkdownItInstance {
   const md = new MarkdownIt({
     html: allowHtml,
     linkify: true,
@@ -134,9 +137,9 @@ function createMarkdownIt(allowHtml = false): MarkdownIt {
 // Cached singleton markdown-it instance (shared across all composables)
 // ---------------------------------------------------------------------------
 
-let cachedMd: MarkdownIt | null = null;
+let cachedMd: MarkdownItInstance | null = null;
 
-function getSharedMarkdownIt(): MarkdownIt {
+function getSharedMarkdownIt(): MarkdownItInstance {
   if (!cachedMd) {
     cachedMd = createMarkdownIt();
   }

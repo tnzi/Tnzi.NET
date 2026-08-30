@@ -232,7 +232,7 @@ const rowActions: RowAction<BankAccountRow>[] = [
 .fin-bank-acct__hint {
   font-size: 12px;
   line-height: 1.5;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 
 .fin-bank-acct__set-check {
@@ -244,7 +244,7 @@ const rowActions: RowAction<BankAccountRow>[] = [
 .fin-bank-acct__set-check-hint {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 
 .fin-bank-acct__set-check-input {

@@ -55,6 +55,17 @@ public class AgentRunResult
     /// <summary>完成原因</summary>
     public string? FinishReason { get; init; }
 
+    /// <summary>
+    /// 失败的业务错误码（仅失败类 <see cref="FinishReason"/> 下有意义，成功路径恒为 null）。
+    /// </summary>
+    /// <remarks>
+    /// FinishReason 只够区分「哪一类结局」，区分不了同一类结局里处置完全不同的原因：
+    /// 配额记录缺失（查那一行为什么不在）与预留并发冲突（重试即可）都是 <c>Error</c>。
+    /// 没有这个码，HTTP 边界（<see cref="Tnzi.AI.Engine.AgentStreamMapper.TryMapFailure"/>）
+    /// 只能把它们统统贴成 500——服务层辛苦分出来的「可重试」在最后一跳被抹平。
+    /// </remarks>
+    public string? ErrorCode { get; init; }
+
     /// <summary>实际执行使用的模型</summary>
     public string? Model { get; init; }
 
@@ -116,7 +127,8 @@ public class AgentRunResult
         string? clarificationQuestion = null,
         Guid? userMessageId = null,
         Guid? assistantMessageId = null,
-        string? deliverable = null)
+        string? deliverable = null,
+        string? errorCode = null)
     {
         return new AgentRunResult
         {
@@ -133,6 +145,7 @@ public class AgentRunResult
             Usage = usage ?? Usage,
             Citations = citations ?? Citations,
             FinishReason = finishReason ?? FinishReason,
+            ErrorCode = errorCode ?? ErrorCode,
             Model = model ?? Model,
             Provider = provider ?? Provider,
             HandoffPath = handoffPath ?? HandoffPath,

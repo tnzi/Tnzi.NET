@@ -11,6 +11,10 @@ export { default as TListShell } from './TListShell.vue'
 export type { TListShellProps } from './TListShell.vue'
 export { default as TCardPage } from './TCardPage.vue'
 export { default as TCardRenderer } from './renderers/TCardRenderer.vue'
+// Drag-to-reorder payload (`TCardPage` / `TCardRenderer` `@reorder`). Consumers
+// name this type to type their handler, so it lives in its own module: a type
+// declared inside `<script setup>` is not importable from anywhere else.
+export type { CardReorderPayload } from './renderers/card-reorder'
 export { default as TTableRenderer } from './renderers/TTableRenderer.vue'
 // Third list shape: full-width document rows (see TItemCard). Same shell, so a
 // page moves between table / tile grid / row list in one line.

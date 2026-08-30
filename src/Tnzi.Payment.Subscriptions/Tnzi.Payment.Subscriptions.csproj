@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Recurring billing for the Tnzi.NET payment module: plans, subscriptions, trials, proration on plan change, unattended off-session renewal, dunning and renewal reminders. Optional - a host that only charges once at checkout never carries the three Payment_ subscription tables, twenty-six endpoints or four permission codes. Without it the payment module charges, refunds and reconciles exactly as before; it simply has no notion of a recurring customer.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <!--
+      Tnzi.Notification 是**续费域自己的**依赖：续费提醒、扣款失败通知、宽限期告警都从这里发。
+      即使它经父模块传递可达，也**显式声明** —— 可达只是因为父模块碰巧还在别处用它，
+      传递引用不是契约（这一条是上一次拆分实打实踩到的：父模块一路 global using 着
+      Tnzi.Template 却从未声明过引用，靠 Tnzi.Notification 的传递边编译）。
+    -->
+    <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" />
+  </ItemGroup>
+
+</Project>

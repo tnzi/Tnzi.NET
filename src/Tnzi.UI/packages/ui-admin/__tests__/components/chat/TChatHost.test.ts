@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import TChatHost from '../../../src/components/chat/TChatHost.vue'
+import { useAdminDesktopStore } from '../../../src/stores/useAdminDesktopStore'
+import { useAdminThemeStore } from '../../../src/stores/useAdminThemeStore'
 
 // --- Fake bridge ---
 const fakeBridge = {
@@ -108,5 +111,47 @@ describe('TChatHost', () => {
     await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled())
     wrapper.unmount()
     expect(mockRealtimeStop).toHaveBeenCalled()
+  })
+})
+
+describe('TChatHost - chat is an ordinary window on the desktop', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockClient = {}
+    fakeBridge.listConversations.mockResolvedValue([])
+    mockRealtimeStart.mockResolvedValue(undefined)
+    mockRealtimeStop.mockResolvedValue(undefined)
+  })
+
+  it('opens a desktop window instead of a floating modal', async () => {
+    useAdminThemeStore().layoutMode = 'desktop'
+    const desktop = useAdminDesktopStore()
+    const wrapper = mount(TChatHost, { global: globalStubs })
+    await flushPromises()
+
+    wrapper.findComponent('.t-chat-launcher-stub').vm.$emit('open')
+    await nextTick()
+
+    // As a modal it sat permanently above every window and never appeared in
+    // the taskbar - the taskbar renders exactly this list.
+    expect(desktop.windows).toHaveLength(1)
+    expect(desktop.windows[0].stack[0].panel).toBe('chat')
+    // And the modal instance must NOT also be mounted: two live copies would
+    // run every watcher twice for one visible surface.
+    expect(wrapper.find('.t-chat-window-stub').exists()).toBe(false)
+  })
+
+  it('still uses the floating window in every other layout', async () => {
+    useAdminThemeStore().layoutMode = 'vertical'
+    const desktop = useAdminDesktopStore()
+    const wrapper = mount(TChatHost, { global: globalStubs })
+    await flushPromises()
+
+    wrapper.findComponent('.t-chat-launcher-stub').vm.$emit('open')
+    await nextTick()
+
+    expect(desktop.windows).toHaveLength(0)
+    expect(wrapper.find('.t-chat-window-stub').exists()).toBe(true)
   })
 })

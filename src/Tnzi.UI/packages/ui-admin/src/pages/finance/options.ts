@@ -44,21 +44,35 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     return options
   })
 
-  function flattenFundsLeaves(nodes: AccountTreeDto[], into: SelectOption[]) {
+  function flattenFundsLeaves(nodes: AccountTreeDto[], into: SelectOption[], roles: Record<string, string>) {
     for (const node of nodes) {
       if (!node.isGroup && node.isActive && node.cashFlowActivity === CashFlowActivity.CashEquivalent) {
         into.push({ label: `${node.code} ${node.name}`, value: node.id })
+        if (node.systemRole) roles[String(node.systemRole)] = node.id
       }
-      flattenFundsLeaves(node.children ?? [], into)
+      flattenFundsLeaves(node.children ?? [], into, roles)
     }
   }
+
+  /**
+   * `systemRole` → account id, for the funds accounts above.
+   *
+   * A page that needs "the undeposited-funds account" must ask the tree for it.
+   * The only other handle is the option `label`, which is a localised
+   * `code name` string - matching a role out of it works on an English chart of
+   * accounts and silently finds nothing on any other. Filled by the same load
+   * that builds `fundsAccountOptions`, so it costs no extra request.
+   */
+  const fundsAccountRoles = ref<Record<string, string>>({})
 
   // Cash / bank funds accounts only (CashEquivalent) - bank account profiles
   // and bank-feed selection require a funds account, not any leaf.
   const fundsAccounts = lazy<SelectOption>(async () => {
     const tree = await bridge.accounts.tree(false)
     const options: SelectOption[] = []
-    flattenFundsLeaves(tree, options)
+    const roles: Record<string, string> = {}
+    flattenFundsLeaves(tree, options, roles)
+    fundsAccountRoles.value = roles
     return options
   })
 
@@ -113,6 +127,7 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     ensureLeafAccounts: leafAccounts.ensure,
     fundsAccountOptions: fundsAccounts.options,
     ensureFundsAccounts: fundsAccounts.ensure,
+    fundsAccountRoles,
     expenseAccountOptions: expenseAccounts.options,
     ensureExpenseAccounts: expenseAccounts.ensure,
     customerOptions: customers.options,

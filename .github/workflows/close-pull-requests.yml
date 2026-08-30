@@ -1,0 +1,59 @@
+name: Close pull requests
+
+# This repository is a read-only mirror. Pull requests opened here cannot be merged:
+# every sync replaces the tree wholesale, so a merged commit would be overwritten and
+# would never reach upstream. GitHub has no switch to disable pull requests, and it
+# refuses to turn off all three merge methods at once, so closing them on arrival is
+# the only way to make "we can't take PRs" true rather than just documented.
+#
+# This is the only workflow carried into the mirror. The others are deliberately left
+# behind: the publishing ones need secrets and would imply packages ship from here,
+# and the quality ones read files under docs/, which the mirror does not carry.
+#
+# Security note: this uses `pull_request_target`, which runs with repository write
+# access. That is safe here only because the job never checks out the pull request's
+# code. Do not add a checkout step.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: [
+                `Thanks for this, @${author}. Closing it automatically, and not because`,
+                'of what it contains.',
+                '',
+                'This repository is a projection of a private development repo. Each sync',
+                'replaces the whole tree, so anything merged here would be overwritten on',
+                'the next one and would never reach upstream. Leaving the pull request open',
+                'would only suggest otherwise.',
+                '',
+                '**Your work is still usable.** Open an issue with the diff, or a link to',
+                'your fork. The change gets implemented upstream, credited to you in the',
+                'commit message, and arrives here with the next sync.',
+                '',
+                'Bug reports and API objections go through issues too, and those are read.'
+              ].join('\n')
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              state: 'closed'
+            });

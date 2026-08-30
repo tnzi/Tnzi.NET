@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Organization-tree sub-module for the Tnzi.NET identity module: the company shape users hang off (hierarchy, codes, ordering, per-node headcount, assigning a user to a node). Optional - a product whose users are individuals, or a headless API whose principals are services, loads Identity on purpose and never wants an org tree.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />
+  </ItemGroup>
+
+</Project>

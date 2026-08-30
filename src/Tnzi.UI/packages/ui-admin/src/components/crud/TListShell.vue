@@ -12,7 +12,7 @@
       v-else-if="props.showHeader"
       :bordered="false"
       size="small"
-      class="t-list-shell__header-card"
+      class="t-list-shell__header-card t-surface-card"
     >
       <TPageHeader
         :title="props.title"
@@ -155,7 +155,7 @@
       v-if="$slots.search"
       :bordered="false"
       size="small"
-      class="t-list-shell__search-card"
+      class="t-list-shell__search-card t-surface-card"
     >
       <slot name="search" />
     </NCard>
@@ -197,7 +197,7 @@
     <NCard
       :bordered="false"
       size="small"
-      class="t-list-shell__list-card"
+      class="t-list-shell__list-card t-surface-card"
     >
       <!-- Toolbar row inside the list container: left filters + right
            action buttons (create / refresh / export / import / columns).
@@ -590,7 +590,17 @@ const modalTitle = computed(() => {
 .t-list-shell--page {
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  /* `clip` rather than `hidden` so the clip region can be pushed out by the
+     card gutter. A card's chrome - the hairline, the selection ring, the drop
+     shadow - lives OUTSIDE its border box, and these cards are exactly as wide
+     as this element, so `hidden` cropped all of it flush at the left and right
+     edges: the hairline that is supposed to separate the card from the page
+     canvas was the first casualty. `overflow-clip-margin` moves the boundary
+     without moving anything (measured: identical box heights, no page
+     overflow), which padding here could not do - padding would inset all three
+     cards and put list pages out of line with every other page. */
+  overflow: clip;
+  overflow-clip-margin: var(--tnzi-surface-card-gutter);
 }
 .t-list-shell--container {
   height: auto;
@@ -601,7 +611,10 @@ const modalTitle = computed(() => {
 .t-list-shell__search-card,
 .t-list-shell__list-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  /* Card tier - one pair for every container that sits on the page canvas.
+     See the surface tiers in `@tnzi/ui/styles/variables.css`. */
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-list-shell__header-card,
 .t-list-shell__search-card { flex-shrink: 0; }

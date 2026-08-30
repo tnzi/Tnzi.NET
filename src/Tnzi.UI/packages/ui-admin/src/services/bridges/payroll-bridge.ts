@@ -39,6 +39,8 @@ import {
   type PayslipListDto as CorePayslipListDto,
   type PayslipLineDto as CorePayslipLineDto,
   type UpdatePayslipInputsDto as CoreUpdatePayslipInputsDto,
+  type PayRunInputDto as CorePayRunInputDto,
+  type SetPayRunInputDto as CoreSetPayRunInputDto,
   type ExternalPayRunIngestDto as CoreExternalPayRunIngestDto,
   type CountryPackDto as CoreCountryPackDto,
   type CountryPackSeedResult as CoreCountryPackSeedResult,
@@ -76,6 +78,8 @@ export type PayslipDto = CorePayslipDto
 export type PayslipListDto = CorePayslipListDto
 export type PayslipLineDto = CorePayslipLineDto
 export type UpdatePayslipInputsDto = CoreUpdatePayslipInputsDto
+export type PayRunInputDto = CorePayRunInputDto
+export type SetPayRunInputDto = CoreSetPayRunInputDto
 export type ExternalPayRunIngestDto = CoreExternalPayRunIngestDto
 export type CountryPackDto = CoreCountryPackDto
 export type CountryPackSeedResult = CoreCountryPackSeedResult
@@ -155,6 +159,10 @@ export interface PayrollBridge {
     payslips(id: string): Promise<PayslipListDto[]>
     payslip(id: string, payslipId: string): Promise<PayslipDto | null>
     updatePayslipInputs(id: string, payslipId: string, data: CoreUpdatePayslipInputsDto): Promise<PayslipDto>
+    /** 一次性输入(奖金/补发/罚扣):挂在**批次**上,整批重算不会把它冲掉。 */
+    inputs(id: string): Promise<PayRunInputDto[]>
+    setInput(id: string, data: CoreSetPayRunInputDto): Promise<PayRunInputDto>
+    deleteInput(id: string, inputId: string): Promise<void>
     createFromExternal(data: CoreExternalPayRunIngestDto): Promise<PayRunDto>
   }
   countryPacks: {
@@ -319,6 +327,11 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
       payslip: async (id, payslipId) => unwrap<PayslipDto | null>(await api.runs.getPayslip(id, payslipId)),
       updatePayslipInputs: async (id, payslipId, data) =>
         unwrap<PayslipDto>(await api.runs.updatePayslipInputs(id, payslipId, data)),
+      inputs: async (id) => unwrap<PayRunInputDto[]>(await api.runs.getInputs(id)) ?? [],
+      setInput: async (id, data) => unwrap<PayRunInputDto>(await api.runs.setInput(id, data)),
+      deleteInput: async (id, inputId) => {
+        ensureOk(await api.runs.deleteInput(id, inputId))
+      },
       createFromExternal: async (data) => unwrap<PayRunDto>(await api.runs.createFromExternal(data)),
     },
 

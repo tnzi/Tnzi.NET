@@ -2,6 +2,8 @@
 import { ref, watch, nextTick } from 'vue'
 import { useBreakpoints, breakpointsTailwind } from '@vueuse/core'
 import 'pinia-plugin-persistedstate'
+import { getDefaultAdminLocale, isAdminLocaleRegistered } from '../i18n/locale-registry'
+import type { AdminLocale } from '../i18n/messages'
 
 /**
  * Admin app store - global UI state for the admin shell.
@@ -18,12 +20,15 @@ import 'pinia-plugin-persistedstate'
 export const useAdminAppStore = defineStore('admin-app', () => {
   // State
   const siderCollapse = ref(false)
-  const locale = ref<'en' | 'zh-cn'>('en')
+  const locale = ref<AdminLocale>('en')
   const fullContent = ref(false)
   const reloadFlag = ref(true)
   /**
-   * Consumer-supplied locale messages, deep-merged on top of ui-admin's
-   * bundled `en`/`zh-cn` dictionaries by `useAdminRouteStore.resolveI18nKey`.
+   * Consumer-supplied locale messages, keyed by locale code and deep-merged on
+   * top of whatever dictionary that code resolves to, by every chrome path
+   * that translates a key (`resolveI18nKey`, `translatePageKey`,
+   * `translateChromeKey`). Any code is accepted, including one the framework
+   * ships no dictionary for.
    * Lets a host app register its own
    * `admin.modules.{module}.{page}.title` keys so the sidebar / breadcrumb
    * / tabs resolve them in the active locale - without this slot, custom
@@ -46,7 +51,7 @@ export const useAdminAppStore = defineStore('admin-app', () => {
    *    silently disables persistence for the WHOLE admin-app store
    *    (sider collapse / locale / ops view stop surviving reloads).
    */
-  const messageOverrides = ref<{ en: Record<string, unknown>; 'zh-cn': Record<string, unknown> }>({
+  const messageOverrides = ref<Record<AdminLocale, Record<string, unknown>>>({
     en: {},
     'zh-cn': {},
   })
@@ -117,8 +122,23 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     siderCollapse.value = value
   }
 
-  function setLocale(lang: 'en' | 'zh-cn'): void {
+  function setLocale(lang: AdminLocale): void {
     locale.value = lang
+  }
+
+  /**
+   * Drop a persisted locale the application no longer offers.
+   *
+   * `locale` survives reloads, so an app that stops shipping a language - or a
+   * user whose localStorage predates that change - would boot pinned to a code
+   * with no dictionary, no entry in the switcher, and therefore no way back to
+   * a language they can read. Called by `defineAdminApp().install()` once the
+   * consumer's `localeOptions` are registered.
+   */
+  function ensureLocaleRegistered(): void {
+    if (!isAdminLocaleRegistered(locale.value)) {
+      locale.value = getDefaultAdminLocale()
+    }
   }
 
   function toggleFullContent(): void {
@@ -147,22 +167,26 @@ export const useAdminAppStore = defineStore('admin-app', () => {
 
   /**
    * Register additional locale messages on top of the bundled dictionaries.
-   * Pass partial trees keyed by locale code; both locales are optional so
-   * a host can extend just one if it only ships a single language. Subsequent
-   * calls deep-merge - later keys win, but disjoint paths accumulate.
+   * Pass partial trees keyed by locale code - ANY code, not just the two this
+   * package bundles. Subsequent calls deep-merge: later keys win, disjoint
+   * paths accumulate.
    *
    * Used by host apps to surface their own
-   * `admin.modules.{module}.{page}.title` keys to the sidebar/breadcrumb/tabs.
+   * `admin.modules.{module}.{page}.title` keys to the sidebar/breadcrumb/tabs,
+   * and to supply the whole dictionary for a language the framework does not
+   * ship.
+   *
+   * ⚠️ This used to check for `en` and `'zh-cn'` BY NAME and merge only those,
+   * so `extendLocaleMessages({ fr })` was dropped on the floor - no error, no
+   * warning, and `createAdminApp({ locales })` is the documented way to supply
+   * consumer messages. Iterate the entries; never re-introduce a name check.
    */
-  function extendLocaleMessages(messages: {
-    en?: Record<string, unknown>
-    'zh-cn'?: Record<string, unknown>
-  }): void {
-    if (messages.en) {
-      messageOverrides.value.en = deepMerge(messageOverrides.value.en, messages.en)
-    }
-    if (messages['zh-cn']) {
-      messageOverrides.value['zh-cn'] = deepMerge(messageOverrides.value['zh-cn'], messages['zh-cn'])
+  function extendLocaleMessages(
+    messages: Partial<Record<AdminLocale, Record<string, unknown>>>,
+  ): void {
+    for (const [code, tree] of Object.entries(messages)) {
+      if (!tree) continue
+      messageOverrides.value[code] = deepMerge(messageOverrides.value[code] ?? {}, tree)
     }
   }
 
@@ -180,6 +204,7 @@ export const useAdminAppStore = defineStore('admin-app', () => {
     toggleSiderCollapse,
     setSiderCollapse,
     setLocale,
+    ensureLocaleRegistered,
     toggleFullContent,
     reloadPage,
     toggleMixSiderFixed,

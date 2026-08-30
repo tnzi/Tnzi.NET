@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Stripe payment channel for the Tnzi.NET payment module: the IPaymentProvider implementation, the Payment:Stripe options, and promotion-to-coupon sync. Load it only when the application actually charges through Stripe; without it Tnzi.Payment carries no Stripe.net dependency.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Stripe.net" Version="52.3.0" />
+  </ItemGroup>
+
+</Project>

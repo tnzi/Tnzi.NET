@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Object-storage providers (Amazon S3, Cloudflare R2, Azure Blob) for the Tnzi.NET storage module. Load it only when the application stores files in the cloud; without it Tnzi.Storage carries neither AWSSDK.S3 nor Azure.Storage.Blobs, and none of their transitive packages (Azure.Core, Microsoft.Identity.Client and the rest of the identity chain).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="4.0.102.2" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+  </ItemGroup>
+
+</Project>

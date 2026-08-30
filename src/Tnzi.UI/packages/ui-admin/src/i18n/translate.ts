@@ -1,5 +1,5 @@
 import { useAdminAppStore } from '../stores/useAdminAppStore'
-import { getLocaleMessages } from './messages'
+import { getLocaleMessages, type AdminLocale } from './messages'
 
 /**
  * Last-segment capitalised fallback for i18n keys that haven't been
@@ -21,7 +21,20 @@ export function humanise(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
-function lookup(messages: Record<string, unknown>, path: string): string | undefined {
+/**
+ * Walk a dotted path through a messages tree, returning the string leaf or
+ * `undefined` when any segment is missing or the leaf is not a string.
+ *
+ * Exported because `useAdminRouteStore.resolveI18nKey` needs the identical
+ * walk under a different signature (it resolves locale + overrides ONCE and
+ * maps the result over a whole menu tree). It used to keep a byte-identical
+ * private copy - the same hand-copy that let `AdminShellRoot` and
+ * `ExceptionView` drift away from honouring consumer overrides.
+ */
+export function lookupMessage(
+  messages: Record<string, unknown>,
+  path: string,
+): string | undefined {
   let node: unknown = messages
   for (const part of path.split('.')) {
     if (typeof node === 'object' && node !== null && part in (node as Record<string, unknown>)) {
@@ -31,6 +44,67 @@ function lookup(messages: Record<string, unknown>, path: string): string | undef
     }
   }
   return typeof node === 'string' ? node : undefined
+}
+
+/**
+ * The active locale and its consumer overrides.
+ *
+ * `useAdminAppStore()` requires an active Pinia. Test harnesses that mount
+ * components without `createPinia()` make it throw, so a failure defaults to
+ * English rather than forcing every mount to wire pinia. Production shells
+ * always install pinia in main.ts.
+ *
+ * Single source of the "which dictionary wins" rule: consumer overrides for
+ * the ACTIVE locale first, then the bundled pack. Every chrome surface goes
+ * through it. The breadcrumb and the exception pages each used to carry their
+ * own copy of the walk that read the bundled dictionary only, so an override
+ * for a key the bundle already had (`admin.modules.dashboard.title`) was
+ * honoured in the sidebar menu and ignored in the breadcrumb.
+ *
+ * There are three ENTRY POINTS, and that is deliberate - they differ only in
+ * miss policy and in how the locale reaches them:
+ *
+ * | entry | miss policy | locale source |
+ * |---|---|---|
+ * | `translateChromeKey` | `fallback ?? key` | reads the store |
+ * | `translatePageKey`   | `humanise(key)`   | reads the store |
+ * | `useAdminRouteStore.resolveI18nKey` | `humanise(key)` | passed in, resolved once per menu tree |
+ *
+ * All three share `lookupMessage` and the overrides-first order. Adding a
+ * fourth private walk is how this drifted the first time; extend these instead.
+ */
+function activeLocale(): { locale: AdminLocale; overrides?: Record<string, unknown> } {
+  try {
+    const store = useAdminAppStore()
+    const locale = store.locale
+    return {
+      locale,
+      overrides: store.messageOverrides?.[locale] as Record<string, unknown> | undefined,
+    }
+  } catch {
+    return { locale: 'en' }
+  }
+}
+
+/**
+ * Resolve a chrome key: consumer overrides first, then the active locale's
+ * bundled dictionary, then `fallback ?? key` on a miss.
+ *
+ * Same resolution ORDER as `translatePageKey`, different MISS POLICY. Chrome
+ * translators (`TThemeDrawer`, the desktop tray, the login page) pass an
+ * English literal as `fallback` and want it verbatim on a miss; page keys have
+ * no such literal and humanise instead. Keep both - what must not diverge is
+ * which dictionary wins, and that is now decided in one place.
+ */
+export function translateChromeKey(key: string, fallback?: string): string {
+  if (!key) return key
+  const { locale, overrides } = activeLocale()
+  const messages = getLocaleMessages(locale) ?? {}
+  // Strip optional `tnzi.` prefix - bundled locales are rooted at `admin.*`
+  // (mirrors translatePageKey / resolveI18nKey).
+  const normalised = key.startsWith('tnzi.') ? key.slice(5) : key
+  const hit = (overrides && lookupMessage(overrides, normalised)) ?? lookupMessage(messages, normalised)
+  return hit ?? fallback ?? key
 }
 
 /**
@@ -48,19 +122,7 @@ function lookup(messages: Record<string, unknown>, path: string): string | undef
  */
 export function translatePageKey(pageNs: string, key: string): string {
   if (!key) return key
-  // `useAdminAppStore()` requires an active Pinia. In test harnesses that
-  // mount components without `createPinia()` the store throws - catch and
-  // default to English so unit tests don't have to wire pinia for every
-  // mount. Production app shells always install pinia in main.ts.
-  let locale: 'en' | 'zh-cn' = 'en'
-  let overrides: Record<string, unknown> | undefined
-  try {
-    const store = useAdminAppStore()
-    locale = store.locale
-    overrides = store.messageOverrides?.[locale] as Record<string, unknown> | undefined
-  } catch {
-    locale = 'en'
-  }
+  const { locale, overrides } = activeLocale()
   // Undefined until the locale chunk lands; every lookup below then misses and
   // falls through to `humanise`, and the reactive registry repaints once it
   // arrives. See i18n/messages.ts.
@@ -75,7 +137,7 @@ export function translatePageKey(pageNs: string, key: string): string {
   // `admin.modules.{module}.…` and `admin.shared.…` keys to every page,
   // breadcrumb, and tab without forking the locale files.
   const find = (path: string): string | undefined =>
-    (overrides && lookup(overrides, path)) ?? lookup(messages, path)
+    (overrides && lookupMessage(overrides, path)) ?? lookupMessage(messages, path)
 
   // Absolute key - resolve directly without prefixing the page namespace.
   if (normalised.startsWith('admin.')) {

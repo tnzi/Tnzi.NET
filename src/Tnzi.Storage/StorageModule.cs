@@ -1,9 +1,17 @@
 namespace Tnzi.Storage;
 
 /// <summary>
-/// 存储模块
+/// 存储模块：程序化的对象仓库 —— 别的模块往里写字节、按 id 取回字节、靠 <c>[FileField]</c>
+/// 数引用、到期回收。
 /// 配置路径：Storage
 /// </summary>
+/// <remarks>
+/// 「人在界面上拿文件做的事」（目录树 / 分享链接 / 版本 / 断点续传）在可选子模块
+/// <c>Tnzi.Storage.Workspace</c>，五张表随它走。本模块声明其中三个契约
+/// （<see cref="IFileShareService"/> / <see cref="IFileVersionService"/> /
+/// <see cref="IFileChunkUploadService"/>）并在两个默认控制器上可选注入它们，
+/// 因为那批端点长在本模块的 <c>files</c> / <c>admin/files</c> 路由上、没有搬走。
+/// </remarks>
 [DependsOn(typeof(EFCore.EFCoreModule))]
 public class StorageModule : TnziApplicationModule
 {
@@ -83,14 +91,15 @@ public class StorageModule : TnziApplicationModule
         // 注册文件存储服务
         services.AddScoped<IFileStorageService, FileStorageService>();
 
-        // 注册文件目录服务
-        services.AddScoped<IFileFolderService, FileFolderService>();
-
-        // 注册拆分后的专职服务
+        // 注册拆分后的专职服务。
+        // 目录 / 分享 / 版本 / 分片上传四个实现在可选包 Tnzi.Storage.Workspace，不在这里注册。
         services.AddScoped<IFileReferenceService, FileReferenceService>();
-        services.AddScoped<IFileShareService, FileShareService>();
-        services.AddScoped<IFileVersionService, FileVersionService>();
-        services.AddScoped<IFileChunkUploadService, FileChunkUploadService>();
+
+        // 上传闸门（体积 / 扩展名白名单 + 净化管线）。收成一个 DI 服务而不是让每条写路径
+        // 各 new 一个：三条把字节交给 provider 的路径（直传 / 分片完成 / 建新版本）必须过同一份，
+        // 而其中两条已经搬进了子模块 —— 各自 new 就意味着两个程序集各抄一份，那正是它们
+        // 当初漂开的原因。Scoped：净化器由消费方注册，生命周期未知，单例会形成 captive dependency。
+        services.AddScoped<UploadGuard>();
 
         // 注册文件预览服务
         services.AddScoped<IFilePreviewService, FilePreviewService>();

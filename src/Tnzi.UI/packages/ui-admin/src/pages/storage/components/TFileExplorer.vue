@@ -233,7 +233,7 @@ function onRootDrop(e: DragEvent): void {
 }
 .t-file-explorer__grid--drop {
   background: rgb(var(--tnzi-primary-rgb) / 0.06);
-  box-shadow: inset 0 0 0 2px var(--tnzi-primary);
+  box-shadow: var(--tnzi-surface-ring-inset);
 }
 .t-file-tile {
   position: relative;

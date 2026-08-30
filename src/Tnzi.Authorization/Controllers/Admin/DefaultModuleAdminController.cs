@@ -137,6 +137,7 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
         Order = entity.Order,
         IsSystemManaged = entity.IsSystemManaged,
         Category = entity.Category,
+        IsRetired = entity.IsRetired,
     };
 
     /// <summary>

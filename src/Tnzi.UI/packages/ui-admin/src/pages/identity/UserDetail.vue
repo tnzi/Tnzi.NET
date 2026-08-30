@@ -149,6 +149,7 @@ import UserSessionsSection from './sections/UserSessionsSection.vue'
 import UserLoginLogsSection from './sections/UserLoginLogsSection.vue'
 import { userProfileSchema, userProfileSections } from './user-config'
 import { useDetail } from '../../headless/useDetail'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { useTabTitle } from '../../headless/useTabTitle'
 import { useBreadcrumbLabel } from '../../headless/use-breadcrumb'
@@ -240,16 +241,30 @@ const badges = computed<RecordBadge[]>(() => {
   return out
 })
 
+/**
+ * 组织树来自可选包 `Tnzi.Identity.Organization`。宿主没加载它时后端恒返回
+ * `organizationName: null`，这一行会变成一个永远空着的字段 —— 与其留着让人以为
+ * 「这个用户没填部门」，不如整行不渲染。`has` 在信号未知时放行（老后端 / 探测未回），
+ * 与侧边栏菜单同口径：缺信号绝不该把界面清空。
+ */
+const { has: hasModule } = useModuleAvailability()
+const IDENTITY_ORGANIZATION = 'identity-organization'
+
 const facts = computed<RecordFact[]>(() => {
   const u = user.value
   if (!u) return []
-  return [
+  const out: RecordFact[] = [
     { icon: 'mdi:email-outline', value: u.email ?? '' },
     { icon: 'mdi:phone-outline', value: u.phoneNumber ?? '' },
-    { icon: 'mdi:office-building-outline', value: u.organizationName ?? '' },
+  ]
+  if (hasModule(IDENTITY_ORGANIZATION)) {
+    out.push({ icon: 'mdi:office-building-outline', value: u.organizationName ?? '' })
+  }
+  out.push(
     { icon: 'mdi:account-key-outline', value: (u.roles ?? []).join(', ') },
     { icon: 'mdi:calendar-plus', value: formatDateOnly(u.creationTime) },
-  ]
+  )
+  return out
 })
 
 /** Grants only appear for admins allowed to read them. */

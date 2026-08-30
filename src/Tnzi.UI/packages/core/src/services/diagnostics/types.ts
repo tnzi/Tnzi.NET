@@ -56,6 +56,38 @@ export interface ControllerDiagnosticsResultDto {
   controllers: ControllerInfoDto[];
 }
 
+/**
+ * One sensitive endpoint that is currently reachable in the running process.
+ *
+ * Mirror of Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.
+ */
+export interface SensitiveEndpointDto {
+  /** Capability name; also the key used to suppress it via ControllerFilter:DisabledEndpoints. */
+  name: string;
+  /** Why this endpoint is sensitive, stated as a consequence. */
+  reason: string;
+  route: string;
+  httpMethod: string;
+  controller: string;
+  module: string;
+  /** True when the controller is a framework default that was activated automatically. */
+  isDefaultController: boolean;
+  /** True when the endpoint is reachable without authentication - read these rows first. */
+  allowsAnonymous: boolean;
+}
+
+/**
+ * Mirror of Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.
+ *
+ * Reflects the live route table, not an assembly scan: endpoints suppressed via
+ * `ControllerFilter:DisabledEndpoints` are absent from the list, so "I thought I
+ * turned that off" can be disproved with a single query.
+ */
+export interface SensitiveEndpointReportDto {
+  totalCount: number;
+  endpoints: SensitiveEndpointDto[];
+}
+
 /** Mirror of Tnzi.AspNetCore.Dtos.ModuleDiagnosticsDto. */
 export interface ModuleDiagnosticsDto {
   type: string;

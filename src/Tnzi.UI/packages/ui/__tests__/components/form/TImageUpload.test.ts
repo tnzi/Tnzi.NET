@@ -349,6 +349,11 @@ describe('TImageUpload', () => {
     expect(fid && (fid[0] as (string | undefined)[])[0]).toBeUndefined()
     // Removing must NOT open the file picker (click.stop).
     expect(props.upload).not.toHaveBeenCalled()
+
+    // Same control as TAttachmentWall's: shared material + visibility rule,
+    // hosted by the root so hovering the picture reveals it.
+    expect(removeBtn.classes()).toContain('t-media-remove')
+    expect(wrapper.find('.t-image-upload').classes()).toContain('t-media-frame')
   })
 
   // (k) remove control is hidden without a value, when not removable, or when disabled

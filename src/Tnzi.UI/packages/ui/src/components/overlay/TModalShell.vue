@@ -11,14 +11,20 @@
       :size="size"
       :mask-closable="maskClosable"
       :auto-focus="autoFocus"
-      :title="title"
+      :title="$slots.header ? undefined : title"
       :class="{ 't-modal-shell--fullscreen': isFullscreen }"
       :style="modalStyle"
       @update:show="(v: boolean) => emit('update:show', v)"
     >
     <!-- Rich header (entity name + status tag / subtitle): a `#header` slot
          overrides the plain `title` prop for callers that need more than a
-         string. Omit it and the `title` prop drives the header as before. -->
+         string. Omit it and the `title` prop drives the header as before.
+         The override is enforced above by withholding `title` from NModal
+         whenever the slot is present - naive's Card resolves its header as
+         `title ? [title] : slots.header` (Card.mjs), i.e. the PROP wins and the
+         slot is dropped without a warning or a DOM node. Forwarding both would
+         silently render the plain title. Withholding it also matches
+         TDrawerShell, where naive's DrawerContent already lets the slot win. -->
     <template v-if="$slots.header" #header>
       <slot name="header" />
     </template>
@@ -58,6 +64,10 @@ import { useOverlayTheme, useOverlayThemeOverrides } from '../../headless/theme/
 interface Props {
   /** Open state (controlled). */
   show: boolean
+  /**
+   * Plain-string header. Ignored when a `#header` slot is supplied - the slot
+   * wins, and the modal renders no plain title alongside it.
+   */
   title?: string
   /** Desktop width (px); capped at 95vw so a too-large value still shows a mask strip. */
   width?: number

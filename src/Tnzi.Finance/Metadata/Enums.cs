@@ -124,36 +124,23 @@ public enum FinanceDocumentStatus
 }
 
 /// <summary>
-/// 报价单 / 采购订单的生命周期状态（**不过账单据**共用）
+/// 主数据种类（<see cref="Services.IMasterDataUsageProvider"/> 的寻址键）。
 /// </summary>
 /// <remarks>
-/// 与 <see cref="FinanceDocumentStatus"/> 刻意分开：那个枚举的每一档都在描述
-/// 单据与总账的关系（已过账 / 已核销 / 已作废），而报价单和采购订单**从不触碰
-/// 总账**——它们描述的是一次商业往来走到了哪一步。把两者塞进同一个枚举，会让
-/// "Posted 的报价单" 这种无意义状态在类型上成立。
-///
-/// 两侧语义镜像：报价单的 Accepted = 客户接受了我方报价；采购订单的 Accepted =
-/// 供应商确认了我方订单。
+/// 只列**有删除守卫、且可能被会计内核之外的记录引用**的三类主数据。
+/// 跨模块契约的一部分，故按 docs/coding-standards/metadata.md 放在 Metadata/。
+/// 数值不参与持久化（只在进程内传递），但仍显式写出以免日后重排时被误当作无关紧要。
 /// </remarks>
-public enum FinanceOfferStatus
+public enum FinanceMasterDataKind
 {
-    /// <summary>草稿（可编辑、可删除、尚未占号）</summary>
-    Draft = 0,
+    /// <summary>客户</summary>
+    Customer = 1,
 
-    /// <summary>已发出（分配编号；对方已经看到了这个号，故此后只能关闭不能删除）</summary>
-    Sent = 1,
+    /// <summary>供应商</summary>
+    Vendor = 2,
 
-    /// <summary>对方已接受</summary>
-    Accepted = 2,
-
-    /// <summary>对方已拒绝</summary>
-    Declined = 3,
-
-    /// <summary>已转为正式单据（发票 / 账单），转换目标记录在 ConvertedTo* 字段</summary>
-    Converted = 4,
-
-    /// <summary>已关闭（过期、作罢、不再跟进）</summary>
-    Closed = 5
+    /// <summary>目录项（商品 / 服务）</summary>
+    Item = 3
 }
 
 /// <summary>

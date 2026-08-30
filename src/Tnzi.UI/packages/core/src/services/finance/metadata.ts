@@ -279,6 +279,7 @@ export const FINANCE_SOURCE_TYPES = [
   'PaymentEntry',
   'PaymentApplication',
   'Transfer',
+  'Deposit',
   'Revaluation',
 ] as const;
 

@@ -1,4 +1,4 @@
-global using Microsoft.AspNetCore.Authorization;
+﻿global using Microsoft.AspNetCore.Authorization;
 global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Hosting;
 global using Microsoft.AspNetCore.Http;
@@ -15,6 +15,7 @@ global using Polly.Registry;
 
 
 global using System;
+global using System.Buffers.Text;
 global using System.Collections.Concurrent;
 global using System.Collections.Generic;
 global using System.ComponentModel;
@@ -49,6 +50,7 @@ global using Tnzi.Domain.Entities;
 global using Tnzi.EventBus;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
+global using Tnzi.Geometry;
 global using Tnzi.Json;
 global using Tnzi.Modules;
 global using Tnzi.Modules.Diagnostics;
@@ -67,3 +69,6 @@ global using Tnzi.Utilities;
 
 global using Tnzi.AI.Tools.Attributes;
 global using Tnzi.AI.Tools.Models;
+global using System.Net.Sockets;
+global using Tnzi.AI.Options;
+global using Tnzi.AI.Services;

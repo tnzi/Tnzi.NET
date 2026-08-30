@@ -138,6 +138,15 @@ public class UploadSanitizationTests : StorageIntegrationTestBase
         Assert.True(result.Succeeded);
     }
 
+    // ==================== 两条曾经绕开闸门的写路径 ====================
+
+    /// <summary>
+    /// 分片上传的完成同样把字节写进存储提供者，此前一道闸门都不过。
+    /// </summary>
+    /// <remarks>
+    /// 触发方式就是文档里教的那三步：init → 推分块 → complete。一个注册了病毒扫描器的部署
+    /// 以为自己拦住了，实际上这条通道从来没跑过扫描器。
+    /// </remarks>
     private sealed class RecordingSanitizer : IUploadSanitizer
     {
         private static int _counter;

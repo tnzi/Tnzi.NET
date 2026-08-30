@@ -7,14 +7,17 @@ namespace Tnzi.Documents.Tests;
 /// <see cref="DocumentsModule"/> 的接线契约。
 /// </summary>
 /// <remarks>
-/// 「三个原语都注册了、消费应用能整体覆盖、模块不带表前缀」这几条只体现在注册代码里，
+/// 「六个原语都注册了、消费应用能整体覆盖、模块不带表前缀」这几条只体现在注册代码里，
 /// 改错了编译照过，直到运行时才会发现。
 /// </remarks>
 public class DocumentsModuleTests
 {
     [Theory]
+    [InlineData(typeof(IDocumentImageRenderer), typeof(ChromiumDocumentImageRenderer))]
     [InlineData(typeof(IPdfInspector), typeof(PdfPigPdfInspector))]
     [InlineData(typeof(IPdfStamper), typeof(PdfSharpPdfStamper))]
+    [InlineData(typeof(IPdfCombiner), typeof(PdfSharpPdfCombiner))]
+    [InlineData(typeof(IPdfRasterizer), typeof(PdfiumPdfRasterizer))]
     public void Module_RegistersTheDefaultImplementationOfEachPrimitive(Type contract, Type implementation)
     {
         var services = ConfigureModule();
@@ -82,11 +85,13 @@ public class DocumentsModuleTests
         using var provider = await BuildProviderAsync(new Dictionary<string, string?>
         {
             ["Documents:ConversionTimeoutSeconds"] = "45",
-            ["Documents:Html:PaperSize"] = "Legal"
+            ["Documents:Html:PaperSize"] = "Legal",
+            ["Documents:Raster:MaxPagePixels"] = "1000000"
         });
 
         provider.GetRequiredService<IOptions<DocumentsOptions>>().Value.ConversionTimeoutSeconds.ShouldBe(45);
         provider.GetRequiredService<IOptions<HtmlPdfOptions>>().Value.PaperSize.ShouldBe("Legal");
+        provider.GetRequiredService<IOptions<PdfRasterOptions>>().Value.MaxPagePixels.ShouldBe(1_000_000L);
     }
 
     /// <summary>

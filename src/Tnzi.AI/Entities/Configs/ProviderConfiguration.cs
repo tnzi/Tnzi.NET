@@ -36,6 +36,10 @@ public class ProviderConfiguration : EntityTypeConfigurationBase<Provider, Guid>
             .IsRequired()
             .HasDefaultValue(0);
 
+        builder.Property(e => e.SortOrder)
+            .IsRequired()
+            .HasDefaultValue(0);
+
         builder.Property(e => e.IsEnabled)
             .IsRequired()
             .HasDefaultValue(true);
@@ -49,6 +53,9 @@ public class ProviderConfiguration : EntityTypeConfigurationBase<Provider, Guid>
             .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
         builder.HasIndex(e => e.ProviderType);
+
+        // 列表按展示顺序取，索引跟着它走。
+        builder.HasIndex(e => e.SortOrder);
 
         // 可见性查询索引 - 加速 Scope/TenantId 联合查询
         builder.HasIndex(e => new { e.Scope, e.TenantId });

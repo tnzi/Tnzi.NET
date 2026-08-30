@@ -3,6 +3,18 @@ namespace Tnzi.Identity.Services;
 /// <summary>
 /// 组织架构服务接口
 /// </summary>
+/// <remarks>
+/// ★ <b>契约留在核心，实现在可选包 <c>Tnzi.Identity.Organization</c> 里</b>
+/// （<c>OrganizationService</c>）—— 与 Finance 的 <c>ICheckDocumentRenderer</c> /
+/// <c>IReceiptExtractor</c> 同一形状。
+///
+/// 理由是核心自己要拿着它：<c>UserService</c> 与 <c>DefaultUserAdminController</c> 都以
+/// <c>IOrganizationService?</c>（可空可选注入）持有它，把接口一起搬走会让核心反过来
+/// 引用子模块，接缝当场闭死。DTO（<c>OrganizationDto</c> 等）同理留在核心。
+///
+/// 未加载该包时容器里没有实现，两处调用方按 null 降级：管理端的两个组织端点答 <b>501</b>
+/// 并指名要加载哪个包；用户 DTO 的 <c>OrganizationName</c> 恒为 null。
+/// </remarks>
 public interface IOrganizationService
 {
     /// <summary>
@@ -17,6 +29,18 @@ public interface IOrganizationService
     /// <param name="id">组织ID</param>
     /// <returns>组织信息</returns>
     Task<Result<OrganizationDto>> GetByIdAsync(Guid id);
+
+    /// <summary>
+    /// 批量取组织名（Id → Name），用于把一页用户的 <c>OrganizationId</c> 翻译成显示名。
+    /// </summary>
+    /// <remarks>
+    /// 拆分前这一列来自 <c>User → Organization</c> 的 LEFT JOIN；导航属性随实体搬走之后，
+    /// 核心改为按整页的 Id 集合问一次（有界集合，一次 IN 查询，不是 N+1）。
+    /// 内部方法，故返回原始类型而不是 <c>Result&lt;T&gt;</c>：查不到的 Id 直接不出现在
+    /// 结果里，调用方据此把名字留空 —— 一个用户挂在已删组织上不是错误。
+    /// </remarks>
+    /// <param name="ids">组织 Id 集合，可含重复；空集合直接返回空字典</param>
+    Task<IReadOnlyDictionary<Guid, string>> GetNamesAsync(IReadOnlyCollection<Guid> ids);
 
     /// <summary>
     /// 创建组织
@@ -128,5 +152,18 @@ public interface IOrganizationService
     /// </summary>
     /// <param name="updates">排序更新列表（组织ID和新排序值）</param>
     Task<Result> BatchUpdateSortOrderAsync(IEnumerable<(Guid Id, int SortOrder)> updates);
+
+    /// <summary>
+    /// 重排同一父组织下的组织（拖拽排序）
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="BatchUpdateSortOrderAsync"/> 的区别：那个是「把这几条的序号精确设成这些值」，
+    /// 调用方自己负责不与范围外的记录撞号；本方法接受一段<b>相对顺序</b>，
+    /// 由服务端按槽位保留并入全量序列，范围外的组织不会被挤动。
+    /// </remarks>
+    /// <param name="ids">按新顺序排列的组织 Id，可以只是当前可见的一段</param>
+    /// <param name="parentId">父组织范围；null = 顶级组织</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, Guid? parentId = null, CancellationToken cancellationToken = default);
 }
 

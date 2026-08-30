@@ -423,7 +423,7 @@ defineExpose({
       <NCard
         :bordered="false"
         size="small"
-        class="t-usage-dashboard__card"
+        class="t-usage-dashboard__card t-surface-card"
         data-test="filter-bar"
       >
         <NForm inline label-placement="left" :show-feedback="false">
@@ -485,7 +485,7 @@ defineExpose({
         v-if="errors.length"
         :bordered="false"
         size="small"
-        class="t-usage-dashboard__card t-usage-dashboard__errors"
+        class="t-usage-dashboard__card t-usage-dashboard__errors t-surface-card"
         role="alert"
         data-test="error-banner"
       >
@@ -525,7 +525,7 @@ defineExpose({
                   :bordered="false"
                   size="small"
                   :title="t('charts.byModel')"
-                  class="t-usage-dashboard__card"
+                  class="t-usage-dashboard__card t-surface-card"
                   data-test="chart-by-model"
                 >
                   <TChartPanel v-if="topModels.length" :option="modelOption" :height="240" />
@@ -548,7 +548,7 @@ defineExpose({
               <NSpin :show="loading">
                 <NGrid :x-gap="16" :y-gap="16" responsive="screen" item-responsive cols="24">
                   <NGi span="24 m:8">
-                    <NCard :bordered="false" size="small" class="t-usage-dashboard__card">
+                    <NCard :bordered="false" size="small" class="t-usage-dashboard__card t-surface-card">
                       <NStatistic :label="t('cost.totalCost')">
                         <span class="text-success font-600" data-test="cost-total">
                           ${{ cost.totalCostUsd.toFixed(4) }}
@@ -566,7 +566,7 @@ defineExpose({
                       :bordered="false"
                       size="small"
                       :title="t('cost.byProvider')"
-                      class="t-usage-dashboard__card"
+                      class="t-usage-dashboard__card t-surface-card"
                     >
                       <TResponsiveTable
                         :columns="costColumns"
@@ -671,13 +671,21 @@ defineExpose({
    the shared card surface and each pane's internal scroll. */
 .t-usage-dashboard__card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
-/* Each tab pane owns its own scroll (the tab nav stays pinned). */
+/* Each tab pane owns its own scroll (the tab nav stays pinned). A page that
+   owns its own scroll container also owns the card clearance inside it - see
+   `TContentPage.__body` for why it is padding plus a matching negative
+   margin rather than plain padding. */
 .t-usage-dashboard__tab {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  padding: var(--tnzi-surface-card-gutter);
+  margin: calc(-1 * var(--tnzi-surface-card-gutter));
   display: flex;
   flex-direction: column;
   gap: 16px;

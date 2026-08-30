@@ -883,7 +883,19 @@ export interface PaymentStatisticsDto {
   totalRefunds: number;
   refundCount: number;
   refundRate: number;
-  activeSubscriptions: number;
+  /**
+   * Active subscription count, or `null` when this deployment does not do
+   * subscriptions at all (the optional `Tnzi.Payment.Subscriptions` module is
+   * not loaded).
+   *
+   * Deliberately nullable rather than defaulting to 0: the overview endpoint's
+   * payment and refund half is owned by the payment module and keeps working
+   * without the recurring-billing package, so this field has to carry some
+   * value - and 0 would be indistinguishable from "every subscription
+   * disappeared overnight", which is the one alarm a subscription business most
+   * needs to see. Render it as not-applicable, not as a number.
+   */
+  activeSubscriptions: number | null;
   channelDistribution: ChannelStatisticsDto[];
 }
 

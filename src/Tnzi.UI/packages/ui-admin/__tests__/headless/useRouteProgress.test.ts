@@ -24,9 +24,8 @@ describe('useRouteProgress', () => {
     // Capture the in-flight flag from inside another beforeEach so we observe
     // the state *during* the guarded resolution, not after it.
     let snapshot: string | undefined
-    router.beforeEach((_to, _from, next) => {
+    router.beforeEach(() => {
       snapshot = document.documentElement.dataset.tnziRouteLoading
-      next()
     })
     await router.push('/a')
     expect(snapshot).toBe('on')
@@ -61,9 +60,8 @@ describe('useRouteProgress', () => {
     // (or `/` → /dashboard). progress.beforeEach fires for the aborted /a nav
     // (seq++/on) with no matching landing afterEach - the old pending counter
     // leaked here and never returned to 0, so the bar stuck at ~80% forever.
-    router.beforeEach((to, _from, next) => {
-      if (to.path === '/a') return next('/b')
-      next()
+    router.beforeEach((to) => {
+      if (to.path === '/a') return '/b'
     })
     await router.push('/a')
     expect(router.currentRoute.value.path).toBe('/b')
@@ -76,12 +74,11 @@ describe('useRouteProgress', () => {
     const router = makeRouter()
     useRouteProgress(router)
     let snapshot: string | undefined
-    router.beforeEach((_to, _from, next) => {
+    router.beforeEach(() => {
       // Capture during the first guard tick.
       if (snapshot === undefined) {
         snapshot = document.documentElement.dataset.tnziRouteLoading
       }
-      next()
     })
     // Fire two navigations back-to-back.
     const [p1, p2] = [router.push('/a'), router.push('/b')]

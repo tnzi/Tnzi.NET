@@ -1,4 +1,3 @@
-using Tnzi.Identity.Events;
 using Tnzi.Identity.Events.Handlers;
 
 namespace Tnzi.Identity.Tests;

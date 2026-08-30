@@ -204,11 +204,14 @@ public class AspNetCoreModule : TnziFrameworkModule
         context.Services.AddSingleton<IApplicationModelProvider>(
             _ => new Mvc.Conventions.ModuleControllerReplacementProvider(controllerDiagnostics));
 
-        // 注册配置化 Controller 过滤提供者 (Order = -400)（按名称/程序集通配符禁用 Controller）
+        // 注册配置化 Controller 过滤提供者 (Order = -400)
+        // （按名称/程序集通配符禁用 Controller，以及按 [SensitiveEndpoint] 名字禁用单个端点）
         if (aspNetCoreOptions.ControllerFilter != null)
         {
             context.Services.AddSingleton<IApplicationModelProvider>(
-                _ => new Mvc.Conventions.ConfigurationControllerFilterProvider(aspNetCoreOptions.ControllerFilter));
+                sp => new Mvc.Conventions.ConfigurationControllerFilterProvider(
+                    aspNetCoreOptions.ControllerFilter,
+                    sp.GetService<ILoggerFactory>()));
         }
 
         // 注册过滤器服务
@@ -292,6 +295,8 @@ public class AspNetCoreModule : TnziFrameworkModule
             var aspNetCoreOptions = context.ServiceProvider
                 .GetRequiredService<IOptions<AspNetCoreOptions>>()
                 .Value;
+
+            WarnIfAnonymousRateLimitingIsIneffective(context, aspNetCoreOptions);
 
             // ===================================================================
             // 中间件注册顺序说明（从外到内）：
@@ -438,6 +443,64 @@ public class AspNetCoreModule : TnziFrameworkModule
     }
 
     /// <summary>
+    /// 启动期自检：限流唯一必然静默失效的配置组合。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 三者叠加时，限流对<strong>每一个匿名请求</strong>都不生效，而配置里 <c>RateLimit:Enabled</c> 写着 true：
+    /// ①关闭了来源地址采集（<see cref="AspNetCoreOptions.CollectClientIpAddress"/>）
+    /// ②没有注册任何 <see cref="IRateLimitPartitionKeyProvider"/>
+    /// ③取不到分区键时的处置是 <see cref="MissingPartitionKeyBehavior.Allow"/>。
+    /// 三者各自都是合法且常见的选择，<strong>只有叠在一起才失效</strong>，所以没有任何单项配置校验能发现它。
+    /// </para>
+    /// <para>
+    /// <strong>为什么不能只靠中间件那条 Warning。</strong>那条要等第一个匿名请求打进来才出现，
+    /// 且每个请求一条、淹在请求日志里。启动时说一次，说的是另一件事：
+    /// 这个组合不是「限流开着」，是「限流对匿名请求关着」。
+    /// </para>
+    /// <para>
+    /// <strong>刻意只告警不改变行为。</strong>默认值的兼容承诺不能因为一次自检而破掉
+    /// （同 <see cref="MissingPartitionKeyBehavior.Allow"/> 保留为默认值的理由）：
+    /// 启动即失败会让一批既有部署升级后起不来，而它们并没有配错任何东西。
+    /// </para>
+    /// </remarks>
+    private static void WarnIfAnonymousRateLimitingIsIneffective(
+        ApplicationInitializationContext context,
+        AspNetCoreOptions options)
+    {
+        var rateLimit = options.RateLimit;
+
+        // 限流本来就没开：不存在「以为它开着」的误解，无需告警。
+        if (rateLimit is not { Enabled: true })
+        {
+            return;
+        }
+
+        // 任一条不成立，匿名请求就还有分区维度或还会被拒绝。
+        if (options.CollectClientIpAddress || rateLimit.MissingPartitionKey != MissingPartitionKeyBehavior.Allow)
+        {
+            return;
+        }
+
+        // 容器此时已完全构建，解析结果与模块加载顺序无关。
+        // 必须开作用域：提供者允许注册成 scoped，从 root 解析会抛。
+        using var scope = context.ServiceProvider.CreateScope();
+        if (scope.ServiceProvider.GetServices<IRateLimitPartitionKeyProvider>().Any())
+        {
+            return;
+        }
+
+        context.ServiceProvider.GetRequiredService<ILoggerFactory>()
+            .CreateLogger<AspNetCoreModule>()
+            .LogWarning(
+                "Rate limiting is enabled but cannot take effect for anonymous requests. "
+                + "Client IP collection is off (AspNetCore:CollectClientIpAddress=false), no "
+                + "IRateLimitPartitionKeyProvider is registered, and AspNetCore:RateLimit:MissingPartitionKey "
+                + "is Allow - so every anonymous request has no partition key and is let through. "
+                + "Register an IRateLimitPartitionKeyProvider, or set MissingPartitionKey to Deny or Global.");
+    }
+
+    /// <summary>
     /// 配置默认路由
     /// </summary>
     private static void ConfigureDefaultRoutes(WebApplication app)
@@ -447,15 +510,21 @@ public class AspNetCoreModule : TnziFrameworkModule
         var apiPathPrefix = aspNetCoreOptions.ApiPathPrefix ?? "/api";
         var pathBase = aspNetCoreOptions.PathBase ?? "";
 
-        // 收集欢迎页面模板变量
-        var templateVars = BuildWelcomePageTemplateVars(app.Services, pathBase, apiPathPrefix);
-
-        // 配置默认首页
-        app.MapGet("/", () =>
+        // 配置默认首页（欢迎页）。
+        // 自带前端的宿主须关掉它：欢迎页是一个已匹配的端点，而静态文件中间件在
+        // GetEndpoint() 非空时会让路，于是 wwwroot/index.html 恰好在 "/" 上、也只在 "/" 上取不到。
+        // 见 AspNetCoreOptions.EnableWelcomePage。
+        if (aspNetCoreOptions.EnableWelcomePage)
         {
-            var html = GetWelcomePageHtml(templateVars);
-            return Microsoft.AspNetCore.Http.Results.Content(html, "text/html; charset=utf-8");
-        });
+            // 收集欢迎页面模板变量
+            var templateVars = BuildWelcomePageTemplateVars(app.Services, pathBase, apiPathPrefix);
+
+            app.MapGet("/", () =>
+            {
+                var html = GetWelcomePageHtml(templateVars);
+                return Microsoft.AspNetCore.Http.Results.Content(html, "text/html; charset=utf-8");
+            });
+        }
 
         // 配置 Area 路由支持
         app.MapControllerRoute(

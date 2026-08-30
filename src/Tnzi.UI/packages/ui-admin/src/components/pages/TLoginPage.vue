@@ -290,8 +290,11 @@ const loginContext: LoginContext = {
     // Clearing the 2FA flag when the user navigates away from the
     // two-factor module mid-flow keeps the next attempt clean.
     if (name !== 'two-factor') pendingTwoFactor.value = null
-    // The adaptive login captcha only lives on pwd-login; a module switch
+    // This is the *adaptive* captcha the backend pushes inline on
+    // `IDENTITY_CAPTCHA_REQUIRED`, which only pwd-login receives; a module switch
     // starts fresh (a stale captchaId would be rejected on return anyway).
+    // CodeLogin's always-shown captcha is separate state inside that module and
+    // is unaffected by this reset.
     pendingCaptcha.value = null
     props.onToggleModule?.(name)
   },

@@ -88,8 +88,18 @@ public static class AgentStreamMapper
             case FinishReasons.MaxHandoffs:
             case FinishReasons.Error:
             case FinishReasons.Failed:
+                // 服务层把「预留输给并发更新」定为可重试的 409（AI_QUOTA_CONCURRENCY_CONFLICT）。
+                // 在这里贴 500 会把「重试即可」翻译成「内部错误」——客户端与告警都被指向错误的方向。
+                if (string.Equals(result.ErrorCode, ErrorCodes.QuotaConcurrencyConflict, StringComparison.Ordinal))
+                {
+                    statusCode = 409;
+                    errorCode = ErrorCodes.QuotaConcurrencyConflict;
+                    return true;
+                }
+
                 statusCode = 500;
-                errorCode = failureErrorCode;
+                // 结果自带更具体的错误码时透传（如 AI_QUOTA_CHECK_FAILED），没有才回落到调用方的通用码
+                errorCode = result.ErrorCode ?? failureErrorCode;
                 return true;
             default:
                 statusCode = 0;

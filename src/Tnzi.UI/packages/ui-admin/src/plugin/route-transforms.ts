@@ -13,7 +13,7 @@
  */
 import type { Component } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
-import type { AdminRouteRecord } from '../stores/useAdminRouteStore'
+import type { AdminRouteRecord, AdminRouteMeta } from '../stores/useAdminRouteStore'
 
 export function normalizeName(name: string): string {
   return name.toLowerCase().replace(/\./g, '-')
@@ -80,8 +80,10 @@ export function applyBasePath(
     if (route.path === '/admin') {
       return { ...route, path: basePath } as RouteRecordRaw
     }
-    // Only rewrite top-level absolute paths; relative child paths (none
-    // exist at top level in the preset, but defend in depth) stay as-is.
+    // Only rewrite top-level absolute paths. A relative one can only come from
+    // a consumer `rootRoutes` entry (the preset has none) and is a mistake
+    // vue-router can't resolve at the top level - `warnMisplacedTopLevelRoutes`
+    // names it at start-up; leave the path alone rather than inventing a join.
     if (route.path.startsWith('/')) {
       return { ...route, path: basePath + route.path } as RouteRecordRaw
     }
@@ -300,6 +302,12 @@ export function toAdminRouteRecords(
       // rule as `permission`/`moduleGate`: dropped here = the built-in-menus
       // toggle silently never filters anything.
       builtIn: rawMeta?.builtIn as boolean | undefined,
+      // Desktop-layout hints. Same round-trip rule as `permission` above, and
+      // `color` was already failing it: the tint override was documented and
+      // wired at the render end, but never survived this copy, so setting it
+      // did nothing at all.
+      color: rawMeta?.color as string | undefined,
+      window: rawMeta?.window as AdminRouteMeta['window'],
     }
     const record: AdminRouteRecord = {
       name: typeof route.name === 'string' ? route.name : route.path,

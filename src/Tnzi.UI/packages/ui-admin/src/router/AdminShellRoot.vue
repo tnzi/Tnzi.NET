@@ -14,20 +14,35 @@
  * their own component; the route table replacement logic in
  * {@link createTnziUiAdmin} treats consumer-supplied routes as authoritative.
  */
-import { computed, inject, ref, watch, onUnmounted } from 'vue'
+import { computed, defineAsyncComponent, inject, ref, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminShell from '../components/layout/TAdminShell.vue'
 import TAdminAutoBreadcrumb from '../components/layout/TAdminAutoBreadcrumb.vue'
 import TAdminUserAvatar from '../components/layout/TAdminUserAvatar.vue'
+// Rendered directly into the desktop tray. In every other layout mode the
+// shell mounts this itself, into the header's #chat slot - a slot the desktop
+// mode does not have.
+import TChatHost from '../components/chat/TChatHost.vue'
 import TAdminRouterView from '../components/layout/TAdminRouterView.vue'
+/**
+ * The desktop shell replaces the single-outlet router view with a window
+ * manager (N pages mounted and visible at once). Loaded lazily and only when
+ * the layout mode asks for it: an application that never turns it on should
+ * not download a byte of the window chrome, and the shell entry has little
+ * size budget left to spend.
+ */
+const TDesktopHost = defineAsyncComponent(
+  () => import('../components/desktop/TDesktopHost.vue'),
+)
 import TThemeDrawer from '../components/layout/TThemeDrawer.vue'
 import type { AdminMenuItem } from '../stores/useAdminRouteStore'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
 import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
+import { routeToWindowInput, useAdminDesktopStore } from '../stores/useAdminDesktopStore'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useChatStore } from '../stores/useChatStore'
 import { createChatImBridge } from '../services/bridges/chat-im-bridge'
@@ -46,7 +61,9 @@ import { useSettingsRealtime } from '../headless/useSettingsRealtime'
 import { usePresenceActivity } from '../headless/usePresenceActivity'
 import { useStorageApi } from '@tnzi/core/services/storage'
 import { resolveAvatarUrl } from '../utils/resolveAvatarUrl'
-import { getLocaleMessages } from '../i18n/messages'
+import { translateChromeKey } from '../i18n/translate'
+import { useAdminLocale } from '../headless/useAdminLocale'
+import type { AdminLocale } from '../i18n/messages'
 
 const router = useRouter()
 const route = useRoute()
@@ -55,6 +72,23 @@ const themeStore = useAdminThemeStore()
 const tabStore = useAdminTabStore()
 const routeStore = useAdminRouteStore()
 const authStore = useAdminAuthStore()
+const desktopStore = useAdminDesktopStore()
+
+/**
+ * Whether the content area renders the desktop shell instead of the single
+ * router outlet.
+ *
+ * Mirrors `useAdminShellLayout`'s mobile override deliberately rather than
+ * importing it: that composable needs the whole shell prop bag, and the one
+ * rule that matters here is the same one. The desktop metaphor does not
+ * survive a phone - floating, draggable, resizable windows on a 375px screen
+ * are unusable, and this package's mobile conventions (tables collapsing to
+ * card lists, master-detail stacking) assume a single full-width content area.
+ * So below `md` the layout falls back to `vertical` rather than shrinking.
+ */
+const isDesktopLayout = computed(
+  () => themeStore.layoutMode === 'desktop' && !appStore.isMobile,
+)
 
 // Reactively drop persisted tabs the current user can't open - either because
 // they lack permission (`deniedRouteNames`) OR because the tab points into a
@@ -378,46 +412,73 @@ function onOpenThemeDrawer(): void {
   themeDrawerOpen.value = true
 }
 
-function onLocaleChange(locale: 'en' | 'zh-cn'): void {
+function onLocaleChange(locale: AdminLocale): void {
   appStore.setLocale(locale)
 }
 
 /**
- * Default fallback for the avatar's "User Center" menu item - pushes the
- * built-in `/admin/user-center` route. Consumers can still override by
- * passing `defineAdminApp({ login: { user: { onUserCenter } } })`.
+ * Naive UI's own component strings (pagination "per page", date-picker month
+ * names, "Select Date", empty states) for the active locale.
+ *
+ * This binding did not exist before: the shell's config providers set `theme`
+ * and `theme-overrides` and nothing else, so Naive rendered English even when
+ * the rest of the interface was Chinese. `TAdminAppRoot` carries the same
+ * binding for apps that mount it; setting both is harmless (an inner provider
+ * inheriting the identical value) and covers shells assembled by hand.
+ */
+const naiveLocale = useAdminLocale().naive
+
+/**
+ * Default fallback for the avatar's "User Center" menu item.
+ *
+ * In the `desktop` layout it opens a WINDOW. A `router.push` there navigates a
+ * router whose outlet the desktop replaced, so the address bar changes and
+ * nothing else does - measured: the menu item did visibly nothing. Every other
+ * layout keeps the ordinary push.
+ *
+ * Consumers can still override by passing
+ * `defineAdminApp({ login: { user: { onUserCenter } } })`.
  */
 function goUserCenter(): void {
-  router.push({ name: 'user-center' }).catch(() => undefined)
+  if (!isDesktopLayout.value) {
+    router.push({ name: 'user-center' }).catch(() => undefined)
+    return
+  }
+  const resolved = router.resolve({ name: 'user-center' })
+  desktopStore.openOrFocusRoute(
+    routeToWindowInput({
+      name: 'user-center',
+      path: resolved.path,
+      meta: resolved.meta as Record<string, unknown>,
+    }),
+  )
 }
 
 /**
- * Default translator for the bundled drawer / shell components. Looks up
- * dotted keys against the `@tnzi/ui-admin/locales/{en,zh-cn}` packs;
- * returns the raw key on miss so consumers can see exactly which keys
- * still need translation. Consumers using their own i18n stack can
+ * Default translator for the bundled drawer / shell components. Returns the
+ * raw key (or the supplied fallback) on a miss so consumers can see exactly
+ * which keys still need translation. Consumers using their own i18n stack can
  * still override by rendering `<TThemeDrawer :translate="..." />` directly.
+ *
+ * ⚠️ This used to walk the bundled dictionary by hand and never consulted
+ * `useAdminAppStore.messageOverrides`, while `translatePageKey` did - so a
+ * consumer override for a key the bundle ALREADY had (`admin.modules.dashboard.title`)
+ * localised the sidebar menu label and left the header breadcrumb in English.
+ * Both paths now resolve through `i18n/translate`.
  */
 function defaultTranslate(key: string, fallback?: string): string {
-  if (!key) return key
-  const messages = getLocaleMessages(appStore.locale) ?? {}
-  // Strip optional `tnzi.` prefix - bundled locales are rooted at `admin.*`
-  // (mirrors translatePageKey / resolveI18nKey).
-  const normalised = key.startsWith('tnzi.') ? key.slice(5) : key
-  let node: unknown = messages
-  for (const part of normalised.split('.')) {
-    if (typeof node === 'object' && node !== null && part in (node as Record<string, unknown>)) {
-      node = (node as Record<string, unknown>)[part]
-    } else {
-      return fallback ?? key
-    }
-  }
-  return typeof node === 'string' ? node : (fallback ?? key)
+  return translateChromeKey(key, fallback)
 }
 </script>
 
 <template>
-  <NConfigProvider :theme="naiveTheme" :theme-overrides="naiveOverrides" inline-theme-disabled>
+  <NConfigProvider
+    :theme="naiveTheme"
+    :theme-overrides="naiveOverrides"
+    :locale="naiveLocale.locale"
+    :date-locale="naiveLocale.dateLocale"
+    inline-theme-disabled
+  >
     <TAdminShell
       :title="loginConfig.brand ?? 'Tnzi Admin'"
       :sider="{ brand: loginConfig.brand, brandSubtitle: loginConfig.brandSubtitle, brandIcon: loginConfig.brandIcon }"
@@ -467,7 +528,38 @@ function defaultTranslate(key: string, fallback?: string): string {
     <!-- swaps on navigation lives inside the slot - Vue can't see it from -->
     <!-- the outer transition. TAdminRouterView uses the canonical -->
     <!-- <RouterView v-slot> + <Transition> + <component :is> pattern. -->
-    <TAdminRouterView :exclude="['login', '403', '404']" />
+    <!-- Desktop layout swaps the single outlet for the window manager. The
+         router still resolves normally underneath (the desktop reads the route
+         table to find page components); it just isn't what renders. -->
+    <TDesktopHost
+      v-if="isDesktopLayout"
+      :brand="loginConfig.brand ?? 'Tnzi Admin'"
+      :brand-icon="loginConfig.brandIcon"
+      :show-theme-btn="themeBtnVisible"
+      :translate="defaultTranslate"
+    >
+      <!-- The desktop suppresses the header, so the three consumer-supplied
+           header affordances land in the taskbar's system tray instead. Same
+           components, same config - only the address changed. -->
+      <template #tray>
+        <TChatHost v-if="builtinChatEnabled" />
+        <component :is="loginConfig.headerNotification" v-if="loginConfig.headerNotification" />
+        <TAdminUserAvatar
+          :user-name="authStore.userInfo?.shortName || authStore.userInfo?.displayName || authStore.userInfo?.username || loginConfig.user?.userName"
+          :avatar-url="headerAvatarUrl"
+          :avatar-icon="loginConfig.user?.avatarIcon"
+          :on-user-center="loginConfig.user?.onUserCenter ?? goUserCenter"
+          :on-logout="loginConfig.user?.onLogout"
+          :signed-in="loginConfig.user?.signedIn ?? true"
+          :on-sign-in="loginConfig.user?.onSignIn"
+          :presence="presenceEnabled ? chatStore.myStatus : null"
+          :on-set-presence="onSetPresence"
+          :allow-invisible="chatStore.config.allowInvisible"
+          :translate="loginConfig.translate ?? defaultTranslate"
+        />
+      </template>
+    </TDesktopHost>
+    <TAdminRouterView v-else :exclude="['login', '403', '404']" />
     </TAdminShell>
     <TThemeDrawer
       v-model:show="themeDrawerOpen"

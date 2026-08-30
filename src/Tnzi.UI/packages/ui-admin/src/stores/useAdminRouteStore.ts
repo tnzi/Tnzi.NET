@@ -1,38 +1,29 @@
 ﻿import { defineStore } from 'pinia'
+import type { WindowSizeHint } from '../headless/window-sizing'
 import { ref, computed } from 'vue'
-import { getLocaleMessages } from '../i18n/messages'
+import { getLocaleMessages, type AdminLocale } from '../i18n/messages'
 import { DEFAULT_ROUTE_ICONS } from '../router/route-icons'
-import { humanise } from '../i18n/translate'
+import { humanise, lookupMessage } from '../i18n/translate'
 import { useAdminAppStore } from './useAdminAppStore'
 import { useAdminAuthStore } from './useAdminAuthStore'
 import { normalizeModuleName, type AdminShellRealtime } from '../services/admin-shell-modules'
 
 /**
- * Resolve a dotted i18n key against the bundled admin locale pack.
- * Returns the original key unchanged if no entry matches. Missing-key
- * fallback humanises the last segment (shared `humanise` from
- * `_shared/translate`) so the sidebar / breadcrumb / tabs all show the
- * same label when a key is missing.
+ * Resolve a dotted i18n key for the sidebar / breadcrumb / tabs.
+ *
+ * The third entry point into the shared resolver (see `i18n/translate`), and
+ * the only one that takes `locale` + `overrides` as ARGUMENTS: the menu
+ * computed resolves them once and maps the result over a whole tree, rather
+ * than re-reading the store per node. It shares `lookupMessage` and the
+ * overrides-first order with the other two; what differs is the miss policy.
+ *
+ * Misses humanise the last segment so every one of those surfaces shows the
+ * same readable label instead of a raw dotted string. A BARE label (not a
+ * dotted `admin.…` key) is passed through untouched.
  */
-/**
- * Walk a dotted path through a messages tree, returning the string leaf or
- * undefined if any segment is missing / not a string.
- */
-function lookupMessage(messages: Record<string, unknown>, path: string): string | undefined {
-  let node: unknown = messages
-  for (const part of path.split('.')) {
-    if (typeof node === 'object' && node !== null && part in (node as Record<string, unknown>)) {
-      node = (node as Record<string, unknown>)[part]
-    } else {
-      return undefined
-    }
-  }
-  return typeof node === 'string' ? node : undefined
-}
-
 function resolveI18nKey(
   key: string,
-  locale: 'en' | 'zh-cn',
+  locale: AdminLocale,
   overrides?: Record<string, unknown>,
 ): string {
   if (!key) return key
@@ -110,6 +101,18 @@ export interface AdminRouteMeta {
    * Display-only - never consulted by guards.
    */
   builtIn?: boolean
+  /**
+   * Tile colour for the `desktop` layout, overriding the module's own hue.
+   * Any CSS colour; `#rrggbb` also gets the tile's gradient shading.
+   */
+  color?: string
+  /**
+   * How big this page wants its window in the `desktop` layout. Omit and it
+   * gets the `wide` preset - see `headless/window-sizing.ts`. The hint is read
+   * from the page a MODULE opens on, so putting it on the module's first entry
+   * sets the size for the whole module.
+   */
+  window?: WindowSizeHint
 }
 
 export interface AdminRouteRecord {
@@ -128,6 +131,18 @@ export interface AdminMenuItem {
   path: string
   meta?: AdminRouteMeta
   children?: AdminMenuItem[]
+  /**
+   * Live count / short marker for this entry - "N items are waiting on you
+   * behind this door". Written by the app through
+   * {@link useAdminRouteStore.setMenuBadge}; absent for every entry nobody set
+   * one on, which is every entry in an app that never calls it.
+   *
+   * Carried RAW (whatever the app handed over). The display rule - zero and
+   * blank paint nothing, counts cap at 99 - is applied by the renderers via
+   * `normalizeNavBadge`, so a consumer reading this tree sees its own value
+   * back rather than a formatted string.
+   */
+  badge?: string | number | null
 }
 
 /**
@@ -187,6 +202,22 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
   const runtimeHiddenRouteNames = ref<Set<string>>(new Set())
   /** Per-owner contributions behind `runtimeHiddenRouteNames` (plain, non-reactive). */
   const runtimeHiddenOwners = new Map<string, readonly string[]>()
+
+  /**
+   * Live nav badges by ROUTE NAME (= `AdminMenuItem.key`), surfaced on the
+   * derived menu tree as {@link AdminMenuItem.badge}.
+   *
+   * Route `meta` cannot carry this: a pending count changes while the app
+   * runs, and `meta` is fixed when the route table is assembled. So it is
+   * state, next to the other runtime menu contribution
+   * ({@link runtimeHiddenRouteNames}) rather than a prop on the sider - the
+   * sider is shell-internal, and the same value has to reach the collapsed
+   * rail, the vertical-mix rail and the top menu.
+   *
+   * The framework never fills this in: what the number means, where it comes
+   * from and when it refreshes are entirely the app's business.
+   */
+  const menuBadges = ref<Record<string, string | number>>({})
 
   const allRoutes = computed<AdminRouteRecord[]>(() => [
     ...constantRoutes.value,
@@ -328,6 +359,10 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
         path: absolutePath,
         meta: route.meta,
       }
+      // Only stamped when the app actually set one, so the shape of every
+      // existing menu item is byte-for-byte what it was.
+      const badge = menuBadges.value[route.name]
+      if (badge !== undefined) item.badge = badge
       if (route.children && route.children.length > 0) {
         const children = route.children
           .map((c) => toMenuItem(c, absolutePath))
@@ -366,6 +401,54 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    * `permissions`) is public and never denied, so hidden utility routes
    * (user-center, settings, id-driven detail pages) survive.
    */
+  /**
+   * Route name → the top-level menu entry it belongs to.
+   *
+   * The menu tree is the only authority on "which module is this page in".
+   * Route NAMES look like they answer it - the framework's own are dotted and
+   * rooted at the module (`identity.users`) - but that is a convention this
+   * package follows, not a rule the router enforces: a consumer app is equally
+   * likely to register `shop-orders` / `shop-products`, which share no prefix
+   * at all while sitting under one menu entry.
+   *
+   * Consumed by the desktop shell to colour every page of a module alike; kept
+   * here rather than there because the tree walk belongs to whoever owns the
+   * tree. Only entries reachable from `menus` appear - a hidden detail route is
+   * absent, and callers fall back to their own heuristic.
+   */
+  const menuModuleByRoute = computed<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    for (const top of menus.value) {
+      const walk = (node: AdminMenuItem): void => {
+        map.set(node.key, top.key)
+        for (const child of node.children ?? []) walk(child)
+      }
+      walk(top)
+    }
+    return map
+  })
+
+  /**
+   * Which module a route belongs to, for any route name at all.
+   *
+   * The tree answers for everything it contains; the dotted prefix is the
+   * fallback for what it does not. A page reached by id is `hideInMenu` and so
+   * absent from the tree, but `identity.users.detail` still belongs to
+   * Identity - and the desktop needs that to keep the module's colour and its
+   * in-window navigation from vanishing the moment you open a record.
+   *
+   * One function rather than the two-line `get() ?? split('.')` that had grown
+   * three copies: they would drift, and the drift would show up as a window
+   * whose colour and whose nav disagreed about what module it was in.
+   */
+  function moduleKeyOfRoute(routeName: string | undefined): string {
+    if (!routeName) return ''
+    const known = menuModuleByRoute.value.get(routeName)
+    if (known) return known
+    const dot = routeName.indexOf('.')
+    return dot === -1 ? routeName : routeName.slice(0, dot)
+  }
+
   const deniedRouteNames = computed<Set<string>>(() => {
     const authStore = useAdminAuthStore()
     const denied = new Set<string>()
@@ -500,9 +583,37 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     runtimeHiddenRouteNames.value = new Set([...runtimeHiddenOwners.values()].flat())
   }
 
+  /**
+   * Set (or withdraw) the badge on ONE menu entry, keyed by route name.
+   *
+   * Pass `null` / `undefined` to withdraw. `0` is KEPT rather than deleted:
+   * "the count is zero" is a real answer that the renderers already paint as
+   * nothing, and dropping the key here would make a re-set flicker through a
+   * different code path. Deliberately not owner-namespaced (unlike
+   * {@link setRuntimeHiddenRoutes}): an entry has ONE count, so two writers
+   * to the same entry is a conflict however it is modelled, and last-writer-
+   * wins is the honest way to model it.
+   *
+   * Assigns a NEW object rather than mutating, so the `menus` computed
+   * re-derives - object identity is the dependency here.
+   */
+  function setMenuBadge(routeName: string, value: string | number | null | undefined): void {
+    const current = menuBadges.value
+    if (value == null) {
+      if (!(routeName in current)) return
+      const next = { ...current }
+      delete next[routeName]
+      menuBadges.value = next
+      return
+    }
+    if (current[routeName] === value) return
+    menuBadges.value = { ...current, [routeName]: value }
+  }
+
   function clearRoutes(): void {
     constantRoutes.value = []
     authRoutes.value = []
+    menuBadges.value = {}
     availableModules.value = null
     realtime.value = null
     moduleSignalPending.value = false
@@ -521,9 +632,12 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     realtime,
     moduleSignalPending,
     menus,
+    menuModuleByRoute,
+    moduleKeyOfRoute,
     deniedRouteNames,
     unavailableRouteNames,
     runtimeHiddenRouteNames,
+    menuBadges,
     cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,
@@ -531,6 +645,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     setRealtime,
     setModuleSignalPending,
     setRuntimeHiddenRoutes,
+    setMenuBadge,
     resetRouteCache,
     clearRoutes,
   }

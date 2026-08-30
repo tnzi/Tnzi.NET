@@ -10,6 +10,7 @@ import {
   NSwitch,
   NInput,
   NInputNumber,
+  NSlider,
   NButton,
   NSelect,
   NPopconfirm,
@@ -19,9 +20,11 @@ import {
 } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { useTheme, THint, type ThemeContext, type ThemeColors } from '@tnzi/ui'
-import {
+import { DEFAULT_DESKTOP_VIBRANCY,
   useAdminThemeStore,
+  VALID_SURFACE_STYLES,
   type AdminLayoutMode,
+  type AdminSurfaceStyle,
   type PageTransition,
   type TabStyle,
 } from '../../stores/useAdminThemeStore'
@@ -97,11 +100,14 @@ const COLOR_ROLES: Array<{ role: keyof ThemeColors; key: string }> = [
   { role: 'error', key: 'admin.theme.appearance.errorColor' },
 ]
 
+// The picker grid. A mode missing here is unreachable from the UI no matter
+// how completely it is wired everywhere else.
 const LAYOUT_MODES: AdminLayoutMode[] = [
   'vertical',
   'horizontal',
   'vertical-mix',
   'top-hybrid-header-first',
+  'desktop',
 ]
 
 const LAYOUT_LABEL_KEY: Record<AdminLayoutMode, string> = {
@@ -109,6 +115,7 @@ const LAYOUT_LABEL_KEY: Record<AdminLayoutMode, string> = {
   'horizontal': 'admin.theme.layout.horizontal',
   'vertical-mix': 'admin.theme.layout.verticalMix',
   'top-hybrid-header-first': 'admin.theme.layout.topHybridHeaderFirst',
+  'desktop': 'admin.theme.layout.desktop',
 }
 
 const TRANSITION_OPTIONS: PageTransition[] = [
@@ -145,6 +152,26 @@ const TAB_STYLE_LABEL_KEY: Record<TabStyle, string> = {
 
 const ctx = useTheme(props.themeContext)
 const themeStore = useAdminThemeStore()
+
+/** Order the three container-chrome looks are offered in: the shipped default
+ *  first, then the two flatter ones. Sourced from the store so the picker can
+ *  never drift out of sync with what `setSurfaceStyle` accepts. */
+const SURFACE_STYLE_OPTIONS: readonly AdminSurfaceStyle[] = VALID_SURFACE_STYLES
+
+/**
+ * Whether the OS is currently vetoing the glass. Only true while the slider
+ * sits at its default - a deliberate move writes an inline token that beats the
+ * media query, so the note would be a lie once the user has chosen.
+ */
+const systemReducesTransparency = computed(() => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  if (themeStore.desktopVibrancy !== DEFAULT_DESKTOP_VIBRANCY) return false
+  try {
+    return window.matchMedia('(prefers-reduced-transparency: reduce)').matches
+  } catch {
+    return false
+  }
+})
 const message = useMessage()
 const bp = useBreakpoint()
 
@@ -299,17 +326,32 @@ interface BgSurface {
   get: () => string | null
   set: (v: string | null) => void
   reset: () => void
-  fg: () => string | null
-  setFg: (v: string | null) => void
+  /** Text-colour pair. Omitted for surfaces whose foreground is derived only
+   *  (the desktop chrome flips its own text from the chosen background's
+   *  luminance, and a second, manual override there is state nobody asked
+   *  for). */
+  fg?: () => string | null
+  setFg?: (v: string | null) => void
   /** Layout-awareness - hide a surface row when the layout has no such element
    *  (e.g. the sidebar in `horizontal`, the tab/footer bars when turned off). */
   show?: () => boolean
 }
+/** True for the layout that replaces the whole chrome with a window manager. */
+const isDesktop = (): boolean => themeStore.layoutMode === 'desktop'
+
 const BG_SURFACES: BgSurface[] = [
-  { key: 'sider', labelKey: 'admin.theme.appearance.siderBg', get: () => themeStore.siderBg, set: (v) => themeStore.setSiderBg(v), reset: () => themeStore.resetSiderBg(), fg: () => themeStore.siderTextColor, setFg: (v) => themeStore.setSiderTextColor(v), show: () => themeStore.layoutMode !== 'horizontal' },
-  { key: 'header', labelKey: 'admin.theme.appearance.headerBg', get: () => themeStore.headerBg, set: (v) => themeStore.setHeaderBg(v), reset: () => themeStore.resetHeaderBg(), fg: () => themeStore.headerTextColor, setFg: (v) => themeStore.setHeaderTextColor(v) },
-  { key: 'tab', labelKey: 'admin.theme.appearance.tabBg', get: () => themeStore.tabBg, set: (v) => themeStore.setTabBg(v), reset: () => themeStore.resetTabBg(), fg: () => themeStore.tabTextColor, setFg: (v) => themeStore.setTabTextColor(v), show: () => themeStore.tabVisible },
-  { key: 'footer', labelKey: 'admin.theme.appearance.footerBg', get: () => themeStore.footerBg, set: (v) => themeStore.setFooterBg(v), reset: () => themeStore.resetFooterBg(), fg: () => themeStore.footerTextColor, setFg: (v) => themeStore.setFooterTextColor(v), show: () => themeStore.footerVisible },
+  // The four chrome surfaces below do not exist in the `desktop` layout - it
+  // renders no sider, no header, no tab bar and no footer - so their pickers
+  // are hidden there rather than left as controls that change nothing.
+  { key: 'sider', labelKey: 'admin.theme.appearance.siderBg', get: () => themeStore.siderBg, set: (v) => themeStore.setSiderBg(v), reset: () => themeStore.resetSiderBg(), fg: () => themeStore.siderTextColor, setFg: (v) => themeStore.setSiderTextColor(v), show: () => themeStore.layoutMode !== 'horizontal' && !isDesktop() },
+  { key: 'header', labelKey: 'admin.theme.appearance.headerBg', get: () => themeStore.headerBg, set: (v) => themeStore.setHeaderBg(v), reset: () => themeStore.resetHeaderBg(), fg: () => themeStore.headerTextColor, setFg: (v) => themeStore.setHeaderTextColor(v), show: () => !isDesktop() },
+  { key: 'tab', labelKey: 'admin.theme.appearance.tabBg', get: () => themeStore.tabBg, set: (v) => themeStore.setTabBg(v), reset: () => themeStore.resetTabBg(), fg: () => themeStore.tabTextColor, setFg: (v) => themeStore.setTabTextColor(v), show: () => themeStore.tabVisible && !isDesktop() },
+  { key: 'footer', labelKey: 'admin.theme.appearance.footerBg', get: () => themeStore.footerBg, set: (v) => themeStore.setFooterBg(v), reset: () => themeStore.resetFooterBg(), fg: () => themeStore.footerTextColor, setFg: (v) => themeStore.setFooterTextColor(v), show: () => themeStore.footerVisible && !isDesktop() },
+  // The desktop's own three surfaces. Same shape, same setters, same
+  // tone-driven text flip - only the layout they belong to differs.
+  { key: 'desktopWallpaper', labelKey: 'admin.theme.appearance.desktopWallpaper', get: () => themeStore.desktopWallpaperBg, set: (v) => themeStore.setDesktopWallpaperBg(v), reset: () => themeStore.resetDesktopWallpaperBg(), show: isDesktop },
+  { key: 'desktopTaskbar', labelKey: 'admin.theme.appearance.desktopTaskbar', get: () => themeStore.desktopTaskbarBg, set: (v) => themeStore.setDesktopTaskbarBg(v), reset: () => themeStore.resetDesktopTaskbarBg(), show: isDesktop },
+  { key: 'desktopWindowBar', labelKey: 'admin.theme.appearance.desktopWindowBar', get: () => themeStore.desktopWindowBarBg, set: (v) => themeStore.setDesktopWindowBarBg(v), reset: () => themeStore.resetDesktopWindowBarBg(), show: isDesktop },
   { key: 'content', labelKey: 'admin.theme.appearance.contentBg', get: () => themeStore.contentBg, set: (v) => themeStore.setContentBg(v), reset: () => themeStore.resetContentBg(), fg: () => themeStore.contentTextColor, setFg: (v) => themeStore.setContentTextColor(v) },
   { key: 'pageHeader', labelKey: 'admin.theme.appearance.pageHeaderBg', get: () => themeStore.pageHeaderBg, set: (v) => themeStore.setPageHeaderBg(v), reset: () => themeStore.resetPageHeaderBg(), fg: () => themeStore.pageHeaderTextColor, setFg: (v) => themeStore.setPageHeaderTextColor(v) },
   { key: 'card', labelKey: 'admin.theme.appearance.cardBg', get: () => themeStore.cardBg, set: (v) => themeStore.setCardBg(v), reset: () => themeStore.resetCardBg(), fg: () => themeStore.cardTextColor, setFg: (v) => themeStore.setCardTextColor(v) },
@@ -715,6 +757,30 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
 
+          <!-- Group 3b: Container chrome. Border and shadow are ONE setting -
+               half of a flat design is a mixed one, so the combinations that
+               read wrong are simply not offered. See `AdminSurfaceStyle`. -->
+          <NDivider class="t-theme-drawer__divider">
+            <span class="t-theme-drawer__divider-title">
+              {{ tr('admin.theme.appearance.surfaceStyle') }}
+              <THint type="info" :content="tr('admin.theme.appearance.surfaceStyleHint')" />
+            </span>
+          </NDivider>
+          <div class="t-theme-drawer__surface-grid">
+            <button
+              v-for="s in SURFACE_STYLE_OPTIONS"
+              :key="s"
+              type="button"
+              class="t-theme-drawer__surface-card"
+              :class="{ 't-theme-drawer__surface-card--active': themeStore.surfaceStyle === s }"
+              :aria-pressed="themeStore.surfaceStyle === s"
+              @click="themeStore.setSurfaceStyle(s)"
+            >
+              <span class="t-theme-drawer__surface-preview" :class="`t-theme-drawer__surface-preview--${s}`" />
+              <span class="t-theme-drawer__surface-label">{{ tr(`admin.theme.appearance.surface.${s}`) }}</span>
+            </button>
+          </div>
+
           <!-- Group 4: Per-surface backgrounds. Each surface adapts its
                foreground to the chosen color (dark color → light text), so any
                color stays readable. Null value = default token fallback. -->
@@ -758,8 +824,9 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                 </NTooltip>
               </div>
               <!-- Back: text color. Empty picker = Auto (derives from the bg,
-                   or from the picked text color's own luminance). Always shown. -->
-              <div class="t-theme-drawer__bg-cell">
+                   or from the picked text color's own luminance). Absent for
+                   surfaces that only derive their foreground. -->
+              <div v-if="s.fg && s.setFg" class="t-theme-drawer__bg-cell">
                 <NTooltip>
                   <template #trigger>
                     <Icon icon="mdi:format-color-text" class="t-theme-drawer__bg-text-icon" width="15" height="15" />
@@ -772,7 +839,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                   :show-alpha="false"
                   :swatches="TEXT_SWATCHES"
                   size="small"
-                  @update:value="(v: string | null) => s.setFg(v)"
+                  @update:value="(v: string | null) => s.setFg?.(v)"
                 />
                 <NTooltip>
                   <template #trigger>
@@ -780,8 +847,8 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                       quaternary
                       size="tiny"
                       class="t-theme-drawer__bg-reset"
-                      :disabled="s.fg() === null"
-                      @click="s.setFg(null)"
+                      :disabled="s.fg?.() === null"
+                      @click="s.setFg?.(null)"
                     >
                       <Icon icon="mdi:restore" width="13" height="13" />
                     </NButton>
@@ -791,6 +858,40 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
               </div>
             </div>
           </div>
+          <!-- Wallpaper photo. Its own shape (a URL and a slider, not a colour),
+               so it sits below the surface grid rather than inside it. The
+               scrim is not optional polish: the icon labels are painted on this
+               image, and on a bright photo they stop being readable without it. -->
+          <template v-if="isDesktop()">
+            <section class="t-theme-drawer__row">
+              <span class="t-theme-drawer__row-label">
+                {{ tr('admin.theme.appearance.desktopWallpaperImage') }}
+                <THint type="info" :content="tr('admin.theme.appearance.desktopWallpaperImageHint')" />
+              </span>
+              <NInput
+                :value="themeStore.desktopWallpaperImage"
+                size="small"
+                clearable
+                placeholder="https://…"
+                class="t-theme-drawer__wallpaper-input"
+                @update:value="(v: string | null) => themeStore.setDesktopWallpaperImage(v)"
+              />
+            </section>
+            <section v-if="themeStore.desktopWallpaperImage" class="t-theme-drawer__row">
+              <span class="t-theme-drawer__row-label">
+                {{ tr('admin.theme.appearance.desktopWallpaperScrim') }}
+              </span>
+              <NSlider
+                :value="themeStore.desktopWallpaperScrim"
+                :min="0"
+                :max="80"
+                :step="5"
+                :format-tooltip="(v: number) => `${v}%`"
+                class="t-theme-drawer__wallpaper-slider"
+                @update:value="(v: number) => themeStore.setDesktopWallpaperScrim(v)"
+              />
+            </section>
+          </template>
         </NTabPane>
 
         <!-- ── Tab 2: Layout - soybean parity (Mode/Sider/Header/Tab/Footer/Content) ── -->
@@ -814,7 +915,11 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
           </section>
 
           <!-- Group 2: Sider - hide entirely in horizontal mode (no sider exists) -->
-          <template v-if="themeStore.layoutMode !== 'horizontal'">
+          <!-- The desktop layout has no sider, header, tab bar or footer, so
+               none of those groups render there. A control that changes nothing
+               is worse than a missing one: it teaches the user the setting is
+               broken. The desktop's own knobs follow below. -->
+          <template v-if="themeStore.layoutMode !== 'horizontal' && !isDesktop()">
             <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.sider') }}</NDivider>
             <section v-if="themeStore.layoutMode === 'vertical'" class="t-theme-drawer__row">
               <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.siderWidth') }}</span>
@@ -902,6 +1007,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
                in vertical modes there's no reason to hide it. Footer/tab
                keep their visibility switches because they truly are
                optional. -->
+          <template v-if="!isDesktop()">
           <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.header') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.headerHeight') }}</span>
@@ -926,6 +1032,8 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 
           <!-- Group 4: Tab - sub-rows gated on `tabVisible` so disabled
                knobs don't crowd the panel when the bar itself is off. -->
+          </template>
+          <template v-if="!isDesktop()">
           <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.tab') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.showTab') }}</span>
@@ -972,7 +1080,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             />
           </section>
 
+          </template>
+
           <!-- Group 5: Footer -->
+          <template v-if="!isDesktop()">
           <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.footer') }}</NDivider>
           <section class="t-theme-drawer__row">
             <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.showFooter') }}</span>
@@ -983,13 +1094,58 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
             <NInputNumber
               :value="themeStore.footerHeight"
               size="small"
-              :min="32"
+              :min="24"
               :max="80"
               :step="2"
               class="w-120px"
               @update:value="(v: number | null) => v != null && themeStore.setFooterHeight(v)"
             />
           </section>
+
+          </template>
+
+          <!-- The desktop's own chrome knob. Same idea as the header height it
+               replaces - the taskbar is the only bar this layout has. -->
+          <template v-if="isDesktop()">
+            <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.desktop') }}</NDivider>
+            <section class="t-theme-drawer__row">
+              <span class="t-theme-drawer__row-label">{{ tr('admin.theme.layout.taskbarHeight') }}</span>
+              <NInputNumber
+                :value="themeStore.desktopTaskbarHeight"
+                size="small"
+                :min="32"
+                :max="72"
+                :step="2"
+                class="w-120px"
+                @update:value="(v: number | null) => v != null && themeStore.setDesktopTaskbarHeight(v)"
+              />
+            </section>
+            <!-- One slider for the whole material: the taskbar, the start panel,
+                 window title bars, the in-window nav and the icon selection all
+                 read the same two tokens. 0 = solid chrome. Page content never
+                 takes it - a table read through a blurred wallpaper is where
+                 translucency stops being decoration. -->
+            <section class="t-theme-drawer__row">
+              <span class="t-theme-drawer__row-label">
+                {{ tr('admin.theme.layout.desktopVibrancy') }}
+              </span>
+              <NSlider
+                :value="themeStore.desktopVibrancy"
+                :min="0"
+                :max="100"
+                :step="5"
+                :format-tooltip="(v: number) => (v === 0 ? tr('admin.theme.layout.vibrancyOff') : `${v}%`)"
+                class="t-theme-drawer__wallpaper-slider"
+                @update:value="(v: number) => themeStore.setDesktopVibrancy(v)"
+              />
+            </section>
+            <!-- Without this line the desktop is simply solid and the slider
+                 appears broken: the OS preference wins silently at the default,
+                 and nothing on screen says why. -->
+            <p v-if="systemReducesTransparency" class="t-theme-drawer__note">
+              {{ tr('admin.theme.layout.vibrancySystemOff') }}
+            </p>
+          </template>
 
           <!-- Group 6: Content (scroll mode + page animation + fixed pins) -->
           <NDivider class="t-theme-drawer__divider">{{ tr('admin.theme.group.content') }}</NDivider>
@@ -1344,6 +1500,14 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 /* Group container - no border-bottom now that NDivider provides the
    visual separator between groups. The old `border-bottom: 1px solid`
    stacked with the next NDivider and rendered as two parallel lines. */
+.t-theme-drawer__wallpaper-input {
+  max-width: 220px;
+}
+
+.t-theme-drawer__wallpaper-slider {
+  max-width: 160px;
+}
+
 .t-theme-drawer__section {
   padding: var(--tnzi-space-sm, 8px) 0;
 }
@@ -1387,6 +1551,14 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   justify-content: space-between;
   gap: 8px;
 }
+/* Explains a control that is currently being overridden from outside the app. */
+.t-theme-drawer__note {
+  margin: -2px 0 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--tnzi-base-text-muted, #6b7280);
+}
+
 .t-theme-drawer__row-label {
   font-size: 13px;
   color: var(--tnzi-base-text, #374151);
@@ -1486,7 +1658,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
    their cell (capped at the original 96px canvas) via TLayoutModeCard. */
 .t-theme-drawer__layout-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* Auto-fill rather than a fixed column count: the mode list grows over time
+     (four became five when `desktop` landed) and a hard-coded count silently
+     squeezes every card each time one is added. */
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
   column-gap: 8px;
   row-gap: 12px;
 }
@@ -1539,17 +1714,15 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   border-radius: var(--tnzi-admin-radius-md, 8px);
   cursor: pointer;
   transition:
-    transform 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.18s ease;
 }
 .t-theme-drawer__look-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-theme-drawer__look-card--active {
   border-color: var(--tnzi-primary, #646cff);
-  box-shadow: 0 0 0 2px rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.2);
+  box-shadow: var(--tnzi-surface-ring-selected);
 }
 .t-theme-drawer__look-preview {
   position: relative;
@@ -1677,6 +1850,63 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   color: var(--tnzi-base-text, #374151);
   text-transform: capitalize;
 }
+/* ── Container chrome picker ──
+   Each card shows the recipe rather than naming it: a small card-on-canvas
+   swatch painted with that style's own border/shadow pair. Naming a shadow is
+   hard to picture; seeing one is not. The swatches paint literal values rather
+   than the tokens, because the tokens are exactly what the click will change -
+   reading them would make all three previews look identical to the current
+   setting. */
+.t-theme-drawer__surface-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.t-theme-drawer__surface-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  background: var(--tnzi-container-bg, #fff);
+  border: 1px solid var(--tnzi-border, #e5e7eb);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.t-theme-drawer__surface-card--active {
+  border-color: var(--tnzi-primary, #646cff);
+  box-shadow: var(--tnzi-surface-ring-selected);
+}
+.t-theme-drawer__surface-preview {
+  width: 100%;
+  height: 34px;
+  border-radius: var(--tnzi-admin-radius-sm, 4px);
+  /* The canvas the sample card sits on - without it a white-on-white sample
+     shows nothing, which is precisely what `flat` needs to be judged by. */
+  background: var(--tnzi-layout-bg, #f7f8fa);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.t-theme-drawer__surface-preview::after {
+  content: '';
+  width: 68%;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--tnzi-container-bg, #fff);
+}
+.t-theme-drawer__surface-preview--elevated::after {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 16%);
+}
+.t-theme-drawer__surface-preview--outlined::after {
+  border: 1px solid var(--tnzi-border, #e5e7eb);
+}
+.t-theme-drawer__surface-label {
+  font-size: 12px;
+  color: var(--tnzi-base-text, #333);
+}
+
 .t-theme-drawer__preset-card {
   display: flex;
   flex-direction: column;
@@ -1688,17 +1918,15 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
   border-radius: var(--tnzi-admin-radius-md, 8px);
   cursor: pointer;
   transition:
-    transform 0.18s ease,
     border-color 0.18s ease,
     box-shadow 0.18s ease;
 }
 .t-theme-drawer__preset-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-theme-drawer__preset-card--active {
   border-color: var(--tnzi-primary, #646cff);
-  box-shadow: 0 0 0 2px rgb(var(--tnzi-primary-rgb, 100 108 255) / 0.2);
+  box-shadow: var(--tnzi-surface-ring-selected);
 }
 .t-theme-drawer__preset-color {
   display: flex;

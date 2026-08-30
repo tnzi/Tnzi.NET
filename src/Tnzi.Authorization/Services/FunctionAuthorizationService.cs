@@ -135,7 +135,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <summary>角色显式授予的功能码（RoleFunction 直连），仅启用项。</summary>
     private async Task<List<string>> GetRoleGrantedCodesAsync(Guid roleId)
     {
-        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled);
+        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
 
         return await _roleFunctionRepository
             .Where(rf => rf.RoleId == roleId && rf.IsEnabled)
@@ -264,7 +264,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         }
 
         var codes = await _moduleFunctionRepository
-            .Where(f => f.IsEnabled)
+            .Where(f => f.IsEnabled && !f.IsRetired)
             .Select(f => f.Code)
             .Distinct()
             .ToListAsync();
@@ -322,7 +322,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         var roleIdList = userRoles.ToList();
 
         // 基础功能查询器（仅获取启用的功能）
-        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled);
+        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
 
         // a. 用户角色直接绑定的具体功能
         var directRoleFunctionCodes = _roleFunctionRepository
@@ -408,8 +408,8 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // 1. 获取所有启用的模块，并包含功能
         // 不需要 Include Children，我们手动构建树以确保层级正确且不受 EF Core 追踪行为影响
         var allModules = await _moduleRepository
-            .Where(m => m.IsEnabled)
-            .Include(m => m.Functions)
+            .Where(m => m.IsEnabled && !m.IsRetired)
+            .Include(m => m.Functions.Where(f => !f.IsRetired))
             .OrderBy(m => m.Order)
             .ToListAsync();
 
@@ -439,8 +439,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// 获取模块的功能列表
+    /// 获取模块的功能列表（管理面）。
     /// </summary>
+    /// <remarks>
+    /// 这里<b>刻意不</b>过滤 <c>IsRetired</c>：退役行不参与权限解析、也不出现在分配矩阵里，
+    /// 但管理页必须看得见它，否则「授权明明还在、却不生效」没有任何可查之处。
+    /// DTO 带 <c>IsRetired</c> 供前端渲染置灰的退役标。
+    /// </remarks>
     /// <param name="moduleId">模块ID</param>
     /// <returns>功能列表</returns>
     public async Task<Result<IEnumerable<ModuleFunction>>> GetModuleFunctionsAsync(Guid moduleId)
@@ -730,7 +735,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         }
 
         var functions = await _moduleFunctionRepository
-            .Where(f => functionIds.Contains(f.Id) && f.IsEnabled)
+            .Where(f => functionIds.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
             .OrderBy(f => f.Order)
             .ToListAsync();
         return Ok((IEnumerable<ModuleFunction>)functions);
@@ -771,7 +776,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         // 验证功能是否存在
         var existingFunctions = await _moduleFunctionRepository
-            .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled)
+            .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
             .Select(f => f.Id)
             .ToListAsync();
 
@@ -856,7 +861,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (functionIdList.Count > 0)
         {
             var existingFunctions = await _moduleFunctionRepository
-                .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled)
+                .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
                 .Select(f => f.Id)
                 .ToListAsync();
 

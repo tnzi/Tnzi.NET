@@ -369,7 +369,7 @@ const rowActions: RowAction<ReceiptRow>[] = [
 
 .fin-receipts__confidence {
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 
 .fin-receipts__fail {
@@ -389,6 +389,6 @@ const rowActions: RowAction<ReceiptRow>[] = [
 .fin-receipts__hint {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 </style>

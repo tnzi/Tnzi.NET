@@ -450,7 +450,7 @@ function nullIfBlank(value: string | null): string | null {
   margin-bottom: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--tnzi-text-3);
+  color: var(--tnzi-base-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

@@ -254,6 +254,6 @@ onMounted(() => {
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 </style>

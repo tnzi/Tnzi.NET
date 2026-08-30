@@ -167,7 +167,7 @@ function handleRefresh(): void {
 
   <NCard
     v-else
-    class="t-widget-card"
+    class="t-widget-card t-surface-card"
     :data-widget-id="id"
     size="small"
     :bordered="false"
@@ -217,19 +217,20 @@ function handleRefresh(): void {
 
 <style scoped>
 .t-widget-card {
-  /* soybean parity - soft drop shadow on the card body. */
-  background: var(--tnzi-container-bg, #fff);
+  background: var(--tnzi-surface-card-bg);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  transition:
-    transform var(--tnzi-admin-motion-duration-fast, 0.15s) ease,
-    box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+  /* Card tier - the same pair every container on the page canvas takes.
+     See the surface tiers in `styles/variables.css`. */
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
+  transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
 .t-widget-card:hover {
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-widget-card--bare {
   background: transparent;
+  border: none;
   box-shadow: none;
 }
 .t-widget-card__header {

@@ -40,6 +40,7 @@ public class NotificationEnhancementTests
             new Mock<IEmailSender>().Object,
             new Mock<ISmsSender>().Object,
             new Mock<IPushSender>().Object,
+            new Mock<IFaxSender>().Object,
             _unitOfWorkMock.Object,
             optionsMock.Object,
             serviceProviderMock.Object,

@@ -290,7 +290,7 @@ async function remove(row: PartyBankAccountDto) {
 .fin-remit__empty {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
 }
 </style>

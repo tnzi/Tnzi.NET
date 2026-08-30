@@ -30,7 +30,7 @@ public enum SettingValueType
 /// 系统配置实体（key-value 存储）
 /// 支持扩展字段和动态配置
 /// </summary>
-public class Setting : FullAuditedEntity<Guid>
+public class Setting : FullAuditedEntity<Guid>, IHasOrder
 {
     /// <summary>
     /// 获取或设置 配置键（唯一）

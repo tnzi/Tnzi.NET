@@ -650,4 +650,19 @@ public class SettingService : ApplicationService, ISettingService
             }
         }
     }
+
+    public async Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, string? group = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var result = await ExecuteInUnitOfWorkAsync(
+            ct => _settingRepository.ReorderAsync(ids, s => s.Group == group, ct),
+            cancellationToken);
+
+        if (!result.Succeeded)
+            return Result.Failure(result.Message ?? "Reorder failed.", result.Code ?? 400, result.ErrorCode);
+
+        LogInformation("Reordered {Count} setting(s) in group {Group}", result.Data, group);
+        return Ok();
+    }
 }

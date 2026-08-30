@@ -23,6 +23,8 @@ import {
   type ControllerDiagnosticsResultDto,
   type ControllerInfoDto,
   type ModuleDiagnosticsDto,
+  type SensitiveEndpointDto,
+  type SensitiveEndpointReportDto,
 } from '@tnzi/core/services/diagnostics'
 import { ensureOk, unwrapResult as unwrap } from '../_mappers'
 
@@ -34,6 +36,8 @@ export type {
   ControllerDiagnosticsResultDto,
   ControllerInfoDto,
   ModuleDiagnosticsDto,
+  SensitiveEndpointDto,
+  SensitiveEndpointReportDto,
 }
 
 export interface DiagnosticsBridgeDeps {
@@ -52,6 +56,17 @@ export interface DiagnosticsBridge {
   modules: {
     list(): Promise<ModuleDiagnosticsDto[]>
   }
+  /**
+   * Sensitive endpoints that are actually reachable in this deployment.
+   *
+   * Reads the live route table, so anything suppressed via
+   * `AspNetCore:ControllerFilter:DisabledEndpoints` is absent - the list is
+   * real state, not declared state. Being absent does NOT mean the capability
+   * is closed: authorization lives in the service layer, this is visibility.
+   */
+  sensitiveEndpoints: {
+    list(): Promise<SensitiveEndpointReportDto>
+  }
 }
 
 export function createDiagnosticsBridge(deps: DiagnosticsBridgeDeps = {}): DiagnosticsBridge {
@@ -67,6 +82,7 @@ export function createDiagnosticsBridge(deps: DiagnosticsBridgeDeps = {}): Diagn
       },
       controllers: { list: noOp as never },
       modules: { list: noOp as never },
+      sensitiveEndpoints: { list: noOp as never },
     }
   }
 
@@ -89,6 +105,10 @@ export function createDiagnosticsBridge(deps: DiagnosticsBridgeDeps = {}): Diagn
     modules: {
       list: async () =>
         unwrap<ModuleDiagnosticsDto[]>(await api.getModules()) ?? [],
+    },
+    sensitiveEndpoints: {
+      list: async () =>
+        unwrap<SensitiveEndpointReportDto>(await api.getSensitiveEndpoints()),
     },
   }
 }

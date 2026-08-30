@@ -67,6 +67,26 @@ describe('TModalShell', () => {
     expect(w.find('.rich-head .tag').text()).toBe('Posted')
   })
 
+  it('forwards the plain title to NModal when no header slot is given', () => {
+    const w = mount(TModalShell, { props: { show: true, title: 'Invoice' }, global: { stubs } })
+    expect(w.findComponent(modalStub).props('title')).toBe('Invoice')
+  })
+
+  // naive's Card resolves its header as `title ? [title] : slots.header`, so a
+  // forwarded title would win and the slot would vanish with no warning. The
+  // shell withholds the prop to keep the documented precedence (slot wins).
+  // Asserted on the forwarded prop, not on the DOM: the stub above can't
+  // reproduce naive's own resolution.
+  it('withholds the title from NModal when a header slot is given, so the slot wins', () => {
+    const w = mount(TModalShell, {
+      props: { show: true, title: 'Invoice' },
+      slots: { header: '<div class="rich-head">Invoice INV-001</div>' },
+      global: { stubs },
+    })
+    expect(w.findComponent(modalStub).props('title')).toBeUndefined()
+    expect(w.find('.rich-head').exists()).toBe(true)
+  })
+
   it('overlays the body with a spinner while loading', () => {
     const w = mount(TModalShell, {
       props: { show: true, loading: true },

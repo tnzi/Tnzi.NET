@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import TCardRenderer from '../../../src/components/crud/renderers/TCardRenderer.vue'
 
 function makeState(items: { id: number; name: string }[] = [{ id: 1, name: 'A' }, { id: 2, name: 'B' }], loading = false) {
@@ -134,6 +134,130 @@ describe('TCardRenderer', () => {
       })
       expect(wrapper.find('.my-empty').exists()).toBe(true)
       expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+    })
+  })
+
+  /**
+   * `cols` stops at `xl`, and `xl` means "1280 and up, forever" - so a 1280
+   * laptop and a 4K monitor got the same column count and the cards on the 4K
+   * one grew to fill whatever was left. `minColWidth` states the thing the
+   * design actually fixes and lets the count follow.
+   */
+  describe('minColWidth', () => {
+    const gridTemplate = (wrapper: ReturnType<typeof mount>): string =>
+      wrapper.find('.t-card-renderer__grid').attributes('style') ?? ''
+
+    it('packs as many columns as fit instead of taking the count from cols', () => {
+      const wrapper = mount(TCardRenderer, {
+        props: { state: makeState() as any, minColWidth: 280 },
+        slots: { card: '<div class="card-item" />' },
+      })
+      expect(gridTemplate(wrapper)).toContain('repeat(auto-fill, minmax(min(280px, 100%), 1fr))')
+    })
+
+    it('clamps the minimum to the container so a phone-width grid does not overflow', () => {
+      // A bare `minmax(280px, 1fr)` overflows horizontally the moment the
+      // container is narrower than 280 - which every phone is.
+      const wrapper = mount(TCardRenderer, {
+        props: { state: makeState() as any, minColWidth: 280 },
+        slots: { card: '<div class="card-item" />' },
+      })
+      expect(gridTemplate(wrapper)).toContain('min(280px, 100%)')
+    })
+
+    it('leaves call sites that did not opt in exactly as they were', () => {
+      const wrapper = mount(TCardRenderer, {
+        props: { state: makeState() as any, cols: 3 },
+        slots: { card: '<div class="card-item" />' },
+      })
+      expect(gridTemplate(wrapper)).toContain('repeat(3, minmax(0, 1fr))')
+      expect(gridTemplate(wrapper)).not.toContain('auto-fill')
+    })
+
+    it('does not observe anything when the prop is absent', () => {
+      const observe = vi.fn()
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe = observe
+          disconnect = vi.fn()
+        },
+      )
+      try {
+        mount(TCardRenderer, {
+          props: { state: makeState() as any, cols: 3 },
+          slots: { card: '<div class="card-item" />' },
+        })
+        expect(observe).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('starts measuring when the prop arrives after mount', async () => {
+      const observe = vi.fn()
+      const disconnect = vi.fn()
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          observe = observe
+          disconnect = disconnect
+        },
+      )
+      try {
+        const wrapper = mount(TCardRenderer, {
+          props: { state: makeState() as any, cols: 3 },
+          slots: { card: '<div class="card-item" />' },
+        })
+        expect(observe).not.toHaveBeenCalled()
+
+        await wrapper.setProps({ minColWidth: 280 })
+        expect(observe).toHaveBeenCalledTimes(1)
+
+        // ...and stops again when it goes away, rather than leaving a live
+        // observer feeding a width nothing reads.
+        await wrapper.setProps({ minColWidth: undefined })
+        expect(disconnect).toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it('counts the loading skeletons from the measured width, not from cols', async () => {
+      // Eight placeholders in a seven-column grid read as a broken row rather
+      // than as a list loading, so the skeleton count has to know what
+      // `auto-fill` will do.
+      let notify: (() => void) | undefined
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(fn: () => void) {
+            notify = fn
+          }
+          observe = vi.fn()
+          disconnect = vi.fn()
+        },
+      )
+      try {
+        const wrapper = mount(TCardRenderer, {
+          // `cols: 3` is the fallback, and deliberately NOT the answer below.
+          props: { state: makeState([], true) as any, cols: 3, minColWidth: 280 },
+          slots: { card: '<div class="card-item" />' },
+        })
+        // Unmeasured (no layout in the test DOM) → the breakpoint count stands.
+        expect(wrapper.findAll('.t-card-renderer__skeleton')).toHaveLength(6)
+
+        // 1642px of grid at a 16px gap fits floor((1642+16)/(280+16)) = 5.
+        Object.defineProperty(wrapper.find('.t-card-renderer').element, 'clientWidth', {
+          value: 1642,
+          configurable: true,
+        })
+        notify?.()
+        await nextTick()
+        expect(wrapper.findAll('.t-card-renderer__skeleton')).toHaveLength(10)
+      } finally {
+        vi.unstubAllGlobals()
+      }
     })
   })
 })

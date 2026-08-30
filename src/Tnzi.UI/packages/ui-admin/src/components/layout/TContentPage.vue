@@ -17,7 +17,7 @@
       </TPageHeader>
     </slot>
     <div class="t-content-page__body">
-      <div v-if="card" class="t-content-page__card"><slot /></div>
+      <div v-if="card" class="t-content-page__card t-surface-card"><slot /></div>
       <slot v-else />
     </div>
   </div>
@@ -106,6 +106,22 @@ const renderHeader = computed(() => {
   flex-direction: column;
   gap: 12px;
 }
+/* Both clipping modes crop whatever the body holds at exactly its own edge,
+   and what a card puts there is its shadow - so a full-width card lost its
+   side shadow entirely and read as merging with the page.
+
+   `padding` moves the crop line inward; the matching negative `margin` pulls
+   the box back out by the same amount, so the content lands exactly where it
+   did before (measured: identical x and width, no horizontal page overflow)
+   and only the crop line moved. Plain padding would have inset every content
+   page by 4px and put them out of line with list pages, which solve the same
+   problem with `overflow-clip-margin` - unavailable here because that only
+   works with `overflow: clip`, and `scroll-auto` genuinely scrolls. */
+.t-content-page--scroll-auto .t-content-page__body,
+.t-content-page--scroll-fill .t-content-page__body {
+  padding: var(--tnzi-surface-card-gutter);
+  margin: calc(-1 * var(--tnzi-surface-card-gutter));
+}
 .t-content-page--scroll-auto .t-content-page__body { overflow: auto; }
 .t-content-page--scroll-fill .t-content-page__body { overflow: hidden; }
 .t-content-page--scroll-none .t-content-page__body { overflow: visible; }
@@ -119,9 +135,10 @@ const renderHeader = computed(() => {
      (`--tnzi-admin-card-bg`) like every other content card; base container
      color when unset. Dark-card text flip is handled by polish.css
      (`[data-tnzi-card-tone]`). */
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
+  background: var(--tnzi-surface-card-bg);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   padding: 12px;
 }
 .t-content-page--scroll-fill .t-content-page__card {

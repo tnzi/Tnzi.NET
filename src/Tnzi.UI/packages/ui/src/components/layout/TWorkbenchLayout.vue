@@ -36,16 +36,8 @@ import {
 import { NGrid, NGi } from 'naive-ui'
 import TWidgetCard from './TWidgetCard.vue'
 import { useWorkbenchLayout } from '../../headless/layout/useWorkbenchLayout'
+import { useDraggableComponent } from '../../headless/data/useReorderable'
 import type { SpanValue, WidgetDef, WorkbenchConfig } from './widget-types'
-
-// `vue-draggable-plus` is an optional peer dependency. Lazy-load it via
-// defineAsyncComponent so fixed-mode consumers (who never set
-// `layout: 'draggable'`, and may not have it installed) never resolve the
-// module. The `<VueDraggable v-if="draggable">` branch only mounts - and
-// thus only triggers this dynamic import - in draggable mode.
-const VueDraggable = defineAsyncComponent(
-  () => import('vue-draggable-plus').then((m) => m.VueDraggable as unknown as Component),
-)
 
 interface Props {
   /** Widget array - the source of truth. */
@@ -107,6 +99,13 @@ const visibleWidgets = computed<WidgetDef[]>(() => {
 })
 
 const draggable = computed(() => props.layout === 'draggable')
+
+// `vue-draggable-plus` is an optional peer dependency, resolved on first use.
+// Until (or unless) it arrives the grid renders through a plain container, so a
+// consumer without the peer loses the dragging and keeps the widgets - which a
+// local `defineAsyncComponent` did NOT give this component, because Vue mounts
+// an `errorComponent` with no children (see `useDraggableComponent`).
+const dragContainer = useDraggableComponent(() => draggable.value)
 
 const { orderedWidgets, setOrder } = useWorkbenchLayout({
   widgets: visibleWidgets,
@@ -265,7 +264,8 @@ function onWidgetRefresh(def: WidgetDef): void {
     <!-- Draggable mode: wrap NGrid items with VueDraggable so the user
          can re-order cards. The drag handle lives on TWidgetCard's
          header. -->
-    <VueDraggable
+    <component
+      :is="dragContainer"
       v-if="draggable"
       v-model="draggableList"
       :animation="180"
@@ -299,7 +299,7 @@ function onWidgetRefresh(def: WidgetDef): void {
           <component :is="resolveComponent(def)" v-bind="def.props ?? {}" />
         </TWidgetCard>
       </div>
-    </VueDraggable>
+    </component>
 
     <!-- Fixed mode: a plain NGrid renders the widgets in declaration
          order. Each item picks its own responsive span. -->

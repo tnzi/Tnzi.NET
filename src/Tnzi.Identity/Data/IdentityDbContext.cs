@@ -55,13 +55,10 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
             ConfigureIdentityTableNames(b);
         });
 
-        // 2. 修复 IdentityPasskeyData 表名 (如果适用)
-        FixIdentityPasskeyDataTableName(builder);
-
-        // 3. 配置查询过滤器
+        // 2. 配置查询过滤器
         ConfigureQueryFilters(builder);
 
-        // 4. 单租户模式下移除多租户专属身份模型
+        // 3. 单租户模式下移除多租户专属身份模型
         if (!_multiTenancyEnabled)
         {
             ConfigureSingleTenantIdentityModel(builder);
@@ -92,39 +89,63 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         builder.Entity<RoleClaim>().ToTable("RoleClaim");
         builder.Entity<UserToken>().ToTable("UserToken");
 
-#if NET10_0_OR_GREATER
-        try
-        {
-            builder.Entity<Microsoft.AspNetCore.Identity.IdentityPasskeyData>().ToTable("PasskeyData").HasNoKey();
-        }
-        catch (InvalidOperationException)
-        {
-            // 预期的异常：当 IdentityPasskeyData 实体不存在或已配置时会发生
-            // 这是正常情况，不需要处理
-        }
-#endif
+        // Passkey 凭据表。★ 实体是 IdentityUserPasskey<Guid>（主键 CredentialId），
+        // 不是 IdentityPasskeyData —— 后者是它的 Data 属性，一个复杂类型，
+        // `builder.Entity<IdentityPasskeyData>()` 作用在它身上没有意义。
+        // DbSet 由基类 IdentityUserContext 提供，EF 的 UserStore 已实现全部 IUserPasskeyStore 方法，
+        // 所以这里只需要落表名，不需要任何额外映射。
+        ConfigurePasskeyModel(builder);
     }
 
     /// <summary>
-    /// 修复 IdentityPasskeyData 表名
+    /// Passkey 凭据表的完整映射。
     /// </summary>
-    protected virtual void FixIdentityPasskeyDataTableName(ModelBuilder builder)
+    /// <remarks>
+    /// <para>
+    /// ★★ <strong>这不是"改个表名"，是补上一个从来没有过的映射。</strong>
+    /// <c>IdentityUserContext</c> 提供了 <c>UserPasskeys</c> 这个 <c>DbSet</c>，
+    /// 但本类继承的 8 参数 <c>IdentityDbContext&lt;TUser,TRole,TKey,…&gt;</c> 基类
+    /// <strong>不配置 passkey 实体</strong>（既没有主键，也没有说 <c>Data</c> 是复杂类型），
+    /// 于是模型校验直接失败。
+    /// </para>
+    /// <para>
+    /// 此前这里是一段 <c>builder.Entity&lt;IdentityPasskeyData&gt;().ToTable(...).HasNoKey()</c>
+    /// 包在 <c>try/catch</c> 里的代码。它<strong>作用在错误的类型上</strong>
+    /// （<c>IdentityPasskeyData</c> 是 <c>IdentityUserPasskey.Data</c> 的类型，不是实体），
+    /// 效果只是"让模型能通过校验"，代价是 passkey 根本存不进去 ——
+    /// 无主键实体在 EF 里是只读查询类型，<c>AddOrUpdatePasskeyAsync</c> 的写入路径走不通。
+    /// 换句话说：<strong>那不是一个待完善的占位，是一个让启动不报错的止血带。</strong>
+    /// </para>
+    /// </remarks>
+    protected virtual void ConfigurePasskeyModel(ModelBuilder builder)
     {
-#if NET10_0_OR_GREATER
-        try
+        // Data 是随凭据内联存储的一组字段，不是独立的表。
+        // 不 Ignore 的话 EF 会按约定把它当成一个缺主键的实体类型。
+        builder.Ignore<IdentityPasskeyData>();
+
+        builder.Entity<IdentityUserPasskey<Guid>>(b =>
         {
-            var passkeyType = typeof(Microsoft.AspNetCore.Identity.IdentityPasskeyData);
-            if (builder.Model.FindEntityType(passkeyType) != null)
-            {
-                builder.Entity(passkeyType).ToTable("Identity_PasskeyData");
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            // 预期的异常：当 IdentityPasskeyData 实体不存在或已配置时会发生
-            // 这是正常情况，不需要处理
-        }
-#endif
+            // WebAuthn 的凭据标识天然唯一，直接做主键。
+            b.HasKey(p => p.CredentialId);
+
+            // ★★ 前缀必须写全，这里是本文件唯一这么做的地方。框架的 TableNamePrefixConfiguration
+            // 按**实体所在程序集**反查模块拿前缀，而这个实体属于
+            // Microsoft.Extensions.Identity.Stores 而不是 Tnzi.Identity —— 自动前缀对它不生效。
+            // 上面那些 ToTable("User") 写裸名是对的（它们住在本程序集里），照抄到这一行
+            // 就会得到一张没有模块前缀的 UserPasskey 表，混在消费应用自己的表中间。
+            // 有 IdentityConstants.TablePrefix 兜着，改前缀时这里会跟着变。
+            b.ToTable($"{IdentityConstants.TablePrefix}_UserPasskey");
+            b.ComplexProperty(p => p.Data);
+
+            // 用户行被物理删除时凭据跟着走：留下一批指向不存在用户的凭据没有任何意义。
+            // ★ 注意 User 是软删（ISoftDelete），框架的「停用/注销账户」都不会触发这条级联，
+            // 凭据会继续留在库里 —— 那不是漏洞而是刻意的：账号能不能登录由
+            // IAuthService.IssueTokenAsync 的账号状态检查判定，不靠删凭据来实现。
+            b.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(p => p.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     // 缓存泛型方法实例，避免每次调用 MakeGenericMethod

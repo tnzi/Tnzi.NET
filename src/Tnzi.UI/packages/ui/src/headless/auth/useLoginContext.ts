@@ -111,7 +111,11 @@ export interface SendCodePayload {
   type?: 'phone' | 'email'
   /** Which flow the code is for. Drives endpoint selection. */
   purpose: 'code-login' | 'register' | 'reset-pwd'
-  /** Image-captcha id - sent for `register` when the register captcha is on. */
+  /**
+   * Image-captcha id. Sent for `register` and `code-login` when the matching
+   * backend captcha switch is on - those two are the endpoints that spend a
+   * real SMS / email on every call.
+   */
   captchaId?: string
   /** Image-captcha code the user typed. */
   captchaCode?: string

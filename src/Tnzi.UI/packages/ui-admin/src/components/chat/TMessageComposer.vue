@@ -377,9 +377,12 @@ function insertEmoji(emoji: string) {
   width: min(300px, calc(100vw - 24px));
   padding: 8px;
   background: var(--chat-surface, #fff);
-  border: 1px solid var(--chat-border, #e6e6e6);
+  border: var(--tnzi-surface-popover-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: var(--tnzi-shadow-popover, 0 6px 24px rgba(0, 0, 0, 0.16));
+  /* `--tnzi-shadow-popover` used to be spelled here; no such token was ever
+     defined, so this panel silently rendered its own literal and sat deeper
+     than every other dropdown in the shell. */
+  box-shadow: var(--tnzi-surface-popover-shadow);
 }
 
 .t-composer__emoji-title {

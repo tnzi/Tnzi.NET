@@ -199,16 +199,17 @@ public partial class PaymentService
     /// 支付确定失败/过期后归还其占用的优惠券。
     /// 券在建单时就核销掉了，不还就等于用户付款失败还赔一张券。
     /// </summary>
+    /// <remarks>
+    /// 「按支付找到那条核销记录」这一步在契约那一侧（<see cref="ICouponService.ReleaseCouponForPaymentAsync"/>）。
+    /// 拆分前这里持有 <c>IRepository&lt;CouponUsage&gt;</c> 自己查，那是父模块对促销表的直接读取。
+    /// <c>CouponId == null</c> 的快速返回留着：这笔支付压根没用券，连问都不用问。
+    /// </remarks>
     private async Task ReleaseCouponForPaymentAsync(PaymentEntity payment, CancellationToken cancellationToken)
     {
         if (_couponService == null || payment.CouponId == null)
             return;
 
-        var usage = await _couponUsageRepository
-            .FirstOrDefaultAsync(c => c.PaymentId == payment.Id, cancellationToken);
-
-        if (usage != null)
-            await _couponService.ReleaseCouponAsync(usage.Id, cancellationToken);
+        await _couponService.ReleaseCouponForPaymentAsync(payment.Id, cancellationToken);
     }
 
     /// <summary>

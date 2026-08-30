@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Dtos;
+﻿namespace Tnzi.Payment.Dtos;
 
 /// <summary>
 /// 支付统计概览 DTO
@@ -51,9 +51,18 @@ public class PaymentStatisticsDto
     public decimal RefundRate { get; set; }
 
     /// <summary>
-    /// 活跃订阅数
+    /// 活跃订阅数；<c>null</c> = 本部署不提供订阅统计（未加载 <c>Tnzi.Payment.Subscriptions</c>）。
     /// </summary>
-    public int ActiveSubscriptions { get; set; }
+    /// <remarks>
+    /// ★ 类型是 <c>int?</c> 而不是 <c>int</c>，理由值得写下来：这个总览端点的支付与退款那一半
+    /// 是支付模块自己的，缺席续费包时**必须照常工作**，所以整个端点不能一起 501。
+    /// 但那样一来这个字段就得填一个值，而填 <b>0 是错行为</b> ——
+    /// 「这台宿主不做订阅」与「所有订阅一夜之间全没了」在界面上会长得一模一样，
+    /// 后者是每一个订阅制生意最需要立刻看见的灾难。<c>null</c> 让前端渲染「不适用」，
+    /// 与「0」是两句不同的话。<c>@tnzi/core</c> 那侧的 <c>activeSubscriptions</c> 同步是
+    /// <c>number | null</c>。
+    /// </remarks>
+    public int? ActiveSubscriptions { get; set; }
 
     /// <summary>
     /// 渠道分布

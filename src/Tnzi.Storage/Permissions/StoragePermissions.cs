@@ -12,8 +12,6 @@ public static class StoragePermissionNames
     public const string FileCreate = "storage.file.create";
     public const string FileUpdate = "storage.file.update";
     public const string FileDelete = "storage.file.delete";
-    public const string ChunkView = "storage.chunk.view";
-    public const string VersionView = "storage.version.view";
 }
 
 /// <summary>
@@ -36,7 +34,5 @@ public class StoragePermissions : IPermissionDefinitionProvider
         context.AddGroup("storage", "Storage");
         context.AddPermission("storage.view", "View Storage", parentName: "storage");
         context.AddCrudPermissions("storage.file", "Files", parentName: "storage");
-        context.AddPermission("storage.chunk.view", "View Chunks", parentName: "storage", category: PermissionCategory.Technical);
-        context.AddPermission("storage.version.view", "View Versions", parentName: "storage", category: PermissionCategory.Technical);
     }
 }

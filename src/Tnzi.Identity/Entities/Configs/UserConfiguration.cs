@@ -11,10 +11,12 @@ public class UserConfiguration : EntityTypeConfigurationBase<User, Guid>
         // 主键由 Identity 配置
 
         // 关系配置
-        builder.HasOne(u => u.Organization)
-            .WithMany()
-            .HasForeignKey(u => u.OrganizationId)
-            .OnDelete(DeleteBehavior.SetNull);
+        // ★ User → Organization 的外键**不在这里**声明：组织树住在可选包
+        //   Tnzi.Identity.Organization 里，核心不引用它的实体。那条外键由该包的
+        //   OrganizationConfiguration 从主体侧（HasMany<User>().WithOne()）声明，
+        //   列、删除行为与 EF 算出来的约束名与拆分前逐字相同。
+        //   下面这条 OrganizationId 索引**留在核心**：加载不加载那个包，User 表的列形状
+        //   都要一模一样，否则「装了包的库」和「没装包的库」会长出两种 User 表。
 
         // 索引配置
         builder.HasIndex(u => u.Email);

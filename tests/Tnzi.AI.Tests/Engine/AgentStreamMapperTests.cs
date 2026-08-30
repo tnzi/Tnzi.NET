@@ -145,6 +145,43 @@ public class AgentStreamMapperTests
     }
 
     [Fact]
+    public void TryMapFailure_ConcurrencyConflict_MapsTo409AndKeepsTheRetryableCode()
+    {
+        // 服务层把预留并发冲突定为「可重试的 409」；FinishReason 只有 Error 一档，
+        // 没有错误码透传的话这里只能贴 500——「重试即可」在最后一跳被翻译成「内部错误」。
+        var result = new AgentRunResult
+        {
+            Response = string.Empty,
+            FinishReason = FinishReasons.Error,
+            ErrorCode = ErrorCodes.QuotaConcurrencyConflict
+        };
+
+        var mapped = AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out var status, out var code);
+
+        mapped.ShouldBeTrue();
+        status.ShouldBe(409);
+        code.ShouldBe(ErrorCodes.QuotaConcurrencyConflict);
+    }
+
+    [Fact]
+    public void TryMapFailure_ErrorWithSpecificCode_SurfacesThatCodeAt500()
+    {
+        // 结果自带更具体的错误码（如配额记录缺失）时透传给客户端，而不是盖成通用码
+        var result = new AgentRunResult
+        {
+            Response = string.Empty,
+            FinishReason = FinishReasons.Error,
+            ErrorCode = ErrorCodes.QuotaCheckFailed
+        };
+
+        var mapped = AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out var status, out var code);
+
+        mapped.ShouldBeTrue();
+        status.ShouldBe(500);
+        code.ShouldBe(ErrorCodes.QuotaCheckFailed);
+    }
+
+    [Fact]
     public void TryMapFailure_SuccessfulFinish_ReturnsFalse()
     {
         var result = new AgentRunResult { Response = string.Empty, FinishReason = FinishReasons.Stop };

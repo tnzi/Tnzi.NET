@@ -21,9 +21,9 @@ import {
  *
  * Both enums now serialize as their PascalCase member name strings (global
  * JsonStringEnumConverter). The old hand-written numeric switch mismatched the
- * backend (mapped 3→InApp / 4→Webhook, values NotificationType does not have),
- * so type/status badges are now derived through the shared @tnzi/core label
- * helpers + enum-member badge tones.
+ * backend (it mapped 3→InApp / 4→Webhook; 3 is Push and 4 is Fax), so type/status
+ * badges are now derived through the shared @tnzi/core label helpers +
+ * enum-member badge tones.
  */
 interface NotificationMessageRow {
   id?: string
@@ -48,6 +48,7 @@ function typeBadge(v?: NotificationType): 'info' | 'success' | 'warning' | 'defa
     case NotificationType.Email: return 'info'
     case NotificationType.Sms: return 'success'
     case NotificationType.Push: return 'warning'
+    case NotificationType.Fax: return 'default'
     default: return 'default'
   }
 }

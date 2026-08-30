@@ -3,13 +3,16 @@
  *
  * Fetches a fresh captcha through `useLoginContext().callbacks.getCaptcha(purpose)`
  * (wired to `GET /auth/captcha/{purpose}/json`) and tracks the current
- * `captchaId` + `imageBase64` + the `code` the user types. The two flows drive
- * it differently:
- *   - **register** (always-show) calls `load()` on mount and `load()` again
+ * `captchaId` + `imageBase64` + the `code` the user types. Three flows drive it,
+ * and the `purpose` argument is the backend's captcha scope, NOT the mode:
+ *   - **register** (`'register'`, always-show) calls `load()` on mount and again
  *     after each send (the captcha is one-time-use - verifying consumes it).
- *   - **login** (adaptive) calls `seed()` with the captcha the backend returned
- *     in its `IDENTITY_CAPTCHA_REQUIRED` error, and `load()` for the manual
- *     refresh button.
+ *   - **password login** (`'login'`, adaptive) calls `seed()` with the captcha the
+ *     backend returned in its `IDENTITY_CAPTCHA_REQUIRED` error, and `load()` for
+ *     the manual refresh button. Zero friction until an account starts failing.
+ *   - **code login** (`'login'`, always-show) behaves like register: that endpoint
+ *     spends a real SMS / email per call, so there is no "failure count" to grow
+ *     adaptive from - it is gated from the first attempt.
  *
  * HTTP-agnostic: the consumer wires `getCaptcha`; the composable stays a thin
  * reactive holder so `PwdLogin` / `Register` bind it straight to `TLoginCaptcha`.

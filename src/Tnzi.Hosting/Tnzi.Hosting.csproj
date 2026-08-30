@@ -22,6 +22,17 @@
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Identity.Presence\Tnzi.Identity.Presence.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Notification.Push\Tnzi.Notification.Push.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Storage.Cloud\Tnzi.Storage.Cloud.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Payment.Stripe\Tnzi.Payment.Stripe.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Payment.PayPal\Tnzi.Payment.PayPal.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Storage.Workspace\Tnzi.Storage.Workspace.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.System\Tnzi.System.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Authorization\Tnzi.Authorization.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" PrivateAssets="all" />

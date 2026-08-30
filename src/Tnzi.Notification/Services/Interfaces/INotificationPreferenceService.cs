@@ -67,4 +67,21 @@ public interface INotificationPreferenceService
     /// 无偏好记录或未设置静默时段时返回 false
     /// </summary>
     Task<bool> IsInQuietHoursAsync(Guid userId, string channel, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 一次取回这一批人在该渠道上生效的每小时上限。<b>没设上限的人不出现在结果里</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="FilterEnabledUsersAsync"/> 同款的批量形状：逐个查在一次千人群发上
+    /// 就是一千次往返。
+    /// </para>
+    /// <para>
+    /// 生效上限的解析顺序与 <see cref="IsChannelEnabledAsync"/> 一致：分类级偏好优先于
+    /// 渠道级，两者都没设就是不限。★ <b>但计数不分分类</b> —— 上限表达的是
+    /// 「这个渠道上别给我发太多」，而分类只决定<b>用哪个数</b>。
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, int>> GetFrequencyCapsAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, string? category = null, CancellationToken cancellationToken = default);
 }

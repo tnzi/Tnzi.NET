@@ -10,6 +10,7 @@
  * override or `translate` to localize.
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useAdminLocale } from '../../headless/useAdminLocale'
 
 interface Props {
   /** Display name to show after the greeting. */
@@ -20,7 +21,19 @@ interface Props {
   subtitle?: string
   /** Hide the live datetime ticker. */
   hideTime?: boolean
-  /** Datetime format (Intl.DateTimeFormat options friendly). */
+  /**
+   * `Intl` tag for the datetime line. Omitted → the ACTIVE admin locale's
+   * tag (`useAdminLocale().intlTag`), so a consumer that registered
+   * `{ code: 'fr', intlTag: 'fr-CA' }` has already answered this and needs
+   * to pass nothing. An explicit value still wins, for a banner that must
+   * read in a fixed locale regardless of the interface language.
+   *
+   * ⚠️ This used to default to the literal `'en'`, and the widget wrapper
+   * did not pass anything - so the workbench greeting kept an English date
+   * and time on an otherwise fully translated console, while the desktop
+   * taskbar clock (which reads the same tag) was correct. Do not put a
+   * language literal back in the default.
+   */
   locale?: string
   /** Translation function for `admin.banner.greeting.{morning|afternoon|evening|night}`. */
   translate?: (key: string) => string
@@ -31,9 +44,17 @@ const props = withDefaults(defineProps<Props>(), {
   greeting: '',
   subtitle: '',
   hideTime: false,
-  locale: 'en',
+  locale: undefined,
   translate: undefined,
 })
+
+// Degrades to the default locale when there is no active Pinia (bare mounts
+// and this component's own specs), which is why adding this does not change
+// what a store-less mount renders.
+const { intlTag } = useAdminLocale()
+
+/** Explicit prop wins; otherwise follow the interface language. */
+const resolvedLocale = computed(() => props.locale || intlTag.value)
 
 const now = ref(new Date())
 let timerId: ReturnType<typeof setInterval> | null = null
@@ -72,7 +93,7 @@ const displayGreeting = computed(() => props.greeting || defaultGreeting.value)
 
 const formattedTime = computed(() => {
   try {
-    return new Intl.DateTimeFormat(props.locale, {
+    return new Intl.DateTimeFormat(resolvedLocale.value, {
       weekday: 'long',
       year: 'numeric',
       month: 'short',

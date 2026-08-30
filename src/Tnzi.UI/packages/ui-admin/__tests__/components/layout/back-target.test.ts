@@ -47,3 +47,50 @@ describe('runBack', () => {
     expect(() => runBack({ fallback: '/x' }, undefined)).not.toThrow()
   })
 })
+
+describe('per-window back probe', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '')
+  })
+
+  it('asks the router own probe instead of browser history when it has one', () => {
+    // Browser history says "yes, you can go back" - it is a single global stack
+    // shared by every open desktop window, so it answers for all of them at once.
+    window.history.replaceState({ back: '/somewhere' }, '')
+
+    const windowRouter = {
+      push: vi.fn(),
+      back: vi.fn(),
+      __tnziCanGoBack: () => false,
+    } as unknown as Router
+
+    expect(hasInAppHistory(windowRouter)).toBe(false)
+
+    // So a smart back inside a fresh window takes the fallback rather than
+    // stepping the whole application back.
+    runBack({ fallback: '/admin/users' }, windowRouter)
+    expect(windowRouter.push).toHaveBeenCalledWith('/admin/users')
+    expect(windowRouter.back).not.toHaveBeenCalled()
+  })
+
+  it('steps back when the window own stack has somewhere to go', () => {
+    const windowRouter = {
+      push: vi.fn(),
+      back: vi.fn(),
+      __tnziCanGoBack: () => true,
+    } as unknown as Router
+
+    runBack({ fallback: '/admin/users' }, windowRouter)
+    expect(windowRouter.back).toHaveBeenCalled()
+    expect(windowRouter.push).not.toHaveBeenCalled()
+  })
+
+  it('falls back to browser history for a router without a probe', () => {
+    window.history.replaceState({ back: '/somewhere' }, '')
+    const plain = { push: vi.fn(), back: vi.fn() } as unknown as Router
+
+    expect(hasInAppHistory(plain)).toBe(true)
+    runBack({ fallback: '/admin/users' }, plain)
+    expect(plain.back).toHaveBeenCalled()
+  })
+})

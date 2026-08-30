@@ -20,6 +20,11 @@ const fetchRuns = vi.fn(async () => ({
   totalCount: 1, pageIndex: 1, pageSize: 20,
 }))
 
+const fetchInputs = vi.fn(async () => [
+  { id: 'i1', payRunId: 'r1', employeeId: 'e1', employeeCode: 'E1', employeeName: 'One', componentId: 'c1', componentCode: 'BONUS', componentName: 'Bonus', componentType: 'Earning', amount: 5000, note: 'H1', creationTime: '2026-08-01' },
+])
+const emptyPage = { items: [], totalCount: 0, pageIndex: 1, pageSize: 20 }
+
 vi.mock('../../../src/services/bridges/payroll-bridge', async (importOriginal) => {
   const original = await importOriginal<Record<string, unknown>>()
   return {
@@ -32,15 +37,29 @@ vi.mock('../../../src/services/bridges/payroll-bridge', async (importOriginal) =
         calculate: vi.fn(), post: vi.fn(), pay: vi.fn(), voidRun: vi.fn(),
         payslips: vi.fn(async () => []), payslip: vi.fn(async () => null),
         updatePayslipInputs: vi.fn(), createFromExternal: vi.fn(),
+        inputs: fetchInputs, setInput: vi.fn(), deleteInput: vi.fn(),
       },
-      structures: { fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })) },
+      structures: { fetch: vi.fn(async () => emptyPage) },
+      components: { fetch: vi.fn(async () => emptyPage) },
+      employees: { fetch: vi.fn(async () => emptyPage) },
     }),
   }
 })
 
 import Page from '../../../src/pages/payroll/PayRuns.vue'
 
+// 捕获 TCrudPage 的 row-actions,以便在测试里驱动"查看"这条路径。
+let capturedRowActions: Array<{ key: string; onClick?: (row: unknown) => unknown }> = []
+
 const stubs = {
+  TCrudPage: {
+    name: 'TCrudPage',
+    props: ['state', 'allColumns', 'title', 'rowActions', 'translate', 'detailWidth', 'detailTitle'],
+    template: '<div class="t-crud-page-stub" />',
+    created(this: { rowActions: typeof capturedRowActions }) {
+      capturedRowActions = this.rowActions ?? []
+    },
+  },
   Card: { name: 'Card', template: '<div><slot /></div>' },
   DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
   Pagination: { name: 'Pagination', template: '<div />' },
@@ -66,5 +85,20 @@ describe('Payroll Pay Runs page', () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchRuns.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('loads the run one-time inputs when a run is viewed', async () => {
+    fetchInputs.mockClear()
+    capturedRowActions = []
+    mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const view = capturedRowActions.find((a) => a.key === 'view' || a.key === 'detail')
+    expect(view).toBeTruthy()
+    await view!.onClick?.({ id: 'r1' })
+    await flushPromises()
+
+    // 一次性输入与工资单一起进详情:批次视图是它的归属地(它挂在批次上,不挂在 payslip 上)。
+    expect(fetchInputs).toHaveBeenCalledWith('r1')
   })
 })

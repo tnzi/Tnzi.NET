@@ -6,6 +6,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { ReorderRequest } from '../../types/api';
 import type {
   FileRecordDto,
   FileQueryDto,
@@ -472,5 +473,14 @@ export function useAdminFileFolderApi(client: HttpClient) {
     /** Bulk-move files into a target folder (or root when folderId is null). */
     moveFiles: (data: MoveFilesToFolderRequest) =>
       client.post<void>(`${ADMIN_FOLDER_BASE}/move-files`, data),
+
+    /**
+     * Reorder folders inside one parent (drag-and-drop).
+     * `ids` is the visible order; folders outside those slots keep their positions.
+     */
+    reorder: (data: ReorderRequest, parentId?: string | null) =>
+      client.post<void>(`${ADMIN_FOLDER_BASE}/reorder`, data, {
+        params: parentId ? { parentId } : undefined,
+      }),
   };
 }

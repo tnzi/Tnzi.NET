@@ -1,7 +1,7 @@
 <template>
   <TCrudPage
     :state="crud"
-    :all-columns="userColumns"
+    :all-columns="columns"
     :search-fields="userSearchFields"
     :title="title"
     :translate="t"
@@ -44,6 +44,7 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { userColumns, userSearchFields, userFormSchema } from './user-config'
+import { useModuleAvailability } from '../../headless/useModuleAvailability'
 
 interface UserListItem {
   id: string
@@ -63,10 +64,26 @@ const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 const router = useRouter()
 
+/**
+ * 组织名这一列来自可选包 `Tnzi.Identity.Organization`。宿主没加载它时后端恒返回
+ * `organizationName: null`，留着就是一列永远空白的表头 —— 会被读成「这些人都没部门」。
+ * `has` 在信号未知时放行（老后端 / 探测未回），与侧边栏菜单同口径。
+ */
+const { has: hasModule } = useModuleAvailability()
+
+// ★ 一次求值，两处共用。列设置引擎（useColumnSettings）在 setup 时**快照**列定义、
+// 之后不再跟随，所以只把过滤后的列绑到模板的 `:all-columns` 是无效的 ——
+// 那个 prop 只喂「列显示设置」弹窗，真正渲染的是引擎按 key 记的账。
+// 冷加载直达本页时探测可能还没回，此时 `has` 放行（与侧边栏同口径），
+// 表现与拆分前一致：列在、值为空；探测回来后的任何一次进入都是对的。
+const columns = userColumns.filter(
+  (c) => c.key !== 'organizationName' || hasModule('identity-organization'),
+)
+
 const crud = useCrudPage<UserListItem>({
   pageId: 'identity.users',
   permission: 'user',
-  columns: userColumns,
+  columns,
   rowKey: (u) => u.id,
   // 0.2.72+ (C4): fetch now returns the full `PagedList<T>` shape so
   // we no longer need to cast back to the 4-field tuple.

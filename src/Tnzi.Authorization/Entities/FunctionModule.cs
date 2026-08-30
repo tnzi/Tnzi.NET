@@ -46,6 +46,12 @@ public class FunctionModule : FullAuditedEntity<Guid>
     public bool IsSystemManaged { get; set; }
 
     /// <summary>
+    /// True when no provider declares this group any more and it holds no live functions,
+    /// i.e. the seeder retired it. See <see cref="ModuleFunction.IsRetired"/> for why the row is kept.
+    /// </summary>
+    public bool IsRetired { get; set; }
+
+    /// <summary>
     /// Transient (not persisted) flag stamped on the admin read path: <c>true</c>
     /// when this module belongs to the FRAMEWORK built-in catalogue (its code
     /// matches a loaded <c>Tnzi.*</c> module), <c>false</c> for a consumer

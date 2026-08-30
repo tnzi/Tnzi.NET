@@ -68,24 +68,31 @@
         />
       </NCard>
       <NCard :title="t('sections.subMetrics')" size="small" :bordered="false">
-        <div class="t-pay-stats-page__sub-list">
+        <!--
+          metrics is null when /subscription-metrics answered 501 - this
+          deployment does not load the recurring-billing module. Rendering a
+          column of zeros there would read as "every subscription is gone",
+          which is a different (and alarming) statement. Say "not available".
+        -->
+        <div v-if="metrics" class="t-pay-stats-page__sub-list">
           <div class="t-pay-stats-page__sub-row">
             <span>{{ t('sub.trial') }}</span>
-            <span>{{ metrics?.trialSubscriptions ?? 0 }}</span>
+            <span>{{ metrics.trialSubscriptions }}</span>
           </div>
           <div class="t-pay-stats-page__sub-row">
             <span>{{ t('sub.newThisMonth') }}</span>
-            <span>{{ metrics?.newSubscriptionsThisMonth ?? 0 }}</span>
+            <span>{{ metrics.newSubscriptionsThisMonth }}</span>
           </div>
           <div class="t-pay-stats-page__sub-row">
             <span>{{ t('sub.cancelledThisMonth') }}</span>
-            <span>{{ metrics?.cancelledThisMonth ?? 0 }}</span>
+            <span>{{ metrics.cancelledThisMonth }}</span>
           </div>
           <div class="t-pay-stats-page__sub-row">
             <span>{{ t('sub.arpu') }}</span>
-            <span>{{ formatMoney(metrics?.averageRevenuePerUser) }}</span>
+            <span>{{ formatMoney(metrics.averageRevenuePerUser) }}</span>
           </div>
         </div>
+        <NEmpty v-else size="small" :description="t('empty.subMetrics')" />
       </NCard>
     </div>
 
@@ -214,14 +221,17 @@ async function refresh(): Promise<void> {
     const start = new Date(end.getTime() - window.value * 24 * 60 * 60 * 1000)
     const startIso = start.toISOString()
     const endIso = end.toISOString()
-    const [ov, met, tr] = await Promise.all([
+    // allSettled, not all: /subscription-metrics answers 501 on a deployment
+    // without the recurring-billing module, and the revenue half of this page
+    // must not go blank because of it.
+    const [ov, met, tr] = await Promise.allSettled([
       bridge.getOverview(startIso, endIso),
       bridge.getSubscriptionMetrics(),
       bridge.getRevenueTrend(startIso, endIso, granularity.value),
     ])
-    overview.value = ov
-    metrics.value = met
-    trend.value = tr
+    overview.value = ov.status === 'fulfilled' ? ov.value : null
+    metrics.value = met.status === 'fulfilled' ? met.value : null
+    trend.value = tr.status === 'fulfilled' ? tr.value : []
   } catch {
     overview.value = null
     metrics.value = null

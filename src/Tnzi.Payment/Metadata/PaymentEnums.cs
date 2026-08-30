@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Metadata;
+﻿namespace Tnzi.Payment.Metadata;
 
 #region Payment Enums
 
@@ -122,154 +122,12 @@ public enum BusinessType
 
 #endregion
 
-#region Subscription Enums
-
-/// <summary>
-/// 订阅状态
-/// </summary>
-public enum SubscriptionStatus
-{
-    /// <summary>
-    /// 待激活
-    /// </summary>
-    Pending = 0,
-
-    /// <summary>
-    /// 试用中
-    /// </summary>
-    Trial = 1,
-
-    /// <summary>
-    /// 活动中
-    /// </summary>
-    Active = 2,
-
-    /// <summary>
-    /// 待续费
-    /// </summary>
-    PendingRenewal = 3,
-
-    /// <summary>
-    /// 已暂停
-    /// </summary>
-    Paused = 4,
-
-    /// <summary>
-    /// 已取消
-    /// </summary>
-    Cancelled = 5,
-
-    /// <summary>
-    /// 已过期
-    /// </summary>
-    Expired = 6,
-
-    /// <summary>
-    /// 逾期欠费（续费/试用转正扣款失败，宽限期内等待重试，超期则过期）
-    /// </summary>
-    PastDue = 7
-}
-
-/// <summary>
-/// 订阅计费支付用途（用于将支付完成事件路由回订阅状态机）
-/// </summary>
-public enum SubscriptionBillingPurpose
-{
-    /// <summary>
-    /// 首次开通付款
-    /// </summary>
-    Initial = 0,
-
-    /// <summary>
-    /// 周期续费
-    /// </summary>
-    Renewal = 1,
-
-    /// <summary>
-    /// 试用转正付款
-    /// </summary>
-    TrialConversion = 2,
-
-    /// <summary>
-    /// 升级补差价
-    /// </summary>
-    Proration = 3
-}
-
-/// <summary>
-/// 计费周期类型
-/// </summary>
-public enum BillingCycleType
-{
-    /// <summary>
-    /// 按天
-    /// </summary>
-    Day = 1,
-
-    /// <summary>
-    /// 按周
-    /// </summary>
-    Week = 2,
-
-    /// <summary>
-    /// 按月
-    /// </summary>
-    Month = 3,
-
-    /// <summary>
-    /// 按年
-    /// </summary>
-    Year = 4,
-
-    /// <summary>
-    /// 一次性
-    /// </summary>
-    OneTime = 5
-}
-
-/// <summary>
-/// 订阅变更类型
-/// </summary>
-public enum SubscriptionChangeType
-{
-    /// <summary>
-    /// 升级
-    /// </summary>
-    Upgrade = 1,
-
-    /// <summary>
-    /// 降级
-    /// </summary>
-    Downgrade = 2,
-
-    /// <summary>
-    /// 平级变更
-    /// </summary>
-    CrossGrade = 3
-}
-
-/// <summary>
-/// 订阅变更状态
-/// </summary>
-public enum SubscriptionChangeStatus
-{
-    /// <summary>
-    /// 待生效
-    /// </summary>
-    Pending = 0,
-
-    /// <summary>
-    /// 已生效
-    /// </summary>
-    Applied = 1,
-
-    /// <summary>
-    /// 已取消
-    /// </summary>
-    Cancelled = 2
-}
-
-#endregion
+// 订阅域的 5 个枚举（SubscriptionStatus / SubscriptionBillingPurpose / BillingCycleType /
+// SubscriptionChangeType / SubscriptionChangeStatus）随订阅域搬去了可选子模块
+// Tnzi.Payment.Subscriptions（类 SubscriptionEnums，取值一字未动）。
+// 刻意**留在这里**的两个同名成员是支付域与促销域自己的：BusinessType.Subscription
+// 标记一笔支付的业务类型，ProductType.Subscription 标记一张促销券的适用产品类型 ——
+// 它们在不加载续费包的宿主上照样有意义（一笔支付可以是别的系统发起的订阅收款）。
 
 #region Refund Enums
 
@@ -337,99 +195,14 @@ public enum RefundType
 
 #endregion
 
-#region Invoice Enums
-
-/// <summary>
-/// 发票状态
-/// </summary>
-public enum InvoiceStatus
-{
-    /// <summary>
-    /// 草稿
-    /// </summary>
-    Draft = 0,
-
-    /// <summary>
-    /// 待发送
-    /// </summary>
-    Pending = 1,
-
-    /// <summary>
-    /// 已发送
-    /// </summary>
-    Sent = 2,
-
-    /// <summary>
-    /// 已支付
-    /// </summary>
-    Paid = 3,
-
-    /// <summary>
-    /// 已过期
-    /// </summary>
-    Overdue = 4,
-
-    /// <summary>
-    /// 已取消
-    /// </summary>
-    Cancelled = 5
-}
-
-/// <summary>
-/// 发票类型
-/// </summary>
-public enum InvoiceType
-{
-    /// <summary>
-    /// 普通发票
-    /// </summary>
-    Standard = 1,
-
-    /// <summary>
-    /// 增值税专用发票
-    /// </summary>
-    Vat = 2,
-
-    /// <summary>
-    /// 收据
-    /// </summary>
-    Receipt = 3
-}
-
-#endregion
-
 #region Promotion Enums
 
-/// <summary>
-/// 促销类型
-/// </summary>
-public enum PromotionType
-{
-    /// <summary>
-    /// 百分比折扣
-    /// </summary>
-    PercentageDiscount = 1,
-
-    /// <summary>
-    /// 固定金额减免
-    /// </summary>
-    FixedAmountDiscount = 2,
-
-    /// <summary>
-    /// 首次订阅专属
-    /// </summary>
-    FirstSubscription = 3,
-
-    /// <summary>
-    /// 限时折扣
-    /// </summary>
-    LimitedTime = 4,
-
-    /// <summary>
-    /// 满减活动
-    /// </summary>
-    ThresholdDiscount = 5
-}
+// 促销域自己的五个枚举（PromotionType / ApplyScope / RedemptionCodeType /
+// RedemptionCodeStatus / UserCouponStatus）随促销域搬去了可选子模块 Tnzi.Payment.Promotions
+// （Metadata/PromotionEnums.cs，数值一个不改）。留在这里的两个不是促销独有的：
+// DiscountType 被父模块的 PaymentChannelCouponDto 带着出境（IPaymentChannelCouponSync 的入参，
+// 实现在渠道包），ProductType 由父模块的 PaymentService 从 BusinessType 现算并写进
+// 同样留在父模块的 CouponApplyContext。搬走任何一个都会让只加载「支付 + 渠道包」的宿主编不过。
 
 /// <summary>
 /// 折扣类型
@@ -445,27 +218,6 @@ public enum DiscountType
     /// 固定金额
     /// </summary>
     Fixed = 2
-}
-
-/// <summary>
-/// 应用范围
-/// </summary>
-public enum ApplyScope
-{
-    /// <summary>
-    /// 全局
-    /// </summary>
-    Global = 0,
-
-    /// <summary>
-    /// 指定计划
-    /// </summary>
-    Plan = 1,
-
-    /// <summary>
-    /// 指定产品
-    /// </summary>
-    Product = 2
 }
 
 /// <summary>
@@ -492,69 +244,6 @@ public enum ProductType
     /// 全部
     /// </summary>
     All = 99
-}
-
-/// <summary>
-/// 兑换码类型
-/// </summary>
-public enum RedemptionCodeType
-{
-    /// <summary>
-    /// 唯一码
-    /// </summary>
-    Unique = 1,
-
-    /// <summary>
-    /// 通用码
-    /// </summary>
-    General = 2
-}
-
-/// <summary>
-/// 兑换码状态
-/// </summary>
-public enum RedemptionCodeStatus
-{
-    /// <summary>
-    /// 有效
-    /// </summary>
-    Active = 1,
-
-    /// <summary>
-    /// 已停用
-    /// </summary>
-    Inactive = 2,
-
-    /// <summary>
-    /// 已过期
-    /// </summary>
-    Expired = 3
-}
-
-/// <summary>
-/// 用户持有的优惠券状态
-/// </summary>
-public enum UserCouponStatus
-{
-    /// <summary>
-    /// 可用
-    /// </summary>
-    Available = 0,
-
-    /// <summary>
-    /// 已使用
-    /// </summary>
-    Used = 1,
-
-    /// <summary>
-    /// 已过期
-    /// </summary>
-    Expired = 2,
-
-    /// <summary>
-    /// 已作废（管理员回收）
-    /// </summary>
-    Revoked = 3
 }
 
 #endregion

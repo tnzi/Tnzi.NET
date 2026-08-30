@@ -99,6 +99,64 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// List every sensitive endpoint that is currently active in this process.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 回答的是一个具体问题：<strong>这个部署到底开着哪些"知道了会改变安全评审结论"的端点。</strong>
+    /// 框架的 <c>[DefaultController]</c> 自动激活，模块自带的端点无需应用做任何事就挂上路由；
+    /// 在此之前想知道开了什么，只能逐模块读源码 —— 那是一次性的人工劳动，
+    /// 而<strong>下一个版本新增的敏感端点不会有任何机制提醒已经审过的应用重审</strong>。
+    /// 标了 <see cref="SensitiveEndpointAttribute"/> 的端点会自动出现在这里。
+    /// </para>
+    /// <para>
+    /// ★ <strong>数据源是 <see cref="IActionDescriptorCollectionProvider"/>，即最终生效的路由表</strong>，
+    /// 不是程序集扫描。所以经 <c>ControllerFilter:DisabledEndpoints</c> 抑制掉的端点不会出现在清单里 ——
+    /// 清单反映的是真实状态而不是声明状态，"我以为我关掉了"因此可以被一次查询证伪。
+    /// </para>
+    /// <para>
+    /// ★ <strong>不在清单里 ≠ 这条能力关上了。</strong>控制器可被消费方整体替换，
+    /// 挂在它上面的特性会随之失效；真正的判定必须落在服务层。本端点解决可见性，不解决授权。
+    /// </para>
+    /// </remarks>
+    [HttpGet("sensitive-endpoints")]
+    public virtual ApiResult<SensitiveEndpointReportDto> GetSensitiveEndpoints(
+        [FromServices] IActionDescriptorCollectionProvider actionProvider)
+    {
+        var endpoints = actionProvider.ActionDescriptors.Items
+            .OfType<ControllerActionDescriptor>()
+            .Select(action => new
+            {
+                Action = action,
+                Sensitive = action.MethodInfo.GetCustomAttribute<SensitiveEndpointAttribute>(inherit: true)
+            })
+            .Where(x => x.Sensitive != null)
+            .Select(x => new SensitiveEndpointDto
+            {
+                Name = x.Sensitive!.Name,
+                Reason = x.Sensitive.Reason,
+                Route = x.Action.AttributeRouteInfo?.Template ?? string.Empty,
+                HttpMethod = x.Action.ActionConstraints?
+                    .OfType<HttpMethodActionConstraint>()
+                    .FirstOrDefault()?.HttpMethods.FirstOrDefault() ?? "GET",
+                Controller = x.Action.ControllerTypeInfo.FullName ?? x.Action.ControllerTypeInfo.Name,
+                Module = x.Action.ControllerTypeInfo.Assembly.GetName().Name ?? string.Empty,
+                IsDefaultController = x.Action.ControllerTypeInfo
+                    .GetCustomAttributes<DefaultControllerAttribute>().Any(),
+                // 匿名可达的敏感端点是清单里最该先看的一行。
+                AllowsAnonymous = x.Action.EndpointMetadata.OfType<IAllowAnonymous>().Any()
+            })
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .ToList();
+
+        return Ok(new SensitiveEndpointReportDto
+        {
+            TotalCount = endpoints.Count,
+            Endpoints = endpoints
+        });
+    }
+
+    /// <summary>
     /// Get all loaded modules and their manifests
     /// </summary>
     [HttpGet("modules")]
@@ -313,4 +371,46 @@ public class ModuleHealthIssueDto
 
     /// <summary>Simple names of the missing dependency modules (empty unless a dependency issue).</summary>
     public List<string> MissingDependencies { get; set; } = [];
+}
+
+/// <summary>
+/// The sensitive endpoints that are actually reachable in this process.
+/// </summary>
+public class SensitiveEndpointReportDto
+{
+    /// <summary>Number of sensitive endpoints currently active.</summary>
+    public int TotalCount { get; set; }
+
+    /// <summary>The endpoints, ordered by capability name.</summary>
+    public List<SensitiveEndpointDto> Endpoints { get; set; } = [];
+}
+
+/// <summary>
+/// One active sensitive endpoint.
+/// </summary>
+public class SensitiveEndpointDto
+{
+    /// <summary>Capability name; also the key used to suppress it via ControllerFilter:DisabledEndpoints.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Why this endpoint is sensitive, stated as a consequence.</summary>
+    public string Reason { get; set; } = string.Empty;
+
+    /// <summary>Route template as registered.</summary>
+    public string Route { get; set; } = string.Empty;
+
+    /// <summary>Primary HTTP method.</summary>
+    public string HttpMethod { get; set; } = string.Empty;
+
+    /// <summary>Declaring controller type.</summary>
+    public string Controller { get; set; } = string.Empty;
+
+    /// <summary>Assembly the controller comes from.</summary>
+    public string Module { get; set; } = string.Empty;
+
+    /// <summary>True when the controller is a framework default that was activated automatically.</summary>
+    public bool IsDefaultController { get; set; }
+
+    /// <summary>True when the endpoint is reachable without authentication.</summary>
+    public bool AllowsAnonymous { get; set; }
 }

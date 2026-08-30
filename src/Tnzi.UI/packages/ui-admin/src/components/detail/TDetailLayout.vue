@@ -14,13 +14,13 @@
       class="t-detail-layout__tabs"
       @update:value="onSection"
     >
-      <NTabPane v-for="s in sections" :key="s.key" :name="s.key" :tab="label(s)" :disabled="s.disabled" />
+      <NTabPane v-for="s in sections" :key="s.key" :name="s.key" :tab="tabLabel(s)" :disabled="s.disabled" />
     </NTabs>
 
     <!-- side: left vertical menu | right panel -->
     <div v-if="layout === 'side'" class="t-detail-layout__split">
       <div class="t-detail-layout__nav-col">
-        <div class="t-detail-layout__nav-card">
+        <div class="t-detail-layout__nav-card t-surface-card">
           <!-- Optional header INSIDE the nav container (e.g. a filter/search
                box) - integrated at the top of the menu card, divided from the
                menu by a hairline. Hidden on the collapsed phone rail where the
@@ -42,7 +42,7 @@
           />
         </div>
       </div>
-      <div ref="panelRef" class="t-detail-layout__panel">
+      <div ref="panelRef" class="t-detail-layout__panel t-surface-card">
         <slot :section="activeSection" :section-icon="activeSectionIcon" />
       </div>
     </div>
@@ -59,10 +59,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, ref, type CSSProperties, type ComponentPublicInstance } from 'vue'
+import { computed, h, nextTick, ref, type CSSProperties, type ComponentPublicInstance, type VNodeChild } from 'vue'
 import { NTabs, NTabPane, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
+import { navBadgeExtra, navBadgeIcon } from '../layout/nav-badge'
+import { normalizeNavBadge } from '../../utils/nav-badge'
 import { maybeTranslateKey } from '../../i18n/translate'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import type { DetailSection, DetailLayout } from '../../headless/useDetail'
@@ -138,6 +140,18 @@ function label(s: DetailSection): string {
   return maybeTranslateKey(props.translate, s.label, s.label)
 }
 
+/**
+ * Tab strip label. A plain string when the section carries no badge, so a
+ * badge-less tab renders exactly the node naive built before; a render fn
+ * (label + trailing chip) when it does - `NTabPane.tab` accepts both.
+ */
+function tabLabel(s: DetailSection): string | (() => VNodeChild) {
+  const text = label(s)
+  if (normalizeNavBadge(s.badge) === null) return text
+  const extra = navBadgeExtra(s.badge)
+  return () => h('span', { class: 't-detail-layout__tab-label' }, [text, extra?.()])
+}
+
 // Icon of the currently-active section (from the nav `sections` metadata) so a
 // side/tabs panel header can mirror the menu icon. undefined when the section
 // carries no icon (or none is active).
@@ -197,16 +211,32 @@ const menuOptions = computed(() => {
   // ordinal badge instead of an empty icon slot. Desktop (expanded, with text
   // labels) keeps the original behaviour: no badge when there's no icon.
   const phone = isSm.value
-  const toItem = (s: DetailSection, index: number) => ({
-    key: s.key,
-    label: label(s),
-    disabled: s.disabled,
-    icon: s.icon
+  const toItem = (s: DetailSection, index: number) => {
+    const icon = s.icon
       ? () => h(TSvgIcon, { icon: s.icon as string, size: 14 })
       : phone
         ? () => h('span', { class: 't-detail-layout__nav-badge' }, sectionBadge(s, index))
-        : undefined,
-  })
+        : undefined
+    // The collapsed phone rail hides the row's trailing `extra` region, so the
+    // count rides the icon there (the letter/ordinal chip included - it stands
+    // in for the icon). Expanded rows keep it at the trailing edge.
+    const item: {
+      key: string
+      label: string
+      disabled?: boolean
+      icon?: () => VNodeChild
+      extra?: () => VNodeChild
+    } = { key: s.key, label: label(s), disabled: s.disabled }
+    if (phone) {
+      const withBadge = navBadgeIcon(s.badge, icon)
+      if (withBadge) item.icon = withBadge
+    } else {
+      if (icon) item.icon = icon
+      const extra = navBadgeExtra(s.badge)
+      if (extra) item.extra = extra
+    }
+    return item
+  }
   if (!hasGroups) return props.sections.map((s, i) => toItem(s, i))
   const order: string[] = []
   const byGroup = new Map<string, DetailSection[]>()
@@ -232,6 +262,10 @@ const menuOptions = computed(() => {
 <style scoped>
 .t-detail-layout { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
 .t-detail-layout__tabs { flex-shrink: 0; }
+/* Tab label + trailing count chip. No `gap` here on purpose: the chip owns
+   its own leading margin (`.t-nav-badge`, polish.css) so every surface spaces
+   it the same way - a `gap` here would silently double it on this one. */
+.t-detail-layout__tab-label { white-space: nowrap; }
 .t-detail-layout__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .t-detail-layout__split { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
 .t-detail-layout__nav-col {
@@ -245,7 +279,8 @@ const menuOptions = computed(() => {
 .t-detail-layout__nav-card {
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column; overflow: hidden;
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg)); border: 1px solid var(--tnzi-border);
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border); box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius, 6px);
 }
 .t-detail-layout__nav-header {
@@ -263,7 +298,8 @@ const menuOptions = computed(() => {
 .t-detail-layout__panel {
   flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column;
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg)); border: 1px solid var(--tnzi-border);
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border); box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius, 6px);
 }
 .t-detail-layout__footer {

@@ -351,7 +351,7 @@ describe('defineAdminApp', () => {
     const pinia = createPinia()
     app.use(pinia)
     setActivePinia(pinia)
-    const guards: Array<(to: unknown, from: unknown, next: (arg?: unknown) => void) => Promise<void> | void> = []
+    const guards: Array<(to: unknown, from: unknown) => Promise<unknown> | unknown> = []
     const router = {
       beforeEach: vi.fn((g) => guards.push(g)),
       afterEach: vi.fn(),
@@ -363,9 +363,14 @@ describe('defineAdminApp', () => {
     // basePath / router history base instead of a hardcoded '/login'. The guard
     // is async now (it first gives `resolveSession` a chance to restore), so
     // await each guard before asserting the redirect landed.
+    // vue-router 5.2 guards RETURN their outcome instead of calling `next`
+    // (R0025). `true` / undefined means continue; anything else is a redirect.
     const redirects: unknown[] = []
     const to = { meta: {}, name: 'x', path: '/admin/x', fullPath: '/admin/x', query: {}, params: {} }
-    for (const g of guards) await g(to, {}, (arg?: unknown) => { if (arg) redirects.push(arg) })
+    for (const g of guards) {
+      const outcome = await g(to, {})
+      if (outcome !== undefined && outcome !== true) redirects.push(outcome)
+    }
     expect(redirects).toContainEqual({ name: 'login' })
   })
 
@@ -1361,4 +1366,49 @@ describe('defineAdminApp', () => {
       expect(users?.path).toBe('/identity/users')
     })
   })
+
+  describe('rootRoutes', () => {
+    const PublicStub = defineComponent({ render: () => h('div', 'public') })
+    const publicRoute = (path: string): RouteRecordRaw =>
+      ({ path, name: 'sign', component: PublicStub, meta: { requiresAuth: false } }) as RouteRecordRaw
+
+    it('joins the table under basePath, like the framework public page', () => {
+      const { routes } = defineAdminApp({ client: dummyClient, rootRoutes: [publicRoute('/sign/:token')] })
+      const paths = routes.map((r) => r.path)
+      expect(paths).toContain('/admin/sign/:token')
+      expect(paths).toContain('/admin/share/:token')
+    })
+
+    it('stays prefix-free when basePath is "/"', () => {
+      const { routes } = defineAdminApp({
+        client: dummyClient,
+        basePath: '/',
+        rootRoutes: [publicRoute('/sign/:token')],
+      })
+      expect(routes.map((r) => r.path)).toContain('/sign/:token')
+    })
+
+    it('lands at the top level, not inside the admin shell', () => {
+      const { routes } = defineAdminApp({ client: dummyClient, rootRoutes: [publicRoute('/sign/:token')] })
+      // A public page must NOT become a child of admin-root: that would wrap it
+      // in the shell layout and put it behind the auth guard's parent record.
+      expect(namesOfChildren(findByPath(routes, '/admin'))).not.toContain('sign')
+    })
+
+    it('keeps consumer public pages out of the sidebar menu', () => {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+
+      const { install } = defineAdminApp({ client: dummyClient, rootRoutes: [publicRoute('/sign/:token')] })
+      install(app, pinia)
+
+      expect(useAdminRouteStore().authRoutes.some((r) => r.name === 'sign')).toBe(false)
+    })
+  })
 })
+
+function findByPath(routes: RouteRecordRaw[], path: string): RouteRecordRaw | undefined {
+  return routes.find((r) => r.path === path)
+}

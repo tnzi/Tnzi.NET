@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Tnzi.AI.Channels.Permissions;
 using Tnzi.AI.Cli.Permissions;
 using Tnzi.Signing.Permissions;
@@ -18,13 +18,19 @@ using Tnzi.Feature.Permissions;
 using Tnzi.Finance.Permissions;
 using Tnzi.Finance.Banking.Permissions;
 using Tnzi.Finance.Recurring.Permissions;
+using Tnzi.Authorization.DataAuth.Permissions;
+using Tnzi.Finance.Offers.Permissions;
 using Tnzi.Finance.Payroll.Permissions;
 using Tnzi.Hangfire.Permissions;
 using Tnzi.HealthChecks.Permissions;
 using Tnzi.Identity.Permissions;
+using Tnzi.Identity.Organization.Permissions;
 using Tnzi.Localization.Permissions;
 using Tnzi.Notification.Permissions;
 using Tnzi.Payment.Permissions;
+using Tnzi.Payment.Billing.Permissions;
+using Tnzi.Payment.Subscriptions.Permissions;
+using Tnzi.Payment.Promotions.Permissions;
 using Tnzi.Performance.Permissions;
 using Tnzi.SignalR.Permissions;
 using Tnzi.Storage.Permissions;
@@ -61,6 +67,7 @@ public class PermissionCataloguePactTests
         new Dictionary<string, IPermissionDefinitionProvider>
         {
             ["Identity"] = new IdentityPermissions(),
+            ["Identity.Organization"] = new IdentityOrganizationPermissions(),
             ["Authorization"] = new AuthorizationPermissions(),
             ["System"] = new SystemPermissions(),
             ["AspNetCore"] = new AspNetCorePermissions(),
@@ -75,9 +82,14 @@ public class PermissionCataloguePactTests
             ["Notification"] = new NotificationPermissions(),
             ["Chat"] = new ChatPermissions(),
             ["Payment"] = new PaymentPermissions(),
+            ["Payment.Billing"] = new PaymentBillingPermissions(),
+            ["Payment.Subscriptions"] = new PaymentSubscriptionsPermissions(),
+            ["Payment.Promotions"] = new PaymentPromotionsPermissions(),
             ["Finance"] = new FinancePermissions(),
             ["Finance.Banking"] = new FinanceBankingPermissions(),
             ["Finance.Recurring"] = new FinanceRecurringPermissions(),
+            ["Authorization.DataAuth"] = new AuthorizationDataAuthPermissions(),
+            ["Finance.Offers"] = new FinanceOffersPermissions(),
             ["Finance.Payroll"] = new PayrollPermissions(),
             ["Template"] = new TemplatePermissions(),
             ["Signing"] = new SigningPermissions(),
@@ -153,6 +165,9 @@ public class PermissionCataloguePactTests
         // ★ 它们不是新写的码 —— CliPermissions 自 2026-07-31 起就在 src 里、模块也一直
         //   正确注册着，只是从未进入本清单，于是整整一个模块的码既不计入总数锁，也不受
         //   「每个码只能有一个声明模块」约束。是 PermissionProviderInventoryTests 扫源码扫出来的。
+        // 2026-08-19：双人授权 2 码（authorization.dualControl.view / .approve）。
+        // 粗码控制「能不能用这个审批面」，服务层再按 {Operation}.approve 决定「能批哪些动作」——
+        // 后者由应用自己声明，不进本目录。
         codes.Count.ShouldBe(302);
         context.Groups.Count.ShouldBe(13);
     }
@@ -275,8 +290,6 @@ public class PermissionCataloguePactTests
     [InlineData("system.log.view", PermissionCategory.Technical)]
     [InlineData("system.performance.view", PermissionCategory.Technical)]
     [InlineData("system.signalr.view", PermissionCategory.Technical)]
-    [InlineData("storage.chunk.view", PermissionCategory.Technical)]
-    [InlineData("storage.version.view", PermissionCategory.Technical)]
     // Request-level audit is technical monitoring (paths/status/duration).
     [InlineData("audit.log.view", PermissionCategory.Technical)]
     // AI engineering/ops surfaces: run monitors, DAG workflows, evaluations.
@@ -342,6 +355,10 @@ public class PermissionCataloguePactTests
         // (self-hosted MCP server ops surface) was added 2026-07-23.
         // 2026-08-08：外部 CLI agent 的 9 码全部 Technical（「哪台机器能跑什么 CLI」是运维面
         // 不是业务面），90 → 99。它们自 2026-07-31 就存在，只是此前不在清单里。
+        // 2026-08-19：双人授权 2 码随 authorization 组默认 Technical，99 → 101。
+        // 2026-08-23：storage.chunk.view / storage.version.view 退役，101 → 99 ——
+        // 它们坐在要求 storage.file.view 的类级门下面，表达不了任何更窄的访问，
+        // 只能藏菜单而 API 照样通（把装饰当权限展示）。
         technical.Count.ShouldBe(99);
     }
 
@@ -443,7 +460,18 @@ public class PermissionCataloguePactTests
         // 经 inherit:false 排除；运行时派生的动态码（{group}.settings.* 等）不经
         // 控制器 attribute 引用，不在扫描面。
         var declared = BuildContext().Permissions.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var assemblies = AllProviders.Values.Select(p => p.GetType().Assembly).Distinct().ToList();
+
+        // ★ 扫描面不能只取「拥有 provider 的程序集」。一个子模块完全可以有 admin 控制器
+        // 却**不自带权限码** —— 它复用父模块已经声明的码（Tnzi.Storage.Workspace 就是这样：
+        // 它的两个 admin 控制器用的是父模块 StoragePermissions 里的 storage.file.*）。
+        // 按 provider 取程序集会让这类控制器**静默退出这道门**：测试照常绿，而那里
+        // 以后写错一个码就会发布一个恒 403 的端点。所以再并上输出目录里所有带
+        // admin 控制器的 Tnzi 程序集。
+        var assemblies = AllProviders.Values
+            .Select(p => p.GetType().Assembly)
+            .Concat(LoadAdminControllerAssemblies())
+            .Distinct()
+            .ToList();
 
         var controllers = assemblies
             .SelectMany(a => a.SafeGetTypes())
@@ -487,4 +515,36 @@ public class PermissionCataloguePactTests
         context.Permissions["user.create"].Category.ShouldBe(PermissionCategory.Business);
         context.Permissions["finance.journal.update"].Category.ShouldBe(PermissionCategory.Business);
     }
+
+    /// <summary>
+    /// 输出目录里所有含 admin 控制器的 <c>Tnzi*.dll</c>。
+    /// </summary>
+    /// <remarks>
+    /// 与 <c>AdminWriteEndpointPermissionConventionTests.LoadFrameworkAssemblies</c> 同款做法：
+    /// 按文件发现而不是按 provider 发现，这样「有控制器但没自带权限码」的子模块也在门内。
+    /// </remarks>
+    private static IReadOnlyList<Assembly> LoadAdminControllerAssemblies()
+    {
+        var result = new List<Assembly>();
+
+        foreach (var dll in Directory.GetFiles(AppContext.BaseDirectory, "Tnzi*.dll"))
+        {
+            try
+            {
+                var assembly = Assembly.Load(AssemblyName.GetAssemblyName(dll));
+                if (assembly.SafeGetTypes().Any(t =>
+                        t is { IsClass: true, IsAbstract: false } && typeof(ApiAdminControllerBase).IsAssignableFrom(t)))
+                {
+                    result.Add(assembly);
+                }
+            }
+            catch
+            {
+                // 非托管 / 加载不了的 DLL 跳过。
+            }
+        }
+
+        return result;
+    }
+
 }

@@ -1,4 +1,4 @@
-﻿using Mapster;
+using Mapster;
 using MapsterMapper;
 using Tnzi.Mapster;
 
@@ -53,7 +53,8 @@ public class MetadataAndInMemoryTests
             TestFileAccessAuthorizer.AllowAll(),
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new UploadGuard(optionsMonitor.Object));
     }
 
     #region E1-1: FileRecord Metadata JSON

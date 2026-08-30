@@ -22,10 +22,20 @@ public sealed record ModuleConfigurationFailure(Type ModuleType, string Phase, E
 /// <param name="Modules">拓扑排序后的模块列表</param>
 /// <param name="ServiceMap">模块 → 它注册的服务描述符</param>
 /// <param name="Failures">配置阶段抛出的异常，<b>调用方必须显式处理</b></param>
+/// <param name="FinalServices">
+/// 三个阶段全部跑完后的服务集合快照。
+/// <para>
+/// 与 <paramref name="ServiceMap"/> 互补而非重复：后者是「谁注册了什么」的差集，
+/// 回答不了「最终谁赢了」—— 一个模块用 <c>RemoveAll</c> + <c>Add</c> 覆盖另一个模块的
+/// 注册时（<c>RedisCachingModule</c> 之于 <c>ICache</c>、<c>AIModule</c> 之于
+/// <c>IAiUtility</c>），差集里两条注册都在，只有这份快照能说明实际生效的是哪一条。
+/// </para>
+/// </param>
 public sealed record ModuleLoadResult(
     IReadOnlyList<IModuleDescriptor> Modules,
     Dictionary<Type, List<ServiceDescriptor>> ServiceMap,
-    IReadOnlyList<ModuleConfigurationFailure> Failures);
+    IReadOnlyList<ModuleConfigurationFailure> Failures,
+    IReadOnlyList<ServiceDescriptor> FinalServices);
 
 /// <summary>
 /// Helper for loading modules and collecting service maps in test scenarios
@@ -117,7 +127,7 @@ public static class ModuleTestHelper
                 serviceMap[module.Type].AddRange(added);
         }
 
-        return new ModuleLoadResult(modules, serviceMap, failures);
+        return new ModuleLoadResult(modules, serviceMap, failures, services.ToList());
     }
 
     /// <summary>

@@ -19,6 +19,19 @@ public class AiUtilityService : IAiUtility
         _logger = logger ?? NullLogger<AiUtilityService>.Instance;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// 只看配置来源的提供商（<c>IChatClientFactory.GetAvailableProviders</c>）。
+    /// 数据库里登记的 <c>Provider</c> 实体不计入 —— 本属性是同步的、不查库，
+    /// 于是「只在 admin 里配了提供商」的部署会被低报为不可用。方向刻意如此：
+    /// 少显示一个本可用的入口，好过显示一个点了没反应的入口。
+    /// <para>
+    /// 已启用的提供商必有 API Key 是启动期保证的（<c>AIOptionsValidator</c> 对
+    /// <c>Enabled</c> 却缺 <c>ApiKey</c> 的条目直接 fail-fast），故此处无需再查。
+    /// </para>
+    /// </remarks>
+    public bool IsAvailable => _chatClientFactory.GetAvailableProviders().Count > 0;
+
     public async Task<string?> ExecuteAsync(
         string systemPrompt,
         string userMessage,

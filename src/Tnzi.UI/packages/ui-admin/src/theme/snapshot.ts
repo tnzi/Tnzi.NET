@@ -7,7 +7,7 @@
  * "save for all users" flow.
  */
 import type { ThemeContext, ThemeColors } from '@tnzi/ui'
-import type { useAdminThemeStore } from '../stores/useAdminThemeStore'
+import type { AdminSurfaceStyle, useAdminThemeStore } from '../stores/useAdminThemeStore'
 import type { AdminThemeSnapshot } from './admin-config'
 import { applyAppearancePreset, type AdminThemePreset } from './appearance-presets'
 
@@ -56,6 +56,7 @@ export function buildThemeSnapshot(themeStore: AdminThemeStore, ctx: ThemeContex
       autoSelectFirstMenu: themeStore.autoSelectFirstMenu,
       presetPickerVisible: themeStore.presetPickerVisible,
       themeRadius: themeStore.themeRadius,
+      surfaceStyle: themeStore.surfaceStyle,
       footerHeight: themeStore.footerHeight,
       siderBg: themeStore.siderBg,
       headerBg: themeStore.headerBg,
@@ -71,6 +72,16 @@ export function buildThemeSnapshot(themeStore: AdminThemeStore, ctx: ThemeContex
       contentTextColor: themeStore.contentTextColor,
       pageHeaderTextColor: themeStore.pageHeaderTextColor,
       cardTextColor: themeStore.cardTextColor,
+      // Desktop layout surfaces. Carried like every other surface so that
+      // "save for all users" ships the desktop's look too - otherwise a super
+      // admin who themed the desktop would be the only one who ever saw it.
+      desktopWallpaperBg: themeStore.desktopWallpaperBg,
+      desktopWallpaperImage: themeStore.desktopWallpaperImage,
+      desktopWallpaperScrim: themeStore.desktopWallpaperScrim,
+      desktopTaskbarBg: themeStore.desktopTaskbarBg,
+      desktopTaskbarHeight: themeStore.desktopTaskbarHeight,
+      desktopVibrancy: themeStore.desktopVibrancy,
+      desktopWindowBarBg: themeStore.desktopWindowBarBg,
     },
     ui: {
       mode: ctx.settings.value.mode,
@@ -204,6 +215,11 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   if (typeof snapshot.admin.themeRadius === 'number') {
     themeStore.setThemeRadius(snapshot.admin.themeRadius)
   }
+  // Absent in a snapshot exported before the surface-style setting existed;
+  // the setter validates, so an unknown string leaves the current style alone.
+  if (typeof snapshot.admin.surfaceStyle === 'string') {
+    themeStore.setSurfaceStyle(snapshot.admin.surfaceStyle as AdminSurfaceStyle)
+  }
   if (typeof snapshot.admin.footerHeight === 'number') {
     themeStore.setFooterHeight(snapshot.admin.footerHeight)
   }
@@ -226,6 +242,27 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   }
   if ('pageHeaderBg' in snapshot.admin) {
     themeStore.setPageHeaderBg(snapshot.admin.pageHeaderBg ?? null)
+  }
+  if ('desktopWallpaperBg' in snapshot.admin) {
+    themeStore.setDesktopWallpaperBg(snapshot.admin.desktopWallpaperBg ?? null)
+  }
+  if ('desktopWallpaperImage' in snapshot.admin) {
+    themeStore.setDesktopWallpaperImage(snapshot.admin.desktopWallpaperImage ?? null)
+  }
+  if (typeof snapshot.admin.desktopWallpaperScrim === 'number') {
+    themeStore.setDesktopWallpaperScrim(snapshot.admin.desktopWallpaperScrim)
+  }
+  if ('desktopTaskbarBg' in snapshot.admin) {
+    themeStore.setDesktopTaskbarBg(snapshot.admin.desktopTaskbarBg ?? null)
+  }
+  if (typeof snapshot.admin.desktopTaskbarHeight === 'number') {
+    themeStore.setDesktopTaskbarHeight(snapshot.admin.desktopTaskbarHeight)
+  }
+  if (typeof snapshot.admin.desktopVibrancy === 'number') {
+    themeStore.setDesktopVibrancy(snapshot.admin.desktopVibrancy)
+  }
+  if ('desktopWindowBarBg' in snapshot.admin) {
+    themeStore.setDesktopWindowBarBg(snapshot.admin.desktopWindowBarBg ?? null)
   }
   if ('cardBg' in snapshot.admin) {
     themeStore.setCardBg(snapshot.admin.cardBg ?? null)

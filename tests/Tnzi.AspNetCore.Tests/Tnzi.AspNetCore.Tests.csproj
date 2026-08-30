@@ -7,14 +7,21 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <!--
+    传递引用了 Tnzi.Documents（经 Tnzi.Signing / Tnzi.Hosting），于是也带上 PDFium/SkiaSharp
+    的原生资产：只为当前主机 RID 构建，并剔除原生 pdb。见该文件里的说明。
+  -->
+  <Import Project="..\TnziNativeAssets.props" />
+
+
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

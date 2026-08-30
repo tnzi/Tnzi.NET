@@ -1,7 +1,8 @@
-global using Moq;
+﻿global using Moq;
 global using SixLabors.ImageSharp;
 global using SixLabors.ImageSharp.PixelFormats;
 global using Tnzi.Caching;
+global using Tnzi.Geometry;
 global using Tnzi.Imaging.Extensions;
 global using Tnzi.Imaging.Metadata;
 global using Tnzi.Imaging.Options;

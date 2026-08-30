@@ -42,7 +42,8 @@ public class ArchiveAuthorizationTests
             authorizer,
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _serviceProvider.Object);
+            _serviceProvider.Object,
+            new UploadGuard(monitor.Object));
     }
 
     private static FileRecord Record(Guid id) => new() { Id = id, FileName = $"{id}.pdf", OriginalName = $"{id}.pdf", Path = $"2026/01/01/{id}.pdf" };

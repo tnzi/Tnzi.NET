@@ -106,7 +106,7 @@ async function handleClick(action: QuickAction): Promise<void> {
       v-for="action in visibleActions"
       :key="action.key"
       type="button"
-      class="t-widget-quick-actions__tile"
+      class="t-widget-quick-actions__tile t-surface-card"
       @click="handleClick(action)"
     >
       <span class="t-widget-quick-actions__icon" :data-tone="action.tone ?? 'primary'">
@@ -135,17 +135,17 @@ async function handleClick(action: QuickAction): Promise<void> {
   justify-content: center;
   gap: 6px;
   padding: 14px 10px;
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
-  border: 1px solid var(--tnzi-border);
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   cursor: pointer;
   text-align: center;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .t-widget-quick-actions__tile:hover {
-  transform: translateY(-2px);
   border-color: var(--tnzi-primary);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-widget-quick-actions__icon {
   display: inline-flex;

@@ -17,7 +17,7 @@
       <article
         v-for="(row, index) in items"
         :key="keyOf(row, index)"
-        class="t-data-cards__card"
+        class="t-data-cards__card t-surface-card"
         :class="{
           't-data-cards__card--selected': showSelection && isSelected(row),
           't-data-cards__card--clickable': isCardClickable(row, index),
@@ -231,6 +231,9 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Clearance - see TCardRenderer. This one had none at all, so on phones the
+     top row sat on the clip edge. */
+  padding: var(--tnzi-surface-card-gutter);
 }
 .t-data-cards__list {
   display: flex;
@@ -244,14 +247,14 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
-  border: 1px solid var(--tnzi-border, #e5e7eb);
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-data-cards__card--selected {
   border-color: var(--tnzi-primary, #646cff);
-  box-shadow: 0 0 0 1px var(--tnzi-primary, #646cff);
+  box-shadow: var(--tnzi-surface-ring-selected);
 }
 .t-data-cards__card--clickable {
   cursor: pointer;
@@ -261,10 +264,10 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
 }
 .t-data-cards__card--clickable:hover {
   border-color: var(--tnzi-primary, #646cff);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-data-cards__card--clickable:active {
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-data-cards__card--summary {
   background: var(--tnzi-layout-bg, #f7f8fa);

@@ -1,4 +1,4 @@
-﻿namespace Tnzi.Storage.Controllers;
+namespace Tnzi.Storage.Controllers;
 
 /// <summary>
 /// 存储控制器基类
@@ -16,6 +16,16 @@
 ///
 /// 判定刻意不放在控制器:本类是 <c>[DefaultController]</c>,消费方可在同路由注册自己的
 /// 控制器把它整个替换掉,那样挂在这里的任何特性都会随之失效。服务层是唯一必经之处。
+///
+/// ★ <b>分享 / 版本 / 分片上传三组端点留在这里,而它们的实现在可选包
+/// <c>Tnzi.Storage.Workspace</c></b>。三个服务因此是<b>可空可选注入</b>,没加载时那些端点
+/// 返回 501 并指名要加载的包 —— <b>URL 一个字不变</b>。
+///
+/// 为什么不把它们搬进子模块自己的控制器:<c>[DefaultController]</c> 是 <c>Inherited = false</c>
+/// 而 <c>[Route]</c> 是 <c>Inherited = true</c>,子模块在 <c>files</c> 这个<b>父模块仍然占着的</b>
+/// 路由模板上另起一个默认控制器,会让「消费方派生 <c>DefaultStorageController</c> 覆写一个端点」
+/// 这条框架文档给出的做法产生它没有要过的副作用。另起路由前缀则会改掉公开 URL,
+/// 那是对所有既有调用方的破坏性变更,不该由一次内部拆分来付。
 /// </remarks>
 [DefaultController]
 [Route("files")]
@@ -24,24 +34,44 @@
 public class DefaultStorageController : ApiControllerBase
 {
     protected readonly IFileStorageService FileStorageService;
-    protected readonly IFileShareService FileShareService;
-    protected readonly IFileVersionService FileVersionService;
-    protected readonly IFileChunkUploadService FileChunkUploadService;
+
+    /// <summary>分享链接服务；<c>null</c> = 未加载 <c>Tnzi.Storage.Workspace</c>。</summary>
+    protected readonly IFileShareService? FileShareService;
+
+    /// <summary>文件版本服务；<c>null</c> = 未加载 <c>Tnzi.Storage.Workspace</c>。</summary>
+    protected readonly IFileVersionService? FileVersionService;
+
+    /// <summary>分片上传服务；<c>null</c> = 未加载 <c>Tnzi.Storage.Workspace</c>。</summary>
+    protected readonly IFileChunkUploadService? FileChunkUploadService;
 
     /// <summary>
     /// 构造函数
     /// </summary>
     public DefaultStorageController(
         IFileStorageService fileStorageService,
-        IFileShareService fileShareService,
-        IFileVersionService fileVersionService,
-        IFileChunkUploadService fileChunkUploadService)
+        IFileShareService? fileShareService = null,
+        IFileVersionService? fileVersionService = null,
+        IFileChunkUploadService? fileChunkUploadService = null)
     {
         FileStorageService = Check.NotNull(fileStorageService);
-        FileShareService = Check.NotNull(fileShareService);
-        FileVersionService = Check.NotNull(fileVersionService);
-        FileChunkUploadService = Check.NotNull(fileChunkUploadService);
+        FileShareService = fileShareService;
+        FileVersionService = fileVersionService;
+        FileChunkUploadService = fileChunkUploadService;
     }
+
+    /// <summary>
+    /// 工作区包缺席时的统一回答：<b>501 + 指名要加载什么</b>。
+    /// </summary>
+    /// <remarks>
+    /// 用 501 而不是 404：路由确实存在，只是这台宿主没装这项能力，404 会让调用方
+    /// 以为自己拼错了 URL，从而去查一个不存在的问题。
+    /// 也不用 503：那是「暂时不可用」，监控与客户端的重试逻辑会照着它一直重试一件
+    /// 永远不会变好的事。501 恰好就是「这台服务器不提供这项功能」，
+    /// 也是框架内既有的同类回答（Finance 的 ICheckDocumentRenderer / IReceiptExtractor 缺席时同样是 501）。
+    /// 消息里点名包名，是因为「少加载一个可选包」在日志里唯一能自证的方式就是它自己说出来。
+    /// </remarks>
+    private const string WorkspaceMissing =
+        "This capability requires the Tnzi.Storage.Workspace module, which this host has not loaded.";
 
     /// <summary>
     /// 根据 ID 获取文件
@@ -242,6 +272,11 @@ public class DefaultStorageController : ApiControllerBase
     /// Generate a presigned URL for temporary public access
     /// </summary>
     [HttpGet("{id:guid}/presigned-url")]
+    [SensitiveEndpoint(
+        "storage.presigned-url",
+        "Issues a URL that the object store serves directly. It bypasses application-layer authorization "
+        + "entirely, and for cloud providers its lifetime is governed by the storage backend rather than by "
+        + "Storage:SignedUrlTtlSeconds - so the framework can neither shorten nor revoke it once handed out.")]
     public virtual async Task<ApiResult<string>> GetPresignedUrl(Guid id, [FromQuery] int expiresInSeconds = 3600)
     {
         var result = await FileStorageService.GetPresignedUrlAsync(id, expiresInSeconds, "GET");
@@ -263,6 +298,11 @@ public class DefaultStorageController : ApiControllerBase
     /// cannot mint a token for it (404, same as every other read path).
     /// </remarks>
     [HttpGet("{id:guid}/access-token")]
+    [SensitiveEndpoint(
+        "storage.access-token",
+        "Issues a credential that can leave the controlled environment (it travels in a URL query string). "
+        + "Blast radius is deliberately small - one file, read-only, capped by Storage:SignedUrlTtlSeconds, "
+        + "and it cannot mint further tokens - but a leaked link is readable by anyone until it expires.")]
     public virtual async Task<ApiResult<FileAccessTokenDto>> GetAccessToken(Guid id, [FromQuery] int? expiresInSeconds = null)
     {
         var result = await FileStorageService.CreateAccessTokenAsync(id, expiresInSeconds);
@@ -274,6 +314,10 @@ public class DefaultStorageController : ApiControllerBase
     /// read are omitted from the response instead of failing the batch.
     /// </summary>
     [HttpPost("access-tokens")]
+    [SensitiveEndpoint(
+        "storage.access-token",
+        "Batch form of the single-file access token: same credential, many files in one round trip. "
+        + "Shares the capability name so that suppressing it closes both.")]
     public virtual async Task<ApiResult<IReadOnlyList<FileAccessTokenDto>>> GetAccessTokens([FromBody] FileAccessTokenRequest request)
     {
         if (request?.FileIds == null || request.FileIds.Count == 0)
@@ -318,6 +362,12 @@ public class DefaultStorageController : ApiControllerBase
         IFormFile file,
         [FromForm] string? description = null)
     {
+        // 能力判定要排在入参校验之前：反过来的话，缺包的宿主对一个没带文件的请求
+        // 回的是「你参数错了」，调用方会去补参数、再收到同一个 400，永远问不出
+        // 真正的原因是这台宿主没装这项能力。
+        if (FileVersionService == null)
+            return Error<FileVersionDto>(WorkspaceMissing, 501);
+
         if (file == null || file.Length == 0)
         {
             return BadRequest<FileVersionDto>("File is required");
@@ -325,8 +375,7 @@ public class DefaultStorageController : ApiControllerBase
 
         using var stream = file.OpenReadStream();
         var result = await FileVersionService.CreateVersionAsync(id, stream, description);
-        // 控制器边界：把 FileVersion 实体投影为安全 DTO，绝不把内部字段（Path / Md5Hash / TenantId）泄漏进 API 契约。
-        return result.Map(v => v.MapTo<FileVersionDto>()).ToApiResult();
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -336,9 +385,11 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<IEnumerable<FileVersionDto>>> GetVersions(Guid id)
     {
+        if (FileVersionService == null)
+            return Error<IEnumerable<FileVersionDto>>(WorkspaceMissing, 501);
+
         var result = await FileVersionService.GetVersionsAsync(id);
-        // 控制器边界：把 FileVersion 实体投影为安全 DTO，绝不把内部字段（Path / Md5Hash / TenantId）泄漏进 API 契约。
-        return result.Map(items => items.Select(v => v.MapTo<FileVersionDto>())).ToApiResult();
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -348,6 +399,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileRecordDto>> RestoreVersion(Guid id, int version)
     {
+        if (FileVersionService == null)
+            return Error<FileRecordDto>(WorkspaceMissing, 501);
+
         var result = await FileVersionService.RestoreVersionAsync(id, version);
         return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
@@ -359,6 +413,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<IActionResult> DownloadVersion(Guid id, int version)
     {
+        if (FileVersionService == null)
+            return WorkspaceMissingResult();
+
         var recordResult = await FileStorageService.GetRecordAsync(id);
         if (!recordResult.Succeeded)
         {
@@ -384,6 +441,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult> DeleteVersion(Guid id, int version)
     {
+        if (FileVersionService == null)
+            return Error(WorkspaceMissing, 501);
+
         var result = await FileVersionService.DeleteVersionAsync(id, version);
         return result.ToApiResult();
     }
@@ -395,13 +455,15 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileSharePublicDto>> CreateShare(Guid id, [FromBody] CreateShareRequest request)
     {
+        if (FileShareService == null)
+            return Error<FileSharePublicDto>(WorkspaceMissing, 501);
+
         var result = await FileShareService.CreateShareAsync(
             id,
             request.ExpiresAt,
             request.MaxAccessCount,
             request.Password);
-        // 投影到公开 DTO，绝不向外暴露 PasswordHash
-        return result.Map(MapToPublicDto).ToApiResult();
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -418,6 +480,9 @@ public class DefaultStorageController : ApiControllerBase
     [AllowAnonymous]
     public virtual async Task<ApiResult<FileSharePreviewDto>> GetSharePreview(string token)
     {
+        if (FileShareService == null)
+            return Error<FileSharePreviewDto>(WorkspaceMissing, 501);
+
         var result = await FileShareService.GetSharePreviewAsync(token);
         return result.ToApiResult();
     }
@@ -429,9 +494,11 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileSharePublicDto>> GetShare(string token)
     {
+        if (FileShareService == null)
+            return Error<FileSharePublicDto>(WorkspaceMissing, 501);
+
         var result = await FileShareService.GetShareAsync(token);
-        // 投影到公开 DTO，绝不向外暴露 PasswordHash
-        return result.Map(MapToPublicDto).ToApiResult();
+        return result.ToApiResult();
     }
 
     /// <summary>
@@ -441,6 +508,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult> RevokeShare(string token)
     {
+        if (FileShareService == null)
+            return Error(WorkspaceMissing, 501);
+
         var result = await FileShareService.RevokeShareAsync(token);
         return result.ToApiResult();
     }
@@ -461,6 +531,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<bool>> VerifyShareAccess(string token, [FromBody] VerifyShareRequest? request = null)
     {
+        if (FileShareService == null)
+            return Error<bool>(WorkspaceMissing, 501);
+
         var result = await FileShareService.ValidateShareAccessAsync(token, request?.Password);
         return result.ToApiResult();
     }
@@ -475,9 +548,17 @@ public class DefaultStorageController : ApiControllerBase
     /// </remarks>
     [HttpGet("share/{token}/download")]
     [AllowAnonymous]
+    [SensitiveEndpoint(
+        "storage.share-link",
+        "Serves file content to an unauthenticated caller who holds a share token. Storage:Share:AllowAnonymous "
+        + "defaults to true, so on upgrade every share row already in the database becomes a working public link - "
+        + "review the shares list before enabling this in a deployment that never intended external distribution.")]
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<IActionResult> DownloadByShareToken(string token, [FromQuery] string? password = null)
     {
+        if (FileShareService == null)
+            return WorkspaceMissingResult();
+
         // 1) 校验密码/过期/启用（密码校验仍需在此进行）
         var isValidResult = await FileShareService.ValidateShareAccessAsync(token, password);
         if (!isValidResult.Succeeded || !isValidResult.Data)
@@ -543,8 +624,11 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("upload/chunk/init")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileUploadSession>> InitiateChunkedUpload([FromBody] InitiateChunkedUploadRequest request)
+    public virtual async Task<ApiResult<FileUploadSessionDto>> InitiateChunkedUpload([FromBody] InitiateChunkedUploadRequest request)
     {
+        if (FileChunkUploadService == null)
+            return Error<FileUploadSessionDto>(WorkspaceMissing, 501);
+
         var result = await FileChunkUploadService.InitiateChunkedUploadAsync(
             request.FileName,
             request.TotalSize,
@@ -558,14 +642,17 @@ public class DefaultStorageController : ApiControllerBase
     /// </summary>
     [HttpPost("upload/chunk/{uploadSessionId:guid}")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public virtual async Task<ApiResult<FileChunk>> UploadChunk(
+    public virtual async Task<ApiResult<FileChunkDto>> UploadChunk(
         Guid uploadSessionId,
         [FromQuery] int chunkIndex,
         IFormFile chunk)
     {
+        if (FileChunkUploadService == null)
+            return Error<FileChunkDto>(WorkspaceMissing, 501);
+
         if (chunk == null || chunk.Length == 0)
         {
-            return BadRequest<FileChunk>("Chunk file is required");
+            return BadRequest<FileChunkDto>("Chunk file is required");
         }
 
         using var stream = chunk.OpenReadStream();
@@ -582,6 +669,9 @@ public class DefaultStorageController : ApiControllerBase
         Guid uploadSessionId,
         [FromBody] CompleteChunkedUploadRequest? request = null)
     {
+        if (FileChunkUploadService == null)
+            return Error<FileRecordDto>(WorkspaceMissing, 501);
+
         var result = await FileChunkUploadService.CompleteChunkedUploadAsync(
             uploadSessionId,
             request?.IsTemporary ?? false);
@@ -595,6 +685,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult> CancelChunkedUpload(Guid uploadSessionId)
     {
+        if (FileChunkUploadService == null)
+            return Error(WorkspaceMissing, 501);
+
         var result = await FileChunkUploadService.CancelChunkedUploadAsync(uploadSessionId);
         return result.ToApiResult();
     }
@@ -606,6 +699,9 @@ public class DefaultStorageController : ApiControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileUploadProgress>> GetUploadProgress(Guid uploadSessionId)
     {
+        if (FileChunkUploadService == null)
+            return Error<FileUploadProgress>(WorkspaceMissing, 501);
+
         var result = await FileChunkUploadService.GetUploadProgressAsync(uploadSessionId);
         return result.ToApiResult();
     }
@@ -660,21 +756,9 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 把 FileShare 实体投影为对外公开 DTO（绝不包含 PasswordHash）
+    /// 两个返回 <see cref="IActionResult"/> 的端点用的 501：它们不走 <c>ApiResult</c>，
+    /// 所以得自己把消息写进响应体。
     /// </summary>
-    private static FileSharePublicDto MapToPublicDto(FileShare share)
-    {
-        return new FileSharePublicDto
-        {
-            Id = share.Id,
-            FileId = share.FileId,
-            ShareToken = share.ShareToken,
-            ExpiresAt = share.ExpiresAt,
-            MaxAccessCount = share.MaxAccessCount,
-            AccessCount = share.AccessCount,
-            RequirePassword = share.RequirePassword,
-            IsEnabled = share.IsEnabled,
-            CreationTime = share.CreationTime
-        };
-    }
+    private ObjectResult WorkspaceMissingResult()
+        => StatusCode(StatusCodes.Status501NotImplemented, WorkspaceMissing);
 }

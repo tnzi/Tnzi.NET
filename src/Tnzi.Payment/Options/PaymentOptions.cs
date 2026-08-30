@@ -87,29 +87,33 @@ public class PaymentOptions
     public bool EnableRefundApproval { get; set; } = true;
 
     /// <summary>
-    /// 支付渠道配置
+    /// 支付渠道配置：键是渠道代码（<c>Stripe</c> / <c>PayPal</c> / <c>Offline</c> …），
+    /// 决定 <c>PaymentProviderFactory</c> 发不发这个渠道。
     /// </summary>
+    /// <remarks>
+    /// 这里管的是「发不发」，不是「怎么连」。各渠道的凭据配置类随实现住在可选子模块里：
+    /// <c>Payment:Stripe</c> → <c>Tnzi.Payment.Stripe</c>，<c>Payment:PayPal</c> → <c>Tnzi.Payment.PayPal</c>。
+    /// 拆包没有改动任何配置节路径，只是绑定与校验换了地方。
+    /// 两处都要配：这里 <c>Enabled=true</c> 让渠道可被选中，那边的凭据让它真能连上。
+    /// </remarks>
     public Dictionary<string, ChannelOptions> Channels { get; set; } = new();
 
-    /// <summary>
-    /// 订阅配置
-    /// </summary>
-    public SubscriptionOptions Subscription { get; set; } = new();
+    // 订阅配置随续费域搬进了可选子模块 Tnzi.Payment.Subscriptions（类 SubscriptionOptions，
+    // 由它自己绑同一个绝对节 Payment:Subscription）。配置 JSON 的形状一字不变，
+    // 少的只是这条嵌套属性 —— 拆分前本模块也从来没有读过它。
 
-    /// <summary>
-    /// 发票配置
-    /// </summary>
-    public InvoiceOptions Invoice { get; set; } = new();
+    // 发票配置随发票域搬进了可选子模块 Tnzi.Payment.Billing（类 InvoiceOptions，
+    // 由它自己绑同一个绝对节 Payment:Invoice）。配置 JSON 的形状一字不变，
+    // 少的只是这条嵌套属性 —— 本模块从来没有读过它。
 
     /// <summary>
     /// 税务配置
     /// </summary>
     public TaxOptions Tax { get; set; } = new();
 
-    /// <summary>
-    /// 促销配置
-    /// </summary>
-    public PromotionOptions Promotion { get; set; } = new();
+    // 促销配置随促销域搬进了可选子模块 Tnzi.Payment.Promotions（类 PromotionOptions，
+    // 由它自己绑同一个绝对节 Payment:Promotion）。配置 JSON 的形状一字不变，
+    // 少的只是这条嵌套属性 —— 本模块从来没有读过它（读的一直是单独注入的 IOptionsMonitor<PromotionOptions>）。
 
     /// <summary>
     /// 后台任务执行间隔（分钟），默认 5 分钟
@@ -156,120 +160,6 @@ public class ChannelOptions
 }
 
 /// <summary>
-/// 订阅配置选项
-/// 配置路径：Payment:Subscription（作为 PaymentOptions 嵌套属性，经父 IOptionsMonitor&lt;PaymentOptions&gt; 热消费）
-/// </summary>
-[ConfigSection("Payment:Subscription")]
-[RuntimeSettingGroup(Key = "payment-subscription", Module = "Payment", DisplayName = "Subscription",
-    I18nKey = "admin.modules.system.settings.groups.paymentSubscription",
-    Icon = "mdi:autorenew", Order = 510)]
-public class SubscriptionOptions
-{
-    /// <summary>
-    /// 自动续费提醒天数
-    /// </summary>
-    [RuntimeSetting(Label = "Auto-Renewal Reminder Days", I18n = "admin.modules.system.settings.fields.paymentAutoRenewalReminderDays",
-        Type = SettingFieldType.Int, Min = 0,
-        Description = "Days before renewal to send a reminder")]
-    public int AutoRenewalReminderDays { get; set; } = 7;
-
-    /// <summary>
-    /// 宽限期天数
-    /// </summary>
-    [RuntimeSetting(Label = "Grace Period Days", I18n = "admin.modules.system.settings.fields.paymentGracePeriodDays",
-        Type = SettingFieldType.Int, Min = 0,
-        Description = "Days a past-due subscription is retried before expiration")]
-    public int GracePeriodDays { get; set; } = 3;
-
-    /// <summary>
-    /// 最大重试次数
-    /// </summary>
-    [RuntimeSetting(Label = "Max Retry Count", I18n = "admin.modules.system.settings.fields.paymentMaxRetryCount",
-        Type = SettingFieldType.Int, Min = 0,
-        Description = "Maximum off-session billing retries before marking expired")]
-    public int MaxRetryCount { get; set; } = 3;
-
-    /// <summary>
-    /// 默认试用天数：计划开启了试用但未设置天数时用它兜底
-    /// </summary>
-    [RuntimeSetting(Label = "Default Trial Days", I18n = "admin.modules.system.settings.fields.paymentDefaultTrialDays",
-        Type = SettingFieldType.Int, Min = 0,
-        Description = "Trial length used when a plan allows trials but does not specify days")]
-    public int DefaultTrialDays { get; set; } = 14;
-
-    /// <summary>
-    /// 暂停订阅的最长天数（0 = 不限制）。超过上限的暂停请求会被拒绝。
-    /// </summary>
-    [RuntimeSetting(Label = "Max Pause Days", I18n = "admin.modules.system.settings.fields.paymentMaxPauseDays",
-        Type = SettingFieldType.Int, Min = 0,
-        Description = "Maximum number of days a subscription may stay paused (0 = unlimited)")]
-    public int MaxPauseDays { get; set; } = 90;
-}
-
-/// <summary>
-/// 发票配置选项
-/// 配置路径：Payment:Invoice
-/// </summary>
-[ConfigSection("Payment:Invoice")]
-[RuntimeSettingGroup(Key = "payment-invoice", Module = "Payment", DisplayName = "Invoice",
-    I18nKey = "admin.modules.system.settings.groups.paymentInvoice",
-    Icon = "mdi:file-document-outline", Order = 520)]
-public class InvoiceOptions
-{
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    [RuntimeSetting(Label = "Invoice Enabled", I18n = "admin.modules.system.settings.fields.paymentInvoiceEnabled",
-        Type = SettingFieldType.Boolean,
-        Description = "Enable invoice generation")]
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>
-    /// 默认模板
-    /// </summary>
-    [RuntimeSetting(Label = "Default Invoice Template", I18n = "admin.modules.system.settings.fields.paymentInvoiceDefaultTemplate",
-        Type = SettingFieldType.String,
-        Description = "Template name used when none is specified")]
-    public string DefaultTemplate { get; set; } = "InvoiceDefault";
-
-    /// <summary>
-    /// 支付成功后自动发送
-    /// </summary>
-    [RuntimeSetting(Label = "Auto-Send On Payment", I18n = "admin.modules.system.settings.fields.paymentInvoiceAutoSendOnPayment",
-        Type = SettingFieldType.Boolean,
-        Description = "Automatically generate and send an invoice when a payment succeeds")]
-    public bool AutoSendOnPayment { get; set; } = true;
-
-    /// <summary>
-    /// 公司名称
-    /// </summary>
-    [RuntimeSetting(Label = "Company Name", I18n = "admin.modules.system.settings.fields.paymentInvoiceCompanyName",
-        Type = SettingFieldType.String, Subsection = "Company")]
-    public string? CompanyName { get; set; }
-
-    /// <summary>
-    /// 公司地址
-    /// </summary>
-    [RuntimeSetting(Label = "Company Address", I18n = "admin.modules.system.settings.fields.paymentInvoiceCompanyAddress",
-        Type = SettingFieldType.String, Subsection = "Company")]
-    public string? CompanyAddress { get; set; }
-
-    /// <summary>
-    /// 公司邮箱
-    /// </summary>
-    [RuntimeSetting(Label = "Company Email", I18n = "admin.modules.system.settings.fields.paymentInvoiceCompanyEmail",
-        Type = SettingFieldType.String, Subsection = "Company")]
-    public string? CompanyEmail { get; set; }
-
-    /// <summary>
-    /// 税号
-    /// </summary>
-    [RuntimeSetting(Label = "Tax ID", I18n = "admin.modules.system.settings.fields.paymentInvoiceTaxId",
-        Type = SettingFieldType.String, Subsection = "Company")]
-    public string? TaxId { get; set; }
-}
-
-/// <summary>
 /// 税务配置选项
 /// 配置路径：Payment:Tax
 /// 由 <see cref="Services.DefaultPaymentTaxCalculator"/> 消费，参与支付应付额与发票税额的计算。
@@ -303,31 +193,4 @@ public class TaxOptions
         Type = SettingFieldType.Boolean,
         Description = "When enabled the listed price already contains tax; tax is only itemised on the invoice")]
     public bool TaxIncluded { get; set; }
-}
-
-/// <summary>
-/// 促销配置选项
-/// 配置路径：Payment:Promotion
-/// </summary>
-[ConfigSection("Payment:Promotion")]
-[RuntimeSettingGroup(Key = "payment-promotion", Module = "Payment", DisplayName = "Promotion",
-    I18nKey = "admin.modules.system.settings.groups.paymentPromotion",
-    Icon = "mdi:tag-outline", Order = 530)]
-public class PromotionOptions
-{
-    /// <summary>
-    /// 每用户单张优惠券的默认使用次数上限：促销未单独设置 PerUserUsageLimit 时用它兜底。
-    /// </summary>
-    [RuntimeSetting(Label = "Max Coupon Usage Per User", I18n = "admin.modules.system.settings.fields.paymentMaxCouponUsagePerUser",
-        Type = SettingFieldType.Int, Min = 1,
-        Description = "Fallback per-user usage cap for promotions that do not set their own limit")]
-    public int MaxCouponUsagePerUser { get; set; } = 5;
-
-    /// <summary>
-    /// 是否启用Stripe优惠券同步
-    /// </summary>
-    [RuntimeSetting(Label = "Enable Stripe Coupon Sync", I18n = "admin.modules.system.settings.fields.paymentEnableStripeCouponSync",
-        Type = SettingFieldType.Boolean,
-        Description = "Sync promotions to Stripe as coupons")]
-    public bool EnableStripeCouponSync { get; set; } = true;
 }

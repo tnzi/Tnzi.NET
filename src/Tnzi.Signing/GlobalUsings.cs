@@ -1,4 +1,4 @@
-// System（System / System.Collections.Generic / System.Linq / System.Threading[.Tasks]
+﻿// System（System / System.Collections.Generic / System.Linq / System.Threading[.Tasks]
 // 由 ImplicitUsings 提供，不在此重复）
 global using System.Globalization;
 global using System.Linq.Expressions;
@@ -24,10 +24,12 @@ global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.EFCore.Extensions;
 global using Tnzi.EFCore.Internal;
+global using Tnzi.Geometry;
 global using Tnzi.Mapster;
 global using Tnzi.Json;
 global using Tnzi.Modules;
 global using Tnzi.Results;
+global using Tnzi.Security;
 global using Tnzi.Security.Authorization;
 // Tnzi.Storage：根命名空间是为了 StorageModule（[DependsOn] 要引用它），
 // .Services 是为了 IFileStorageService。两者缺一不可 —— 根下的类型不会因为

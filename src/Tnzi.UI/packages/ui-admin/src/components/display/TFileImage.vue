@@ -3,9 +3,10 @@
     v-if="lightbox && url"
     :src="url"
     :img-props="{ alt, ...imgProps }"
+    :object-fit="objectFit"
     v-bind="$attrs"
   />
-  <img v-else-if="url" :src="url" :alt="alt" v-bind="$attrs" />
+  <img v-else-if="url" :src="url" :alt="alt" v-bind="$attrs" :style="objectFitStyle" />
   <slot v-else name="fallback" :loading="loading" />
 </template>
 
@@ -57,6 +58,26 @@ const props = withDefaults(
     alt?: string
     /** Extra props for the inner `<img>` when `lightbox` is on. */
     imgProps?: Record<string, unknown>
+    /**
+     * How the picture fills its box (CSS `object-fit`). Applies in BOTH
+     * branches; without it the browser default `fill` stretches a thumbnail to
+     * whatever shape the tile is.
+     *
+     * ★ It has to be a prop. In the `lightbox` branch the picture is naive's
+     * `NImage`, which is `inheritAttrs: false` and merges fallthrough attrs
+     * onto its OUTER wrapper - so a `:style="{ objectFit }"` written here never
+     * reaches the `<img>`; and `:img-props="{ style: { objectFit } }"` loses to
+     * NImage's own `objectFit`, which it appends LAST to the same style array.
+     * Passing `object-fit` through as a fallthrough attr does work at runtime
+     * (NImage declares the prop, so it is extracted before `$attrs`), but a
+     * consumer on `strictTemplates` cannot write it - hence this prop.
+     *
+     * `object-fit` only means something once the box is sized, and CSS is what
+     * sizes it: a `class` / `:style` here lands on the `<img>` in the plain
+     * branch but on the WRAPPER in the lightbox branch, so size the picture
+     * itself through `:img-props="{ style: … }"` there.
+     */
+    objectFit?: 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'
   }>(),
   { kind: 'preview', alt: '' },
 )
@@ -65,4 +86,7 @@ const { url, loading } = useFileUrl(
   () => props.fileId,
   { kind: props.kind, isPublic: computed(() => props.isPublic) },
 )
+
+/** Undefined when unset, so the plain `<img>` keeps rendering exactly as before. */
+const objectFitStyle = computed(() => (props.objectFit ? { objectFit: props.objectFit } : undefined))
 </script>

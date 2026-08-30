@@ -63,6 +63,19 @@ public class AuthConfigDto
     /// <summary>注册是否启用图形验证码</summary>
     public bool EnableCaptchaOnRegister { get; set; }
 
+    // ── Passkey（WebAuthn） ──
+
+    /// <summary>
+    /// 是否启用 passkey（<c>Identity:Passkey:Enabled</c>，默认关闭）。
+    /// </summary>
+    /// <remarks>
+    /// 客户端据此决定要不要显示 passkey 的注册与登录入口。
+    /// ★ 它只说「这个部署开着 passkey」，不说「这个浏览器支持」——
+    /// 后者要客户端自己检测（<c>@tnzi/core</c> 的 <c>isPasskeySupported()</c>），
+    /// 两个条件都成立才该把入口显出来。
+    /// </remarks>
+    public bool EnablePasskey { get; set; }
+
     // ── 第三方登录（仅列出已启用的提供商） ──
 
     /// <summary>已启用的第三方登录提供商列表</summary>

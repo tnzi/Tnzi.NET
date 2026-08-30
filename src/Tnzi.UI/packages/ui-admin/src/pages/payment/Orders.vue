@@ -141,7 +141,10 @@ const defaultStats: PaymentStatisticsDto = {
   totalRefunds: 0,
   refundCount: 0,
   refundRate: 0,
-  activeSubscriptions: 0,
+  // null = not applicable (this deployment may not load the recurring-billing
+  // module at all). This page never renders it; the default just has to match
+  // the DTO rather than assert "zero active subscriptions".
+  activeSubscriptions: null,
   channelDistribution: [],
 }
 

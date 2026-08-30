@@ -50,6 +50,58 @@ describe('TFileImage', () => {
     expect(wrapper.find('img').attributes('src')).toBe('/api/files/avatar/preview')
   })
 
+  it('★ objectFit reaches the <img> in the plain branch', async () => {
+    resolve.mockResolvedValue('/api/files/f1/preview?sig=tok')
+
+    const wrapper = mount(TFileImage, { props: { fileId: 'f1', objectFit: 'cover' } })
+    await flushPromises()
+
+    expect(wrapper.find('img').attributes('style')).toContain('object-fit: cover')
+  })
+
+  it('★ objectFit reaches the inner <img> in the lightbox branch, not the wrapper', async () => {
+    // This is the whole reason it is a prop. NImage is `inheritAttrs: false`
+    // and puts fallthrough attrs on its OUTER div, and it appends its own
+    // `objectFit` LAST to the inner img's style array - so neither `:style` nor
+    // `:img-props="{ style }"` written from outside can win.
+    resolve.mockResolvedValue('/api/files/f1/preview?sig=tok')
+
+    const wrapper = mount(TFileImage, {
+      props: { fileId: 'f1', lightbox: true, objectFit: 'cover' },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('img').attributes('style')).toContain('object-fit: cover')
+    expect(wrapper.find('.n-image').attributes('style') ?? '').not.toContain('object-fit')
+  })
+
+  it('binds the kebab-case form the in-tree call sites already write', async () => {
+    // `object-fit="cover"` was a fallthrough attr before this prop existed and
+    // still reads the same in a template; it must now land on the prop instead
+    // of sailing past into `$attrs`.
+    resolve.mockResolvedValue('/api/files/f1/preview?sig=tok')
+
+    const wrapper = mount(TFileImage, {
+      props: { fileId: 'f1', lightbox: true, 'object-fit': 'cover' },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('img').attributes('style')).toContain('object-fit: cover')
+  })
+
+  it('leaves both branches exactly as they were when objectFit is not given', async () => {
+    resolve.mockResolvedValue('/api/files/f1/preview?sig=tok')
+
+    const plainImg = mount(TFileImage, { props: { fileId: 'f1' } })
+    await flushPromises()
+    expect(plainImg.find('img').attributes('style')).toBeUndefined()
+
+    // NImage's own default is `fill`; forwarding `undefined` must not disturb it.
+    const lightbox = mount(TFileImage, { props: { fileId: 'f1', lightbox: true } })
+    await flushPromises()
+    expect(lightbox.find('img').attributes('style')).toContain('object-fit: fill')
+  })
+
   it('每个实例各自解析，所以放进 v-for 是安全的', async () => {
     // 这正是组件层存在的意义：批量合并在 resolver 层，不在调用点，
     // 所以列表里不必改用 useFileUrls。

@@ -52,6 +52,7 @@ public class OptOutSendPathTests : IntegrationTestBase
         services.AddSingleton(_ => _emailSender.Object);
         services.AddSingleton(_ => new Mock<ISmsSender>().Object);
         services.AddSingleton(_ => new Mock<IPushSender>().Object);
+        services.AddSingleton(_ => new Mock<IFaxSender>().Object);
 
         // 真实的退订服务，不是替身
         services.AddScoped<INotificationOptOutService, NotificationOptOutService>();

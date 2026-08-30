@@ -54,6 +54,16 @@ public class ImagingModule : TnziInfrastructureModule
         // 注册滑动验证码服务
         context.Services.TryAddScoped<ISlidingCaptchaService, SlidingCaptchaService>();
 
+        // 图像编辑（遮挡 / 模糊 / 裁切 / 缩放）。契约在核心，消费方可选注入；
+        // 单例是因为它不持有任何状态，每次调用自带全部输入。
+        context.Services.TryAddSingleton<IImageEditor, ImageEditor>();
+
+        // QR 码生成与读取。契约在核心，消费方可选注入；两者都无状态，故为单例。
+        // 刻意注册成两个服务而不是一个：只印码的应用与只读码的应用都存在，
+        // 合成一个接口会逼其中一方去实现它永远不会调用的那一半。
+        context.Services.TryAddSingleton<IQrCodeGenerator, QrCodeGenerator>();
+        context.Services.TryAddSingleton<IQrCodeReader, QrCodeReader>();
+
         return Task.CompletedTask;
     }
 }

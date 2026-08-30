@@ -20,11 +20,24 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
         ExpressionOptions.RoundAwayFromZero;
 
     /// <summary>
-    /// 函数白名单：自定义 4 函数 + 内置数学函数子集（忽略大小写）
+    /// 解析 + 求值配置（NCalc 7 起由 <see cref="ExpressionConfiguration"/> 承载，
+    /// 与每次求值的运行时状态 <c>ExpressionContext</c> 分离）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ExpressionConfiguration"/> 的属性全为 init-only，故可安全共享一份静态实例；
+    /// 每个 <see cref="Expression"/> 仍各自持有自己的参数与函数处理器。
+    /// </remarks>
+    private static readonly ExpressionConfiguration FormulaConfiguration =
+        ExpressionConfiguration.FromOptions(EvaluationOptions);
+
+    /// <summary>
+    /// 函数白名单：自定义 5 函数 + 内置数学函数子集（忽略大小写）
     /// </summary>
     private static readonly HashSet<string> AllowedFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Bracket", "Ytd", "Attr", "AttrText",
+        PayrollFormulaFunctions.Bracket, PayrollFormulaFunctions.Ytd,
+        PayrollFormulaFunctions.Attr, PayrollFormulaFunctions.AttrText,
+        PayrollFormulaFunctions.Input,
         "Min", "Max", "Round", "Floor", "Ceiling", "Abs"
     };
 
@@ -79,7 +92,7 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
 
         try
         {
-            var parsed = new Expression(expression, EvaluationOptions, CultureInfo.InvariantCulture);
+            var parsed = new Expression(expression, FormulaConfiguration, cultureInfo: CultureInfo.InvariantCulture);
 
             var functionCheck = CheckFunctions(parsed);
             if (!functionCheck.Succeeded)
@@ -87,6 +100,33 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
 
             IReadOnlyCollection<string> names = parsed.GetParameterNames()
                 .Distinct(StringComparer.Ordinal)
+                .ToList();
+            return Result.Success(names);
+        }
+        catch (NCalcException ex)
+        {
+            return Result.Failure<IReadOnlyCollection<string>>($"Invalid expression: {RootMessage(ex)}", 400);
+        }
+    }
+
+    public Result<IReadOnlyCollection<string>> GetFunctions(string expression)
+    {
+        var lengthCheck = CheckLength(expression, "expression");
+        if (!lengthCheck.Succeeded)
+            return Result.Failure<IReadOnlyCollection<string>>(lengthCheck.Message!, lengthCheck.Code ?? 400);
+
+        try
+        {
+            var parsed = new Expression(expression, FormulaConfiguration, cultureInfo: CultureInfo.InvariantCulture);
+
+            var functionCheck = CheckFunctions(parsed);
+            if (!functionCheck.Succeeded)
+                return Result.Failure<IReadOnlyCollection<string>>(functionCheck.Message!, functionCheck.Code ?? 400);
+
+            // 函数名的比较口径与白名单一致（NCalc 以 IgnoreCaseAtBuiltInFunctions 求值，
+            // 自定义函数在 handler 里也按大写归一），故返回忽略大小写的集合。
+            IReadOnlyCollection<string> names = parsed.GetFunctionNames()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             return Result.Success(names);
         }
@@ -107,7 +147,7 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
 
         try
         {
-            var expression = new Expression(text, EvaluationOptions, CultureInfo.InvariantCulture);
+            var expression = new Expression(text, FormulaConfiguration, cultureInfo: CultureInfo.InvariantCulture);
 
             var functionCheck = CheckFunctions(expression);
             if (!functionCheck.Succeeded)
@@ -161,65 +201,82 @@ public class NCalcSalaryFormulaEvaluator : ISalaryFormulaEvaluator
 
     private static void EvaluateCustomFunction(string name, NCalc.Handlers.FunctionEventArgs args, SalaryFormulaContext context)
     {
-        // NCalc 对每个函数调用都先触发本事件：命中 4 个自定义函数时给出结果，
-        // 其余（min/max/round/... 白名单内置）不设置 Result，交回 NCalc 原生处理
-        switch (name.ToUpperInvariant())
+        // NCalc 对每个函数调用都先触发本事件：命中 5 个自定义函数时给出结果，
+        // 其余（min/max/round/... 白名单内置）不设置 Result，交回 NCalc 原生处理。
+        // ★分派键取自 PayrollFormulaFunctions 而不是字面量：白名单、静态判定、这里的分派
+        // 是同一个名字的三处消费，字面量各写一份时改了一处漏了另一处不会是编译错误。
+        if (Is(name, PayrollFormulaFunctions.Input))
         {
-            case "BRACKET":
-                RequireArgs(args, 2, "Bracket(tableCode, amount)");
-                if (context.BracketResolver == null)
-                    throw new FormulaFunctionException("Bracket() is not available in this evaluation context.");
-                args.Result = context.BracketResolver(
-                    ToText(args.Parameters.Evaluate(0), "Bracket", "tableCode"),
-                    ToDecimal(args.Parameters.Evaluate(1), "Bracket", "amount"));
-                break;
+            // 没录入过就是没录入过——这是绝大多数员工绝大多数期间的正常状态，
+            // 所以取默认值（缺省 0）而不是像 Bracket()/Ytd() 那样报"上下文不可用"。
+            if (args.Parameters.Count > 1)
+                throw new FormulaFunctionException("Input() takes no arguments, or a single default value: Input() / Input(default).");
+            args.Result = context.InputAmount
+                ?? (args.Parameters.Count == 1
+                    ? ToDecimal(args.Parameters.Evaluate(0), "Input", "default")
+                    : 0m);
+            return;
+        }
 
-            case "YTD":
+        if (Is(name, PayrollFormulaFunctions.Bracket))
+        {
+            RequireArgs(args, 2, "Bracket(tableCode, amount)");
+            if (context.BracketResolver == null)
+                throw new FormulaFunctionException("Bracket() is not available in this evaluation context.");
+            args.Result = context.BracketResolver(
+                ToText(args.Parameters.Evaluate(0), "Bracket", "tableCode"),
+                ToDecimal(args.Parameters.Evaluate(1), "Bracket", "amount"));
+            return;
+        }
+
+        if (Is(name, PayrollFormulaFunctions.Ytd))
+        {
+            RequireArgs(args, 1, "Ytd(componentCode)");
+            if (context.YtdResolver == null)
+                throw new FormulaFunctionException("Ytd() is not available in this evaluation context.");
+            var ytdKey = ToText(args.Parameters.Evaluate(0), "Ytd", "componentCode");
+            // 组件编码查不到就是 0（这个员工今年确实还没有过这一项）。而 `#` 命名空间
+            // 是**封闭的**：查不到只可能是拼错，静默返回 0 会让一个法定上限的基数变成零，
+            // 于是上限永不触发——要到年终对账才看得出来。
+            var normalized = ytdKey.Trim().ToUpperInvariant();
+            if (normalized.StartsWith('#') && !PayrollYtdAggregates.All.Contains(normalized))
             {
-                RequireArgs(args, 1, "Ytd(componentCode)");
-                if (context.YtdResolver == null)
-                    throw new FormulaFunctionException("Ytd() is not available in this evaluation context.");
-                var ytdKey = ToText(args.Parameters.Evaluate(0), "Ytd", "componentCode");
-                // 组件编码查不到就是 0（这个员工今年确实还没有过这一项）。而 `#` 命名空间
-                // 是**封闭的**：查不到只可能是拼错，静默返回 0 会让一个法定上限的基数变成零，
-                // 于是上限永不触发——要到年终对账才看得出来。
-                var normalized = ytdKey.Trim().ToUpperInvariant();
-                if (normalized.StartsWith('#') && !PayrollYtdAggregates.All.Contains(normalized))
-                {
-                    throw new FormulaFunctionException(
-                        $"Ytd('{ytdKey}') is not a known aggregate. Valid aggregates: {string.Join(", ", PayrollYtdAggregates.All)}.");
-                }
-                args.Result = context.YtdResolver(ytdKey);
-                break;
+                throw new FormulaFunctionException(
+                    $"Ytd('{ytdKey}') is not a known aggregate. Valid aggregates: {string.Join(", ", PayrollYtdAggregates.All)}.");
+            }
+            args.Result = context.YtdResolver(ytdKey);
+            return;
+        }
+
+        if (Is(name, PayrollFormulaFunctions.Attr))
+        {
+            RequireArgs(args, 2, "Attr(name, default)");
+            var attrName = ToText(args.Parameters.Evaluate(0), "Attr", "name");
+            if (!context.Attributes.TryGetValue(attrName, out var raw))
+            {
+                args.Result = ToDecimal(args.Parameters.Evaluate(1), "Attr", "default");
+                return;
             }
 
-            case "ATTR":
-            {
-                RequireArgs(args, 2, "Attr(name, default)");
-                var attrName = ToText(args.Parameters.Evaluate(0), "Attr", "name");
-                if (!context.Attributes.TryGetValue(attrName, out var raw))
-                {
-                    args.Result = ToDecimal(args.Parameters.Evaluate(1), "Attr", "default");
-                    break;
-                }
+            if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
+                throw new FormulaFunctionException($"Employee attribute '{attrName}' is not a number.");
+            args.Result = parsed;
+            return;
+        }
 
-                if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
-                    throw new FormulaFunctionException($"Employee attribute '{attrName}' is not a number.");
-                args.Result = parsed;
-                break;
-            }
-
-            case "ATTRTEXT":
-            {
-                RequireArgs(args, 2, "AttrText(name, default)");
-                var attrName = ToText(args.Parameters.Evaluate(0), "AttrText", "name");
-                args.Result = context.Attributes.TryGetValue(attrName, out var text)
-                    ? text
-                    : ToText(args.Parameters.Evaluate(1), "AttrText", "default");
-                break;
-            }
+        if (Is(name, PayrollFormulaFunctions.AttrText))
+        {
+            RequireArgs(args, 2, "AttrText(name, default)");
+            var attrName = ToText(args.Parameters.Evaluate(0), "AttrText", "name");
+            args.Result = context.Attributes.TryGetValue(attrName, out var text)
+                ? text
+                : ToText(args.Parameters.Evaluate(1), "AttrText", "default");
         }
     }
+
+    /// <summary>函数名比较口径与白名单一致（NCalc 内置函数本就忽略大小写）</summary>
+    private static bool Is(string name, string function)
+        => string.Equals(name, function, StringComparison.OrdinalIgnoreCase);
 
     private static void RequireArgs(NCalc.Handlers.FunctionEventArgs args, int count, string signature)
     {

@@ -190,17 +190,9 @@ public class FinanceOptions
     /// <summary>金额+日期窗口匹配的置信度（默认 0.8）</summary>
     public decimal AmountDateMatchConfidence { get; set; } = 0.8m;
 
-    /// <summary>报价单编号前缀</summary>
-    [RuntimeSetting(Label = "Estimate Number Prefix", I18n = "admin.modules.system.settings.fields.estimateNumberPrefix",
-        Type = SettingFieldType.String, Subsection = "Numbering",
-        Description = "Prefix for estimate (quote) numbers. Change at period boundaries to avoid numbering continuity gaps.")]
-    public string EstimateNumberPrefix { get; set; } = "EST-";
-
-    /// <summary>采购订单编号前缀</summary>
-    [RuntimeSetting(Label = "Purchase Order Number Prefix", I18n = "admin.modules.system.settings.fields.purchaseOrderNumberPrefix",
-        Type = SettingFieldType.String, Subsection = "Numbering",
-        Description = "Prefix for purchase order numbers. Change at period boundaries to avoid numbering continuity gaps.")]
-    public string PurchaseOrderNumberPrefix { get; set; } = "PO-";
+    // 报价单 / 采购订单的号段前缀随单据搬到 Tnzi.Finance.Offers 的 FinanceOfferOptions
+    // （同一 Finance 节、同一 finance-general 组，键路径与标签一字不变）。
+    // 不加载那个模块的宿主就不该在配置中心里看到两个控制不了任何东西的设置项。
 
     /// <summary>收付款单编号前缀</summary>
     [RuntimeSetting(Label = "Payment Number Prefix", I18n = "admin.modules.system.settings.fields.paymentNumberPrefix",
@@ -231,6 +223,12 @@ public class FinanceOptions
         Type = SettingFieldType.String, Subsection = "Numbering",
         Description = "Prefix for fund transfer numbers. Change at period boundaries to avoid numbering continuity gaps.")]
     public string TransferNumberPrefix { get; set; } = "TRF-";
+
+    /// <summary>银行存款单编号前缀</summary>
+    [RuntimeSetting(Label = "Deposit Number Prefix", I18n = "admin.modules.system.settings.fields.depositNumberPrefix",
+        Type = SettingFieldType.String, Subsection = "Numbering",
+        Description = "Prefix for bank deposit numbers. Change at period boundaries to avoid numbering continuity gaps.")]
+    public string DepositNumberPrefix { get; set; } = "DEP-";
 
     /// <summary>EFT 批次编号前缀（P3 EFT 输出）</summary>
     [RuntimeSetting(Label = "EFT Batch Number Prefix", I18n = "admin.modules.system.settings.fields.eftNumberPrefix",

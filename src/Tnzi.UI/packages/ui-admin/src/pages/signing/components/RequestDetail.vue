@@ -1,7 +1,10 @@
 <template>
   <NSpin :show="loading">
     <div v-if="request" class="sd">
-    <TDescriptions :items="facts" :columns="2" />
+    <!-- `maxColumns`, not `columns`: TDescriptions has no `columns` prop, so the
+         earlier spelling fell through as a plain attribute and the cap never
+         applied. -->
+    <TDescriptions :items="facts" :max-columns="2" />
 
     <section class="sd__block">
       <h4 class="sd__title">{{ t('detail.recipients') }}</h4>

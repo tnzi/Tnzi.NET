@@ -290,7 +290,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
         var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
-        var sendResult = await _twoFactorService.SendCodeByAddressAsync(address, type, userId: null);
+        var sendResult = await _twoFactorService.SendCodeByAddressAsync(
+            address, type, VerificationCodePurpose.Registration, userId: null);
         if (!sendResult.Succeeded)
         {
             return Fail<string>(sendResult.Message ?? "Failed to send verification code", sendResult.Code ?? 500);
@@ -337,7 +338,8 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         var address = isEmailRequest ? input.Email! : input.PhoneNumber!;
         var type = isEmailRequest ? TwoFactorType.Email : TwoFactorType.Sms;
-        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(address, input.Code, type);
+        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(
+            address, input.Code, type, VerificationCodePurpose.Registration);
         if (!verifyResult.Succeeded)
         {
             return Fail<QuickRegisterResultDto>(

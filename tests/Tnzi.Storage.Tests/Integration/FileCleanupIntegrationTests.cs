@@ -4,8 +4,10 @@ namespace Tnzi.Storage.Tests.Integration;
 
 /// <summary>
 /// FileCleanupService 集成测试（真实 SQLite + 真实物理存储），多租户「未启用」路径（默认配置）：
-/// 覆盖 T4（过期分片会话清理）、T5（孤立引用验证器）及单租户回归。
+/// 覆盖 T5（孤立引用验证器）及单租户回归。
 /// 多租户启用下的真正隔离见 <see cref="FileCleanupMultiTenantTests"/>。
+/// T4（过期分片会话清理）随两张表搬到了 Tnzi.Storage.Workspace.Tests —— 它现在是一个
+/// <c>IStorageCleanupContributor</c>，本项目里没有任何贡献者，那正是「没加载工作区包」的样子。
 /// </summary>
 public class FileCleanupIntegrationTests : StorageIntegrationTestBase
 {
@@ -40,61 +42,65 @@ public class FileCleanupIntegrationTests : StorageIntegrationTestBase
     }
 
     // ------------------------------------------------------------------
-    // T4: 过期分片上传会话 + 残留分片清理
+    // 「没加载 Tnzi.Storage.Workspace」的现场：一个贡献者都没有。
+    // 本测试项目不引用那个包，所以这不是模拟出来的现场。
     // ------------------------------------------------------------------
 
     [Fact]
-    public async Task CleanupExpiredUploadSessionsAsync_DeletesExpiredSessionAndChunks()
+    public async Task RunContributorsAsync_ReturnsZero_WhenNoContributorRegistered()
     {
-        var (session, chunkPaths) = await SeedUploadSessionWithChunksAsync(null, expired: true);
-
-        // 物理文件确实存在
-        foreach (var path in chunkPaths)
-        {
-            Assert.True(await Storage.ExistsAsync(path), $"chunk file should exist before cleanup: {path}");
-        }
-
         var service = CreateCleanupService();
 
-        var deleted = await service.CleanupExpiredUploadSessionsAsync();
-
-        Assert.Equal(1, deleted);
-        Assert.Equal(0, await DbContext.FileUploadSessions.IgnoreQueryFilters().CountAsync(s => s.Id == session.Id));
-        Assert.Equal(0, await DbContext.FileChunks.IgnoreQueryFilters().CountAsync(c => c.UploadSessionId == session.Id));
-
-        // 物理分片文件也被删除
-        foreach (var path in chunkPaths)
-        {
-            Assert.False(await Storage.ExistsAsync(path), $"chunk file should be deleted: {path}");
-        }
-    }
-
-    [Fact]
-    public async Task CleanupExpiredUploadSessionsAsync_KeepsNonExpiredSession()
-    {
-        var (session, _) = await SeedUploadSessionWithChunksAsync(null, expired: false);
-
-        var service = CreateCleanupService();
-
-        var deleted = await service.CleanupExpiredUploadSessionsAsync();
+        var deleted = await service.RunContributorsAsync();
 
         Assert.Equal(0, deleted);
-        Assert.Equal(1, await DbContext.FileUploadSessions.IgnoreQueryFilters().CountAsync(s => s.Id == session.Id));
-        Assert.Equal(2, await DbContext.FileChunks.IgnoreQueryFilters().CountAsync(c => c.UploadSessionId == session.Id));
     }
 
     [Fact]
-    public async Task CleanupAsync_IncludesExpiredSessionsInTotal()
+    public async Task CleanupAsync_Succeeds_WhenNoContributorRegistered()
     {
-        await SeedUploadSessionWithChunksAsync(null, expired: true);
+        // 过期分片会话那一趟原本写死在服务里、直接吃两个属于工作区的仓储。
+        // 没有本用例时，「构造参数解析不出来 → 宿主启动即崩」这种回归不会被任何测试抓到。
+        await SeedOrphanFileAsync(null, "orphan.txt", agedHours: 200, referenceCount: 0);
 
         var service = CreateCleanupService();
 
         var result = await service.CleanupAsync();
 
         Assert.True(result.Success);
-        Assert.Equal(1, result.ExpiredSessionsDeleted);
-        Assert.True(result.TotalDeleted >= 1);
+        Assert.Empty(result.Errors);
+        Assert.Equal(0, result.ContributedDeleted);
+        Assert.Equal(1, result.OrphanFilesDeleted);
+    }
+
+    [Fact]
+    public async Task CleanupAsync_KeepsRunning_WhenAContributorThrows()
+    {
+        // 一个坏掉的贡献者只该让自己那一趟失败：父模块自己的三趟以及别的贡献者照跑。
+        await SeedOrphanFileAsync(null, "orphan.txt", agedHours: 200, referenceCount: 0);
+
+        var service = CreateCleanupService(contributors: [new ThrowingContributor(), new CountingContributor(3)]);
+
+        var result = await service.CleanupAsync();
+
+        Assert.True(result.Success);
+        Assert.Equal(3, result.ContributedDeleted);
+        Assert.Equal(1, result.OrphanFilesDeleted);
+        Assert.Contains(result.Errors, e => e.Contains("Boom", StringComparison.Ordinal));
+    }
+
+    private sealed class ThrowingContributor : IStorageCleanupContributor
+    {
+        public string Name => "Throwing";
+        public Task<int> CleanupAsync(int maxItems, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Boom");
+    }
+
+    private sealed class CountingContributor(int deleted) : IStorageCleanupContributor
+    {
+        public string Name => "Counting";
+        public Task<int> CleanupAsync(int maxItems, CancellationToken cancellationToken = default)
+            => Task.FromResult(deleted);
     }
 
     // ------------------------------------------------------------------
@@ -243,44 +249,6 @@ public class FileCleanupIntegrationTests : StorageIntegrationTestBase
         DbContext.FileReferences.Add(reference);
         await DbContext.SaveChangesAsync();
         DbContext.ChangeTracker.Clear();
-    }
-
-    private async Task<(FileUploadSession session, List<string> chunkPaths)> SeedUploadSessionWithChunksAsync(Guid? tenantId, bool expired)
-    {
-        var session = new FileUploadSession
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            FileName = "big.zip",
-            TotalSize = 6,
-            ChunkSize = 3,
-            TotalChunks = 2,
-            CreationTime = DateTime.UtcNow.AddHours(-2),
-            ExpiresAt = expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddHours(24)
-        };
-        DbContext.FileUploadSessions.Add(session);
-
-        var paths = new List<string>();
-        for (var i = 0; i < 2; i++)
-        {
-            using var stream = new MemoryStream(Encoding.UTF8.GetBytes($"c{i}x"));
-            var path = await Storage.UploadAsync($"chunk_{session.Id}_{i}.part", stream, "application/octet-stream");
-            paths.Add(path);
-            DbContext.FileChunks.Add(new FileChunk
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                UploadSessionId = session.Id,
-                ChunkIndex = i,
-                ChunkSize = 3,
-                ChunkPath = path,
-                CreationTime = DateTime.UtcNow.AddHours(-2)
-            });
-        }
-
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
-        return (session, paths);
     }
 
     /// <summary>

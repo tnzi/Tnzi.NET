@@ -181,4 +181,19 @@ public partial class SkillCategoryService : ApplicationService, ISkillCategorySe
 
     [GeneratedRegex(@"-{2,}")]
     private static partial Regex SlugMultiHyphenPattern();
+
+    public async Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, Guid? parentId = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        var result = await ExecuteInUnitOfWorkAsync(
+            ct => _repository.ReorderAsync(ids, c => c.ParentId == parentId, ct),
+            cancellationToken);
+
+        if (!result.Succeeded)
+            return Result.Failure(result.Message ?? "Reorder failed.", result.Code ?? 400, result.ErrorCode);
+
+        LogInformation("Reordered {Count} skill category(ies) under parent {ParentId}", result.Data, parentId);
+        return Ok();
+    }
 }

@@ -1,3 +1,5 @@
+﻿using Microsoft.Extensions.DependencyInjection;
+using Tnzi.Data;
 using Tnzi.Payment.Dtos;
 using Tnzi.Payment.Entities;
 using Tnzi.Payment.Metadata;
@@ -11,28 +13,17 @@ namespace Tnzi.Payment.Tests.Integration;
 /// 绑卡链路集成测试。
 /// </summary>
 /// <remarks>
-/// 这条链路此前整体缺失：Subscription 上的 PaymentMethodToken / ProviderCustomerId 全仓只读不写，
-/// 导致后台续费、试用转正、升级补差在开箱状态下必然走"无支付方式"分支降级 PastDue。
+/// 这条链路此前整体缺失：绑卡结果全仓只读不写，导致后台续费、试用转正、升级补差在开箱状态下
+/// 必然走"无支付方式"分支降级 PastDue。
+///
+/// ★ 本文件跑的是<b>没装续费包</b>的宿主：没有任何 <c>IStoredPaymentMethodBindingSink</c> 注册，
+/// 绑卡与解绑照常成功，只是没有下游需要同步。「绑卡 → 订阅同步」那四条用例搬去了
+/// <c>Tnzi.Payment.Subscriptions.Tests/Integration/PaymentMethodBindingSinkIntegrationTests</c>，
+/// 在那边它们证明的是「经过一层扩展点之后这条链路仍然接得上」。
 /// </remarks>
 public class PaymentMethodIntegrationTests : PaymentIntegrationTestBase
 {
     private static readonly Guid UserId = TestHelper.DefaultTestUserId;
-
-    private async Task<SubscriptionPlan> SeedPlanAsync()
-    {
-        var plan = new SubscriptionPlan
-        {
-            PlanCode = $"PLAN-{Guid.NewGuid():N}"[..16],
-            PlanName = "Pro",
-            Price = 30m,
-            Currency = "USD",
-            CycleType = BillingCycleType.Month,
-            CycleValue = 1,
-            IsActive = true
-        };
-        await SeedAsync(plan);
-        return plan;
-    }
 
     private Task<Result<StoredPaymentMethodDto>> BindAsync(string token, bool setAsDefault = true) =>
         InScopeAsync<IPaymentMethodService, Result<StoredPaymentMethodDto>>(
@@ -104,74 +95,92 @@ public class PaymentMethodIntegrationTests : PaymentIntegrationTestBase
         methods.Data!.Single(m => m.Id == first.Data!.Id).IsDefault.ShouldBeFalse();
     }
 
-    /// <summary>
-    /// 绑定默认卡后，用户已有的、尚未绑卡的订阅要同步拿到这张卡，
-    /// 否则"我明明绑了卡"却仍然续不上费。
-    /// </summary>
     [Fact]
-    public async Task Bind_SyncsTokenToSubscriptionsWithoutPaymentMethod()
+    public async Task Bind_InsideCallerTransaction_RollbackKeepsTheExistingDefault()
     {
-        var subscription = new Subscription
+        // ★ 守的是 BindEntityAsync 里「清旧默认」（裸 SQL）前的 EnsureTransactionStartedAsync：
+        //   没有前置时清默认逃逸出事务，而新卡随回滚消失——用户一张默认卡都不剩。
+        var first = await BindAsync("pm_bind_rb_a");
+
+        using (var scope = ServiceProvider.CreateScope())
         {
-            SubscriptionNo = "SUB-SYNC-1",
-            UserId = UserId,
-            PlanId = (await SeedPlanAsync()).Id,
-            Status = SubscriptionStatus.Active,
-            CycleType = BillingCycleType.Month,
-            CycleValue = 1,
-            StartTime = DateTime.UtcNow,
-            NextBillingTime = DateTime.UtcNow.AddDays(30),
-            Currency = "USD",
-            ChannelCode = "Null",
-            AutoRenew = true
-        };
-        await SeedAsync(subscription);
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var svc = scope.ServiceProvider.GetRequiredService<IPaymentMethodService>();
 
-        var bound = await BindAsync("pm_sync");
-        bound.Succeeded.ShouldBeTrue();
-
-        var reloaded = await ReloadAsync<Subscription>(subscription.Id);
-        reloaded!.PaymentMethodToken.ShouldBe("pm_sync");
-        reloaded.StoredPaymentMethodId.ShouldBe(bound.Data!.Id);
-        reloaded.PaymentMethodLast4.ShouldBe("4242");
-    }
-
-    /// <summary>
-    /// 解绑要同时清掉订阅上的快照，否则后台会拿着已失效的 token 反复扣款失败
-    /// </summary>
-    [Fact]
-    public async Task Remove_ClearsSubscriptionBinding()
-    {
-        var subscription = new Subscription
-        {
-            SubscriptionNo = "SUB-SYNC-2",
-            UserId = UserId,
-            PlanId = (await SeedPlanAsync()).Id,
-            Status = SubscriptionStatus.Active,
-            CycleType = BillingCycleType.Month,
-            CycleValue = 1,
-            StartTime = DateTime.UtcNow,
-            NextBillingTime = DateTime.UtcNow.AddDays(30),
-            Currency = "USD",
-            ChannelCode = "Null",
-            AutoRenew = true
-        };
-        await SeedAsync(subscription);
-
-        var bound = await BindAsync("pm_remove");
-        bound.Succeeded.ShouldBeTrue();
-
-        var removed = await InScopeAsync<IPaymentMethodService, Result>(
-            svc => svc.RemoveAsync(UserId, bound.Data!.Id));
-        removed.Succeeded.ShouldBeTrue();
-
-        var reloaded = await ReloadAsync<Subscription>(subscription.Id);
-        reloaded!.PaymentMethodToken.ShouldBeNull();
-        reloaded.StoredPaymentMethodId.ShouldBeNull();
+            manager.EnableTransaction();
+            var second = await svc.BindAsync(UserId, new BindPaymentMethodDto
+            {
+                PaymentMethodToken = "pm_bind_rb_b",
+                ChannelCode = "Null",
+                SetAsDefault = true
+            });
+            second.Succeeded.ShouldBeTrue(second.Message);
+            await manager.RollbackTransactionAsync();
+        }
 
         var methods = await InScopeAsync<IPaymentMethodService, Result<List<StoredPaymentMethodDto>>>(
             svc => svc.GetUserMethodsAsync(UserId));
-        methods.Data!.ShouldBeEmpty();
+
+        methods.Data!.Count.ShouldBe(1);
+        methods.Data.Single(m => m.Id == first.Data!.Id).IsDefault.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// 调用方事务回滚后，被解绑的支付方式必须原样回来（仍有效、仍是默认）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 守的是 <c>RemoveAsync</c> 里那句 <c>EnsureTransactionStartedAsync</c>：
+    /// 它保护的是「置卡失效」与下游清理的同生共死。下游清理这一半在本宿主上没有接收方，
+    /// 所以这里只能验到卡这一半 —— 完整的两半在
+    /// <c>Tnzi.Payment.Subscriptions.Tests</c> 的同名用例里。
+    /// </remarks>
+    [Fact]
+    public async Task Remove_InsideCallerTransaction_RollbackRestoresTheMethod()
+    {
+        var bound = await BindAsync("pm_remove_rb");
+        bound.Succeeded.ShouldBeTrue();
+
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var svc = scope.ServiceProvider.GetRequiredService<IPaymentMethodService>();
+
+            manager.EnableTransaction();
+            (await svc.RemoveAsync(UserId, bound.Data!.Id)).Succeeded.ShouldBeTrue();
+            await manager.RollbackTransactionAsync();
+        }
+
+        var methods = await InScopeAsync<IPaymentMethodService, Result<List<StoredPaymentMethodDto>>>(
+            svc => svc.GetUserMethodsAsync(UserId));
+        methods.Data!.Single(m => m.Id == bound.Data!.Id).IsDefault.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SetDefault_InsideCallerTransaction_RollbackKeepsTheOldDefault()
+    {
+        // ★ 守的是 SetDefaultAsync 里 ClearDefaultAsync（裸 SQL）前的 EnsureTransactionStartedAsync：
+        //   没有前置时「清旧默认」逃逸出事务，而「设新默认」随回滚撤销——
+        //   用户一张默认卡都不剩，后台扣款从此找不到卡，且没有任何报错。
+        var first = await BindAsync("pm_rb_a");
+        var second = await BindAsync("pm_rb_b", setAsDefault: false);
+
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var manager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var svc = scope.ServiceProvider.GetRequiredService<IPaymentMethodService>();
+
+            manager.EnableTransaction();
+            (await svc.SetDefaultAsync(UserId, second.Data!.Id)).Succeeded.ShouldBeTrue();
+            await manager.RollbackTransactionAsync();
+        }
+
+        var methods = await InScopeAsync<IPaymentMethodService, Result<List<StoredPaymentMethodDto>>>(
+            svc => svc.GetUserMethodsAsync(UserId));
+
+        // 回滚后一切如初：旧默认还是默认，而且默认卡恰好一张
+        methods.Data!.Single(m => m.Id == first.Data!.Id).IsDefault.ShouldBeTrue();
+        methods.Data!.Single(m => m.Id == second.Data!.Id).IsDefault.ShouldBeFalse();
+        methods.Data!.Count(m => m.IsDefault).ShouldBe(1);
     }
 
     [Fact]
@@ -190,22 +199,17 @@ public class PaymentMethodIntegrationTests : PaymentIntegrationTestBase
     /// 不接这条 webhook 也不会立刻出事——下次续费扣款失败照样降级 PastDue 并催款——
     /// 但那要等到下一个计费周期。用户是在渠道那边操作的，多半没意识到自己顺手关掉了这里的自动续费，
     /// 而"续费失败"这个信号迟一个周期到，对订阅业务就是一个周期的收入。
+    /// 「顺带清掉订阅快照」那一半在没装续费包的宿主上没有接收方，验证在
+    /// <c>Tnzi.Payment.Subscriptions.Tests</c>。
     /// </remarks>
     [Fact]
-    public async Task RevocationCallback_DeactivatesMethodAndClearsSubscriptionBinding()
+    public async Task RevocationCallback_DeactivatesTheMethod()
     {
-        var subscription = await SeedSubscriptionAsync("SUB-REVOKE-1");
-
         var bound = await BindAsync("pm_revoked");
         bound.Succeeded.ShouldBeTrue();
 
         var handled = await SendRevocationCallbackAsync("pm_revoked", "evt-revoke-1");
         handled.Succeeded.ShouldBeTrue();
-
-        var reloaded = await ReloadAsync<Subscription>(subscription.Id);
-        // 不清快照的话，后台会拿着一个已经作废的凭据反复扣款失败
-        reloaded!.PaymentMethodToken.ShouldBeNull();
-        reloaded.StoredPaymentMethodId.ShouldBeNull();
 
         var methods = await InScopeAsync<IPaymentMethodService, Result<List<StoredPaymentMethodDto>>>(
             svc => svc.GetUserMethodsAsync(UserId));
@@ -239,26 +243,6 @@ public class PaymentMethodIntegrationTests : PaymentIntegrationTestBase
         var handled = await SendRevocationCallbackAsync("pm_never_bound_here", "evt-unknown");
 
         handled.Succeeded.ShouldBeTrue();
-    }
-
-    private async Task<Subscription> SeedSubscriptionAsync(string subscriptionNo)
-    {
-        var subscription = new Subscription
-        {
-            SubscriptionNo = subscriptionNo,
-            UserId = UserId,
-            PlanId = (await SeedPlanAsync()).Id,
-            Status = SubscriptionStatus.Active,
-            CycleType = BillingCycleType.Month,
-            CycleValue = 1,
-            StartTime = DateTime.UtcNow,
-            NextBillingTime = DateTime.UtcNow.AddDays(30),
-            Currency = "USD",
-            ChannelCode = "Null",
-            AutoRenew = true
-        };
-        await SeedAsync(subscription);
-        return subscription;
     }
 
     private Task<Result> SendRevocationCallbackAsync(string token, string eventId) =>

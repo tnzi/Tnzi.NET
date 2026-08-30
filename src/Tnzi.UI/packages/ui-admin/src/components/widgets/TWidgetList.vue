@@ -168,7 +168,12 @@ watch(pageCount, (n) => {
   </div>
 
   <!-- Standalone card. -->
-  <NCard v-else class="t-widget-list" :class="{ 't-widget-list--fill': fill }" :bordered="false">
+  <NCard
+    v-else
+    class="t-widget-list"
+    :class="{ 't-widget-list--fill': fill, 't-surface-card': !bare }"
+    :bordered="false"
+  >
     <template v-if="showHeader" #header>
       <div class="t-widget-list__head" :class="`t-widget-list__head--${tone}`">
         <TSvgIcon v-if="icon" :icon="icon" :size="16" class="t-widget-list__head-icon" />
@@ -226,9 +231,14 @@ watch(pageCount, (n) => {
 .t-widget-list {
   border-radius: var(--tnzi-admin-radius-md, 8px);
 }
-/* Standalone card only - the NCard carries the soft dashboard shadow. */
+/* Standalone card only - the NCard carries the card-tier chrome. (It used to
+   read `--tnzi-shadow-card`, a lighter 3%+2% pair, so this widget sat visibly
+   flatter than the KPI cards beside it on the same dashboard.) */
 .t-widget-list:not(.t-widget-list--bare) {
-  box-shadow: var(--tnzi-shadow-card, 0 1px 2px rgb(0 0 0 / 0.05));
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-widget-list--fill {
   height: 100%;

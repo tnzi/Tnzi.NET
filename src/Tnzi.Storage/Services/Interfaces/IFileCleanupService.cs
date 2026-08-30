@@ -34,11 +34,15 @@ public interface IFileCleanupService
     Task<int> CleanupOrphanReferencesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 清理过期的分片上传会话及其残留分片（含物理文件）
+    /// 跑一遍所有 <see cref="IStorageCleanupContributor"/>，返回它们合计删掉的条数。
     /// </summary>
+    /// <remarks>
+    /// 过期分片上传会话曾经写死在这里，现在由工作区子模块以贡献者身份挂进来 ——
+    /// 那两张表不属于本程序集。没有任何贡献者时返回 0：<b>少扫一类数据，不是错。</b>
+    /// </remarks>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>清理的会话数量</returns>
-    Task<int> CleanupExpiredUploadSessionsAsync(CancellationToken cancellationToken = default);
+    /// <returns>所有贡献者合计清理的条数</returns>
+    Task<int> RunContributorsAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -62,9 +66,10 @@ public class CleanupResult
     public int OrphanReferencesDeleted { get; set; }
 
     /// <summary>
-    /// 清理的过期分片上传会话数量
+    /// 由 <see cref="IStorageCleanupContributor"/> 清理的条数合计
+    /// （工作区子模块加载时，这里是过期分片上传会话及其残留分片；无贡献者时恒为 0）
     /// </summary>
-    public int ExpiredSessionsDeleted { get; set; }
+    public int ContributedDeleted { get; set; }
 
     /// <summary>
     /// 清理是否成功
@@ -79,5 +84,5 @@ public class CleanupResult
     /// <summary>
     /// 清理总数
     /// </summary>
-    public int TotalDeleted => TemporaryFilesDeleted + OrphanFilesDeleted + OrphanReferencesDeleted + ExpiredSessionsDeleted;
+    public int TotalDeleted => TemporaryFilesDeleted + OrphanFilesDeleted + OrphanReferencesDeleted + ContributedDeleted;
 }

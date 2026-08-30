@@ -41,6 +41,7 @@ export const FINANCE_SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
   PaymentEntry: 'sourceType.paymentEntry',
   PaymentApplication: 'sourceType.paymentApplication',
   Transfer: 'sourceType.transfer',
+  Deposit: 'sourceType.deposit',
   Revaluation: 'sourceType.revaluation',
 }
 

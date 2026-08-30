@@ -3,6 +3,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import type { AdminRouteRecord } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
+import { useAdminAppStore } from '../../src/stores/useAdminAppStore'
 
 describe('useAdminRouteStore', () => {
   beforeEach(() => {
@@ -30,6 +31,68 @@ describe('useAdminRouteStore', () => {
     auth.setUserInfo({ id: 'u1', username: 'u', roles: [], permissions })
     if (superUser) auth.setSuperUser(true)
   }
+
+  /**
+   * Menu-label i18n had NO coverage at all: every fixture above uses a plain
+   * `meta.title`, which `resolveI18nKey` returns untouched. So the whole
+   * dictionary-and-overrides path through the sidebar - one of the three entry
+   * points into the shared resolver - was unverified, and a broken lookup here
+   * kept the entire suite green.
+   */
+  describe('menu label i18n', () => {
+    const i18nRoutes: AdminRouteRecord[] = [
+      {
+        name: 'dashboard',
+        path: '/dashboard',
+        meta: { title: 'tnzi.admin.modules.dashboard.title', order: 0 },
+      },
+    ]
+
+    function menuLabel(): string {
+      const store = useAdminRouteStore()
+      store.setAuthRoutes(i18nRoutes)
+      return String(store.menus[0]?.label ?? '')
+    }
+
+    it('resolves a dotted key against the bundled dictionary', () => {
+      // ⚠️ Deliberately a key whose bundled value ('there') is NOT what
+      // `humanise` would produce ('User Fallback'). Most keys are named after
+      // their own value, so the humanising fallback coincides with the
+      // dictionary and the assertion proves nothing - the first version of
+      // this test used `…dashboard.title` and passed with the lookup ripped
+      // out entirely, because humanise returns 'Dashboard' for it too.
+      const store = useAdminRouteStore()
+      store.setAuthRoutes([
+        {
+          name: 'z',
+          path: '/z',
+          meta: { title: 'tnzi.admin.modules.dashboard.userFallback', order: 0 },
+        },
+      ])
+      expect(store.menus[0]?.label).toBe('there')
+    })
+
+    it('lets a consumer override beat a key the bundled pack already has', () => {
+      useAdminAppStore().extendLocaleMessages({
+        en: { admin: { modules: { dashboard: { title: 'Overview' } } } },
+      })
+      expect(menuLabel()).toBe('Overview')
+    })
+
+    it('humanises a key no dictionary carries', () => {
+      const store = useAdminRouteStore()
+      store.setAuthRoutes([
+        { name: 'x', path: '/x', meta: { title: 'admin.modules.nosuch.loginLogs', order: 0 } },
+      ])
+      expect(store.menus[0]?.label).toBe('Login Logs')
+    })
+
+    it('passes a plain label through untouched', () => {
+      const store = useAdminRouteStore()
+      store.setAuthRoutes([{ name: 'y', path: '/y', meta: { title: 'Matters', order: 0 } }])
+      expect(store.menus[0]?.label).toBe('Matters')
+    })
+  })
 
   it('starts with empty routes', () => {
     const store = useAdminRouteStore()
@@ -493,5 +556,82 @@ describe('useAdminRouteStore - role gating (meta.roles)', () => {
     loginAs(['Lawyer'])
     expect(store.deniedRouteNames.has('staff')).toBe(true)
     expect(store.deniedRouteNames.has('files')).toBe(false)
+  })
+})
+
+describe('useAdminRouteStore - menu badges', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  const routes: AdminRouteRecord[] = [
+    { name: 'staff', path: '/staff', meta: { title: 'Staff', order: 1 } },
+    {
+      name: 'hr',
+      path: '/hr',
+      meta: { title: 'HR', order: 2 },
+      children: [{ name: 'hr.leave', path: 'leave', meta: { title: 'Leave' } }],
+    },
+  ]
+
+  function badgeOf(store: ReturnType<typeof useAdminRouteStore>, key: string): unknown {
+    const find = (items: typeof store.menus): (typeof store.menus)[number] | undefined => {
+      for (const item of items) {
+        if (item.key === key) return item
+        const hit = item.children ? find(item.children) : undefined
+        if (hit) return hit
+      }
+      return undefined
+    }
+    return find(store.menus)?.badge
+  }
+
+  it('stamps no badge field at all when the app never sets one', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    // Purely additive: an untouched menu item must not even carry the key.
+    expect('badge' in store.menus[0]).toBe(false)
+  })
+
+  it('setMenuBadge surfaces the value on the derived menu item', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    store.setMenuBadge('staff', 3)
+    expect(badgeOf(store, 'staff')).toBe(3)
+    expect(badgeOf(store, 'hr')).toBeUndefined()
+  })
+
+  it('re-derives the tree when the count changes - no remount needed', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    store.setMenuBadge('staff', 1)
+    expect(badgeOf(store, 'staff')).toBe(1)
+    store.setMenuBadge('staff', 7)
+    expect(badgeOf(store, 'staff')).toBe(7)
+  })
+
+  it('reaches nested menu entries, keyed by route name', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    store.setMenuBadge('hr.leave', 'NEW')
+    expect(badgeOf(store, 'hr.leave')).toBe('NEW')
+  })
+
+  it('keeps a zero (the renderers paint nothing) but drops a null', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    store.setMenuBadge('staff', 0)
+    expect(badgeOf(store, 'staff')).toBe(0)
+    store.setMenuBadge('staff', null)
+    expect(badgeOf(store, 'staff')).toBeUndefined()
+  })
+
+  it('clearRoutes drops every badge - a badge must not survive sign-out', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(routes)
+    store.setMenuBadge('staff', 4)
+    store.clearRoutes()
+    store.setAuthRoutes(routes)
+    expect(badgeOf(store, 'staff')).toBeUndefined()
   })
 })

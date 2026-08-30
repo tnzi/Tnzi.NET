@@ -34,11 +34,22 @@ const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // Horizontal bar-rank widget for "top-N by X" drilldowns. The doc names it in
   // section 5 and spells the package out inline - `TMetricBars`（`@tnzi/ui`）.
   TMetricBars: '@tnzi/ui',
+  // The inline attachment grid the drag-reorder section points at for the
+  // keyboard half. Owned by @tnzi/ui, named there so both reorder surfaces are
+  // findable from one place.
+  TAttachmentWall: '@tnzi/ui',
   // Admin shell internals assembled by defineAdminApp; named in the doc only to
   // describe framework behaviour, never as something a consumer imports.
   TAdminContent: 'shell internal',
   TAdminSidebar: 'shell internal',
   TGlobalSearch: 'shell internal',
+  // The `desktop` layout's internals. `components/desktop/` deliberately ships
+  // no barrel (exporting it makes the whole window manager statically
+  // reachable, measured at +7.1 kB gzip); the doc names these to say where the
+  // tray slot lives and what the in-window nav is, for anyone assembling their
+  // own shell.
+  TDesktopHost: 'shell internal',
+  TDesktopWindowNav: 'shell internal',
   // Internal section wrapper of the built-in User Center page.
   TUserCenterSection: 'page internal',
 }

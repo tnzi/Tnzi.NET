@@ -164,6 +164,10 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     {
         try
         {
+            // 事务内的裸 SQL 前置：不强开物理事务，这条累加会在自动提交模式下执行，
+            // 与它对应的预留却随请求回滚 —— 两边不一致比少记一次更难查。
+            await _quotaRepository.EnsureTransactionStartedAsync(ct);
+
             await _quotaRepository.AsQueryable()
                 .Where(q => q.UserId == userId)
                 .ExecuteUpdateAsync(s => s
@@ -307,6 +311,12 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     {
         try
         {
+            // 本方法全程走 ExecuteUpdateAsync（绕过变更跟踪器的裸 SQL）。框架物理事务延迟到
+            // 首次 UoW SaveChanges 才 BEGIN，不先强开就会在自动提交模式下执行：行锁不持有到
+            // 事务结束、回滚撤不掉扣减，且与 GetOrCreateQuotaAsync 的 flush 不在同一个事务里
+            // —— 那样扣减根本看不见刚插入的那一行。
+            await _quotaRepository.EnsureTransactionStartedAsync(ct);
+
             var quota = await GetOrCreateQuotaAsync(userId, ct);
 
             // 重置配额（如果需要）
@@ -339,22 +349,48 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 
             if (affectedRows == 0)
             {
-                // 重新读取最新值以提供准确的错误信息
+                // 扣减不到不等于配额耗尽。重新读取最新值，把三种原因分开报，
+                // 因为它们的处置完全不同：调额度 / 修配额记录 / 重试。
                 var current = await _quotaRepository.AsQueryable()
                     .Where(q => q.UserId == userId)
                     .Select(q => new { q.CurrentDailyUsage, q.DailyTokenLimit, q.CurrentMonthlyUsage, q.MonthlyTokenLimit })
                     .FirstOrDefaultAsync(ct);
 
-                if (current != null && current.CurrentDailyUsage + estimatedTokens > current.DailyTokenLimit)
+                if (current == null)
+                {
+                    // ★ 配额记录缺失或读不出来。报 429「配额耗尽」会把排查方向整个带偏
+                    //   （去查额度配置），而真正该看的是这一行为什么不在。
+                    Logger.LogError(
+                        "Quota row for user {UserId} is missing right after reservation; the reservation was not recorded.",
+                        userId);
+
+                    return Fail<QuotaReservation>(
+                        "Quota record is unavailable, so the reservation could not be recorded. This is not a quota limit.",
+                        500, ErrorCodes.QuotaCheckFailed);
+                }
+
+                if (current.CurrentDailyUsage + estimatedTokens > current.DailyTokenLimit)
                 {
                     return Fail<QuotaReservation>(
                         $"Daily quota exceeded. Current: {current.CurrentDailyUsage}, Limit: {current.DailyTokenLimit}",
                         429, ErrorCodes.QuotaExceeded);
                 }
 
+                if (current.CurrentMonthlyUsage + estimatedTokens > current.MonthlyTokenLimit)
+                {
+                    return Fail<QuotaReservation>(
+                        $"Monthly quota exceeded. Current: {current.CurrentMonthlyUsage}, Limit: {current.MonthlyTokenLimit}",
+                        429, ErrorCodes.QuotaExceeded);
+                }
+
+                // 两条限额都还有余量却扣减不到：并发方在扣减与回读之间改动了该行。可重试。
+                Logger.LogWarning(
+                    "Quota reservation for user {UserId} matched no row while both limits still had headroom (daily {Daily}/{DailyLimit}, monthly {Monthly}/{MonthlyLimit}).",
+                    userId, current.CurrentDailyUsage, current.DailyTokenLimit, current.CurrentMonthlyUsage, current.MonthlyTokenLimit);
+
                 return Fail<QuotaReservation>(
-                    $"Monthly quota exceeded. Current: {current?.CurrentMonthlyUsage}, Limit: {current?.MonthlyTokenLimit}",
-                    429, ErrorCodes.QuotaExceeded);
+                    "Quota reservation lost a concurrent update. This is not a quota limit; please retry.",
+                    409, ErrorCodes.QuotaConcurrencyConflict);
             }
 
             Logger.LogDebug(
@@ -393,6 +429,11 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             {
                 return Ok(); // 精确预估，无需调整
             }
+
+            // 事务内的裸 SQL 前置：结算必须与 ReserveQuotaAsync 的扣减落在同一个事务里。
+            // 预留随请求回滚而结算不回滚，会把补偿差值（通常是负数）应用到一次并未发生的
+            // 预留上，用量被压到真实值以下。
+            await _quotaRepository.EnsureTransactionStartedAsync(ct);
 
             // 使用 ExecuteUpdateAsync 原子性补偿差值，绕过 ChangeTracker
             // SQL: SET CurrentDailyUsage = GREATEST(0, CurrentDailyUsage + @diff)
@@ -471,18 +512,30 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
 
     /// <summary>
     /// 获取或创建用户配额（内部方法）
-    /// 使用 try/catch 处理并发插入竞态：两个请求同时发现 null 并尝试插入时，
-    /// 第二个请求捕获唯一约束异常后重新查询
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>新建的配额行必须当场 flush</b>。启用事务（典型是 AspNetCore 的
+    /// <c>EnableGlobalUnitOfWork</c>）时仓储默认延迟保存，插入只落在变更跟踪器里；
+    /// 而 <see cref="ReserveQuotaAsync"/> 紧接着走 <c>ExecuteUpdateAsync</c>
+    /// —— 那是绕过变更跟踪器直接发给数据库的 SQL，匹配不到这一行，返回受影响行数 0。
+    /// 0 行被读成「配额不足」，于是<b>每个用户的首次 AI 请求必定失败，而且失败原因写着配额耗尽</b>
+    /// （默认额度是每日 100 万 / 每月 2000 万 Token，全新账号「已耗尽」根本讲不通，
+    /// 排查方向却被指向配额配置）。flush 之后 <c>quota.Id</c> 才被赋值也是同一条的推论。
+    /// </para>
+    /// <para>
+    /// 并发插入竞态由 UserId 唯一索引兜底：第二个请求捕获唯一约束冲突后重新查询。
+    /// </para>
+    /// </remarks>
     private async Task<UserQuota> GetOrCreateQuotaAsync(Guid userId, CancellationToken ct = default)
     {
-        var quota = await _quotaRepository.AsQueryable()
+        var existing = await _quotaRepository.AsQueryable()
             .FirstOrDefaultAsync(q => q.UserId == userId, ct);
 
-        if (quota != null) return quota;
+        if (existing != null) return existing;
 
         var quotaOptions = _options.CurrentValue.Quota;
-        quota = new UserQuota
+        var quota = new UserQuota
         {
             UserId = userId,
             DailyTokenLimit = quotaOptions.DefaultDailyTokenLimit,
@@ -496,17 +549,28 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
         try
         {
             await _quotaRepository.InsertAsync(quota, ct);
+            // 显式 flush：让这一行对后续的集合式 SQL（ExecuteUpdate）可见。
+            // 事务已启用时经由 UnitOfWork 保存，因此写入仍在事务内、随请求一起回滚。
+            await _quotaRepository.SaveChangesAsync(ct);
             LogInformation("Created default quota for user {UserId}", userId);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            // 并发插入竞态：另一个请求已创建该用户的配额，重新查询
-            quota = await _quotaRepository.AsQueryable()
-                .FirstOrDefaultAsync(q => q.UserId == userId, ct)
-                ?? throw new InvalidOperationException($"Failed to get or create quota for user {userId}");
+            // 并发插入竞态：另一个请求已创建该用户的配额。
+            // ★ 必须 Discard：插入失败的实体仍是 Added 留在变更跟踪器里，
+            //   本作用域下一次 SaveChanges 会重放它，异常落在完全无关的位置。
+            _quotaRepository.Discard(quota);
             Logger.LogDebug("Quota already created by concurrent request for user {UserId}", userId);
         }
 
-        return quota;
+        // ★ 一律重新读回，而不是返回刚插入的那个实例。
+        //   flush 过的实体是<b>被跟踪</b>的，而查得到的那条路径返回的是未跟踪副本 ——
+        //   两条路径给出不同跟踪状态，调用方就得知道自己走的是哪条。
+        //   更具体的坑：本类随后用 ExecuteUpdate 改这一行，被跟踪实例会就此变成过期副本，
+        //   谁再改它一下（比如跨天触发 ResetQuotaIfNeeded），提交时就会把 ExecuteUpdate
+        //   刚写进去的用量原样覆盖回去。
+        return await _quotaRepository.AsQueryable()
+            .FirstOrDefaultAsync(q => q.UserId == userId, ct)
+            ?? throw new InvalidOperationException($"Failed to get or create quota for user {userId}");
     }
 }

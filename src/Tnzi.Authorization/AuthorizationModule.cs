@@ -1,4 +1,4 @@
-namespace Tnzi.Authorization;
+﻿namespace Tnzi.Authorization;
 
 /// <summary>
 /// 授权模块
@@ -43,6 +43,8 @@ public class AuthorizationModule : TnziApplicationModule
             Tnzi.Authorization.Options.AuthorizationOptionsValidator>(context.Configuration)
             .PostConfigure(Tnzi.Authorization.Options.AuthorizationOptions.ApplyConventionDefaults);
 
+        services.AddTnziOptions<Tnzi.Authorization.Options.DualControlOptions>(context.Configuration);
+
         // 注册授权服务（单一实现，多接口注册）
         services.AddScoped<FunctionAuthorizationService>();
         services.AddScoped<Tnzi.Authorization.Services.IFunctionAuthorizationService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
@@ -50,7 +52,7 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddScoped<IRoleFunctionService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
         services.AddScoped<Tnzi.Security.Authorization.IFunctionAuthorizationService>(sp => sp.GetRequiredService<FunctionAuthorizationService>());
         services.AddScoped<IUserFunctionService, UserFunctionService>();
-        services.AddScoped<IDataAuthService, DataAuthService>();
+        services.AddScoped<IDualControlService, DualControlService>();
         services.AddSingleton<FunctionAuthCache>();
 
         // 注册权限管理器和权限检查器

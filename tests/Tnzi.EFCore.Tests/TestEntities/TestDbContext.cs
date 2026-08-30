@@ -36,6 +36,11 @@ public class TestDbContext : TnziDbContext<TestDbContext>
     public DbSet<TestSoftDeletableProduct> SoftDeletableProducts { get; set; } = null!;
 
     /// <summary>
+    /// 可排序测试实体表
+    /// </summary>
+    public DbSet<TestOrderedItem> OrderedItems { get; set; } = null!;
+
+    /// <summary>
     /// 可空 Guid Id 测试实体
     /// </summary>
     public DbSet<TestEntityWithNullableGuidId> TestEntitiesWithNullableGuidId { get; set; } = null!;

@@ -13,16 +13,18 @@ using PaymentEntity = Tnzi.Payment.Entities.Payment;
 namespace Tnzi.Payment.Tests;
 
 /// <summary>
-/// PaymentStatisticsService 单元测试
+/// PaymentStatisticsService 单元测试：支付与退款两块由本服务自己算。
 /// </summary>
+/// <remarks>
+/// 订阅那一块（总览里的活跃订阅数 + 整块订阅指标）已改为向 <c>IPaymentStatisticsContributor</c> 提问，
+/// 促销那一块（Top N 促销效果分析）改为向 <c>IPromotionAnalyticsProvider</c> 提问。
+/// 本测试**两个供给方都不注册**，跑的是「续费包与折扣包都没装」的宿主。
+/// 真正算数的那段促销查询搬去了 <c>Tnzi.Payment.Promotions.Tests/PromotionAnalyticsProviderTests</c>。
+/// </remarks>
 public class StatisticsServiceTests
 {
     private readonly Mock<IRepository<PaymentEntity, Guid>> _paymentRepositoryMock;
     private readonly Mock<IRepository<Refund, Guid>> _refundRepositoryMock;
-    private readonly Mock<IRepository<Subscription, Guid>> _subscriptionRepositoryMock;
-    private readonly Mock<IRepository<SubscriptionPlan, Guid>> _planRepositoryMock;
-    private readonly Mock<IRepository<CouponUsage, Guid>> _couponUsageRepositoryMock;
-    private readonly Mock<IRepository<Promotion, Guid>> _promotionRepositoryMock;
     private readonly PaymentStatisticsService _service;
 
     public StatisticsServiceTests()
@@ -34,10 +36,6 @@ public class StatisticsServiceTests
 
         _paymentRepositoryMock = new Mock<IRepository<PaymentEntity, Guid>>();
         _refundRepositoryMock = new Mock<IRepository<Refund, Guid>>();
-        _subscriptionRepositoryMock = new Mock<IRepository<Subscription, Guid>>();
-        _planRepositoryMock = new Mock<IRepository<SubscriptionPlan, Guid>>();
-        _couponUsageRepositoryMock = new Mock<IRepository<CouponUsage, Guid>>();
-        _promotionRepositoryMock = new Mock<IRepository<Promotion, Guid>>();
 
         // 设置 IServiceProvider mock
         var serviceProviderMock = new Mock<IServiceProvider>();
@@ -48,10 +46,6 @@ public class StatisticsServiceTests
         _service = new PaymentStatisticsService(
             _paymentRepositoryMock.Object,
             _refundRepositoryMock.Object,
-            _subscriptionRepositoryMock.Object,
-            _planRepositoryMock.Object,
-            _couponUsageRepositoryMock.Object,
-            _promotionRepositoryMock.Object,
             serviceProviderMock.Object
         );
     }
@@ -90,23 +84,6 @@ public class StatisticsServiceTests
             .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
     }
 
-    /// <summary>
-    /// 设置订阅仓储的 IQueryable mock
-    /// </summary>
-    private void SetupSubscriptionQueryable(List<Subscription> subscriptions)
-    {
-        var mockQueryable = subscriptions.BuildMock();
-        _subscriptionRepositoryMock.Setup(r => r.AsQueryable(false)).Returns(mockQueryable);
-        _subscriptionRepositoryMock.As<IQueryable<Subscription>>()
-            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
-        _subscriptionRepositoryMock.As<IQueryable<Subscription>>()
-            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
-        _subscriptionRepositoryMock.As<IQueryable<Subscription>>()
-            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
-        _subscriptionRepositoryMock.As<IQueryable<Subscription>>()
-            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
-    }
-
     #region GetStatisticsAsync Tests
 
     [Fact]
@@ -115,7 +92,6 @@ public class StatisticsServiceTests
         // Arrange
         SetupPaymentQueryable(new List<PaymentEntity>());
         SetupRefundQueryable(new List<Refund>());
-        SetupSubscriptionQueryable(new List<Subscription>());
 
         var query = new StatisticsQueryDto
         {
@@ -136,7 +112,9 @@ public class StatisticsServiceTests
         result.Data.TotalRefunds.ShouldBe(0);
         result.Data.RefundCount.ShouldBe(0);
         result.Data.RefundRate.ShouldBe(0);
-        result.Data.ActiveSubscriptions.ShouldBe(0);
+        // ★ null 而不是 0：没有 IPaymentStatisticsContributor 的宿主根本不做订阅，
+        //   而「不适用」与「一个活跃订阅都没有」是两句不同的话。见 SubscriptionsPackageAbsenceTests。
+        result.Data.ActiveSubscriptions.ShouldBeNull();
         result.Data.ChannelDistribution.ShouldBeEmpty();
     }
 
@@ -161,12 +139,6 @@ public class StatisticsServiceTests
 
         SetupPaymentQueryable(payments);
         SetupRefundQueryable(refunds);
-        SetupSubscriptionQueryable(new List<Subscription>
-        {
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Trial, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Cancelled, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" }
-        });
 
         var query = new StatisticsQueryDto
         {
@@ -186,7 +158,8 @@ public class StatisticsServiceTests
         stats.TotalRevenue.ShouldBe(450m); // 100+200+150
         stats.TotalRefunds.ShouldBe(50m);
         stats.RefundCount.ShouldBe(1);
-        stats.ActiveSubscriptions.ShouldBe(2); // Active + Trial
+        // 没有供给方 → 「不适用」而不是 0（活跃订阅数由 IPaymentStatisticsContributor 回答）
+        stats.ActiveSubscriptions.ShouldBeNull();
         stats.ChannelDistribution.Count.ShouldBe(2); // Stripe + PayPal
     }
 
@@ -196,7 +169,6 @@ public class StatisticsServiceTests
         // Arrange
         SetupPaymentQueryable(new List<PaymentEntity>());
         SetupRefundQueryable(new List<Refund>());
-        SetupSubscriptionQueryable(new List<Subscription>());
 
         var query = new StatisticsQueryDto(); // 不设置时间，使用默认
 
@@ -224,7 +196,6 @@ public class StatisticsServiceTests
 
         SetupPaymentQueryable(payments);
         SetupRefundQueryable(new List<Refund>());
-        SetupSubscriptionQueryable(new List<Subscription>());
 
         var query = new StatisticsQueryDto
         {
@@ -405,134 +376,10 @@ public class StatisticsServiceTests
 
     #endregion
 
-    #region GetSubscriptionMetricsAsync Tests
-
-    [Fact]
-    public async Task GetSubscriptionMetricsAsync_WithActiveSubscriptions_CalculatesMRRAndARPU()
-    {
-        // Arrange
-        var monthlyPlan = new SubscriptionPlan
-        {
-            Id = Guid.NewGuid(),
-            PlanCode = "MONTHLY",
-            PlanName = "Monthly Pro",
-            Price = 29.99m,
-            CycleType = BillingCycleType.Month,
-            CycleValue = 1,
-            Currency = "USD"
-        };
-        var yearlyPlan = new SubscriptionPlan
-        {
-            Id = Guid.NewGuid(),
-            PlanCode = "YEARLY",
-            PlanName = "Yearly Pro",
-            Price = 299.88m,
-            CycleType = BillingCycleType.Year,
-            CycleValue = 1,
-            Currency = "USD"
-        };
-
-        var now = DateTime.UtcNow;
-        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        var subscriptions = new List<Subscription>
-        {
-            // 2 个月度活跃订阅
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = monthlyPlan.Id, Plan = monthlyPlan, PaidAmount = 29.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = monthStart.AddMonths(-3) },
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = monthlyPlan.Id, Plan = monthlyPlan, PaidAmount = 29.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = monthStart.AddMonths(-1) },
-            // 1 个年度活跃订阅
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = yearlyPlan.Id, Plan = yearlyPlan, PaidAmount = 299.88m, Currency = "USD", ChannelCode = "Stripe", CreationTime = monthStart.AddMonths(-6) },
-            // 1 个试用订阅
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Trial, UserId = Guid.NewGuid(), PlanId = monthlyPlan.Id, Plan = monthlyPlan, PaidAmount = 0, Currency = "USD", ChannelCode = "Stripe", CreationTime = monthStart.AddDays(2) },
-            // 1 个本月新增活跃订阅
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = monthlyPlan.Id, Plan = monthlyPlan, PaidAmount = 29.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = monthStart.AddDays(5) },
-            // 1 个本月取消的订阅（上月活跃）
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Cancelled, UserId = Guid.NewGuid(), PlanId = monthlyPlan.Id, Plan = monthlyPlan, PaidAmount = 29.99m, Currency = "USD", ChannelCode = "Stripe", CancelTime = monthStart.AddDays(3), CreationTime = monthStart.AddMonths(-2) }
-        };
-
-        SetupSubscriptionQueryable(subscriptions);
-
-        // Act
-        var result = await _service.GetSubscriptionMetricsAsync();
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        var metrics = result.Data!;
-
-        metrics.ActiveSubscriptions.ShouldBe(4); // 3 existing active + 1 new active
-        metrics.TrialSubscriptions.ShouldBe(1);
-        metrics.NewSubscriptionsThisMonth.ShouldBe(2); // 1 trial + 1 active created this month
-        metrics.CancelledThisMonth.ShouldBe(1);
-
-        // MRR: 4 active subscriptions (3 monthly × $29.99 + 1 yearly $299.88/12 = $24.99)
-        var expectedMrr = 29.99m * 3 + 299.88m / 12;
-        metrics.MonthlyRecurringRevenue.ShouldBe(expectedMrr);
-
-        // ARPU: MRR / active count
-        var expectedArpu = Math.Round(expectedMrr / 4, 2);
-        metrics.AverageRevenuePerUser.ShouldBe(expectedArpu);
-
-        // Churn rate: cancelled this month / last month active
-        // Last month active = subscriptions created before this month that are still active or cancelled this month
-        // = 3 (active from before) + 1 (cancelled this month, was active) = 4
-        metrics.ChurnRate.ShouldBe(Math.Round(1m / 4 * 100, 2)); // 25%
-    }
-
-    [Fact]
-    public async Task GetSubscriptionMetricsAsync_WithNoSubscriptions_ReturnsZeroMetrics()
-    {
-        // Arrange
-        SetupSubscriptionQueryable(new List<Subscription>());
-
-        // Act
-        var result = await _service.GetSubscriptionMetricsAsync();
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        var metrics = result.Data!;
-        metrics.ActiveSubscriptions.ShouldBe(0);
-        metrics.TrialSubscriptions.ShouldBe(0);
-        metrics.MonthlyRecurringRevenue.ShouldBe(0);
-        metrics.AverageRevenuePerUser.ShouldBe(0);
-        metrics.ChurnRate.ShouldBe(0);
-        metrics.PlanDistribution.ShouldBeEmpty();
-    }
-
-    [Fact]
-    public async Task GetSubscriptionMetricsAsync_PlanDistribution_GroupsByPlanName()
-    {
-        // Arrange
-        var basicPlan = new SubscriptionPlan { Id = Guid.NewGuid(), PlanCode = "BASIC", PlanName = "Basic", Price = 9.99m, CycleType = BillingCycleType.Month, CycleValue = 1, Currency = "USD" };
-        var proPlan = new SubscriptionPlan { Id = Guid.NewGuid(), PlanCode = "PRO", PlanName = "Pro", Price = 29.99m, CycleType = BillingCycleType.Month, CycleValue = 1, Currency = "USD" };
-
-        var now = DateTime.UtcNow;
-        var subscriptions = new List<Subscription>
-        {
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = basicPlan.Id, Plan = basicPlan, PaidAmount = 9.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = now.AddMonths(-3) },
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = basicPlan.Id, Plan = basicPlan, PaidAmount = 9.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = now.AddMonths(-2) },
-            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), PlanId = proPlan.Id, Plan = proPlan, PaidAmount = 29.99m, Currency = "USD", ChannelCode = "Stripe", CreationTime = now.AddMonths(-1) },
-        };
-
-        SetupSubscriptionQueryable(subscriptions);
-
-        // Act
-        var result = await _service.GetSubscriptionMetricsAsync();
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        var distribution = result.Data!.PlanDistribution;
-        distribution.Count.ShouldBe(2);
-
-        var basic = distribution.First(p => p.PlanName == "Basic");
-        basic.SubscriptionCount.ShouldBe(2);
-        basic.Revenue.ShouldBe(19.98m); // 9.99 * 2
-
-        var pro = distribution.First(p => p.PlanName == "Pro");
-        pro.SubscriptionCount.ShouldBe(1);
-        pro.Revenue.ShouldBe(29.99m);
-    }
-
-    #endregion
+    // GetSubscriptionMetricsAsync 的三条用例随续费域搬去了
+    // Tnzi.Payment.Subscriptions.Tests/SubscriptionStatisticsContributorTests —— 那一整块
+    // 现在由 IPaymentStatisticsContributor 计算。本服务这一侧只剩「没有供给方时回 501」，
+    // 钉在 SubscriptionsPackageAbsenceTests。
 
     #region ExportReconciliationAsync Tests
 
@@ -691,114 +538,13 @@ public class StatisticsServiceTests
 
     #region GetPromotionAnalyticsAsync Tests
 
-    private void SetupCouponUsageQueryable(List<CouponUsage> usages)
-    {
-        var mockQueryable = usages.BuildMock();
-        _couponUsageRepositoryMock.Setup(r => r.AsQueryable(false)).Returns(mockQueryable);
-        _couponUsageRepositoryMock.As<IQueryable<CouponUsage>>()
-            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
-        _couponUsageRepositoryMock.As<IQueryable<CouponUsage>>()
-            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
-        _couponUsageRepositoryMock.As<IQueryable<CouponUsage>>()
-            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
-        _couponUsageRepositoryMock.As<IQueryable<CouponUsage>>()
-            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
-    }
-
-    private void SetupPromotionQueryable(List<Promotion> promotions)
-    {
-        var mockQueryable = promotions.BuildMock();
-        _promotionRepositoryMock.Setup(r => r.AsQueryable(false)).Returns(mockQueryable);
-        _promotionRepositoryMock.As<IQueryable<Promotion>>()
-            .Setup(q => q.Provider).Returns(mockQueryable.Provider);
-        _promotionRepositoryMock.As<IQueryable<Promotion>>()
-            .Setup(q => q.Expression).Returns(mockQueryable.Expression);
-        _promotionRepositoryMock.As<IQueryable<Promotion>>()
-            .Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
-        _promotionRepositoryMock.As<IQueryable<Promotion>>()
-            .Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
-    }
-
-    [Fact]
-    public async Task GetPromotionAnalyticsAsync_WithUsageData_ReturnsTopPromotions()
-    {
-        // Arrange
-        var promo1Id = Guid.NewGuid();
-        var promo2Id = Guid.NewGuid();
-        var user1 = Guid.NewGuid();
-        var user2 = Guid.NewGuid();
-        var user3 = Guid.NewGuid();
-
-        var usages = new List<CouponUsage>
-        {
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = user1, DiscountAmount = 10m, CreationTime = DateTime.UtcNow.AddDays(-5) },
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = user2, DiscountAmount = 15m, CreationTime = DateTime.UtcNow.AddDays(-3) },
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = user1, DiscountAmount = 10m, CreationTime = DateTime.UtcNow.AddDays(-1) },
-            new() { Id = Guid.NewGuid(), CouponId = promo2Id, UserId = user3, DiscountAmount = 50m, CreationTime = DateTime.UtcNow.AddDays(-2) },
-        };
-
-        var promotions = new List<Promotion>
-        {
-            new() { Id = promo1Id, Name = "Summer Sale", PromotionCode = "SUMMER", DiscountType = DiscountType.Percentage, DiscountValue = 10, UsedCount = 3, TotalUsageLimit = 100, IsActive = true },
-            new() { Id = promo2Id, Name = "Welcome", PromotionCode = "WELCOME", DiscountType = DiscountType.Fixed, DiscountValue = 50, UsedCount = 1, TotalUsageLimit = null, IsActive = true },
-        };
-
-        SetupCouponUsageQueryable(usages);
-        SetupPromotionQueryable(promotions);
-
-        // Act
-        var result = await _service.GetPromotionAnalyticsAsync(topN: 10);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data!.Count.ShouldBe(2);
-
-        var top = result.Data[0]; // promo1 has 3 usages
-        top.Name.ShouldBe("Summer Sale");
-        top.UsageCount.ShouldBe(3);
-        top.UniqueUsers.ShouldBe(2); // user1 + user2
-        top.TotalDiscountAmount.ShouldBe(35m); // 10+15+10
-        top.AverageDiscountPerUse.ShouldBe(11.67m); // 35/3
-        top.RedemptionRate.ShouldBe(3m); // 3/100 * 100
-
-        var second = result.Data[1]; // promo2 has 1 usage
-        second.Name.ShouldBe("Welcome");
-        second.UsageCount.ShouldBe(1);
-        second.TotalDiscountAmount.ShouldBe(50m);
-        second.RedemptionRate.ShouldBe(-1); // no limit
-    }
-
-    [Fact]
-    public async Task GetPromotionAnalyticsAsync_WithDateFilter_FiltersCorrectly()
-    {
-        // Arrange
-        var promoId = Guid.NewGuid();
-        var now = DateTime.UtcNow;
-
-        var usages = new List<CouponUsage>
-        {
-            new() { Id = Guid.NewGuid(), CouponId = promoId, UserId = Guid.NewGuid(), DiscountAmount = 10m, CreationTime = now.AddDays(-30) },
-            new() { Id = Guid.NewGuid(), CouponId = promoId, UserId = Guid.NewGuid(), DiscountAmount = 20m, CreationTime = now.AddDays(-2) },
-        };
-
-        var promotions = new List<Promotion>
-        {
-            new() { Id = promoId, Name = "Test", PromotionCode = "TEST", DiscountType = DiscountType.Fixed, DiscountValue = 10, IsActive = true },
-        };
-
-        SetupCouponUsageQueryable(usages);
-        SetupPromotionQueryable(promotions);
-
-        // Act - filter to last 7 days
-        var result = await _service.GetPromotionAnalyticsAsync(topN: 10, startDate: now.AddDays(-7));
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data!.Count.ShouldBe(1);
-        result.Data[0].UsageCount.ShouldBe(1); // only the recent usage
-        result.Data[0].TotalDiscountAmount.ShouldBe(20m);
-    }
-
+    /// <summary>
+    /// 入参校验在父模块，与装没装折扣包无关：非法 topN 永远是 400。
+    /// </summary>
+    /// <remarks>
+    /// 顺序也是断言的一部分 —— 400 必须先于 501 给出。反过来（先答 501）会让一个
+    /// 写错了的请求在装了折扣包之后突然变成 400，同一个请求两种答复。
+    /// </remarks>
     [Fact]
     public async Task GetPromotionAnalyticsAsync_InvalidTopN_ReturnsFail()
     {
@@ -810,56 +556,86 @@ public class StatisticsServiceTests
         result.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// 没装折扣包时回 501，并在文案里指名要加载哪个包。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>不是空列表</b>：空列表是一个答案（「有促销这回事，只是这段时间没人用」），
+    /// 会把一次部署疏漏伪装成一条业务结论 —— 运营看着一张空白看板，以为促销没人领。
+    /// </remarks>
     [Fact]
-    public async Task GetPromotionAnalyticsAsync_EmptyData_ReturnsEmptyList()
+    public async Task GetPromotionAnalyticsAsync_WithoutThePromotionsPackage_Answers501NamingTheModule()
     {
-        // Arrange
-        SetupCouponUsageQueryable(new List<CouponUsage>());
-
-        // Act
         var result = await _service.GetPromotionAnalyticsAsync();
 
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        result.Data!.Count.ShouldBe(0);
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(501);
+        result.Message!.ShouldContain("Tnzi.Payment.Promotions");
+        result.Data.ShouldBeNull();
     }
 
+    /// <summary>
+    /// 缺席回的是 501 而<b>不是 503</b>。
+    /// </summary>
+    /// <remarks>
+    /// 503 意味着暂时故障，会让监控告警、客户端退避重试 —— 而这件事永远不会自己恢复。
+    /// 501 是「本服务器不提供此功能」，恰好就是事实。
+    /// </remarks>
     [Fact]
-    public async Task GetPromotionAnalyticsAsync_TopN_LimitsResults()
+    public async Task GetPromotionAnalyticsAsync_IsNot503()
     {
-        // Arrange
-        var promo1Id = Guid.NewGuid();
-        var promo2Id = Guid.NewGuid();
-        var promo3Id = Guid.NewGuid();
+        (await _service.GetPromotionAnalyticsAsync()).Code.ShouldNotBe(503);
+    }
 
-        var usages = new List<CouponUsage>
-        {
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = Guid.NewGuid(), DiscountAmount = 10m, CreationTime = DateTime.UtcNow },
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = Guid.NewGuid(), DiscountAmount = 10m, CreationTime = DateTime.UtcNow },
-            new() { Id = Guid.NewGuid(), CouponId = promo1Id, UserId = Guid.NewGuid(), DiscountAmount = 10m, CreationTime = DateTime.UtcNow },
-            new() { Id = Guid.NewGuid(), CouponId = promo2Id, UserId = Guid.NewGuid(), DiscountAmount = 20m, CreationTime = DateTime.UtcNow },
-            new() { Id = Guid.NewGuid(), CouponId = promo2Id, UserId = Guid.NewGuid(), DiscountAmount = 20m, CreationTime = DateTime.UtcNow },
-            new() { Id = Guid.NewGuid(), CouponId = promo3Id, UserId = Guid.NewGuid(), DiscountAmount = 30m, CreationTime = DateTime.UtcNow },
-        };
+    /// <summary>
+    /// 装上供给方时，父模块把它的答案原样交出去 —— 包括<b>空列表</b>这个答案。
+    /// </summary>
+    /// <remarks>
+    /// 这条与上面两条合起来才完整：只测缺席，一个永远返回 null 的假实现也能全绿。
+    /// 空列表必须是 200 而不是 501，否则「没人用券」会被报成「本服务器不提供此功能」。
+    /// </remarks>
+    [Fact]
+    public async Task GetPromotionAnalyticsAsync_WithAProvider_PassesItsAnswerThrough_IncludingEmpty()
+    {
+        var provider = new Mock<IPromotionAnalyticsProvider>();
+        provider.Setup(p => p.GetTopPromotionsAsync(It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
 
-        var promotions = new List<Promotion>
-        {
-            new() { Id = promo1Id, Name = "P1", PromotionCode = "P1", IsActive = true },
-            new() { Id = promo2Id, Name = "P2", PromotionCode = "P2", IsActive = true },
-            new() { Id = promo3Id, Name = "P3", PromotionCode = "P3", IsActive = true },
-        };
+        var service = ServiceWith(promotionAnalytics: provider.Object);
 
-        SetupCouponUsageQueryable(usages);
-        SetupPromotionQueryable(promotions);
+        var result = await service.GetPromotionAnalyticsAsync();
 
-        // Act - limit to top 2
-        var result = await _service.GetPromotionAnalyticsAsync(topN: 2);
-
-        // Assert
         result.Succeeded.ShouldBeTrue();
-        result.Data!.Count.ShouldBe(2);
-        result.Data[0].UsageCount.ShouldBe(3); // P1
-        result.Data[1].UsageCount.ShouldBe(2); // P2
+        result.Data!.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// 供给方自己说「我答不上来」（返回 null）时，父模块同样回 501 —— 而不是把 null 当成空列表。
+    /// </summary>
+    [Fact]
+    public async Task GetPromotionAnalyticsAsync_WhenTheProviderCannotAnswer_Answers501()
+    {
+        var provider = new Mock<IPromotionAnalyticsProvider>();
+        provider.Setup(p => p.GetTopPromotionsAsync(It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<PromotionAnalyticsDto>?)null);
+
+        var result = await ServiceWith(promotionAnalytics: provider.Object).GetPromotionAnalyticsAsync();
+
+        result.Code.ShouldBe(501);
+    }
+
+    private PaymentStatisticsService ServiceWith(IPromotionAnalyticsProvider promotionAnalytics)
+    {
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        return new PaymentStatisticsService(
+            _paymentRepositoryMock.Object,
+            _refundRepositoryMock.Object,
+            serviceProviderMock.Object,
+            promotionAnalytics: promotionAnalytics);
     }
 
     #endregion

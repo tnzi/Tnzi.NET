@@ -34,13 +34,9 @@
   </Folder>
   <Folder Name="/src/modules/">
     <Project Path="src/Tnzi.Audit/Tnzi.Audit.csproj" />
-    <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
     <Project Path="src/Tnzi.Chat/Tnzi.Chat.csproj" />
     <Project Path="src/Tnzi.Feature/Tnzi.Feature.csproj" />
-    <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
-    <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
     <Project Path="src/Tnzi.Signing/Tnzi.Signing.csproj" />
-    <Project Path="src/Tnzi.Storage/Tnzi.Storage.csproj" />
     <Project Path="src/Tnzi.System/Tnzi.System.csproj" />
     <Project Path="src/Tnzi.Template/Tnzi.Template.csproj" />
   </Folder>
@@ -62,10 +58,33 @@
     <Project Path="src/Tnzi.Finance.Recurring/Tnzi.Finance.Recurring.csproj" />
     <Project Path="src/Tnzi.Finance.Tax.Ca/Tnzi.Finance.Tax.Ca.csproj" />
     <Project Path="src/Tnzi.Finance.Payroll/Tnzi.Finance.Payroll.csproj" />
+    <Project Path="src/Tnzi.Finance.Offers/Tnzi.Finance.Offers.csproj" />
   </Folder>
   <Folder Name="/src/modules/Tnzi.Identity/">
     <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
     <Project Path="src/Tnzi.Identity.Presence/Tnzi.Identity.Presence.csproj" />
+    <Project Path="src/Tnzi.Identity.Organization/Tnzi.Identity.Organization.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.Authorization/">
+    <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
+    <Project Path="src/Tnzi.Authorization.DataAuth/Tnzi.Authorization.DataAuth.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.Notification/">
+    <Project Path="src/Tnzi.Notification/Tnzi.Notification.csproj" />
+    <Project Path="src/Tnzi.Notification.Push/Tnzi.Notification.Push.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.Payment/">
+    <Project Path="src/Tnzi.Payment/Tnzi.Payment.csproj" />
+    <Project Path="src/Tnzi.Payment.Stripe/Tnzi.Payment.Stripe.csproj" />
+    <Project Path="src/Tnzi.Payment.PayPal/Tnzi.Payment.PayPal.csproj" />
+    <Project Path="src/Tnzi.Payment.Billing/Tnzi.Payment.Billing.csproj" />
+    <Project Path="src/Tnzi.Payment.Subscriptions/Tnzi.Payment.Subscriptions.csproj" />
+    <Project Path="src/Tnzi.Payment.Promotions/Tnzi.Payment.Promotions.csproj" />
+  </Folder>
+  <Folder Name="/src/modules/Tnzi.Storage/">
+    <Project Path="src/Tnzi.Storage/Tnzi.Storage.csproj" />
+    <Project Path="src/Tnzi.Storage.Cloud/Tnzi.Storage.Cloud.csproj" />
+    <Project Path="src/Tnzi.Storage.Workspace/Tnzi.Storage.Workspace.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Tnzi.AI.Rag.Tests/Tnzi.AI.Rag.Tests.csproj" />
@@ -75,11 +94,13 @@
     <Project Path="tests/Tnzi.AspNetCore.Tests/Tnzi.AspNetCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Audit.Tests/Tnzi.Audit.Tests.csproj" />
     <Project Path="tests/Tnzi.Authorization.Tests/Tnzi.Authorization.Tests.csproj" />
+    <Project Path="tests/Tnzi.Authorization.DataAuth.Tests/Tnzi.Authorization.DataAuth.Tests.csproj" />
     <Project Path="tests/Tnzi.Chat.Tests/Tnzi.Chat.Tests.csproj" />
     <Project Path="tests/Tnzi.Documents.Tests/Tnzi.Documents.Tests.csproj" />
     <Project Path="tests/Tnzi.EFCore.Tests/Tnzi.EFCore.Tests.csproj" />
     <Project Path="tests/Tnzi.Feature.Tests/Tnzi.Feature.Tests.csproj" />
     <Project Path="tests/Tnzi.Finance.Tests/Tnzi.Finance.Tests.csproj" />
+    <Project Path="tests/Tnzi.Finance.Offers.Tests/Tnzi.Finance.Offers.Tests.csproj" />
     <Project Path="tests/Tnzi.Finance.Payroll.Tests/Tnzi.Finance.Payroll.Tests.csproj" />
     <Project Path="tests/Tnzi.Finance.Tax.Ca.Tests/Tnzi.Finance.Tax.Ca.Tests.csproj" />
     <Project Path="tests/Tnzi.Finance.Ai.Tests/Tnzi.Finance.Ai.Tests.csproj" />
@@ -87,14 +108,21 @@
     <Project Path="tests/Tnzi.HealthChecks.Tests/Tnzi.HealthChecks.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Presence.Tests/Tnzi.Identity.Presence.Tests.csproj" />
+    <Project Path="tests/Tnzi.Identity.Organization.Tests/Tnzi.Identity.Organization.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Kafka.Tests/Tnzi.Kafka.Tests.csproj" />
     <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
     <Project Path="tests/Tnzi.Mapster.Tests/Tnzi.Mapster.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
+    <Project Path="tests/Tnzi.Notification.Push.Tests/Tnzi.Notification.Push.Tests.csproj" />
     <Project Path="tests/Tnzi.OpenTelemetry.Tests/Tnzi.OpenTelemetry.Tests.csproj" />
     <Project Path="tests/Tnzi.Payment.Tests/Tnzi.Payment.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.Stripe.Tests/Tnzi.Payment.Stripe.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.PayPal.Tests/Tnzi.Payment.PayPal.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.Billing.Tests/Tnzi.Payment.Billing.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.Subscriptions.Tests/Tnzi.Payment.Subscriptions.Tests.csproj" />
+    <Project Path="tests/Tnzi.Payment.Promotions.Tests/Tnzi.Payment.Promotions.Tests.csproj" />
     <Project Path="tests/Tnzi.PermissionCatalogue.Tests/Tnzi.PermissionCatalogue.Tests.csproj" />
     <Project Path="tests/Tnzi.Performance.Tests/Tnzi.Performance.Tests.csproj" />
     <Project Path="tests/Tnzi.RabbitMQ.Tests/Tnzi.RabbitMQ.Tests.csproj" />
@@ -102,6 +130,8 @@
     <Project Path="tests/Tnzi.SignalR.Tests/Tnzi.SignalR.Tests.csproj" />
     <Project Path="tests/Tnzi.Signing.Tests/Tnzi.Signing.Tests.csproj" />
     <Project Path="tests/Tnzi.Storage.Tests/Tnzi.Storage.Tests.csproj" />
+    <Project Path="tests/Tnzi.Storage.Cloud.Tests/Tnzi.Storage.Cloud.Tests.csproj" />
+    <Project Path="tests/Tnzi.Storage.Workspace.Tests/Tnzi.Storage.Workspace.Tests.csproj" />
     <Project Path="tests/Tnzi.Swagger.Tests/Tnzi.Swagger.Tests.csproj" />
     <Project Path="tests/Tnzi.System.Tests/Tnzi.System.Tests.csproj" />
     <Project Path="tests/Tnzi.Template.Tests/Tnzi.Template.Tests.csproj" />

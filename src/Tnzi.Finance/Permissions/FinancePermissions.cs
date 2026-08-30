@@ -42,11 +42,9 @@ public class FinancePermissions : IPermissionDefinitionProvider
             actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
         context.AddCrudPermissions("finance.comment", "Document Comments", parentName: "finance",
             actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
-        // 报价单与采购订单是**成为会计事实之前**的单据：报价的销售、下单的采购，
-        // 都不该因此拿到发票/账单的过账权限，所以自带一套码而不是复用 finance.document.*。
-        // 转换动作（转发票/转账单）叠加目标单据的 .create，见控制器。
-        context.AddCrudPermissions("finance.estimate", "Estimates", parentName: "finance");
-        context.AddCrudPermissions("finance.purchaseOrder", "Purchase Orders", parentName: "finance");
+        // finance.estimate.* / finance.purchaseOrder.* 随单据搬到 Tnzi.Finance.Offers 的
+        // FinanceOffersPermissions（码串一字不变，父组仍是这里的 finance）：报价的销售、
+        // 下单的采购都不该因此拿到发票/账单的过账权限，而不做这两件事的宿主连码都不该 seed。
         // Complete（锁定对账）走 .update（生命周期状态变更），与单据 post/void 一致。
         context.AddCrudPermissions("finance.reconciliation", "Bank Reconciliations", parentName: "finance");
         // 期末汇兑重估：非 CRUD 套装（view 只读预览 + execute 过账）。

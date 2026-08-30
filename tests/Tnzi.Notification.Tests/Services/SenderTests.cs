@@ -2,6 +2,35 @@
 namespace Tnzi.Notification.Tests.Services;
 
 /// <summary>
+/// <c>MailKitEmailSender</c> 返回的追踪 ID 依赖 MimeKit 的一个行为，这里把那个前提钉住。
+/// </summary>
+/// <remarks>
+/// ★★ <b>整条传真回执链架在这上面</b>：<c>SendResult.ExternalMessageId</c> 必须是那封信
+/// <b>真正的</b> <c>Message-ID</c>（随信发出去的那个），网关回执的 <c>In-Reply-To</c> 才对得上号。
+/// 它一度是自造的 <c>email-{时间戳}-{guid}</c> —— 一个从未出现在信里的字符串，看着像追踪 ID
+/// 却什么也追踪不到。现在的写法是「读 <c>MimeMessage.MessageId</c>」，成立的前提是
+/// <b>MimeKit 在构造时就生成了这个值</b>。升级 MimeKit 后这个前提若变了，
+/// 症状是回执从此永远对不上号 —— 没有异常、没有日志。
+/// </remarks>
+public class MimeMessageIdAssumptionTests
+{
+    [Fact]
+    public void ANewMimeMessage_AlreadyHasAMessageId()
+    {
+        var message = new MimeKit.MimeMessage();
+
+        message.MessageId.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>两封信不能拿到同一个 ID，否则回执会对到别人头上。</summary>
+    [Fact]
+    public void TwoMessages_GetDifferentIds()
+    {
+        new MimeKit.MimeMessage().MessageId.ShouldNotBe(new MimeKit.MimeMessage().MessageId);
+    }
+}
+
+/// <summary>
 /// MailKitEmailSender 单元测试
 /// </summary>
 public class MailKitEmailSenderTests
@@ -310,60 +339,6 @@ public class HttpSmsSenderTests
         // Assert
         result.Success.ShouldBeTrue();
         result.ExternalMessageId.ShouldNotBeNullOrEmpty();
-    }
-
-}
-
-/// <summary>
-/// PushSender 单元测试
-/// </summary>
-public class PushSenderTests
-{
-    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
-    private readonly Mock<ILogger<PushSender>> _loggerMock;
-    private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
-    private readonly NotificationOptions _options;
-
-    public PushSenderTests()
-    {
-        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        _loggerMock = new Mock<ILogger<PushSender>>();
-        _httpMessageHandlerMock = new Mock<HttpMessageHandler>();
-
-        _options = new NotificationOptions
-        {
-            MaxConcurrency = 5,
-            PushSender = new PushSenderOptions
-            {
-                Provider = "Firebase",
-                FirebaseProjectId = "test_project_id"
-            }
-        };
-    }
-
-    [Fact]
-    public void Constructor_Should_Initialize_Successfully()
-    {
-        // Act
-        var sender = new PushSender(_options, _loggerMock.Object);
-
-        // Assert
-        sender.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task SendToAsync_Should_Return_Failure_When_Options_Not_Configured()
-    {
-        // Arrange
-        var optionsWithoutPushSender = new NotificationOptions();
-        var sender = new PushSender(optionsWithoutPushSender, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendToAsync("device_token", "Title", "Body");
-
-        // Assert
-        result.Success.ShouldBeFalse();
-        result.FailureReason!.ShouldContain("not configured");
     }
 
 }

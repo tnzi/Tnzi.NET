@@ -249,7 +249,7 @@ async function removeAttachment(item: AttachmentItem) {
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: var(--tnzi-admin-radius-md, 6px);
   min-width: 0;
 }

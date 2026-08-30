@@ -78,7 +78,7 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
             // （见架构契约 §2.1），减法对分桶方案免疫。
             Overdue = (row?.Total ?? 0m) - (row?.Current ?? 0m),
             Buckets = row == null
-                ? new AgingBucketsDto()
+                ? new AgingBucketsDto { AgingBucketDays = _options.ResolveAgingBucketDays() }
                 : new AgingBucketsDto
                 {
                     Current = row.Current,
@@ -87,6 +87,7 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
                     Days61To90 = row.Days61To90,
                     Over90 = row.Over90,
                     Total = row.Total,
+                    AgingBucketDays = row.AgingBucketDays,
                 },
         };
 

@@ -29,6 +29,7 @@ import {
   useAdminFinancePaymentApi,
   useAdminFinanceSettlementApi,
   useAdminFinanceTransferApi,
+  useAdminFinanceDepositApi,
   useAdminFinanceReconciliationApi,
   useAdminFinanceRevaluationApi,
   useAdminFinanceBankAccountApi,
@@ -144,6 +145,12 @@ import {
   type CashFlowReportDto as CoreCashFlowReportDto,
   type TransferDto as CoreTransferDto,
   type CreateTransferDto as CoreCreateTransferDto,
+  type DepositDto as CoreDepositDto,
+  type DepositLineDto as CoreDepositLineDto,
+  type CreateDepositDto as CoreCreateDepositDto,
+  type CreateDepositFundsLineDto as CoreCreateDepositFundsLineDto,
+  type UndepositedReceiptDto as CoreUndepositedReceiptDto,
+  type UndepositedReceiptQueryDto as CoreUndepositedReceiptQueryDto,
   type ReconciliationDto as CoreReconciliationDto,
   type CreateReconciliationDto as CoreCreateReconciliationDto,
   type ReconciliationWorksheetDto as CoreReconciliationWorksheetDto,
@@ -299,6 +306,12 @@ export type TaxSummaryRowDto = CoreTaxSummaryRowDto
 export type CashFlowReportDto = CoreCashFlowReportDto
 export type TransferDto = CoreTransferDto
 export type CreateTransferDto = CoreCreateTransferDto
+export type DepositDto = CoreDepositDto
+export type DepositLineDto = CoreDepositLineDto
+export type CreateDepositDto = CoreCreateDepositDto
+export type CreateDepositFundsLineDto = CoreCreateDepositFundsLineDto
+export type UndepositedReceiptDto = CoreUndepositedReceiptDto
+export type UndepositedReceiptQueryDto = CoreUndepositedReceiptQueryDto
 export type ReconciliationDto = CoreReconciliationDto
 export type CreateReconciliationDto = CoreCreateReconciliationDto
 export type ReconciliationWorksheetDto = CoreReconciliationWorksheetDto
@@ -563,6 +576,10 @@ export interface FinanceBridge {
   creditMemos: FinanceDocSection<CreditMemoDto, CoreCreateCreditMemoDto>
   payments: FinanceDocSection<PaymentEntryDto, CoreCreatePaymentEntryDto>
   transfers: FinanceDocSection<TransferDto, CoreCreateTransferDto>
+  deposits: FinanceDocSection<DepositDto, CoreCreateDepositDto> & {
+    /** Posted inbound receipts on the account that no live deposit has claimed yet. */
+    undeposited(query: CoreUndepositedReceiptQueryDto): Promise<UndepositedReceiptDto[]>
+  }
   reconciliations: {
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<ReconciliationDto>>
     getById(id: string): Promise<ReconciliationDto | null>
@@ -741,6 +758,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       creditMemos: section as never,
       payments: section as never,
       transfers: section as never,
+      deposits: section as never,
       reconciliations: section as never,
       revaluations: section as never,
       settlements: section as never,
@@ -1144,6 +1162,15 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     creditMemos: docSection<CreditMemoDto, CoreCreateCreditMemoDto>(useAdminFinanceCreditMemoApi(client)),
     payments: docSection<PaymentEntryDto, CoreCreatePaymentEntryDto>(paymentApi),
     transfers: docSection<TransferDto, CoreCreateTransferDto>(useAdminFinanceTransferApi(client)),
+
+    deposits: (() => {
+      const api = useAdminFinanceDepositApi(client)
+      return {
+        ...docSection<DepositDto, CoreCreateDepositDto>(api),
+        undeposited: async (query: CoreUndepositedReceiptQueryDto) =>
+          unwrap<UndepositedReceiptDto[]>((await api.getUndeposited(query)) as never) ?? [],
+      }
+    })(),
 
     reconciliations: (() => {
       const api = useAdminFinanceReconciliationApi(client)

@@ -4,3 +4,4 @@
 // (zero consumers). Headless data/form state lives in @tnzi/core; bind its
 // controllers (they are reactive via `vue`) instead of re-implementing here.
 export * from './useEcharts'
+export * from './useReorderable'

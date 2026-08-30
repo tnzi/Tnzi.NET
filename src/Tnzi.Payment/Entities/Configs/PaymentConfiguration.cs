@@ -27,10 +27,10 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
             .HasForeignKey(r => r.PaymentId)
             .HasPrincipalKey(p => p.Id);
 
-        builder.HasOne(p => p.Invoice)
-            .WithOne(i => i.Payment)
-            .HasForeignKey<Invoice>(i => i.PaymentId)
-            .HasPrincipalKey<Payment>(p => p.Id);
+        // 「支付 → 发票」的一对一关系移到依赖端声明（子模块 Tnzi.Payment.Billing 的
+        // InvoiceConfiguration）。外键本来就在发票那一侧，这里删掉的只是一条父 → 子的导航；
+        // 列、索引、约束名与关系基数都不变，因此**不产生迁移**。
+        // 不加载那个子模块时，Payment_Invoice 表不存在，本表也不再引用它。
 
         if (multiTenancyEnabled)
         {

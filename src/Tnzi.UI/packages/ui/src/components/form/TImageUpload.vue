@@ -293,7 +293,7 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
 </script>
 
 <template>
-  <div class="t-image-upload">
+  <div class="t-image-upload t-media-frame">
     <!-- Hidden file input -->
     <input
       ref="fileInputRef"
@@ -335,12 +335,14 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
     <button
       v-if="removable && modelValue && !disabled"
       type="button"
-      class="t-image-upload__remove"
+      class="t-image-upload__remove t-media-chip t-media-remove"
       :title="removeLabel"
       :aria-label="removeLabel"
       @click.stop="handleRemove"
     >
-      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" aria-hidden="true">
+      <!-- 12px, matching the `mdi:close` TAttachmentWall renders at the shared
+           `font-size: 12px`. At 10px the same chip read as a different one. -->
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true">
         <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
       </svg>
     </button>
@@ -368,48 +370,37 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
 </template>
 
 <style scoped>
+/**
+ * `width: fit-content` is not redundant next to `inline-block`.
+ *
+ * An inline-block shrink-to-fits in normal flow, so in that context the two say
+ * the same thing. But a flex or grid item is BLOCKIFIED - `display: inline-block`
+ * silently becomes `block` - and naive-ui's `.n-form-item-blank` is a flex
+ * container, which is the ordinary way this component is used. Without this the
+ * root stretches across the whole form column while the preview frame keeps its
+ * own width, and the remove chip - anchored to the root - lands hundreds of
+ * pixels away from the picture it belongs to. Nothing warns; it just looks
+ * broken.
+ *
+ * `fit-content` also survives `align-items: stretch` in a column flex container,
+ * because stretching only applies to an `auto` cross size.
+ */
 .t-image-upload {
   display: inline-block;
+  width: fit-content;
   position: relative;
 }
 
-/* Corner remove control - a soft floating chip tucked onto the top-right edge.
-   Hidden at rest, it fades in when the avatar is hovered (or focused for a11y)
-   so it never clutters the resting state. */
+/* Position only - the chip's material, its visibility rule and its hover
+   feedback are shared with `TAttachmentWall` and live in
+   `styles/media-chip.css` (classes `t-media-chip` + `t-media-remove`, revealed by the
+   `t-media-frame` on this root). On the outer corner rather than inside the
+   frame because this control is often pinned to a small avatar, where an inset
+   chip covers the face. */
 .t-image-upload__remove {
   position: absolute;
   top: -3px;
   right: -3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--tnzi-container-bg, #fff);
-  color: var(--tnzi-base-text-muted, #8a8a8a);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
-  cursor: pointer;
-  opacity: 0;
-  transform: scale(0.75);
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease,
-    color 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.t-image-upload:hover .t-image-upload__remove,
-.t-image-upload__remove:focus-visible {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.t-image-upload__remove:hover {
-  color: #fff;
-  background: var(--tnzi-error, #e64340);
 }
 
 .t-image-upload__input {

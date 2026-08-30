@@ -96,23 +96,23 @@
     "@vue-flow/background": "^1.3.2",
     "@vue-flow/core": "^1.48.2",
     "@vue-flow/minimap": "^1.5.4",
-    "katex": "^0.17.0",
-    "markdown-it": "^14.2.0",
-    "shiki": "^4.2.0"
+    "katex": "^0.18.4",
+    "markdown-it": "^15.0.0",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@iconify/vue": "catalog:",
     "@tnzi/core": "workspace:*",
     "@tnzi/ui": "workspace:*",
-    "@types/katex": "^0.16.8",
-    "@types/markdown-it": "^14.1.2",
-    "@vitejs/plugin-vue": "^6.0.7",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "naive-ui": "catalog:",
     "rimraf": "^6.1.3",
     "typescript": "^6.0.3",
-    "unocss": "^66.7.2",
-    "vite": "^7.3.5",
-    "vue-tsc": "^3.3.5",
-    "vue-router": "catalog:"
+    "unocss": "^66.8.0",
+    "vite": "^8.2.1",
+    "vue": "catalog:",
+    "vue-router": "catalog:",
+    "vue-tsc": "^3.3.10"
   },
   "peerDependencies": {
     "@iconify/vue": ">=5.0.0",
@@ -138,6 +138,9 @@
     "url": "https://github.com/tnzi/tnzi.net"
   },
   "peerDependenciesMeta": {
+    "@tnzi/ui": {
+      "optional": true
+    },
     "vue-router": {
       "optional": true
     }

@@ -53,6 +53,16 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     component: () => import('../pages/share/SharePage.vue'),
     meta: { requiresAuth: false, title: 'Shared file' },
   },
+  {
+    // 退订链接的收件人页面。同 /share/:token 的理由：收件人未必是本系统的用户，
+    // 而要求先登录才能退订本身就违背「一键退订」的合规要求。
+    // ★ 令牌走查询串（`?token=`）不走路径段：签名令牌含 base64url 的 `.` 与 `-`，
+    //   而邮件客户端在转发链接时对查询串的处理最一致。
+    path: '/unsubscribe',
+    name: 'unsubscribe',
+    component: () => import('../pages/notification/UnsubscribePage.vue'),
+    meta: { requiresAuth: false, title: 'Unsubscribe' },
+  },
   // Exception pages - top-level (so `applyBasePath` prefixes them uniformly with
   // every other route) and `requiresAuth: false` so the permission / module
   // guards can redirect INTO them without the auth guard bouncing back. Each
@@ -120,6 +130,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
         meta: {
           title: 'tnzi.admin.modules.account.userCenter.title',
           hideInMenu: true,
+          // Sectioned forms, not a table - the default table width would leave
+          // half the window empty.
+          window: { preset: 'medium' },
         },
       },
 
@@ -193,6 +206,8 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'identity.organizations',
             component: () => import('../pages/identity/Organizations.vue'),
             meta: {
+              // 组织架构自 2026-08-29 起在 Tnzi.Identity.Organization 子模块里。
+              moduleGate: 'identity-organization',
               title: 'tnzi.admin.modules.identity.organizations.title',
               permission: 'organization.view',
               keepAlive: true,
@@ -262,8 +277,22 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'authorization.entityRoles',
             component: () => import('../pages/authorization/EntityRoles.vue'),
             meta: {
+              // 行级数据授权自 2026-08-29 起在 Tnzi.Authorization.DataAuth 子模块里。
+              // 父节点 authorization 的 moduleGate 仍然对准父模块，不要改它，
+              // 另外四个子页（功能模块 / 权限 / 角色功能 / 双人授权）都留在父模块里。
+              moduleGate: 'authorization-dataauth',
               title: 'tnzi.admin.modules.authorization.entityRoles.title',
               permission: 'authorization.entityRole.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'dual-control',
+            name: 'authorization.dualControl',
+            component: () => import('../pages/authorization/DualControl.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.authorization.dualControl.title',
+              permission: 'authorization.dualControl.view',
               keepAlive: true,
             },
           },
@@ -428,8 +457,15 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'storage.chunks',
             component: () => import('../pages/storage/Chunks.vue'),
             meta: {
+              // 分片、版本、分享自 2026-08-29 起在 Tnzi.Storage.Workspace 子模块里：
+              // 宿主没加载它时这三页必须消失，而不是渲染出一堆 404 / 501 的死链。
+              // storage.files 刻意不挂门 —— 它的文件列表本身仍然可用，只是目录树那一半不可用，
+              // 那一半在页面内处理（见 Files.vue 的可用性判断）。
+              moduleGate: 'storage-workspace',
               title: 'tnzi.admin.modules.storage.chunks.title',
-              permission: 'storage.chunk.view',
+              // 端点走 storage.file.view（类级读门）。此前这里挂的是一个后端
+              // 不强制的码，于是「只授 View Chunks」会让菜单出现而每个请求 403。
+              permission: 'storage.file.view',
               keepAlive: true,
             },
           },
@@ -438,8 +474,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'storage.versions',
             component: () => import('../pages/storage/Versions.vue'),
             meta: {
+              moduleGate: 'storage-workspace',
               title: 'tnzi.admin.modules.storage.versions.title',
-              permission: 'storage.version.view',
+              permission: 'storage.file.view',
               keepAlive: true,
             },
           },
@@ -448,6 +485,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'storage.shares',
             component: () => import('../pages/storage/Shares.vue'),
             meta: {
+              moduleGate: 'storage-workspace',
               title: 'tnzi.admin.modules.storage.shares.title',
               permission: 'storage.file.view',
               keepAlive: true,
@@ -622,6 +660,8 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'payment.subscriptions',
             component: () => import('../pages/payment/Subscriptions.vue'),
             meta: {
+              // 订阅、开票、促销自 2026-08-29 起各自成包，未加载时整页消失而不是留一堆 404 死链。
+              moduleGate: 'payment-subscriptions',
               title: 'tnzi.admin.modules.payment.subscriptions.title',
               permission: 'payment.subscription.view',
               keepAlive: true,
@@ -652,6 +692,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'payment.invoices',
             component: () => import('../pages/payment/Invoices.vue'),
             meta: {
+              moduleGate: 'payment-billing',
               title: 'tnzi.admin.modules.payment.invoices.title',
               permission: 'payment.invoice.view',
               keepAlive: true,
@@ -662,6 +703,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             name: 'payment.promotions',
             component: () => import('../pages/payment/Promotions.vue'),
             meta: {
+              moduleGate: 'payment-promotions',
               title: 'tnzi.admin.modules.payment.promotions.title',
               permission: 'payment.promotion.view',
               keepAlive: true,
@@ -716,6 +758,8 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.estimates',
                 component: () => import('../pages/finance/Estimates.vue'),
                 meta: {
+                  // 报价与采购订单自 2026-08-29 起在 Tnzi.Finance.Offers 子模块里。
+                  moduleGate: 'finance-offers',
                   title: 'tnzi.admin.modules.finance.estimates.title',
                   permission: 'finance.estimate.view',
                   keepAlive: true,
@@ -776,6 +820,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 name: 'finance.purchaseOrders',
                 component: () => import('../pages/finance/PurchaseOrders.vue'),
                 meta: {
+                  moduleGate: 'finance-offers',
                   title: 'tnzi.admin.modules.finance.purchaseOrders.title',
                   permission: 'finance.purchaseOrder.view',
                   keepAlive: true,
@@ -851,6 +896,16 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
                 component: () => import('../pages/finance/Transfers.vue'),
                 meta: {
                   title: 'tnzi.admin.modules.finance.transfers.title',
+                  permission: 'finance.document.view',
+                  keepAlive: true,
+                },
+              },
+              {
+                path: 'deposits',
+                name: 'finance.deposits',
+                component: () => import('../pages/finance/Deposits.vue'),
+                meta: {
+                  title: 'tnzi.admin.modules.finance.deposits.title',
                   permission: 'finance.document.view',
                   keepAlive: true,
                 },
@@ -1188,6 +1243,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               permission: 'ai.workflow.view',
               hideInMenu: true,
               activeMenu: 'ai.workflows',
+              // A node graph is the one page here that genuinely wants the
+              // whole desktop; the default `wide` crops the canvas.
+              window: { preset: 'full' },
             },
           },
           {

@@ -16,6 +16,7 @@ import type {
   UserDto,
   UserDetailDto,
 } from '@tnzi/core/services/identity'
+import { isPasskeySupported } from '@tnzi/core/services/identity'
 import { resolveAvatarUrl } from '../../utils/resolveAvatarUrl'
 import type { IdentityBridge } from '../../services/bridges/identity-bridge'
 import type { StorageBridge } from '../../services/bridges/storage-bridge'
@@ -37,15 +38,25 @@ export interface UserCenterCapabilities {
   smsChannel: boolean
   /** OAuth providers available for linking a new third-party account. */
   oauthProviders: OAuthProviderInfoDto[]
+  /**
+   * Passkeys are enabled for this deployment AND this browser can run the
+   * ceremony. Both halves matter: showing "Add a passkey" on a browser without
+   * the JSON bridges produces a TypeError midway through, after the user has
+   * already been prompted.
+   */
+  passkey: boolean
 }
 
 /**
  * Fail-open capability derivation. When the probe fails (`config == null`) we
  * assume the two core-identity change flows are available (they almost always
  * are), but offer NO OAuth link buttons we couldn't actually fulfil.
+ *
+ * Passkeys are the other fail-CLOSED case: they default to off server-side, so
+ * a failed probe must not advertise an enrolment flow that would 400.
  */
 export function deriveCapabilities(config: AuthConfigDto | null): UserCenterCapabilities {
-  if (!config) return { emailChannel: true, smsChannel: true, oauthProviders: [] }
+  if (!config) return { emailChannel: true, smsChannel: true, oauthProviders: [], passkey: false }
   const emailChannel = !!(
     config.allowEmailLogin ||
     config.codeLoginViaEmail ||
@@ -58,7 +69,12 @@ export function deriveCapabilities(config: AuthConfigDto | null): UserCenterCapa
     config.recoveryViaSms ||
     config.registerViaSms
   )
-  return { emailChannel, smsChannel, oauthProviders: config.oAuthProviders ?? [] }
+  return {
+    emailChannel,
+    smsChannel,
+    oauthProviders: config.oAuthProviders ?? [],
+    passkey: !!config.enablePasskey && isPasskeySupported(),
+  }
 }
 
 export interface UserCenterContext {

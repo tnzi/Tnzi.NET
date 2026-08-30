@@ -94,6 +94,11 @@ import type {
   TransferDto,
   CreateTransferDto,
   TransferQueryDto,
+  DepositDto,
+  CreateDepositDto,
+  DepositQueryDto,
+  UndepositedReceiptDto,
+  UndepositedReceiptQueryDto,
   ReconciliationDto,
   CreateReconciliationDto,
   ReconciliationQueryDto,
@@ -423,6 +428,7 @@ const ADMIN_CREDIT_MEMO_BASE = '/admin/finance/credit-memos';
 const ADMIN_PAYMENT_BASE = '/admin/finance/payments';
 const ADMIN_SETTLEMENT_BASE = '/admin/finance/settlements';
 const ADMIN_TRANSFER_BASE = '/admin/finance/transfers';
+const ADMIN_DEPOSIT_BASE = '/admin/finance/deposits';
 const ADMIN_RECONCILIATION_BASE = '/admin/finance/reconciliations';
 const ADMIN_REVALUATION_BASE = '/admin/finance/revaluations';
 
@@ -648,6 +654,22 @@ export function useAdminFinanceSettlementApi(client: HttpClient) {
 /** Admin Transfer API (funds transfer document workflow) */
 export function useAdminFinanceTransferApi(client: HttpClient) {
   return documentApi<TransferDto, CreateTransferDto, TransferQueryDto>(client, ADMIN_TRANSFER_BASE);
+}
+
+/**
+ * Admin Bank Deposit API (the exit from Undeposited Funds).
+ *
+ * `getUndeposited` is what a deposit editor lists: posted inbound receipts
+ * sitting on the given account that no live deposit has claimed yet.
+ */
+export function useAdminFinanceDepositApi(client: HttpClient) {
+  return {
+    ...documentApi<DepositDto, CreateDepositDto, DepositQueryDto>(client, ADMIN_DEPOSIT_BASE),
+    getUndeposited: (params: UndepositedReceiptQueryDto) =>
+      client.get<UndepositedReceiptDto[]>(`${ADMIN_DEPOSIT_BASE}/undeposited`, {
+        params: params as unknown as Record<string, unknown>,
+      }),
+  };
 }
 
 /** Admin Bank Reconciliation API */

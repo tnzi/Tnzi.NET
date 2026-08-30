@@ -1,6 +1,51 @@
 #nullable enable
+*REMOVED*readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.Interfaces.ILogFileService!
+*REMOVED*Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.Interfaces.ILogFileService! logFileService) -> void
+abstract Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.PermissionPrefix.get -> string!
+override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.Priority.get -> int
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Equals(object? obj) -> bool
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.GetHashCode() -> int
+override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.ToString() -> string!
+readonly Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.Catalog -> Tnzi.Capabilities.ICapabilityCatalog!
+readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.ILogFileService!
+static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.RunPostMigrationStartupTasksAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
+static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator !=(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
+static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator ==(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
 Tnzi.AspNetCore.Controllers.DefaultAdminShellController
 Tnzi.AspNetCore.Controllers.DefaultAdminShellController.DefaultAdminShellController() -> void
+Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController
+Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.DefaultCapabilitiesController(Tnzi.Capabilities.ICapabilityCatalog! catalog) -> void
+Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.ILogFileService! logFileService) -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.AllowsAnonymous.get -> bool
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.AllowsAnonymous.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Controller.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Controller.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.HttpMethod.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.HttpMethod.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.IsDefaultController.get -> bool
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.IsDefaultController.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Module.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Module.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Name.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Name.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Reason.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Reason.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Route.get -> string!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.Route.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointDto.SensitiveEndpointDto() -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.Endpoints.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Controllers.SensitiveEndpointDto!>!
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.Endpoints.set -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.SensitiveEndpointReportDto() -> void
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.TotalCount.get -> int
+Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto.TotalCount.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellHubDto
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.AdminShellHubDto() -> void
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.get -> string!
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.set -> void
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.get -> string!
+Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.set -> void
 Tnzi.AspNetCore.Dtos.AdminShellModuleDto
 Tnzi.AspNetCore.Dtos.AdminShellModuleDto.AdminShellModuleDto() -> void
 Tnzi.AspNetCore.Dtos.AdminShellModuleDto.IsEnabled.get -> bool
@@ -11,45 +56,6 @@ Tnzi.AspNetCore.Dtos.AdminShellModulesDto
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.AdminShellModulesDto() -> void
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminShellModuleDto!>!
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Modules.set -> void
-Tnzi.AspNetCore.Permissions.AspNetCorePermissions
-Tnzi.AspNetCore.Permissions.AspNetCorePermissions.AspNetCorePermissions() -> void
-Tnzi.AspNetCore.Permissions.AspNetCorePermissions.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void
-Tnzi.AspNetCore.Mvc.ApiAdminControllerBase.CsvFile(Tnzi.Results.Result<string!>! result, string! baseName) -> Microsoft.AspNetCore.Mvc.IActionResult!
-abstract Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.PermissionPrefix.get -> string!
-Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>
-Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CrudAdminControllerBase(Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>! service, System.IServiceProvider? serviceProvider = null) -> void
-Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Service.get -> Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.BatchDelete(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Create(TCreateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CreatePermission.get -> string!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Delete(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.DeletePermission.get -> string!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetById(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetList(Tnzi.Data.PagedQueryDto! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Query(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.RequirePermissionAsync(string! permissionCode) -> System.Threading.Tasks.Task!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Update(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.UpdatePermission.get -> string!
-virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!
-static Tnzi.AspNetCore.Extensions.WebApplicationExtensions.RunPostMigrationStartupTasksAsync(this Microsoft.AspNetCore.Builder.WebApplication! app) -> System.Threading.Tasks.Task!
-override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.Priority.get -> int
-Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.get -> System.Collections.Generic.List<string!>?
-Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.set -> void
-*REMOVED*Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.Interfaces.ILogFileService! logFileService) -> void
-Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.ILogFileService! logFileService) -> void
-*REMOVED*readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.Interfaces.ILogFileService!
-readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.ILogFileService!
-override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Equals(object? obj) -> bool
-override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.GetHashCode() -> int
-override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.ToString() -> string!
-static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator !=(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
-static Tnzi.AspNetCore.Services.RealtimeHubDescriptor.operator ==(Tnzi.AspNetCore.Services.RealtimeHubDescriptor? left, Tnzi.AspNetCore.Services.RealtimeHubDescriptor? right) -> bool
-Tnzi.AspNetCore.Dtos.AdminShellHubDto
-Tnzi.AspNetCore.Dtos.AdminShellHubDto.AdminShellHubDto() -> void
-Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.get -> string!
-Tnzi.AspNetCore.Dtos.AdminShellHubDto.Name.set -> void
-Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.get -> string!
-Tnzi.AspNetCore.Dtos.AdminShellHubDto.Path.set -> void
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Realtime.get -> Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto!
 Tnzi.AspNetCore.Dtos.AdminShellModulesDto.Realtime.set -> void
 Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto
@@ -58,6 +64,43 @@ Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Available.get -> bool
 Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Available.set -> void
 Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Hubs.get -> System.Collections.Generic.List<Tnzi.AspNetCore.Dtos.AdminShellHubDto!>!
 Tnzi.AspNetCore.Dtos.AdminShellRealtimeDto.Hubs.set -> void
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.set -> void
+Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.ServerCapabilitiesDto() -> void
+Tnzi.AspNetCore.Http.HttpClientCapabilities
+Tnzi.AspNetCore.Http.HttpClientCapabilities.Declared.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.AspNetCore.Http.HttpClientCapabilities.HttpClientCapabilities(Microsoft.AspNetCore.Http.IHttpContextAccessor! httpContextAccessor) -> void
+Tnzi.AspNetCore.Http.HttpClientCapabilities.Supports(string! capability) -> bool
+Tnzi.AspNetCore.Mvc.ApiAdminControllerBase.CsvFile(Tnzi.Results.Result<string!>! result, string! baseName) -> Microsoft.AspNetCore.Mvc.IActionResult!
+Tnzi.AspNetCore.Mvc.Conventions.ConfigurationControllerFilterProvider.ConfigurationControllerFilterProvider(Tnzi.AspNetCore.Options.ControllerFilterOptions! options, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory) -> void
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CrudAdminControllerBase(Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>! service, System.IServiceProvider? serviceProvider = null) -> void
+Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Service.get -> Tnzi.Application.ICrudAppService<TKey, TDto, TCreateDto, TUpdateDto>!
+Tnzi.AspNetCore.Mvc.SensitiveEndpointAttribute
+Tnzi.AspNetCore.Mvc.SensitiveEndpointAttribute.Name.get -> string!
+Tnzi.AspNetCore.Mvc.SensitiveEndpointAttribute.Reason.get -> string!
+Tnzi.AspNetCore.Mvc.SensitiveEndpointAttribute.SensitiveEndpointAttribute(string! name, string! reason) -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.set -> void
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableWelcomePage.get -> bool
+Tnzi.AspNetCore.Options.AspNetCoreOptions.EnableWelcomePage.set -> void
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledEndpoints.get -> string![]?
+Tnzi.AspNetCore.Options.ControllerFilterOptions.DisabledEndpoints.set -> void
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Allow = 0 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Deny = 1 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Global = 2 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.get -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
+Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.set -> void
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.get -> System.Collections.Generic.List<string!>?
+Tnzi.AspNetCore.Options.RequestTrackingOptions.SensitiveQueryKeys.set -> void
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions.AspNetCorePermissions() -> void
+Tnzi.AspNetCore.Permissions.AspNetCorePermissions.Define(Tnzi.Security.Authorization.IPermissionDefinitionContext! context) -> void
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.GetPartitionKey(Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.Order.get -> int
 Tnzi.AspNetCore.Services.IRealtimeHubRegistry
 Tnzi.AspNetCore.Services.IRealtimeHubRegistry.Hubs.get -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Services.RealtimeHubDescriptor!>!
 Tnzi.AspNetCore.Services.IRealtimeHubRegistry.Register(string! name, string! path) -> void
@@ -75,26 +118,17 @@ Tnzi.AspNetCore.Services.RealtimeHubRegistry.Hubs.get -> System.Collections.Gene
 Tnzi.AspNetCore.Services.RealtimeHubRegistry.RealtimeHubRegistry() -> void
 Tnzi.AspNetCore.Services.RealtimeHubRegistry.Register(string! name, string! path) -> void
 virtual Tnzi.AspNetCore.Controllers.DefaultAdminShellController.GetModules(Tnzi.ITnziApplication! tnziApp, Tnzi.AspNetCore.Services.IRealtimeHubRegistry? hubRegistry = null) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminShellModulesDto!>!
-Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController
-Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.DefaultCapabilitiesController(Tnzi.Capabilities.ICapabilityCatalog! catalog) -> void
-Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto
-Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.get -> System.Collections.Generic.List<string!>!
-Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.Capabilities.set -> void
-Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto.ServerCapabilitiesDto() -> void
-Tnzi.AspNetCore.Http.HttpClientCapabilities
-Tnzi.AspNetCore.Http.HttpClientCapabilities.Declared.get -> System.Collections.Generic.IReadOnlyList<string!>!
-Tnzi.AspNetCore.Http.HttpClientCapabilities.HttpClientCapabilities(Microsoft.AspNetCore.Http.IHttpContextAccessor! httpContextAccessor) -> void
-Tnzi.AspNetCore.Http.HttpClientCapabilities.Supports(string! capability) -> bool
-readonly Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.Catalog -> Tnzi.Capabilities.ICapabilityCatalog!
 virtual Tnzi.AspNetCore.Controllers.DefaultCapabilitiesController.GetCapabilities() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.ServerCapabilitiesDto!>!
-Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.get -> bool
-Tnzi.AspNetCore.Options.AspNetCoreOptions.CollectClientIpAddress.set -> void
-Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
-Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Allow = 0 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
-Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Deny = 1 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
-Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior.Global = 2 -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
-Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.get -> Tnzi.AspNetCore.Options.MissingPartitionKeyBehavior
-Tnzi.AspNetCore.Options.RateLimitOptions.MissingPartitionKey.set -> void
-Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider
-Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.GetPartitionKey(Microsoft.AspNetCore.Http.HttpContext! context) -> string?
-Tnzi.AspNetCore.Services.IRateLimitPartitionKeyProvider.Order.get -> int
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetSensitiveEndpoints(Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider! actionProvider) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Controllers.SensitiveEndpointReportDto!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.BatchDelete(System.Collections.Generic.IEnumerable<TKey>! ids, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Create(TCreateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.CreatePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Delete(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.DeletePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetById(TKey id, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.GetList(Tnzi.Data.PagedQueryDto! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Query(Tnzi.Data.PagedQuery! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<Tnzi.Data.IPagedList<TDto>!>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.RequirePermissionAsync(string! permissionCode) -> System.Threading.Tasks.Task!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Update(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.UpdatePermission.get -> string!
+virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!

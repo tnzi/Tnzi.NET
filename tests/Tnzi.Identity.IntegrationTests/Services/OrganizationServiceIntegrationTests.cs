@@ -1,7 +1,10 @@
-using Tnzi.Identity.Services;
 using Tnzi.MultiTenancy;
+using Tnzi.Identity.Organization.Services;
 
 namespace Tnzi.Identity.IntegrationTests.Services;
+
+// 见 IntegrationTestBase.cs 顶部：`Organization` 的 using 必须在命名空间体内。
+using Tnzi.Identity.Organization.Entities;
 
 public class OrganizationServiceIntegrationTests : RelationalIdentityIntegrationTestBase
 {

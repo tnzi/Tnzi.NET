@@ -116,7 +116,8 @@ public class MiddlewarePipelineIntegrationTests
                             ReservedAt = DateTime.UtcNow
                         });
                     }
-                    return Result<QuotaReservation>.Failure("Daily quota exceeded", 429);
+                    // 错误码是「是否真的超限」的判据（QuotaMiddleware.IsQuotaExceeded），真实服务始终带码
+                    return Result<QuotaReservation>.Failure("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded);
                 });
 
             _quotaServiceMock

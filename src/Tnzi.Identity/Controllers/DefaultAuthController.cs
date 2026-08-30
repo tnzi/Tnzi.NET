@@ -1,4 +1,4 @@
-using TokenResult = Tnzi.Identity.Services.TokenResult;
+﻿using TokenResult = Tnzi.Identity.Services.TokenResult;
 
 namespace Tnzi.Identity.Controllers;
 
@@ -8,7 +8,7 @@ namespace Tnzi.Identity.Controllers;
 /// </summary>
 [DefaultController]
 [Route("auth")]
-public class DefaultAuthController : ApiControllerBase
+public partial class DefaultAuthController : ApiControllerBase
 {
     protected readonly ITwoFactorService TwoFactorService;
     protected readonly IAuthService AuthService;
@@ -20,6 +20,8 @@ public class DefaultAuthController : ApiControllerBase
     protected readonly IConfiguration? Configuration;
     protected readonly IIdentityPageService? IdentityPageService;
     protected readonly IPasswordPolicyService? PasswordPolicyService;
+    protected readonly IPasskeyService? PasskeyService;
+    protected readonly IStepUpService? StepUpService;
 
     /// <summary>
     /// 初始化认证控制器
@@ -34,6 +36,8 @@ public class DefaultAuthController : ApiControllerBase
     /// <param name="configuration">配置（可选）</param>
     /// <param name="identityPageService">页面生成服务（可选）</param>
     /// <param name="passwordPolicyService">密码策略服务（可选）</param>
+    /// <param name="passkeyService">Passkey 服务（可选；未注册时六个 passkey 端点统一返回未启用）</param>
+    /// <param name="stepUpService">二次确认服务（可选；未注册时两个 step-up 端点统一返回不可用）</param>
     public DefaultAuthController(
         ITwoFactorService twoFactorService,
         IAuthService authService,
@@ -44,7 +48,9 @@ public class DefaultAuthController : ApiControllerBase
         IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IConfiguration? configuration = null,
         IIdentityPageService? identityPageService = null,
-        IPasswordPolicyService? passwordPolicyService = null)
+        IPasswordPolicyService? passwordPolicyService = null,
+        IPasskeyService? passkeyService = null,
+        IStepUpService? stepUpService = null)
     {
         TwoFactorService = Check.NotNull(twoFactorService);
         AuthService = Check.NotNull(authService);
@@ -56,6 +62,8 @@ public class DefaultAuthController : ApiControllerBase
         Configuration = configuration;
         IdentityPageService = identityPageService;
         PasswordPolicyService = passwordPolicyService;
+        PasskeyService = passkeyService;
+        StepUpService = stepUpService;
     }
 
     /// <summary>

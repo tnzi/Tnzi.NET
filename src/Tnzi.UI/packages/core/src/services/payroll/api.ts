@@ -6,6 +6,10 @@
  * Note the payslip sub-resources are NESTED under the run
  * (`runs/{id}/payslips/{payslipId}` / `.../inputs`) and the external ingestion
  * endpoint is `runs/external` - matching the backend controller routes.
+ *
+ * `runs/{id}/inputs` (one-time inputs) is a sibling of `payslips`, not a child:
+ * an input is attached to the RUN, so a full recalculation - which rebuilds every
+ * payslip - cannot drop an already-approved bonus.
  */
 
 import type { HttpClient } from '../../http/http'
@@ -40,6 +44,8 @@ import type {
   PayslipDto,
   PayslipListDto,
   UpdatePayslipInputsDto,
+  PayRunInputDto,
+  SetPayRunInputDto,
   ExternalPayRunIngestDto,
   CountryPackDto,
   CountryPackSeedResult,
@@ -141,6 +147,14 @@ export function useAdminPayrollApi(client: HttpClient) {
         client.get<PayslipDto>(`${ADMIN_RUN_BASE}/${id}/payslips/${payslipId}`),
       updatePayslipInputs: (id: string, payslipId: string, data: UpdatePayslipInputsDto) =>
         client.put<PayslipDto>(`${ADMIN_RUN_BASE}/${id}/payslips/${payslipId}/inputs`, data),
+      /** One-time inputs for the whole run (bonus / back pay / one-off deduction). */
+      getInputs: (id: string) => client.get<PayRunInputDto[]>(`${ADMIN_RUN_BASE}/${id}/inputs`),
+      /** Enter or overwrite one input; recalculates that payslip when the run is Calculated. */
+      setInput: (id: string, data: SetPayRunInputDto) =>
+        client.post<PayRunInputDto>(`${ADMIN_RUN_BASE}/${id}/inputs`, data),
+      /** Remove one input; recalculates that payslip when the run is Calculated. */
+      deleteInput: (id: string, inputId: string) =>
+        client.delete<void>(`${ADMIN_RUN_BASE}/${id}/inputs/${inputId}`),
       /** Idempotent external ingestion (External / OpeningBalance). */
       createFromExternal: (data: ExternalPayRunIngestDto) =>
         client.post<PayRunDto>(`${ADMIN_RUN_BASE}/external`, data),

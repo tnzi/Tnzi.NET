@@ -68,7 +68,10 @@ const layoutClass = computed(() =>
   padding: 48px;
   max-width: 440px;
   width: 100%;
-  box-shadow: var(--tnzi-shadow-card);
+  /* Overlay tier: a login panel floats over an arbitrary background image, so
+     it needs real separation rather than the canvas-card whisper. */
+  border: var(--tnzi-surface-overlay-border);
+  box-shadow: var(--tnzi-surface-overlay-shadow);
 }
 .t-auth-layout__brand {
   margin-bottom: 32px;

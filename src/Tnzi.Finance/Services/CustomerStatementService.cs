@@ -124,6 +124,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
                     Days61To90 = row.Days61To90,
                     Over90 = row.Over90,
                     Total = row.Total,
+                    AgingBucketDays = row.AgingBucketDays,
                 },
             });
         }

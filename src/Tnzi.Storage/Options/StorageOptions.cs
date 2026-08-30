@@ -226,14 +226,29 @@ public class ShareOptions
 public class S3StorageOptions
 {
     /// <summary>
-    /// 获取或设置 访问密钥ID
+    /// 获取或设置 访问密钥ID。与 <see cref="SecretAccessKey"/> **同时留空**表示不配置静态密钥，
+    /// 凭据改由 AWS SDK 的默认凭据链解析，详见 <see cref="UsesDefaultCredentialChain"/>。
     /// </summary>
     public string AccessKeyId { get; set; } = string.Empty;
 
     /// <summary>
-    /// 获取或设置 访问密钥
+    /// 获取或设置 访问密钥。与 <see cref="AccessKeyId"/> **同时留空**表示不配置静态密钥，
+    /// 凭据改由 AWS SDK 的默认凭据链解析，详见 <see cref="UsesDefaultCredentialChain"/>。
     /// </summary>
     public string SecretAccessKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取 是否把凭据交给 AWS SDK 的默认凭据链解析：两个密钥字段**都**为空时为 true。
+    ///
+    /// 在 AWS 上运行时（ECS 任务角色 / EC2 实例角色 / EKS IRSA）这是推荐做法：凭据由运行环境
+    /// 提供并自动轮换，不必把一对长期密钥写进部署配置或镜像。解析顺序与直接
+    /// <c>new AmazonS3Client()</c> 完全一致（环境变量 / 共享凭据文件 / 容器 / 实例角色，先后次序由 SDK 决定）。
+    ///
+    /// ★**只填一个不算**：那是笔误，不是在要默认凭据链，由 <see cref="StorageOptionsValidator"/>
+    /// 拒绝。否则一个打错的键名会静默地换掉整个部署用的身份，而症状要到第一次访问对象存储时才出现。
+    /// </summary>
+    public bool UsesDefaultCredentialChain =>
+        string.IsNullOrWhiteSpace(AccessKeyId) && string.IsNullOrWhiteSpace(SecretAccessKey);
 
     /// <summary>
     /// 获取或设置 服务端点URL
@@ -445,11 +460,18 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
                 errors.Add("S3 options are required when Provider is S3.");
             else
             {
-                if (string.IsNullOrEmpty(options.S3.AccessKeyId))
-                    errors.Add("S3.AccessKeyId is required.");
+                // 两个密钥字段都留空 = 交给 AWS SDK 的默认凭据链（环境变量 / 共享凭据文件 /
+                // ECS 任务角色 / EC2 实例角色）。强制填写等于逼着每个跑在 AWS 上的部署把一对
+                // 长期密钥写进部署配置，而那正是任务角色要消灭的东西。
+                // 只填一个仍然拒绝：那是笔误，不是在要默认凭据链。
+                if (!options.S3.UsesDefaultCredentialChain)
+                {
+                    if (string.IsNullOrWhiteSpace(options.S3.AccessKeyId))
+                        errors.Add("S3.AccessKeyId is required when S3.SecretAccessKey is set. Leave both empty to use the AWS SDK default credential chain.");
 
-                if (string.IsNullOrEmpty(options.S3.SecretAccessKey))
-                    errors.Add("S3.SecretAccessKey is required.");
+                    if (string.IsNullOrWhiteSpace(options.S3.SecretAccessKey))
+                        errors.Add("S3.SecretAccessKey is required when S3.AccessKeyId is set. Leave both empty to use the AWS SDK default credential chain.");
+                }
 
                 if (string.IsNullOrEmpty(options.S3.BucketName))
                     errors.Add("S3.BucketName is required.");

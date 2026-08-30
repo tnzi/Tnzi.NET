@@ -499,7 +499,8 @@ defineExpose({ contextTarget, contextVisible, onContextSelect })
      dropping the line here makes both bars read the same soft-edged way.) A
      custom / inverted tab surface re-adds a border below, since this light
      shadow is invisible on a colored bar. */
-  box-shadow: 0 1px 2px 0 rgb(0 21 41 / 0.05);
+  border-bottom: var(--tnzi-surface-chrome-border);
+  box-shadow: var(--tnzi-surface-chrome-shadow-tab);
   padding: 0 8px;
   z-index: var(--tnzi-admin-z-tabs, 70);
 }

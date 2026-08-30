@@ -7,9 +7,18 @@
 // as importable from the package root while being unreachable in `dist`.
 // A component is public iff it is listed in its folder's barrel.
 //
-// Folders without a barrel below (chat, settings internals, utility, ...) are
-// shell internals assembled by `defineAdminApp`; the handful of them that are
-// public are listed explicitly at the bottom of this file.
+// Folders without a barrel below (chat, desktop, settings internals, utility,
+// ...) are shell internals assembled by `defineAdminApp`; the handful of them
+// that are public are listed explicitly at the bottom of this file.
+//
+// `desktop/` deliberately has no barrel and appears nowhere in this file. Its
+// components are the `layoutMode: 'desktop'` shell, mounted lazily by
+// `AdminShellRoot` - a consumer turns the mode on, it does not assemble the
+// window manager by hand. Exporting them would also undo that laziness: a
+// barrel entry makes the whole desktop statically reachable from this file and
+// from the package root, which measured at +7.1 kB gzip on the `components`
+// budget for a surface nobody imports. (The reusable half - the per-window
+// route context and the move/resize engine - IS public, from `headless/`.)
 export * from './crud'
 export * from './data'
 export * from './detail'

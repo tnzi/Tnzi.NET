@@ -72,6 +72,10 @@ export interface AdminThemeSnapshotV1 {
     /** Theme Drawer additions - radius slider + footer height knob. */
     themeRadius?: number
     footerHeight?: number
+    /** Container chrome across the whole shell: `elevated` (soft shadow, no
+        outline) / `outlined` (1px outline, no shadow) / `flat` (neither).
+        Absent in snapshots exported before the setting existed. */
+    surfaceStyle?: string
     /** Per-surface background overrides - `null` clears the override (falls
         back to the default token). `undefined` means the field was missing
         from an older snapshot and should be skipped (leave current value).
@@ -99,6 +103,18 @@ export interface AdminThemeSnapshotV1 {
     contentTextColor?: string | null
     pageHeaderTextColor?: string | null
     cardTextColor?: string | null
+    /**
+     * Desktop-layout surfaces. Optional like every other surface override -
+     * absent in a snapshot saved before the layout existed, and `null` means
+     * "cleared", not "unset".
+     */
+    desktopWallpaperBg?: string | null
+    desktopWallpaperImage?: string | null
+    desktopWallpaperScrim?: number
+    desktopTaskbarBg?: string | null
+    desktopTaskbarHeight?: number
+    desktopVibrancy?: number
+    desktopWindowBarBg?: string | null
   }
   ui: {
     mode: 'light' | 'dark' | 'auto'

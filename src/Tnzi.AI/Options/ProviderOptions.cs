@@ -1,52 +1,16 @@
 namespace Tnzi.AI.Options;
 
 /// <summary>
-/// 提供商配置选项
+/// 提供商配置选项 —— 在核心的 <see cref="AiProviderOptions"/> 之上补充 Agent 层字段。
 /// </summary>
-public class ProviderOptions
+/// <remarks>
+/// 基础字段（Name / Enabled / ApiKey / BaseUrl / DefaultModel / TimeoutSeconds /
+/// MaxTokens / Temperature / Models）定义在核心基类，本类只声明「需要 Agent 引擎才用得上」
+/// 的那些。两者绑定同一个 <c>AI:Providers</c> 配置节：核心的
+/// <c>AiProviderRegistryOptions</c> 只认基类字段，<c>AIOptions</c> 认全部。
+/// </remarks>
+public class ProviderOptions : AiProviderOptions
 {
-    /// <summary>
-    /// Provider name - auto-populated from the configuration dictionary key in PostConfigure.
-    /// Used to route each provider to its own isolated Polly resilience pipeline so that
-    /// a 429/circuit-open condition on one provider does not break other providers.
-    /// </summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 是否启用
-    /// </summary>
-    public bool Enabled { get; set; }
-
-    /// <summary>
-    /// API Key
-    /// </summary>
-    public string? ApiKey { get; set; }
-
-    /// <summary>
-    /// 基础 URL
-    /// </summary>
-    public string? BaseUrl { get; set; }
-
-    /// <summary>
-    /// 默认模型名称
-    /// </summary>
-    public string? DefaultModel { get; set; }
-
-    /// <summary>
-    /// 超时时间（秒）
-    /// </summary>
-    public int? TimeoutSeconds { get; set; }
-
-    /// <summary>
-    /// 最大 Token 数
-    /// </summary>
-    public int? MaxTokens { get; set; }
-
-    /// <summary>
-    /// 温度参数（0-2）
-    /// </summary>
-    public double? Temperature { get; set; }
-
     /// <summary>
     /// 降级提供商列表（按优先级排序）
     /// </summary>
@@ -65,15 +29,6 @@ public class ProviderOptions
     /// Gemini 2.5 需要在请求中注入 extra_body.google.thinking_config。
     /// </remarks>
     public ThinkingOptions? Thinking { get; set; }
-
-    /// <summary>
-    /// 模型别名字典，如 { "think": "o4-mini", "fast": "gpt-4.1-mini" }
-    /// </summary>
-    /// <remarks>
-    /// 通过别名引用模型：ChatRequestDto.Model = "think" → 自动解析为 "o4-mini"。
-    /// ThinkingMiddleware 在启用推理时自动查找 "think" 别名切换到推理模型。
-    /// </remarks>
-    public Dictionary<string, string>? Models { get; set; }
 
     /// <summary>
     /// Prompt Caching 配置（减少重复 system prompt 和工具定义的 Token 成本）

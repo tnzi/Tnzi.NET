@@ -13,9 +13,12 @@ public partial class PayRunService : ApplicationService, IPayRunService
     private readonly IRepository<PayRun, Guid> _runRepo;
     private readonly IRepository<Payslip, Guid> _payslipRepo;
     private readonly IRepository<PayslipLine, Guid> _lineRepo;
+    private readonly IRepository<PayRunInput, Guid> _inputRepo;
     private readonly IRepository<SalaryStructure, Guid> _structureRepo;
     private readonly IRepository<SalaryComponent, Guid> _componentRepo;
+    private readonly IRepository<SalaryAssignment, Guid> _assignmentRepo;
     private readonly IRepository<Employee, Guid> _employeeRepo;
+    private readonly ISalaryFormulaEvaluator _evaluator;
     private readonly ILedgerPostingService _ledgerPosting;
     private readonly IDocumentNumberService _documentNumber;
     private readonly PayslipCalculator _calculator;
@@ -31,9 +34,12 @@ public partial class PayRunService : ApplicationService, IPayRunService
         IRepository<PayRun, Guid> runRepo,
         IRepository<Payslip, Guid> payslipRepo,
         IRepository<PayslipLine, Guid> lineRepo,
+        IRepository<PayRunInput, Guid> inputRepo,
         IRepository<SalaryStructure, Guid> structureRepo,
         IRepository<SalaryComponent, Guid> componentRepo,
+        IRepository<SalaryAssignment, Guid> assignmentRepo,
         IRepository<Employee, Guid> employeeRepo,
+        ISalaryFormulaEvaluator evaluator,
         ILedgerPostingService ledgerPosting,
         IDocumentNumberService documentNumber,
         PayslipCalculator calculator,
@@ -45,9 +51,12 @@ public partial class PayRunService : ApplicationService, IPayRunService
         _runRepo = Check.NotNull(runRepo);
         _payslipRepo = Check.NotNull(payslipRepo);
         _lineRepo = Check.NotNull(lineRepo);
+        _inputRepo = Check.NotNull(inputRepo);
         _structureRepo = Check.NotNull(structureRepo);
         _componentRepo = Check.NotNull(componentRepo);
+        _assignmentRepo = Check.NotNull(assignmentRepo);
         _employeeRepo = Check.NotNull(employeeRepo);
+        _evaluator = Check.NotNull(evaluator);
         _ledgerPosting = Check.NotNull(ledgerPosting);
         _documentNumber = Check.NotNull(documentNumber);
         _calculator = Check.NotNull(calculator);
@@ -146,12 +155,19 @@ public partial class PayRunService : ApplicationService, IPayRunService
 
         var payslips = await _payslipRepo.AsQueryable(true).Include(p => p.Lines)
             .Where(p => p.PayRunId == id).ToListAsync(cancellationToken);
+        var inputs = await _inputRepo.AsQueryable(true)
+            .Where(i => i.PayRunId == id).ToListAsync(cancellationToken);
 
         try
         {
             await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
                 await DeletePayslipsAsync(payslips, ct);
+                // 一次性输入随批次走。★不是 FK 逼出来的：批次是软删（DeleteAsync 写
+                // IsDeleted 走 UPDATE），Restrict 永远不会触发。不清理也不会报错 ——
+                // 只会在库里留下一批指向已删批次的输入，等这个批次号被恢复或复用时冒出来。
+                if (inputs.Count > 0)
+                    await _inputRepo.DeleteManyAsync(inputs, ct);
                 await _runRepo.DeleteAsync(run, ct);
                 return Result.Success();
             }, cancellationToken);
@@ -513,12 +529,32 @@ public partial class PayRunService : ApplicationService, IPayRunService
         if (payslip == null)
             return Fail<PayslipDto>("Payslip not found.", 404);
 
-        var overrides = new Dictionary<Guid, decimal> { [payslip.EmployeeId] = input.WorkedDays };
+        var recalc = await RecalculatePayslipAsync(run, payslip, input.WorkedDays, cancellationToken);
+        if (!recalc.Succeeded)
+            return Fail<PayslipDto>(recalc.Message ?? "Recalculation failed.", recalc.Code ?? 400);
+
+        var reloaded = await _payslipRepo.AsNoTracking().Include(p => p.Lines)
+            .FirstOrDefaultAsync(p => p.Id == payslipId, cancellationToken);
+        return Ok(ToPayslipDto(reloaded!));
+    }
+
+    /// <summary>
+    /// 就地重算单张工资单（原对象，不重建行主键之外的身份），并刷新批次聚合快照。
+    /// </summary>
+    /// <remarks>
+    /// 两个调用方：改 <c>WorkedDays</c>，以及录入/删除一次性输入。后者必须走同一条路——
+    /// 只把输入存下来而不重算，就会留下一张"状态是 Calculated、数字却不含刚批准那笔奖金"的批次，
+    /// 而它照样可以过账。★<paramref name="workedDays"/> 由调用方传入现值，
+    /// 从而重算一次性输入时不会把已修正的出勤天数冲回周期天数。
+    /// </remarks>
+    private async Task<Result> RecalculatePayslipAsync(PayRun run, Payslip payslip, decimal workedDays, CancellationToken cancellationToken)
+    {
+        var overrides = new Dictionary<Guid, decimal> { [payslip.EmployeeId] = workedDays };
         var calcResult = await _calculator.CalculateAsync(run, overrides, new[] { payslip.EmployeeId }, cancellationToken);
         if (!calcResult.Succeeded)
-            return Fail<PayslipDto>(calcResult.Message ?? "Recalculation failed.", calcResult.Code ?? 400);
+            return Fail(calcResult.Message ?? "Recalculation failed.", calcResult.Code ?? 400);
         if (calcResult.Data!.Count == 0)
-            return Fail<PayslipDto>("The employee is no longer eligible for this pay run.", 400);
+            return Fail("The employee is no longer eligible for this pay run.", 400);
 
         var recomputed = calcResult.Data[0];
 
@@ -531,7 +567,7 @@ public partial class PayRunService : ApplicationService, IPayRunService
                     await _lineRepo.DeleteManyAsync(oldLines, ct);
                 payslip.Lines.Clear();
 
-                payslip.WorkedDays = input.WorkedDays;
+                payslip.WorkedDays = workedDays;
                 payslip.BaseAmount = recomputed.BaseAmount;
                 payslip.PeriodDays = recomputed.PeriodDays;
                 payslip.StructureId = recomputed.StructureId;
@@ -551,7 +587,7 @@ public partial class PayRunService : ApplicationService, IPayRunService
                 await _payslipRepo.SaveChangesAsync(ct);
 
                 // 重算批次聚合快照
-                var all = await _payslipRepo.AsNoTracking().Where(p => p.PayRunId == id).ToListAsync(ct);
+                var all = await _payslipRepo.AsNoTracking().Where(p => p.PayRunId == run.Id).ToListAsync(ct);
                 ApplyAggregates(run, all);
                 await _runRepo.UpdateAsync(run, ct);
                 await _runRepo.SaveChangesAsync(ct);
@@ -560,12 +596,10 @@ public partial class PayRunService : ApplicationService, IPayRunService
         }
         catch (DbUpdateConcurrencyException)
         {
-            return Fail<PayslipDto>("The pay run was modified concurrently. Reload and try again.", 409);
+            return Fail("The pay run was modified concurrently. Reload and try again.", 409);
         }
 
-        var reloaded = await _payslipRepo.AsNoTracking().Include(p => p.Lines)
-            .FirstOrDefaultAsync(p => p.Id == payslipId, cancellationToken);
-        return Ok(ToPayslipDto(reloaded!));
+        return Ok();
     }
 
     // ── 内部辅助 ───────────────────────────────────────────────────────────────

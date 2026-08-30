@@ -1,0 +1,38 @@
+/**
+ * Surface tiers - the structural half.
+ *
+ * `variables.css` says what a card's chrome looks like. This file says the one
+ * thing that cannot be expressed as a value: **what a card is sitting on**.
+ *
+ * A card separates itself from its backdrop with whichever of its two signals
+ * is visible - the border if it has one, otherwise its own material. When that
+ * signal is the same colour as the backdrop the card has no edge at all, and
+ * the case where that happens is not a colour anyone picked: it is a card
+ * nested inside another card, where the two are the same material by
+ * construction. A white tile on a white list card is the everyday example.
+ *
+ * So the condition is structural, and the selector below IS the condition -
+ * no measurement, no per-component wiring, and nothing for the next card
+ * component to remember. Anything carrying `t-surface-card` inside anything
+ * else carrying it repaints one step off its host. `--tnzi-surface-card-step`
+ * controls how far (see `variables.css`); `0%` disables the whole mechanism,
+ * which is what the `outlined` surface style does, because there the visible
+ * signal is a border whose colour is not the backdrop's.
+ *
+ * Deliberately a descendant selector rather than a child selector: a card is
+ * usually several wrappers deep inside its host (renderer > grid > cell >
+ * card), and those wrappers are layout, not surfaces.
+ *
+ * Deeper nesting settles at one step rather than compounding - level 3 reads
+ * the same value as level 2 - because the nested colour is derived from the
+ * root container colour, not from the inherited one. That is on purpose: three
+ * visibly different greys stacked inside each other is not a hierarchy anyone
+ * can read, it is just mud.
+ *
+ * `:where()` keeps the specificity at zero so a component's own scoped rule
+ * always wins - a gradient tile or a deliberately recessed summary row states
+ * its own background and is not fought over.
+ */
+:where(.t-surface-card) :where(.t-surface-card) {
+  --tnzi-surface-card-bg: var(--tnzi-surface-card-bg-nested);
+}

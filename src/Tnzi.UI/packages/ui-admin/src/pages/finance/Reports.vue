@@ -195,7 +195,7 @@
           <TResponsiveTable :columns="agingColumns" :data="arAging.rows" size="small" mobile="scroll" :pagination="false" :bordered="false" />
           <div class="fin-reports__totals">
             <span>{{ t('aging.total') }}: <strong>{{ fmtAmount(arAging.totals.total) }}</strong></span>
-            <span>{{ t('aging.over90') }}: <strong>{{ fmtAmount(arAging.totals.over90) }}</strong></span>
+            <span>{{ agingLabels[3] }}: <strong>{{ fmtAmount(arAging.totals.over90) }}</strong></span>
           </div>
         </template>
         <TEmpty v-else-if="!arLoading" :text="t('runHint')" />
@@ -210,7 +210,7 @@
           <TResponsiveTable :columns="agingColumns" :data="apAging.rows" size="small" mobile="scroll" :pagination="false" :bordered="false" />
           <div class="fin-reports__totals">
             <span>{{ t('aging.total') }}: <strong>{{ fmtAmount(apAging.totals.total) }}</strong></span>
-            <span>{{ t('aging.over90') }}: <strong>{{ fmtAmount(apAging.totals.over90) }}</strong></span>
+            <span>{{ agingLabels[3] }}: <strong>{{ fmtAmount(apAging.totals.over90) }}</strong></span>
           </div>
         </template>
         <TEmpty v-else-if="!apLoading" :text="t('runHint')" />
@@ -352,7 +352,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import { useFinancePeriod } from '../../headless/useFinancePeriod'
 import { useGlDrilldown, type GlDrilldownTarget } from '../../headless/useGlDrilldown'
 import { useDetail } from '../../headless/useDetail'
-import { formatAccountingDateRange, formatMoney, formatPercent, srMoney, variance } from '../../utils/finance-format'
+import { agingBucketLabels, formatAccountingDateRange, formatMoney, formatPercent, srMoney, variance } from '../../utils/finance-format'
 import { useAdminClient } from '../../plugin/client'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { makePageTranslator } from '../_shared/translate'
@@ -658,15 +658,18 @@ const apAging = ref<AgingReportDto | null>(null)
 const arLoading = ref(false)
 const apLoading = ref(false)
 
-const agingColumns: DataTableColumns<AgingRowDto> = [
+// 范围列的表头由随桶下发的切分点生成（Finance:AgingBucketDays 可配，写死会让列名与数不符）；
+// AR/AP 共享同一套部署级切分点，取先加载到的那份。
+const agingLabels = computed(() => agingBucketLabels((arAging.value ?? apAging.value)?.totals.agingBucketDays))
+const agingColumns = computed<DataTableColumns<AgingRowDto>>(() => [
   { key: 'partyName', title: t('aging.party'), minWidth: 160 },
   { key: 'current', title: t('aging.current'), width: 110, render: (r) => amountCell(fmtAmount(r.current)) },
-  { key: 'days1To30', title: t('aging.d1to30'), width: 100, render: (r) => amountCell(fmtAmount(r.days1To30)) },
-  { key: 'days31To60', title: t('aging.d31to60'), width: 100, render: (r) => amountCell(fmtAmount(r.days31To60)) },
-  { key: 'days61To90', title: t('aging.d61to90'), width: 100, render: (r) => amountCell(fmtAmount(r.days61To90)) },
-  { key: 'over90', title: t('aging.over90'), width: 100, render: (r) => amountCell(fmtAmount(r.over90)) },
+  { key: 'days1To30', title: agingLabels.value[0], width: 100, render: (r) => amountCell(fmtAmount(r.days1To30)) },
+  { key: 'days31To60', title: agingLabels.value[1], width: 100, render: (r) => amountCell(fmtAmount(r.days31To60)) },
+  { key: 'days61To90', title: agingLabels.value[2], width: 100, render: (r) => amountCell(fmtAmount(r.days61To90)) },
+  { key: 'over90', title: agingLabels.value[3], width: 100, render: (r) => amountCell(fmtAmount(r.over90)) },
   { key: 'total', title: t('aging.total'), width: 120, render: (r) => amountCell(fmtAmount(r.total), true) },
-]
+])
 
 async function runAging(side: 'ar' | 'ap') {
   const loading = side === 'ar' ? arLoading : apLoading
@@ -983,7 +986,7 @@ onMounted(async () => {
 .fin-reports__truncation {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--tnzi-text-3, #909399);
+  color: var(--tnzi-base-text-muted);
 }
 
 .fin-reports__pagination {

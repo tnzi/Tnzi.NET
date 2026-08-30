@@ -171,6 +171,47 @@
       </div>
     </div>
 
+    <!-- ── Passkeys (WebAuthn) ──
+         Only rendered when the deployment enables passkeys AND this browser can
+         run the ceremony (capabilities.passkey folds in both). Registration is
+         two-legged and driven by @tnzi/core's helper - dismissing the system
+         dialog resolves to null and is NOT an error. -->
+    <div v-if="ctx.capabilities.value.passkey" class="t-uc-group">
+      <div class="t-uc-group-title">
+        <span class="t-uc-group-title__label">
+          {{ t('security.passkey.title') }}
+          <THint type="help" :content="t('security.passkey.hint')" />
+        </span>
+        <NButton size="tiny" type="primary" ghost :loading="passkeyAdding" @click="addPasskey">
+          <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
+          {{ t('security.passkey.add') }}
+        </NButton>
+      </div>
+
+      <NSpin :show="passkeysLoading">
+        <p v-if="!passkeys.length" class="t-uc-hint">{{ t('security.passkey.empty') }}</p>
+        <div v-for="p in passkeys" :key="p.credentialId" class="t-uc-row">
+          <div>
+            <div class="t-uc-row-label">
+              {{ p.name || t('security.passkey.unnamed') }}
+              <NTag v-if="p.isBackedUp" size="tiny" :bordered="false" type="info">
+                {{ t('security.passkey.synced') }}
+              </NTag>
+            </div>
+            <div class="t-uc-hint">{{ t('security.passkey.added', { date: formatDateTime(p.createdAt) }) }}</div>
+          </div>
+          <NPopconfirm @positive-click="removePasskey(p.credentialId)">
+            <template #trigger>
+              <NButton size="tiny" type="warning" ghost :loading="passkeyBusyId === p.credentialId">
+                {{ t('security.passkey.remove') }}
+              </NButton>
+            </template>
+            {{ t('security.passkey.confirmRemove') }}
+          </NPopconfirm>
+        </div>
+      </NSpin>
+    </div>
+
     <!-- TOTP setup dialog: secret + QR + verification code. -->
     <TModalShell v-model:show="totpModal.show" :title="t('security.twoFactor.setupTitle')" :width="440">
       <NSpin :show="totpModal.loading">
@@ -209,7 +250,8 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { NButton, NDivider, NForm, NFormItem, NInput, NPopconfirm, NQrCode, NSpace, NSpin, NSwitch, NTag, NTooltip } from 'naive-ui'
 import { THint, TSvgIcon } from '@tnzi/ui'
 import { TwoFactorType } from '@tnzi/core/services/identity'
-import type { TwoFactorStatusDto } from '@tnzi/core/services/identity'
+import type { PasskeyCredentialDto, TwoFactorStatusDto } from '@tnzi/core/services/identity'
+import { formatDateTime } from '@tnzi/core/utils'
 import TUserCenterSection from './TUserCenterSection.vue'
 import { TModalShell } from '@tnzi/ui'
 import { useUserCenterContext } from '../user-center-context'
@@ -523,8 +565,68 @@ async function confirmTotp(): Promise<void> {
   }
 }
 
+// ── Passkeys (WebAuthn) ──
+const passkeys = ref<PasskeyCredentialDto[]>([])
+const passkeysLoading = ref(false)
+const passkeyAdding = ref(false)
+const passkeyBusyId = ref<string | null>(null)
+
+async function loadPasskeys(): Promise<void> {
+  // Not enabled for this deployment (or unsupported browser): don't call an
+  // endpoint that would 400, and leave the group unrendered.
+  if (!ctx.capabilities.value.passkey) {
+    passkeys.value = []
+    return
+  }
+  passkeysLoading.value = true
+  try {
+    passkeys.value = await ctx.bridge.me.getPasskeys()
+  } catch {
+    passkeys.value = []
+  } finally {
+    passkeysLoading.value = false
+  }
+}
+
+async function addPasskey(): Promise<void> {
+  passkeyAdding.value = true
+  try {
+    const created = await ctx.bridge.me.registerPasskey()
+    // null = the user dismissed the system dialog. A normal outcome, not a
+    // failure - surfacing it as an error would be lying about what happened.
+    if (!created) return
+    ctx.message.success(t('security.passkey.addSuccess'))
+    await loadPasskeys()
+  } catch (e) {
+    ctx.message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    passkeyAdding.value = false
+  }
+}
+
+async function removePasskey(credentialId: string): Promise<void> {
+  passkeyBusyId.value = credentialId
+  try {
+    await ctx.bridge.me.removePasskey(credentialId)
+    ctx.message.success(t('security.passkey.removeSuccess'))
+    await loadPasskeys()
+  } catch (e) {
+    ctx.message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    passkeyBusyId.value = null
+  }
+}
+
+// The capability probe resolves after mount, so the list has to follow it -
+// loading only on mount would leave the group permanently empty on a deployment
+// that does have passkeys enabled.
+watch(() => ctx.capabilities.value.passkey, (on) => { if (on) void loadPasskeys() }, { immediate: true })
+
 onMounted(() => void loadTwoFactor())
-watch(() => ctx.reloadKey.value, () => void loadTwoFactor())
+watch(() => ctx.reloadKey.value, () => {
+  void loadTwoFactor()
+  void loadPasskeys()
+})
 </script>
 
 <style scoped>

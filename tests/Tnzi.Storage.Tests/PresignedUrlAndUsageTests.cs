@@ -1,4 +1,4 @@
-﻿
+
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
@@ -40,7 +40,8 @@ public class PresignedUrlAndUsageTests
             TestFileAccessAuthorizer.AllowAll(),
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new UploadGuard(optionsMonitor.Object));
     }
 
     #region Presigned URL Tests

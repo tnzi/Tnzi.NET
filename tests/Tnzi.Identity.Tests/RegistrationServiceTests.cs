@@ -173,7 +173,7 @@ public class RegistrationServiceTests
         {
             Email = "test@example.com"
         };
-        _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync(input.Email!, TwoFactorType.Email, null))
+        _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync(input.Email!, TwoFactorType.Email, VerificationCodePurpose.Registration, null))
             .ReturnsAsync(Result.Success());
 
         _eventBusMock.Setup(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.QuickRegisterCodeSentEvent>(), It.IsAny<CancellationToken>()))
@@ -207,7 +207,7 @@ public class RegistrationServiceTests
         Assert.False(result.Succeeded);
         Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
         _twoFactorServiceMock.Verify(
-            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<Guid?>()),
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
             Times.Never);
     }
 
@@ -222,7 +222,7 @@ public class RegistrationServiceTests
             Otp = new OtpOptions()
         });
         _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "register")).ReturnsAsync(true);
-        _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, null))
+        _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, VerificationCodePurpose.Registration, null))
             .ReturnsAsync(Result.Success());
 
         var input = new SendQuickRegisterCodeDto { Email = "test@example.com", CaptchaId = "cid", CaptchaCode = "good" };
@@ -232,7 +232,7 @@ public class RegistrationServiceTests
 
         // Assert - captcha passes → the OTP send proceeds.
         Assert.True(result.Succeeded);
-        _twoFactorServiceMock.Verify(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, null), Times.Once);
+        _twoFactorServiceMock.Verify(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, VerificationCodePurpose.Registration, null), Times.Once);
     }
 
     [Fact]
@@ -246,7 +246,7 @@ public class RegistrationServiceTests
             Code = "123456"
         };
 
-        _twoFactorServiceMock.Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(input.Email!, input.Code, TwoFactorType.Email))
+        _twoFactorServiceMock.Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(input.Email!, input.Code, TwoFactorType.Email, VerificationCodePurpose.Registration))
             .ReturnsAsync(Result<Guid?>.Success(null));
 
         _userManagerMock.Setup(x => x.FindByEmailAsync(input.Email!))

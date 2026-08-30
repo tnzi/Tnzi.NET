@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import TChatWindow from '../../../src/components/chat/TChatWindow.vue'
@@ -171,5 +172,57 @@ describe('TChatWindow (pure display - orchestration moved to TChatHost)', () => 
       expect(wrapper.emitted('update:show')?.[0]).toEqual([false])
     }
     wrapper.unmount()
+  })
+})
+
+describe('chat is a window, not a blocking modal', () => {
+  // Asserted on SOURCE rather than a mounted tree, deliberately. The substance
+  // of this invariant is CSS that neutralises naive's mask and click-swallowing
+  // container - they live outside the component's Teleport, and jsdom computes
+  // neither `:has()` nor `pointer-events`. A mount test could only re-state the
+  // two props and would pass while the half that actually unblocks the page was
+  // deleted.
+  const read = (rel: string): string =>
+    readFileSync(new URL(rel, import.meta.url), 'utf8')
+
+  it('turns off focus trapping and scroll locking', () => {
+    // As a real modal, chat swallowed every click: with it open no other
+    // feature could be reached at all. Reported on the desktop layout, but it
+    // was wrong in every layout - chat is a surface you leave open while you
+    // work, the way a desktop IM client is.
+    const sfc = read('../../../src/components/chat/TChatWindow.vue')
+    expect(sfc).toMatch(/trapFocus:\s*false/)
+    expect(sfc).toMatch(/blockScroll:\s*false/)
+  })
+
+  it('makes the mask and container click-through', () => {
+    const css = read('../../../src/styles/polish.css')
+    // The container swallows the clicks; the window itself must take pointer
+    // events back or chat would be inert too.
+    expect(css).toMatch(/\.n-modal-container:has\(\.t-chat-window\)\s*\{[^}]*pointer-events:\s*none/)
+    expect(css).toMatch(/\.n-modal-container:has\(\.t-chat-window\)\s+\.t-chat-window\s*\{[^}]*pointer-events:\s*auto/)
+    expect(css).toMatch(/\.n-modal-container:has\(\.t-chat-window\)\s+\.n-modal-mask\s*\{[^}]*display:\s*none/)
+  })
+
+  it('draws its own edge, since the mask no longer does', () => {
+    // The other half of hiding the mask. `--chat-bg` is `--tnzi-bg-deep`,
+    // measured at rgb(246 248 250) against an admin canvas of rgb(247 250 252)
+    // - a few RGB steps apart. While the mask was there the page behind was
+    // dimmed 45% and that drew the boundary; without it the window has to draw
+    // its own or the message pane runs straight into the page.
+    //
+    // It used to draw a hand-rolled 1px ring at 16% of the TEXT colour, which
+    // worked but in a colour nothing else uses: `--tnzi-border` is near-white
+    // and the text token is near-black, so this was the only surface in the
+    // shell outlined in black. It now takes the overlay tier like every other
+    // floating surface, and that tier's ambient layer marks the top edge that
+    // a purely downward shadow leaves bare.
+    const sfc = read('../../../src/components/chat/TChatWindow.vue')
+    const rule = sfc.match(/\n\.t-chat-window \{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(rule).not.toBe('')
+    expect(rule).toMatch(/box-shadow:\s*var\(--tnzi-surface-overlay-shadow\)/)
+    // Not a literal of its own again: the point is that it looks like the other
+    // floating surfaces, which only holds while it reads the same token.
+    expect(rule).not.toMatch(/box-shadow:[\s\S]*?rgb\(var\(--tnzi-base-text-rgb/)
   })
 })

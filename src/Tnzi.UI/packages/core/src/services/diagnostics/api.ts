@@ -13,6 +13,7 @@ import type {
   ExceptionEntryDto,
   ControllerDiagnosticsResultDto,
   ModuleDiagnosticsDto,
+  SensitiveEndpointReportDto,
 } from './types';
 
 const ADMIN_DIAGNOSTICS_BASE = '/admin/diagnostics';
@@ -49,5 +50,19 @@ export function useAdminDiagnosticsApi(client: HttpClient) {
     /** List the loaded module manifests. */
     getModules: () =>
       client.get<ModuleDiagnosticsDto[]>(`${ADMIN_DIAGNOSTICS_BASE}/modules`),
+
+    /**
+     * List every sensitive endpoint currently reachable in this deployment.
+     *
+     * Answers "what is this deployment actually exposing" - framework default
+     * controllers activate on their own, so without this the only way to know was
+     * to read each module's source. Suppressed endpoints are absent from the
+     * result because it reads the live route table rather than scanning assemblies.
+     *
+     * Being absent from the list does NOT mean the capability is closed:
+     * authorization lives in the service layer, this is visibility only.
+     */
+    getSensitiveEndpoints: () =>
+      client.get<SensitiveEndpointReportDto>(`${ADMIN_DIAGNOSTICS_BASE}/sensitive-endpoints`),
   };
 }

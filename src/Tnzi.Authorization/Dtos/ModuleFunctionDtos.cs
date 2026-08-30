@@ -55,6 +55,13 @@ public class ModuleFunctionDto
     /// by it; it does not drive any implicit grant.
     /// </summary>
     public PermissionCategory Category { get; set; }
+
+    /// <summary>
+    /// True when no loaded module declares this code any more. The row and its grants are kept,
+    /// but it grants nothing and is hidden from the assignment matrix until the declaring module
+    /// is loaded again. Admin UI should render it as a greyed "retired" row rather than offering it.
+    /// </summary>
+    public bool IsRetired { get; set; }
 }
 
 /// <summary>

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>Invoicing for the Tnzi.NET payment module: issue a payable request to a customer, deliver it as a rendered PDF, and collect against it. Optional - a shop that only takes one-off payments at checkout never issues an invoice, and leaving this out costs it two tables, eleven endpoints and three permission codes. The entity is still called Invoice and the table is still Payment_Invoice; only the assembly is called Billing, because the accounting module owns a different aggregate of the same name.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.Payment\Tnzi.Payment.csproj" />
+    <!--
+      Template / Storage / Notification 是发票域**自己**的依赖，不是支付域的：PDF 由
+      ITemplateRenderService 渲染、由 IHtmlToPdfConverter 转换，成品由 IFileStorageService 落地，
+      账单由 INotificationService 发出。三条**全部显式声明**，即使其中两条经父模块传递也可达。
+
+      理由是本次拆分顺手修好的那个缺陷：拆分前父模块一路 global using 着 Tnzi.Template，
+      却从未声明过这条项目引用 —— 靠 Tnzi.Notification 的传递引用编译。传递引用不是契约，
+      通知模块哪天不再引用模板模块，支付模块就会在一次与它完全无关的改动里编译失败。
+      同样的道理对 Notification 也成立：它现在经父模块可达，只是因为父模块碰巧还要用它发续费提醒。
+      三个 [OptionalDependsOn] 在模块类上声明（不加载即降级对应的那一步，不是编译期依赖）。
+    -->
+    <ProjectReference Include="..\Tnzi.Template\Tnzi.Template.csproj" />
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
+    <ProjectReference Include="..\Tnzi.Notification\Tnzi.Notification.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内置发票模板随发票域走；消费方仍可在数据库或文件系统里覆盖同名模板。 -->
+    <Content Include="Templates\**\*.cshtml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

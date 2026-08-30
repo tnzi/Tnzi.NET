@@ -225,6 +225,6 @@ onMounted(() => {
 
 .fin-accounts__hint {
   font-size: 12px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 </style>

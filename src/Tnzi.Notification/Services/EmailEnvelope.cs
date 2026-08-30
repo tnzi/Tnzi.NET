@@ -31,7 +31,8 @@ internal static class EmailEnvelope
             Subject = message.Subject,
             Body = message.Body,
             IsHtml = message.IsHtml,
-            Attachments = message.Attachments
+            Attachments = message.Attachments,
+            Headers = message.Headers
         };
     }
 
@@ -63,7 +64,10 @@ internal static class EmailEnvelope
             Subject = $"[DEV → {Describe(message)}] {message.Subject}",
             Body = message.Body,
             IsHtml = message.IsHtml,
-            Attachments = message.Attachments
+            Attachments = message.Attachments,
+            // ★ 信头也要跟过来：消费应用会在重定向模式下跑上几个月，而那几个月里被反复验证的
+            // 必须就是切生产那天要跑的那一封信（同 FaxEnvelope 对重定向的取舍）。
+            Headers = message.Headers
         };
     }
 

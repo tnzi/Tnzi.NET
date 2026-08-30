@@ -93,7 +93,15 @@ public class TemplateStatementRenderer : IStatementRenderer
           .Append(Money(statement.ClosingBalance, statement.Currency)).Append("</td></tr></table></div>");
 
         var b = statement.Buckets;
-        sb.Append("<table class=\"aging\"><tr><th>Current</th><th>1-30</th><th>31-60</th><th>61-90</th><th>90+</th></tr><tr>")
+        // 表头随生效切分点生成：桶已由 Finance:AgingBucketDays 参数化，写死 1-30/31-60/61-90/90+
+        // 会在配了 [7,14,21] 的部署里把「逾期 15 天」印在标着 31-60 的列下面——纸上的谎最难收回。
+        // 默认切分点 30/60/90 下生成的表头与旧版逐字一致。
+        var cuts = b.AgingBucketDays is { Length: 3 } configured ? configured : FinanceOptions.DefaultAgingBucketDays;
+        sb.Append("<table class=\"aging\"><tr><th>Current</th>")
+          .Append("<th>1-").Append(cuts[0]).Append("</th>")
+          .Append("<th>").Append(cuts[0] + 1).Append('-').Append(cuts[1]).Append("</th>")
+          .Append("<th>").Append(cuts[1] + 1).Append('-').Append(cuts[2]).Append("</th>")
+          .Append("<th>").Append(cuts[2]).Append("+</th></tr><tr>")
           .Append("<td class=\"num\">").Append(Money(b.Current, statement.Currency)).Append("</td>")
           .Append("<td class=\"num\">").Append(Money(b.Days1To30, statement.Currency)).Append("</td>")
           .Append("<td class=\"num\">").Append(Money(b.Days31To60, statement.Currency)).Append("</td>")

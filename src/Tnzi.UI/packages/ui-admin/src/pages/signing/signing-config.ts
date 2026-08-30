@@ -134,6 +134,18 @@ export const templateFormSchema: FormSchemaItem[] = [
     section: 'source',
     span: 'full',
   },
+  // The document behind an `Uploaded` template. Without a field for it, picking
+  // that source produced a request the backend always rejected, with no field on
+  // the form to fix - half the feature was a dead branch in the shipped UI.
+  // ★ Its own type, not 'custom': TSchemaForm resolves fieldRenderers by TYPE,
+  // so reusing 'custom' would hand this field the placed-fields editor.
+  {
+    key: 'sourceFile',
+    label: 'form.sourceFile',
+    type: 'signing-source-file',
+    section: 'source',
+    span: 'full',
+  },
   { key: 'pageCount', label: 'form.pageCount', type: 'number', section: 'source', min: 1 },
   { key: 'fields', label: 'form.fields', type: 'custom', section: 'fields' },
 ]

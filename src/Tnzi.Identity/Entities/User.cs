@@ -15,13 +15,15 @@ public class User : IdentityUser<Guid>, IEntity<Guid>, ISoftDelete, IHasCreation
     /// <summary>
     /// 获取或设置 组织ID
     /// </summary>
+    /// <remarks>
+    /// ★ 刻意**没有** <c>Organization</c> 导航属性：组织树住在可选包
+    /// <c>Tnzi.Identity.Organization</c> 里，核心的 User 不认识那个实体（认识了，
+    /// 那个包就永远拆不出去）。外键与删除行为由该包的 <c>OrganizationConfiguration</c>
+    /// 从主体侧声明，列形状与拆分前逐字相同；不加载该包时这里只是一个带索引的可空 Guid。
+    /// 需要组织名的地方经 <c>IOrganizationService.GetNamesAsync</c> 批量翻译。
+    /// </remarks>
     public Guid? OrganizationId { get; set; }
-    
-    /// <summary>
-    /// 获取或设置 组织
-    /// </summary>
-    public virtual Organization? Organization { get; set; }
-    
+
     // ── 双因素认证：按方式独立启用状态 ──
     // ASP.NET Identity 的 TwoFactorEnabled 只表达"是否需要 2FA",不区分方式。
     // 这三个 flag 表达"具体哪种方式被用户启用",允许各自独立开关(保留 TOTP、

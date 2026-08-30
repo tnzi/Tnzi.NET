@@ -1,4 +1,4 @@
-﻿namespace Tnzi.Storage.Dtos;
+namespace Tnzi.Storage.Dtos;
 
 /// <summary>
 /// 文件存储统计信息
@@ -240,57 +240,6 @@ public class FileReferenceInfo
 }
 
 /// <summary>
-/// 文件上传进度
-/// </summary>
-public class FileUploadProgress
-{
-    /// <summary>
-    /// 上传会话ID
-    /// </summary>
-    public Guid UploadSessionId { get; set; }
-
-    /// <summary>
-    /// 文件名
-    /// </summary>
-    public string FileName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 文件总大小
-    /// </summary>
-    public long TotalSize { get; set; }
-
-    /// <summary>
-    /// 已上传大小
-    /// </summary>
-    public long UploadedSize { get; set; }
-
-    /// <summary>
-    /// 总分片数
-    /// </summary>
-    public int TotalChunks { get; set; }
-
-    /// <summary>
-    /// 已上传分片数
-    /// </summary>
-    public int UploadedChunks { get; set; }
-
-    /// <summary>
-    /// 上传进度百分比 0-100
-    /// </summary>
-    public double ProgressPercentage => TotalSize > 0 ? (double)UploadedSize / TotalSize * 100 : 0;
-
-    /// <summary>
-    /// 是否已完成
-    /// </summary>
-    public bool IsCompleted { get; set; }
-
-    /// <summary>
-    /// 是否已取消
-    /// </summary>
-    public bool IsCancelled { get; set; }
-}
-
-/// <summary>
 /// 重命名文件请求
 /// </summary>
 public class RenameFileRequest
@@ -312,28 +261,6 @@ public class CopyFileRequest
     /// 可选的新文件名（不传则自动生成）
     /// </summary>
     public string? NewFileName { get; set; }
-}
-
-/// <summary>
-/// 创建分享请求
-/// </summary>
-public class CreateShareRequest
-{
-    /// <summary>
-    /// 过期时间
-    /// </summary>
-    public DateTime? ExpiresAt { get; set; }
-
-    /// <summary>
-    /// 最大访问次数
-    /// </summary>
-    public int? MaxAccessCount { get; set; }
-
-    /// <summary>
-    /// 分享密码
-    /// </summary>
-    [MaxLength(128)]
-    public string? Password { get; set; }
 }
 
 /// <summary>
@@ -385,46 +312,6 @@ public class UserStorageUsage
         if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
     }
-}
-
-/// <summary>
-/// 初始化分块上传请求
-/// </summary>
-public class InitiateChunkedUploadRequest
-{
-    /// <summary>
-    /// 文件名
-    /// </summary>
-    [Required]
-    [MaxLength(256)]
-    public string FileName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 文件总大小（字节）
-    /// </summary>
-    public long TotalSize { get; set; }
-
-    /// <summary>
-    /// 分块大小（字节），默认 5MB
-    /// </summary>
-    public int ChunkSize { get; set; } = 5 * 1024 * 1024;
-
-    /// <summary>
-    /// 整体 MD5（可选，用于校验）
-    /// </summary>
-    [MaxLength(64)]
-    public string? Md5Hash { get; set; }
-}
-
-/// <summary>
-/// 完成分块上传请求
-/// </summary>
-public class CompleteChunkedUploadRequest
-{
-    /// <summary>
-    /// 是否临时文件
-    /// </summary>
-    public bool IsTemporary { get; set; } = false;
 }
 
 /// <summary>
@@ -536,161 +423,6 @@ public class BatchIntegrityResult
 }
 
 /// <summary>
-/// File share summary DTO (for admin listing)
-/// </summary>
-public class FileShareSummaryDto
-{
-    /// <summary>
-    /// Share ID
-    /// </summary>
-    public Guid Id { get; set; }
-
-    /// <summary>
-    /// File ID
-    /// </summary>
-    public Guid FileId { get; set; }
-
-    /// <summary>
-    /// Original file name
-    /// </summary>
-    public string OriginalName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Share token
-    /// </summary>
-    public string ShareToken { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Expiration time
-    /// </summary>
-    public DateTime? ExpiresAt { get; set; }
-
-    /// <summary>
-    /// Access count
-    /// </summary>
-    public int AccessCount { get; set; }
-
-    /// <summary>
-    /// Max access count
-    /// </summary>
-    public int? MaxAccessCount { get; set; }
-
-    /// <summary>
-    /// Whether password is required
-    /// </summary>
-    public bool RequirePassword { get; set; }
-
-    /// <summary>
-    /// Whether the share is enabled
-    /// </summary>
-    public bool IsEnabled { get; set; }
-
-    /// <summary>
-    /// Whether the share is expired
-    /// </summary>
-    public bool IsExpired => ExpiresAt.HasValue && ExpiresAt.Value < DateTime.UtcNow;
-
-    /// <summary>
-    /// Whether the share has reached max access count
-    /// </summary>
-    public bool IsExhausted => MaxAccessCount.HasValue && AccessCount >= MaxAccessCount.Value;
-
-    /// <summary>
-    /// When the link was last used successfully (null = never used).
-    /// Answers the question a share list is most often opened to answer.
-    /// </summary>
-    public DateTime? LastAccessedAt { get; set; }
-
-    /// <summary>
-    /// Creation time
-    /// </summary>
-    public DateTime CreationTime { get; set; }
-
-    /// <summary>
-    /// Creator ID
-    /// </summary>
-    public Guid? CreatorId { get; set; }
-}
-
-/// <summary>
-/// Public-facing file share DTO (never exposes PasswordHash).
-/// 对外暴露的分享信息（绝不包含 PasswordHash），用于匿名可达的分享端点。
-/// </summary>
-public class FileSharePublicDto
-{
-    /// <summary>
-    /// Share ID
-    /// </summary>
-    public Guid Id { get; set; }
-
-    /// <summary>
-    /// File ID
-    /// </summary>
-    public Guid FileId { get; set; }
-
-    /// <summary>
-    /// Share token
-    /// </summary>
-    public string ShareToken { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Expiration time (null = never expires)
-    /// </summary>
-    public DateTime? ExpiresAt { get; set; }
-
-    /// <summary>
-    /// Max access count (null = unlimited)
-    /// </summary>
-    public int? MaxAccessCount { get; set; }
-
-    /// <summary>
-    /// Current access count
-    /// </summary>
-    public int AccessCount { get; set; }
-
-    /// <summary>
-    /// Whether a password is required to access this share
-    /// </summary>
-    public bool RequirePassword { get; set; }
-
-    /// <summary>
-    /// Whether the share is enabled
-    /// </summary>
-    public bool IsEnabled { get; set; }
-
-    /// <summary>
-    /// Creation time
-    /// </summary>
-    public DateTime CreationTime { get; set; }
-}
-
-/// <summary>
-/// Active shares query request
-/// </summary>
-public class ActiveSharesQueryRequest : PagedQueryDto
-{
-    /// <summary>
-    /// Filter by file ID
-    /// </summary>
-    public Guid? FileId { get; set; }
-
-    /// <summary>
-    /// Filter by creator ID
-    /// </summary>
-    public Guid? CreatorId { get; set; }
-
-    /// <summary>
-    /// Include expired shares (default false)
-    /// </summary>
-    public bool IncludeExpired { get; set; } = false;
-
-    /// <summary>
-    /// Include disabled shares (default false)
-    /// </summary>
-    public bool IncludeDisabled { get; set; } = false;
-}
-
-/// <summary>
 /// Set file tags request
 /// </summary>
 public class SetFileTagsRequest
@@ -722,43 +454,6 @@ public class SetFileVisibilityRequest
     /// false restores the default "owner or storage.file.view" policy.
     /// </summary>
     public bool IsPublic { get; set; }
-}
-
-/// <summary>
-/// Body of the anonymous share-password check.
-/// </summary>
-public class VerifyShareRequest
-{
-    /// <summary>Password to check. Null / empty for links that need none.</summary>
-    public string? Password { get; set; }
-}
-
-/// <summary>
-/// What a share-link recipient is shown BEFORE downloading: enough to decide
-/// whether to trust the link, and nothing more.
-/// </summary>
-/// <remarks>
-/// Deliberately narrower than `FileSharePublicDto`: no `fileId` (an anonymous
-/// visitor has no business learning internal ids), no access counts, no creator.
-/// Returned only while the link is actually usable - an expired, exhausted or
-/// revoked token gets a plain 404, so probing tells the caller nothing.
-/// </remarks>
-public class FileSharePreviewDto
-{
-    /// <summary>File name as uploaded, so the recipient can tell what they are about to open.</summary>
-    public string FileName { get; set; } = string.Empty;
-
-    /// <summary>Size in bytes.</summary>
-    public long Size { get; set; }
-
-    /// <summary>MIME type, for picking an icon.</summary>
-    public string? ContentType { get; set; }
-
-    /// <summary>True when the link asks for a password before it hands over the file.</summary>
-    public bool RequirePassword { get; set; }
-
-    /// <summary>When the link stops working (null = no expiry).</summary>
-    public DateTime? ExpiresAt { get; set; }
 }
 
 /// <summary>

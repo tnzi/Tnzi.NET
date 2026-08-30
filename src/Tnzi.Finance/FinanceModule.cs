@@ -80,9 +80,8 @@ public class FinanceModule : TnziApplicationModule
         // 挂在单据上的凭据由别人上传，看它的会计既不是创建者也不该拿 storage.file.view。
         // 让附件的可见性跟着它自己的权限码走。Storage 未加载时该注册无害。
         context.Services.AddScoped<IFileReferenceAccessResolver, FinanceFileReferenceAccessResolver>();
-        context.Services.AddScoped<OfferComposer>();
-        context.Services.AddScoped<IEstimateService, EstimateService>();
-        context.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
+        // 报价单 / 采购订单（不过账单据）在 Tnzi.Finance.Offers：它们从不投影总账，
+        // 只记账的消费方不该多出四张表、二十个端点与八个权限码。
         context.Services.AddScoped<IInvoiceService, InvoiceService>();
         context.Services.AddScoped<IBillService, BillService>();
         context.Services.AddScoped<IExpenseService, ExpenseService>();
@@ -92,6 +91,10 @@ public class FinanceModule : TnziApplicationModule
 
         // P3a 银行域
         context.Services.AddScoped<ITransferService, TransferService>();
+        context.Services.AddScoped<IDepositService, DepositService>();
+        // 拒绝作废「已被某张存活存款单收走」的收款：没有这道门，待存款项的借方会被冲销掉
+        // 而存款单贷记的那一笔仍在，同一笔钱贷两次，且每张凭证自身都是平的（无人会察觉）
+        context.Services.AddScoped<IFinancePostingGuard, DepositClaimPaymentGuard>();
         context.Services.AddScoped<IReconciliationService, ReconciliationService>();
 
         // 多币种深化：未实现汇兑损益期末重估

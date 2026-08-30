@@ -94,7 +94,7 @@ const srcdoc = computed(() => props.html ?? '')
 .t-html-preview {
   display: block;
   width: 100%;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: 4px;
   background: var(--tnzi-bg-deep);
 }

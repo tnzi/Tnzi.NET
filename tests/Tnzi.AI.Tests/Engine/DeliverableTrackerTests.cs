@@ -134,4 +134,21 @@ public class DeliverableTrackerTests
 
         rewritten.Deliverable.ShouldBe("new deliverable");
     }
+
+    [Fact]
+    public void CloneWith_CarriesTheErrorCode_ThroughMiddlewareAnnotation()
+    {
+        // 错误码是 HTTP 边界还原 409/具体错误码的唯一线索，任何一层中间件 CloneWith 时
+        // 把它弄丢，服务层分好的「可重试」就又被抹平回 500。
+        var original = new AgentRunResult
+        {
+            Response = "reservation lost a concurrent update",
+            FinishReason = FinishReasons.Error,
+            ErrorCode = ErrorCodes.QuotaConcurrencyConflict
+        };
+
+        var annotated = original.CloneWith(runId: Guid.NewGuid());
+
+        annotated.ErrorCode.ShouldBe(ErrorCodes.QuotaConcurrencyConflict);
+    }
 }

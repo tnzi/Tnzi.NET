@@ -6,11 +6,17 @@ namespace Tnzi.Finance.Services;
 public class CustomerService : ApplicationService, ICustomerService
 {
     private readonly IRepository<Customer, Guid> _customerRepository;
+    private readonly IEnumerable<IMasterDataUsageProvider> _usageProviders;
 
-    public CustomerService(IServiceProvider serviceProvider, IRepository<Customer, Guid> customerRepository)
+    public CustomerService(
+        IServiceProvider serviceProvider,
+        IRepository<Customer, Guid> customerRepository,
+        IEnumerable<IMasterDataUsageProvider>? usageProviders = null)
         : base(serviceProvider)
     {
         _customerRepository = Check.NotNull(customerRepository);
+        // 可选：一个实现都没有时删除守卫回到"只有会计单据算数"，与引入契约之前逐字一致。
+        _usageProviders = usageProviders ?? Enumerable.Empty<IMasterDataUsageProvider>();
     }
 
     public async Task<Result<IPagedList<CustomerDto>>> GetPagedAsync(CustomerQueryDto query, CancellationToken cancellationToken = default)
@@ -105,6 +111,13 @@ public class CustomerService : ApplicationService, ICustomerService
             await paymentRepository.AnyAsync(p => p.PartyType == FinancePartyType.Customer && p.PartyId == id, cancellationToken);
         if (referenced)
             return Fail("Cannot delete a customer referenced by invoices, credit memos, or payments. Deactivate it instead.", 409);
+
+        // 会计单据之外还有谁在用它？引用者不一定在会计内核里（报价单就住在 Tnzi.Finance.Offers），
+        // 所以经契约提问而不是直接查表——否则内核会反向依赖那个模块。未注册实现 = 无人在用。
+        var usage = await MasterDataUsageAsker.AskAsync(
+            _usageProviders, FinanceMasterDataKind.Customer, id, cancellationToken);
+        if (usage != null)
+            return Fail(usage.Detail, 409);
 
         await _customerRepository.DeleteAsync(customer, cancellationToken);
         return Ok();

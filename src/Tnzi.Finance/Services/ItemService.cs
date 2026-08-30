@@ -7,15 +7,19 @@ public class ItemService : ApplicationService, IItemService
 {
     private readonly IRepository<Item, Guid> _itemRepository;
     private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
+    private readonly IEnumerable<IMasterDataUsageProvider> _usageProviders;
 
     public ItemService(
         IServiceProvider serviceProvider,
         IRepository<Item, Guid> itemRepository,
-        IReadOnlyRepository<Account, Guid> accountRepository)
+        IReadOnlyRepository<Account, Guid> accountRepository,
+        IEnumerable<IMasterDataUsageProvider>? usageProviders = null)
         : base(serviceProvider)
     {
         _itemRepository = Check.NotNull(itemRepository);
         _accountRepository = Check.NotNull(accountRepository);
+        // 可选：一个实现都没有时删除守卫回到"只有会计单据算数"，与引入契约之前逐字一致。
+        _usageProviders = usageProviders ?? Enumerable.Empty<IMasterDataUsageProvider>();
     }
 
     public async Task<Result<IPagedList<ItemDto>>> GetPagedAsync(ItemQueryDto query, CancellationToken cancellationToken = default)
@@ -110,6 +114,12 @@ public class ItemService : ApplicationService, IItemService
             await creditMemoLineRepository.AnyAsync(l => l.ItemId == id, cancellationToken);
         if (referenced)
             return Fail("Cannot delete an item referenced by invoice, bill, or credit-memo lines. Deactivate it instead.", 409);
+
+        // 同 CustomerService：报价单行 / 采购订单行住在 Tnzi.Finance.Offers，经契约提问。
+        var usage = await MasterDataUsageAsker.AskAsync(
+            _usageProviders, FinanceMasterDataKind.Item, id, cancellationToken);
+        if (usage != null)
+            return Fail(usage.Detail, 409);
 
         await _itemRepository.DeleteAsync(item, cancellationToken);
         return Ok();

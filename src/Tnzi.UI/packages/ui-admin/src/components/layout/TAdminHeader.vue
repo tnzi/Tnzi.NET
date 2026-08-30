@@ -137,7 +137,7 @@
         Theme settings
       </NTooltip>
       <NDropdown
-        v-if="showLangSwitch"
+        v-if="langSwitchVisible"
         :options="langOptions"
         trigger="click"
         @select="onLangSelect"
@@ -146,7 +146,7 @@
           class="t-admin-header__icon-btn t-admin-header__lang"
           aria-label="Language"
         >
-          <Icon icon="mdi:translate" width="20" height="20" />
+          <Icon icon="mdi:web" width="20" height="20" />
         </button>
       </NDropdown>
       <div v-if="$slots.chat" class="t-admin-header__chat">
@@ -170,6 +170,8 @@ import { NTooltip, NDropdown, type DropdownOption } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { useAdminLocale } from '../../headless/useAdminLocale'
+import type { AdminLocale } from '../../i18n/messages'
 
 interface Props {
   title?: string
@@ -231,7 +233,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   openSearch: []
   openThemeDrawer: []
-  localeChange: [locale: 'en' | 'zh-cn']
+  localeChange: [locale: AdminLocale]
 }>()
 
 const appStore = useAdminAppStore()
@@ -255,38 +257,45 @@ const fullscreenButtonVisible = computed<boolean>(() => {
   return true
 })
 
-function setLocale(locale: 'en' | 'zh-cn') {
-  appStore.setLocale(locale)
-  emit('localeChange', locale)
+/**
+ * Language options for the NDropdown - derived from the locale registry, so
+ * adding or removing a language is a consumer's `localeOptions` call and never
+ * an edit to this file. Active option gets a checkmark icon via the `icon`
+ * render function (NDropdown calls it lazily per render).
+ */
+const locales = useAdminLocale()
+const langOptions = computed<DropdownOption[]>(() =>
+  locales.options.value.map((l) => ({
+    key: l.code,
+    label: l.label,
+    icon: () => (l.active ? h(Icon, { icon: 'mdi:check', width: 14, height: 14 }) : null),
+  })),
+)
+
+/**
+ * Hide the switcher when the application offers a single language: a menu with
+ * one entry that cannot change anything reads as a broken control. Also keeps
+ * it out of the `maxInlineActions` budget so a monolingual app gets one more
+ * real button instead of a dead slot.
+ */
+const langSwitchVisible = computed(() => props.showLangSwitch && locales.hasChoice.value)
+
+/**
+ * Select a language. Exposed for tests (the dropdown teleports, so driving it
+ * through the DOM is awkward) and used by `onLangSelect` - one path, so what a
+ * test exercises is what a click does.
+ *
+ * A code the application does not offer is ignored and emits nothing: claiming
+ * a change that did not happen is worse than doing nothing.
+ */
+function setLocale(locale: AdminLocale): void {
+  const before = locales.current.value
+  locales.setLocale(locale)
+  if (locales.current.value !== before) emit('localeChange', locale)
 }
 
-/** Language options for the NDropdown - mirrors soybean's lang-switch.vue
- *  pattern (NDropdown :options + trigger=hover + @select). When a new
- *  locale is added, extend this list - TAdminHeader picks it up without
- *  template changes. Active option gets a checkmark icon via the `icon`
- *  render function (NDropdown calls it lazily per render). */
-const langOptions = computed<DropdownOption[]>(() => [
-  {
-    key: 'zh-cn',
-    label: '中文',
-    icon: () =>
-      appStore.locale === 'zh-cn'
-        ? h(Icon, { icon: 'mdi:check', width: 14, height: 14 })
-        : null,
-  },
-  {
-    key: 'en',
-    label: 'English',
-    icon: () =>
-      appStore.locale === 'en'
-        ? h(Icon, { icon: 'mdi:check', width: 14, height: 14 })
-        : null,
-  },
-])
-
 function onLangSelect(key: string | number): void {
-  const locale = key as 'en' | 'zh-cn'
-  setLocale(locale)
+  setLocale(String(key))
 }
 
 /** Phase H1 B1: theme-schema toggle wiring. Reads the optional
@@ -391,7 +400,7 @@ const overflowActions = computed<OverflowAction[]>(() => [
 const inlineActionKeys = computed<Set<string>>(() => {
   if (shouldUseOverflow.value) return new Set<string>()
   const enabled = overflowActions.value.filter((a) => a.show).map((a) => a.key)
-  if (props.showLangSwitch) enabled.push('lang')
+  if (langSwitchVisible.value) enabled.push('lang')
   const max = props.maxInlineActions
   if (max == null || enabled.length <= max) return new Set(enabled)
   const keep = Math.max(0, max - 1)
@@ -427,12 +436,13 @@ defineExpose({ setLocale })
   height: var(--tnzi-admin-header-height, 56px);
   padding: 0 16px;
   background-color: var(--tnzi-admin-header-bg, var(--tnzi-container-bg));
-  border-bottom: 1px solid var(--tnzi-border);
+  border-bottom: var(--tnzi-surface-chrome-border);
   /* Phase H1 B2: soybean header has a subtle shadow that lifts it
      above the content. Earlier annotation claimed "no box-shadow"
-     was the parity - that was wrong. soybean uses `shadow-header`
-     ≈ `0 1px 2px 0 rgb(0 21 41 / 8%)`. */
-  box-shadow: 0 1px 2px 0 rgb(0 21 41 / 0.05);
+     was the parity - that was wrong. The value belongs to the shell-rail
+     token so the header, the tab bar and a consumer's own header all move
+     together; the literal that used to sit here had drifted to 5%. */
+  box-shadow: var(--tnzi-surface-chrome-shadow-header);
   z-index: var(--tnzi-admin-z-header, 80);
   transition:
     height var(--tnzi-admin-motion-duration-base, 0.3s) var(--tnzi-admin-motion-ease-in-out, ease),

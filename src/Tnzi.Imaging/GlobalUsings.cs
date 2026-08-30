@@ -1,4 +1,4 @@
-
+﻿
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.DependencyInjection.Extensions;
 global using Microsoft.Extensions.Logging;
@@ -13,6 +13,7 @@ global using System.IO;
 global using System.Linq;
 global using System.Text;
 global using System.Threading.Tasks;
+global using Tnzi.Geometry;
 global using Tnzi.Modules;
 global using Microsoft.Extensions.Options;
 global using Microsoft.AspNetCore.Authorization;

@@ -1,4 +1,4 @@
-namespace Tnzi.Identity;
+﻿namespace Tnzi.Identity;
 
 /// <summary>
 /// 身份认证模块
@@ -16,7 +16,7 @@ public class IdentityModule : TnziApplicationModule
     /// <summary>
     /// 表名前缀
     /// </summary>
-    public override string? TableNamePrefix => "Identity";
+    public override string? TableNamePrefix => IdentityConstants.TablePrefix;
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
@@ -69,8 +69,9 @@ public class IdentityModule : TnziApplicationModule
         // 注册密码服务
         context.Services.AddScoped<IPasswordService, PasswordService>();
 
-        // 注册组织架构服务
-        context.Services.AddScoped<IOrganizationService, OrganizationService>();
+        // 组织架构服务**不在这里注册**：契约 IOrganizationService 留在核心（UserService 与
+        // DefaultUserAdminController 以可空可选依赖持有它），实现随可选包
+        // Tnzi.Identity.Organization 走。未加载该包时容器里没有实现，那两处按 null 降级。
         context.Services.AddScoped<ITenantService, TenantService>();
         context.Services.TryAddScoped<ITenantChecker, TenantChecker>();
 
@@ -92,6 +93,13 @@ public class IdentityModule : TnziApplicationModule
         // 注册2FA服务
         context.Services.AddScoped<ITwoFactorService, TwoFactorService>();
 
+        // 注册 passkey 服务。★ 无条件注册、由 Identity:Passkey:Enabled 在服务层门控 ——
+        // 按配置决定要不要注册，会让「配置中心把开关打开」在下次重启前不生效
+        // （同 SecurityHeaders / RateLimit 中间件那条热开关判据）。
+        context.Services.AddScoped<IPasskeyEnrollmentTokenService, PasskeyEnrollmentTokenService>();
+        context.Services.AddScoped<IPasskeyService, PasskeyService>();
+        context.Services.AddScoped<IStepUpService, StepUpService>();
+
         // 注册OAuth服务
         context.Services.AddScoped<IOAuthService, OAuthService>();
 
@@ -107,9 +115,14 @@ public class IdentityModule : TnziApplicationModule
         // 注册登录会话协调器（多设备/单设备/限并发策略 + 令牌签发前同步建立会话）
         context.Services.AddScoped<ILoginSessionCoordinator, LoginSessionCoordinator>();
 
-        // 注册登录守卫求值器。始终注册（消费应用未实现任何 ILoginGuard 时直接放行，零开销），
-        // 这样每条令牌签发路径无需判空；守卫本身由消费应用注册。
+        // 注册登录守卫求值器。始终注册，这样每条令牌签发路径无需判空；
+        // 消费应用的守卫（IP 白名单 / 时段 / 设备）另行注册，按 Order 升序排在内置守卫之后。
         context.Services.AddScoped<ILoginGuardEvaluator, LoginGuardEvaluator>();
+
+        // ★★ 内置守卫：账号锁定 / 停用。挂在守卫链上而不是逐条签发路径各查一遍 ——
+        // 求值器是全部签发路径的唯一共同调用点，一处实现覆盖全部，
+        // 且后续新增的登录方式自动受它保护。详见 LockedAccountLoginGuard 的注释。
+        context.Services.AddScoped<ILoginGuard, LockedAccountLoginGuard>();
 
         // 注册会话维护后台服务（定期清理过期/失活会话，避免幽灵会话累积影响并发计数）
         context.Services.AddHostedService<SessionMaintenanceBackgroundService>();
@@ -390,8 +403,48 @@ public static class IdentityExtensions
                 options.Lockout.MaxFailedAccessAttempts = accountSecuritySection.GetValue("MaxFailedLoginAttempts", 5);
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(accountSecuritySection.GetValue("LockoutDurationMinutes", 30));
                 options.Lockout.AllowedForNewUsers = accountSecuritySection.GetValue("EnableLockout", true);
+
             })
+            .AddTnziPasskeyOptions(configuration)
             .AddEntityFrameworkStores<TDbContext>()
             .AddDefaultTokenProviders();
+    }
+
+    /// <summary>
+    /// 把 <c>Identity:Passkey</c> 里与 WebAuthn 协议相关的部分灌进运行时的
+    /// <see cref="IdentityPasskeyOptions"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <see cref="IdentityPasskeyOptions"/> 是<strong>独立注册的 options</strong>，
+    /// 不是 <c>IdentityOptions</c> 的子对象（跟 Password / Lockout 那些不一样），所以要单独 Configure。
+    /// 框架自己的 <c>PasskeyOptions</c> 只管"开不开、挑战活多久、注册令牌活多久"这些框架侧的事。
+    /// </remarks>
+    private static IdentityBuilder AddTnziPasskeyOptions(this IdentityBuilder builder, IConfiguration configuration)
+    {
+        var passkeySection = configuration.GetSection("Identity").GetSection("Passkey");
+
+        builder.Services.Configure<IdentityPasskeyOptions>(options =>
+        {
+            // 留空时不赋值：让运行时按当前请求的 host 推断（本地开发方便）。
+            // ★ 生产应显式配置，且改它会让已注册的全部凭据失效 —— 凭据在创建时就绑定了 RP ID。
+            var serverDomain = passkeySection.GetValue<string?>("ServerDomain");
+            if (!string.IsNullOrWhiteSpace(serverDomain))
+            {
+                options.ServerDomain = serverDomain;
+            }
+
+            // 默认要求用户验证（指纹 / 面容 / PIN）。关掉它，捡到解锁状态设备的人就能登录，
+            // passkey 从"双因子"退化成"单因子"。
+            options.UserVerificationRequirement =
+                passkeySection.GetValue("RequireUserVerification", true) ? "required" : "preferred";
+
+            // ★ 同一个 ChallengeTimeoutSeconds 要同时喂给两侧。浏览器那侧（AuthenticatorTimeout）
+            // 决定系统弹窗等多久，服务端那侧决定缓存里的挑战状态活多久（PasskeyService.StoreStateAsync）。
+            // 只设一侧，用户会遇到"弹窗还开着、提交回来却说挑战已过期"这类查不出原因的失败。
+            var challengeTimeout = passkeySection.GetValue("ChallengeTimeoutSeconds", 300);
+            options.AuthenticatorTimeout = TimeSpan.FromSeconds(Math.Max(30, challengeTimeout));
+        });
+
+        return builder;
     }
 }

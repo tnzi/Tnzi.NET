@@ -37,9 +37,15 @@ export interface PermissionGuardOptions {
  * Routes may opt out by setting `meta.requiresAuth = false`.
  */
 export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard {
-  return async (to, _from, next) => {
+  // vue-router 5.2 deprecated the navigation-guard callback (R0025); a guard
+  // now signals its outcome by RETURNING it. Declaring fewer than three
+  // parameters is exactly what tells vue-router to read the return value, so
+  // do not re-add the third parameter "for symmetry" - the moment it is
+  // declared, vue-router goes back to waiting for a call that no longer
+  // happens and the navigation hangs forever.
+  return async (to) => {
     if (to.meta?.requiresAuth === false) {
-      return next()
+      return true
     }
     // When a session resolver is injected it is the SINGLE source of truth and
     // runs on every guarded navigation - it checks the live client token first
@@ -52,15 +58,15 @@ export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard
     // cheap when already signed in (token present → no backend call).
     if (options.resolveSession) {
       return (await options.resolveSession())
-        ? next()
-        : next(options.loginPath ?? { name: 'login' })
+        ? true
+        : (options.loginPath ?? { name: 'login' })
     }
     // No resolver (consumer manages restore itself): plain store check.
     const auth = useAdminAuthStore()
     if (auth.isLogin) {
-      return next()
+      return true
     }
-    next(options.loginPath ?? { name: 'login' })
+    return options.loginPath ?? { name: 'login' }
   }
 }
 
@@ -74,7 +80,7 @@ export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard
 export function createPermissionGuard(
   options: PermissionGuardOptions = {},
 ): NavigationGuard {
-  return (to, _from, next) => {
+  return (to) => {
     const required = (to.meta?.permission ?? '') as string
     const requiredAny = (to.meta?.permissions ?? []) as string[]
     // The Settings Center route sets `anySettingsPermission` instead of a single
@@ -101,12 +107,12 @@ export function createPermissionGuard(
         const roleAllowed =
           requiredRoles.length === 0 || auth.isSuperUser || auth.hasAnyRole(requiredRoles)
         if (!permAllowed || !roleAllowed) {
-          return next(options.forbiddenPath ?? { name: 'forbidden' })
+          return options.forbiddenPath ?? { name: 'forbidden' }
         }
       }
     }
     addTabFromRoute(to)
-    next()
+    return true
   }
 }
 
@@ -131,13 +137,13 @@ export interface ModuleGuardOptions {
 export function createModuleGuard(
   options: ModuleGuardOptions = {},
 ): NavigationGuard {
-  return (to, _from, next) => {
+  return (to) => {
     const routeStore = useAdminRouteStore()
     const name = typeof to.name === 'string' ? to.name : ''
     if (name && routeStore.unavailableRouteNames.has(name)) {
-      return next(options.forbiddenPath ?? { name: 'forbidden' })
+      return options.forbiddenPath ?? { name: 'forbidden' }
     }
-    next()
+    return true
   }
 }
 

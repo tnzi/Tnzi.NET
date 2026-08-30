@@ -29,4 +29,12 @@ public interface ISkillCategoryService
     /// 获取指定分类下的技能列表
     /// </summary>
     Task<Result<List<SkillSummaryDto>>> GetSkillsByCategoryAsync(Guid categoryId);
+
+    /// <summary>
+    /// 重排同一父分类下的技能分类（拖拽排序）
+    /// </summary>
+    /// <param name="ids">按新顺序排列的分类 Id，可以只是当前可见的一段</param>
+    /// <param name="parentId">父分类范围；null = 顶级分类</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, Guid? parentId = null, CancellationToken cancellationToken = default);
 }

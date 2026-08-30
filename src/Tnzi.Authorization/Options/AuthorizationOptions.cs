@@ -51,6 +51,16 @@ public class AuthorizationOptions
     public Dictionary<string, PermissionCategory> PermissionCategoryOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// 权限码不再被任何 provider 声明时的处置方式，默认
+    /// <see cref="PermissionRetirementMode.Disable"/>（保留数据行与授权，只标记退役）。
+    /// </summary>
+    /// <remarks>
+    /// 默认值刻意不是「删除」：一个码消失最常见的原因是这个部署没加载那个模块，
+    /// 而删除会连同角色授权一起丢且不可恢复。详见 <see cref="PermissionRetirementMode"/>。
+    /// </remarks>
+    public PermissionRetirementMode PermissionRetirement { get; set; } = PermissionRetirementMode.Disable;
+
+    /// <summary>
     /// When <c>true</c> (default), startup creates an Identity role (marked
     /// <c>IsSystem</c>) for every name listed in <see cref="SuperAdminRoles"/>
     /// that does not exist yet, so the super-admin convention works out of

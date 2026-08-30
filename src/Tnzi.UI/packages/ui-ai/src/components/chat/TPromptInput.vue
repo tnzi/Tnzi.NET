@@ -10,7 +10,7 @@ import { NButton } from 'naive-ui';
 import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
-import { formatFileSize } from '@tnzi/core';
+import { formatFileSize } from '@tnzi/core/utils';
 const props = withDefaults(defineProps<{
   modelValue: string;
   placeholder?: string;

@@ -25,7 +25,7 @@
     <template #default>
       <TMasterDetailLayout :master-width="320" :bordered="false" :detail-scroll="false">
         <template #master>
-          <aside class="t-run-monitor__list" data-test="run-list">
+          <aside class="t-run-monitor__list t-surface-card" data-test="run-list">
             <div v-if="listError" class="t-run-monitor__error" role="alert">
               {{ listError }}
             </div>
@@ -60,7 +60,7 @@
           <NCard
             size="small"
             :bordered="false"
-            class="t-run-monitor__detail"
+            class="t-run-monitor__detail t-surface-card"
             data-test="run-detail"
           >
             <div v-if="!selectedRun" class="t-run-monitor__placeholder">
@@ -389,9 +389,10 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
+  background: var(--tnzi-surface-card-bg);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-run-monitor__list-items {
   flex: 1 1 auto;
@@ -412,10 +413,11 @@ defineExpose({ selectRun, runs, traceEvents, selectedRunId })
   background: rgb(var(--tnzi-primary-rgb) / 0.12);
 }
 .t-run-monitor__detail {
-  /* NCard supplies the chrome (padding, border, surface). We only add
-     the soft shadow + radius for parity with TCrudPage list-card. */
+  /* NCard supplies the padding + surface; the card tier supplies the chrome,
+     the same pair TCrudPage's list-card takes. */
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-run-monitor__meta > div {
   margin-bottom: 4px;

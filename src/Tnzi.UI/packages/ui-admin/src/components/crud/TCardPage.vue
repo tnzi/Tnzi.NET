@@ -27,11 +27,17 @@
       <TCardRenderer
         :state="props.state"
         :cols="cols"
+        :min-col-width="minColWidth"
         :gap="gap"
         :card-key="cardKey"
         :show-selection="showBatch"
         :row-actions="rowActions"
+        :draggable="draggable"
+        :drag-filter="dragFilter"
+        :drag-disabled="dragDisabled"
+        :drag-while-sorted="dragWhileSorted"
         :translate="translate"
+        @reorder="emit('reorder', $event)"
       >
         <template #card="ctx">
           <slot name="card" v-bind="ctx" />
@@ -63,6 +69,7 @@
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import TListShell from './TListShell.vue'
 import TCardRenderer from './renderers/TCardRenderer.vue'
+import type { CardReorderPayload } from './renderers/card-reorder'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { RowAction } from '../../headless/row-actions'
 import type { FormModalMode } from '../../headless/useFormModal'
@@ -78,6 +85,13 @@ export interface TCardPageProps<T, TId extends string | number = string | number
    */
   mode?: 'page' | 'container'
   cols?: number | { xs?: number; sm?: number; md?: number; lg?: number; xl?: number }
+  /**
+   * Minimum column width in px. Set it and the column count follows the
+   * available width instead of `cols` - which is what a screen wider than the
+   * `xl` breakpoint needs, since `xl` covers everything from 1280 to 4K.
+   * See `TCardRenderer`.
+   */
+  minColWidth?: number
   gap?: number
   cardKey?: (row: T) => string | number
   /** When false the shell's white header card is not rendered - for card
@@ -107,6 +121,17 @@ export interface TCardPageProps<T, TId extends string | number = string | number
    * `#card` slot scope as `rowActions`.
    */
   rowActions?: RowAction<T>[]
+  /**
+   * Let the operator reorder cards by dragging them (off by default).
+   * Listen for `reorder` to persist the new order; see `TCardRenderer`.
+   */
+  draggable?: boolean
+  /** Extra CSS selector for elements that must not start a drag. */
+  dragFilter?: string
+  /** Rows that may not be dragged (pinned / system rows). */
+  dragDisabled?: (row: T) => boolean
+  /** Allow dragging while a column sort is active (off by default). */
+  dragWhileSorted?: boolean
   showPagination?: boolean
   formModalWidth?: number
   /** Width of the read-only view drawer (the `#detail` slot). Default 640.
@@ -123,6 +148,7 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   title: undefined,
   mode: 'container',
   cols: () => ({ xs: 1, sm: 2, md: 3, lg: 4 }),
+  minColWidth: undefined,
   gap: 16,
   cardKey: undefined,
   showHeader: true,
@@ -138,6 +164,10 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   showRefresh: true,
   showBatch: false,
   rowActions: undefined,
+  draggable: false,
+  dragFilter: undefined,
+  dragDisabled: undefined,
+  dragWhileSorted: false,
   showPagination: true,
   formModalWidth: 560,
   detailWidth: 640,
@@ -146,6 +176,8 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   titleHelpTitle: undefined,
   translate: undefined,
 })
+
+const emit = defineEmits<{ reorder: [payload: CardReorderPayload<T, TId>] }>()
 
 defineSlots<{
   header?: () => unknown

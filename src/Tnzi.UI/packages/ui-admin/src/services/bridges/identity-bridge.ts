@@ -17,6 +17,8 @@ import {
   useProfileApi,
   useAuthApi,
   oauthLoginUrl,
+  registerPasskey as runPasskeyRegistration,
+  type PasskeyCredentialDto,
   type AuthConfigDto,
   type UserListItemDto,
   type CreateUserDto,
@@ -282,6 +284,17 @@ export interface IdentityBridge {
     disableTwoFactorMethod(type: TwoFactorType): Promise<void>
     /** Set the preferred 2FA method (must be an enabled method; shown first at login). */
     setPreferredTwoFactor(type: TwoFactorType): Promise<void>
+    // -- Passkeys (WebAuthn) --
+    /** The current user's registered passkeys. */
+    getPasskeys(): Promise<PasskeyCredentialDto[]>
+    /**
+     * Run the full registration ceremony for the current user.
+     *
+     * Returns `null` when the user dismissed the system dialog - that is a normal
+     * outcome, not a failure, and must not be surfaced as an error.
+     */
+    registerPasskey(deviceName?: string): Promise<PasskeyCredentialDto | null>
+    removePasskey(credentialId: string): Promise<void>
   }
 }
 
@@ -624,6 +637,25 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         setPreferredTwoFactor: async (type) => {
           ensureOk(await profileApi.setPreferredTwoFactor({ type }))
         },
+        // Passkey endpoints live under /auth, so they need authApi rather than
+        // profileApi - guarded on their own so a missing authApi cannot take
+        // down the 2FA methods above, which do not depend on it.
+        getPasskeys: async () =>
+          authApi
+            ? ((unwrap(await authApi.getPasskeyCredentials()) as PasskeyCredentialDto[] | null) ?? [])
+            : missing<PasskeyCredentialDto[]>('me.getPasskeys'),
+        // Delegates to @tnzi/core's browser helper: it owns the parse ->
+        // navigator.credentials -> serialise ceremony, so no consuming app has
+        // to re-implement the same base64url plumbing. It needs the client
+        // itself (not an api object) because it drives both request legs.
+        registerPasskey: async (deviceName) =>
+          deps.client
+            ? runPasskeyRegistration(deps.client, { deviceName })
+            : missing<PasskeyCredentialDto | null>('me.registerPasskey'),
+        removePasskey: async (credentialId) => {
+          if (!authApi) return missing<void>('me.removePasskey')
+          ensureOk(await authApi.deletePasskeyCredential(credentialId))
+        },
       }
     : {
         getProfile: () => missing('me.getProfile'),
@@ -654,6 +686,9 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         disableTotp: () => missing('me.disableTotp'),
         disableTwoFactorMethod: () => missing('me.disableTwoFactorMethod'),
         setPreferredTwoFactor: () => missing('me.setPreferredTwoFactor'),
+        getPasskeys: () => missing('me.getPasskeys'),
+        registerPasskey: () => missing('me.registerPasskey'),
+        removePasskey: () => missing('me.removePasskey'),
       }
 
   const getAuthConfig = async (): Promise<AuthConfigDto | null> => {

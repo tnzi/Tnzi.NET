@@ -67,6 +67,41 @@ public class DefaultUnsubscribeController : ApiControllerBase
     }
 
     /// <summary>
+    /// RFC 8058 一键退订：邮件服务商<b>直接</b> POST 到这里，收件人不会打开浏览器。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与上面那个 <c>POST</c> 的差别只在<b>谁来调</b>：那个是落地页在用户确认后调的，令牌在
+    /// JSON 体里；这个是 Gmail / Outlook / Apple Mail 那颗「退订」按钮触发的，令牌在**查询串**里
+    /// （信头里那个 URI 是什么样，服务商就 POST 到什么地址），请求体是固定的
+    /// <c>List-Unsubscribe=One-Click</c> 表单，本方法不读它。
+    /// </para>
+    /// <para>
+    /// ★ <b>必须与落地页分成两个端点</b>：一键退订**没有确认步骤**（那正是「一键」的含义），
+    /// 而落地页那条必须先让人看清自己要退订什么。把它们合成一个，等于要么给一键流程加一道
+    /// 服务商不会走的确认，要么把落地页的确认变成摆设。
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// ★ <b>刻意不加 <c>[Consumes]</c></b>：本方法一个字节的请求体都不读，令牌在查询串里。
+    /// 加上它只会在服务商发来一个我们没列举的 <c>Content-Type</c>（或干脆不带）时回 415 ——
+    /// 而那意味着收件人按了「退订」而什么也没发生，正是这条链路要消灭的失败形态。
+    /// 能拒绝的东西越少，这个端点越可靠。
+    /// </remarks>
+    [HttpPost("one-click")]
+    public virtual async Task<ApiResult> OneClick([FromQuery] string token, CancellationToken cancellationToken)
+    {
+        var payload = OptOut.ResolveUnsubscribeToken(token);
+        if (payload == null)
+            return ApiResult.Error("This unsubscribe link is not valid.", 400);
+
+        var result = await OptOut.OptOutAsync(
+            payload.Address, payload.Channel, payload.Category,
+            source: "one-click header", reason: null, cancellationToken: cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 撤销退订，给点错了的人一条回头路。
     /// </summary>
     [HttpPost("resubscribe")]

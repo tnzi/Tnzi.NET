@@ -199,8 +199,10 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
       <NGi v-for="kpi in kpis" :key="kpi.key" :span="kpiSpan">
         <NCard
           size="small"
+          :bordered="false"
           :class="[
             't-dashboard-page__kpi-card',
+            't-surface-card',
             { 't-dashboard-page__kpi-card--gradient': !!kpi.gradient },
           ]"
           :content-style="
@@ -249,13 +251,13 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
          which made the pie unreadable on phones / tablets. -->
     <NGrid :x-gap="12" :y-gap="12" responsive="screen" item-responsive cols="24" class="t-dashboard-page__chart-row">
       <NGi span="24 m:24 l:16">
-        <NCard :title="lineTitle" size="small" class="t-dashboard-page__chart-card">
+        <NCard :title="lineTitle" size="small" :bordered="false" class="t-dashboard-page__chart-card t-surface-card">
           <div v-if="lineHasData" ref="lineRef" class="t-dashboard-page__chart" />
           <div v-else class="t-dashboard-page__empty">{{ emptyLabel }}</div>
         </NCard>
       </NGi>
       <NGi span="24 m:24 l:8">
-        <NCard :title="pieTitle" size="small" class="t-dashboard-page__chart-card">
+        <NCard :title="pieTitle" size="small" :bordered="false" class="t-dashboard-page__chart-card t-surface-card">
           <div v-if="pieHasData" ref="pieRef" class="t-dashboard-page__chart" />
           <div v-else class="t-dashboard-page__empty">{{ emptyLabel }}</div>
         </NCard>
@@ -282,16 +284,15 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 }
 
 .t-dashboard-page__kpi-card {
-  /* soybean parity: soft drop shadow on every unbordered card by default,
-     not just on hover (matches soybean's home-page card treatment). */
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  /* Card tier - the pair, on the card by default rather than only on hover
+     (matches soybean's home-page card treatment). */
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  transition: transform var(--tnzi-admin-motion-duration-fast, 0.15s) ease,
-    box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+  transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
 .t-dashboard-page__kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-dashboard-page__kpi-card--gradient :deep(.n-card-header) {
   display: none;
@@ -387,9 +388,12 @@ function buildPieOption(mode: 'light' | 'dark'): EChartsOption {
 
 .t-dashboard-page__chart-card {
   height: 360px;
-  /* soybean parity - drop shadow + 8px radius matching the KPI cards. */
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
+  /* Same card tier as the KPI cards above. */
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
 }
 .t-dashboard-page__chart {
   width: 100%;

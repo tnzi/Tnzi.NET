@@ -11,6 +11,7 @@ import {
 } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminWindowHandles from './TAdminWindowHandles'
+import { useAdminLocale } from '../../headless/useAdminLocale'
 
 interface Props {
   /**
@@ -65,6 +66,14 @@ const resolvedOverrides = computed<GlobalThemeOverrides>(() => {
 // `<slot><router-view v-if="..." /></slot>` in the template triggers a
 // Vue compile-time quirk that turns the v-if expression into a boolean
 // VNode child, producing "Invalid VNode type: true (boolean)" warnings.
+/**
+ * Naive UI's own strings (pagination, date picker, empty states) for the
+ * active locale. Outermost provider, so it also reaches teleported modals,
+ * popovers and message hosts. Falls back to English for any locale that
+ * registers no `naive` bundle - see `i18n/locale-registry`.
+ */
+const naiveLocale = useAdminLocale().naive
+
 const slots = useSlots()
 const Inner = defineComponent({
   name: 'TAdminAppRootInner',
@@ -79,7 +88,12 @@ const Inner = defineComponent({
 </script>
 
 <template>
-  <NConfigProvider :theme="resolvedTheme" :theme-overrides="resolvedOverrides">
+  <NConfigProvider
+    :theme="resolvedTheme"
+    :theme-overrides="resolvedOverrides"
+    :locale="naiveLocale.locale"
+    :date-locale="naiveLocale.dateLocale"
+  >
     <NLoadingBarProvider>
       <NMessageProvider>
         <NNotificationProvider>

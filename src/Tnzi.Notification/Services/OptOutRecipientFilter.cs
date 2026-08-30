@@ -38,9 +38,9 @@ internal static class OptOutRecipientFilter
     /// </summary>
     /// <param name="candidates">本轮待发的收件人。</param>
     /// <param name="allowedAddresses">
-    /// <see cref="INotificationOptOutService.FilterAllowedAsync"/> 返回的放行地址。
-    /// 它会归一化地址（大小写 / 空白），所以这里按不区分大小写的集合反查，
-    /// 而不是拿原始字符串做等值比较。
+    /// <see cref="INotificationOptOutService.FilterAllowedAsync"/> 返回的放行地址。它返回的是
+    /// <b>传给它的那个原样地址</b>（归一化只发生在它内部的比对里），所以这里能直接按收件人地址反查；
+    /// 集合仍取不区分大小写，好让收件人名单与放行名单之间的大小写差异不算作失配。
     /// </param>
     /// <remarks>
     /// ★ 被剔除的人标 <c>Cancelled</c> 并留下原因，而<b>不是</b>从列表里抹掉 ——

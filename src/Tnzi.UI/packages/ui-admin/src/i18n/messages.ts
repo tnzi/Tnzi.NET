@@ -28,7 +28,21 @@
  */
 import { shallowRef, triggerRef } from 'vue'
 
-export type AdminLocale = 'en' | 'zh-cn'
+/**
+ * A locale code.
+ *
+ * Deliberately an OPEN set. The two bundled codes stay spelled out so editors
+ * still complete them and typos in framework code still fail, but any string
+ * is accepted: a consumer registering `fr` (see `i18n/locale-registry`) must be
+ * able to call `setLocale('fr')`, `getLocaleMessages('fr')` and
+ * `extendLocaleMessages({ fr })` without a cast at every call site. The
+ * `string & Record<never, never>` arm is the standard idiom for "any string,
+ * but keep the literals in autocomplete".
+ */
+export type AdminLocale = 'en' | 'zh-cn' | (string & Record<never, never>)
+
+/** The dictionaries this package ships as async chunks. */
+export const BUNDLED_LOCALES = ['en', 'zh-cn'] as const
 
 type Dictionary = Record<string, unknown>
 
@@ -40,6 +54,25 @@ type Dictionary = Record<string, unknown>
  */
 const dictionaries = shallowRef(new Map<AdminLocale, Dictionary>())
 const inFlight = new Map<AdminLocale, Promise<void>>()
+/**
+ * Consumer-registered dictionary loaders, keyed by locale code. Populated by
+ * `registerAdminLocales` for definitions that pass `loadMessages`, so a
+ * consumer's own pack can be an async chunk exactly like the bundled ones.
+ * Kept here rather than in the registry so this module never has to import it
+ * (the dependency runs registry → messages, never back).
+ */
+const loaders = new Map<AdminLocale, () => Promise<Record<string, unknown>>>()
+
+/**
+ * Register a lazy dictionary loader for `locale`. Called by
+ * `registerAdminLocales`; direct callers are assembling a shell by hand.
+ */
+export function setLocaleLoader(
+  locale: AdminLocale,
+  loader: () => Promise<Record<string, unknown>>,
+): void {
+  loaders.set(locale, loader)
+}
 
 /** Dictionary for `locale`, or `undefined` when it has not been loaded yet. */
 export function getLocaleMessages(locale: AdminLocale): Dictionary | undefined {
@@ -58,12 +91,9 @@ export function setLocaleMessages(locale: AdminLocale, messages: Dictionary): vo
 }
 
 /**
- * Load one bundled dictionary. Idempotent, and concurrent calls share a single
- * import. Resolves immediately when the dictionary is already present.
- *
- * The `import()` specifiers are literal on purpose: a computed specifier would
- * defeat static analysis and bundlers would emit the whole `locales/` folder as
- * one chunk, putting us back where we started.
+ * Load a dictionary. Idempotent, and concurrent calls share a single import.
+ * Resolves immediately when the dictionary is already present, and also when
+ * the locale has no pack at all (see `resolveLoader`).
  */
 export function loadLocaleMessages(locale: AdminLocale): Promise<void> {
   if (dictionaries.value.has(locale)) return Promise.resolve()
@@ -71,10 +101,15 @@ export function loadLocaleMessages(locale: AdminLocale): Promise<void> {
   const existing = inFlight.get(locale)
   if (existing) return existing
 
-  const task = (locale === 'zh-cn'
-    ? import('../locales/zh-cn').then((m) => m.zhCn as Dictionary)
-    : import('../locales/en').then((m) => m.en as Dictionary)
-  )
+  const source = resolveLoader(locale)
+  // No pack for this code: a consumer-registered locale whose strings arrive
+  // through `extendLocaleMessages` instead. Resolve without installing
+  // anything. This used to fall through to the `en` branch of a ternary, which
+  // installed the ENGLISH dictionary under the requested code - so a French app
+  // rendered English chrome and looked like a translation gap rather than a bug.
+  if (!source) return Promise.resolve()
+
+  const task = source()
     .then((messages) => {
       setLocaleMessages(locale, messages)
     })
@@ -87,4 +122,41 @@ export function loadLocaleMessages(locale: AdminLocale): Promise<void> {
 
   inFlight.set(locale, task)
   return task
+}
+
+/**
+ * Drop every dictionary, loader and in-flight memo for a locale this package
+ * does not bundle.
+ *
+ * Test-only, and called by `resetAdminLocalesForTest` so ONE reset undoes
+ * everything a spec registered - a reset that only rolls back half the state
+ * is worse than none, because the leftover half looks like a passing test.
+ * The bundled two survive: the global test setup installs them once per file
+ * and every other spec expects them present.
+ */
+export function resetLocaleMessagesForTest(): void {
+  for (const code of [...dictionaries.value.keys()]) {
+    if (!(BUNDLED_LOCALES as readonly string[]).includes(code)) dictionaries.value.delete(code)
+  }
+  for (const code of [...inFlight.keys()]) {
+    if (!(BUNDLED_LOCALES as readonly string[]).includes(code)) inFlight.delete(code)
+  }
+  loaders.clear()
+  triggerRef(dictionaries)
+}
+
+/**
+ * Pick the loader for `locale`: a consumer-registered one first, then the
+ * bundled packs.
+ *
+ * The bundled `import()` specifiers stay literal on purpose - a computed
+ * specifier defeats static analysis and bundlers emit the whole `locales/`
+ * folder as one chunk, putting us back where we started.
+ */
+function resolveLoader(locale: AdminLocale): (() => Promise<Dictionary>) | undefined {
+  const registered = loaders.get(locale)
+  if (registered) return registered as () => Promise<Dictionary>
+  if (locale === 'en') return () => import('../locales/en').then((m) => m.en as Dictionary)
+  if (locale === 'zh-cn') return () => import('../locales/zh-cn').then((m) => m.zhCn as Dictionary)
+  return undefined
 }

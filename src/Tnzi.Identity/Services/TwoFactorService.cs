@@ -3,7 +3,7 @@ namespace Tnzi.Identity.Services;
 /// <summary>
 /// 双因素认证服务实现
 /// </summary>
-public class TwoFactorService : ApplicationService, ITwoFactorService
+public partial class TwoFactorService : ApplicationService, ITwoFactorService
 {
     private static readonly TimeSpan TwoFactorFailureCacheExpiration = TimeSpan.FromMinutes(15);
     private const int MaxTwoFactorFailureAttempts = 5;
@@ -31,7 +31,7 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         _cache = cache;
     }
 
-    public async Task<Result> SendSmsCodeAsync(Guid userId, string phoneNumber)
+    public async Task<Result> SendSmsCodeAsync(Guid userId, string phoneNumber, VerificationCodePurpose purpose)
     {
         // 验证用户存在
         var user = await _userManager.FindByGuidAsync(userId);
@@ -41,10 +41,10 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         // 委托给基于地址的通用方法
-        return await SendCodeByAddressAsync(phoneNumber, TwoFactorType.Sms, userId);
+        return await SendCodeByAddressAsync(phoneNumber, TwoFactorType.Sms, purpose, userId);
     }
 
-    public async Task<Result> SendEmailCodeAsync(Guid userId, string email)
+    public async Task<Result> SendEmailCodeAsync(Guid userId, string email, VerificationCodePurpose purpose)
     {
         // 验证用户存在
         var user = await _userManager.FindByGuidAsync(userId);
@@ -54,10 +54,10 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         // 委托给基于地址的通用方法
-        return await SendCodeByAddressAsync(email, TwoFactorType.Email, userId);
+        return await SendCodeByAddressAsync(email, TwoFactorType.Email, purpose, userId);
     }
 
-    public async Task<Result> VerifyCodeAsync(Guid userId, string code, TwoFactorType type)
+    public async Task<Result> VerifyCodeAsync(Guid userId, string code, TwoFactorType type, VerificationCodePurpose purpose)
     {
         var user = await _userManager.FindByGuidAsync(userId);
         if (user == null)
@@ -65,7 +65,9 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // TOTP 验证：直接走 UserManager 内置验证，不查数据库
+        // TOTP 验证：直接走 UserManager 内置验证，不查数据库。
+        // ⚠ TOTP 码由时间与共享密钥派生，不存在「这枚码是为哪个用途发的」——
+        // purpose 对它无从约束，这是 TOTP 的固有性质。需要按用途隔离的场景请用 SMS/Email。
         if (type == TwoFactorType.Totp)
         {
             var isValid = await _userManager.VerifyTwoFactorTokenAsync(
@@ -81,7 +83,7 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         // 委托给基于地址的验证并标记已使用方法
-        var result = await VerifyCodeByAddressAndMarkUsedAsync(address, code, type);
+        var result = await VerifyCodeByAddressAndMarkUsedAsync(address, code, type, purpose);
         if (!result.Succeeded)
         {
             return Fail(result.Message ?? "Verification failed", result.Code ?? 400, result.ErrorCode);
@@ -529,207 +531,6 @@ public class TwoFactorService : ApplicationService, ITwoFactorService
             if (set.Contains(t) && !ordered.Contains(t)) ordered.Add(t);
         }
         return ordered;
-    }
-
-    #endregion
-
-    #region 验证码登录支持（基于地址，无需 UserId）
-
-    /// <inheritdoc />
-    public async Task<Result> SendCodeByAddressAsync(string address, TwoFactorType type, Guid? userId = null)
-    {
-        if (type == TwoFactorType.Totp)
-        {
-            return Fail("TOTP does not require sending verification codes", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 验证类型和配置
-        if (type == TwoFactorType.Sms && !_otpOptions.EnableSms)
-        {
-            return Fail("SMS verification is not enabled", 400, ErrorCodes.CONFIGURATION_ERROR);
-        }
-
-        if (type == TwoFactorType.Email && !_otpOptions.EnableEmail)
-        {
-            return Fail("Email verification is not enabled", 400, ErrorCodes.CONFIGURATION_ERROR);
-        }
-
-        if (_eventBus == null)
-        {
-            return Fail("IEventBus is not available, cannot send verification code", 500, ErrorCodes.CONFIGURATION_ERROR);
-        }
-
-        if (string.IsNullOrWhiteSpace(address))
-        {
-            return Fail("Address is required", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 优先检查缓存
-        var resendCacheKey = $"2FA_Resend_Timestamp:{address}:{(int)type}";
-        if (_cache != null)
-        {
-            var lastSent = await _cache.GetAsync<DateTime?>(resendCacheKey);
-            if (lastSent.HasValue && lastSent.Value.AddSeconds(_otpOptions.ResendIntervalSeconds) > DateTime.UtcNow)
-            {
-                var remaining = (int)(lastSent.Value.AddSeconds(_otpOptions.ResendIntervalSeconds) - DateTime.UtcNow).TotalSeconds;
-                return Fail($"Verification code sent too frequently, please wait {remaining} seconds", 429, ErrorCodes.VALIDATION_ERROR);
-            }
-        }
-
-        // 检查数据库
-        if (_cache == null)
-        {
-            var lastCode = await _repository
-                .Where(tfc => tfc.Address == address && tfc.Type == type && !tfc.IsUsed)
-                .OrderByDescending(tfc => tfc.CreationTime)
-                .FirstOrDefaultAsync();
-
-            if (lastCode != null && lastCode.CreationTime.AddSeconds(_otpOptions.ResendIntervalSeconds) > DateTime.UtcNow)
-            {
-                var remainingSeconds = (int)(lastCode.CreationTime.AddSeconds(_otpOptions.ResendIntervalSeconds) - DateTime.UtcNow).TotalSeconds;
-                return Fail($"Verification code sent too frequently, please wait {remainingSeconds} seconds", 429, ErrorCodes.VALIDATION_ERROR);
-            }
-        }
-
-        // 生成验证码
-        var code = GenerateCode(_otpOptions.CodeLength);
-        var expiresAt = DateTime.UtcNow.AddMinutes(_otpOptions.ExpirationMinutes);
-
-        // 保存验证码（UserId 可为空）
-        var twoFactorCode = new TwoFactorCode
-        {
-            UserId = userId,
-            Code = code,
-            Type = type,
-            Address = address,
-            ExpiresAt = expiresAt,
-            IsUsed = false,
-            CreationTime = DateTime.UtcNow
-        };
-
-        await _repository.InsertAsync(twoFactorCode);
-
-        // 获取用户名（如果 userId 有值）
-        string? userName = null;
-        if (userId.HasValue)
-        {
-            var user = await _userManager.FindByGuidAsync(userId.Value);
-            userName = user?.UserName;
-        }
-
-        // 发布事件，由应用层处理发送
-        try
-        {
-            await _eventBus.PublishAsync(new TwoFactorCodeSentEvent
-            {
-                UserId = userId ?? Guid.Empty,
-                UserName = userName ?? string.Empty,
-                Type = type == TwoFactorType.Email ? IdentityConstants.TwoFactorTypeName.Email : IdentityConstants.TwoFactorTypeName.Sms,
-                Address = address,
-                Code = code,
-                ExpiresAt = expiresAt,
-                ExpirationMinutes = _otpOptions.ExpirationMinutes
-            }, cancellationToken: default);
-
-            LogInformation("Verification code event published for address {Address}, type {Type}", address, type);
-
-            // 更新发送时间缓存
-            if (_cache != null)
-            {
-                await _cache.SetAsync(resendCacheKey, DateTime.UtcNow, TimeSpan.FromSeconds(_otpOptions.ResendIntervalSeconds));
-            }
-            return Ok();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to publish verification code event for address {Address}, type {Type}", address, type);
-            return Fail("Failed to send verification code", 500, ErrorCodes.INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<Result> VerifyCodeByAddressAsync(string address, string code, TwoFactorType type)
-    {
-        if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(code))
-        {
-            return Fail("Address and code are required", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 查找未使用且未过期的验证码
-        var twoFactorCode = await _repository
-            .Where(tfc => tfc.Address == address
-                && tfc.Code == code
-                && tfc.Type == type
-                && !tfc.IsUsed
-                && tfc.ExpiresAt > DateTime.UtcNow)
-            .OrderByDescending(tfc => tfc.CreationTime)
-            .FirstOrDefaultAsync();
-
-        if (twoFactorCode == null)
-        {
-            return Fail("Invalid or expired verification code", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 只验证，不标记为已使用
-        LogInformation("Verification code validated for address {Address}, type {Type}", address, type);
-        return Ok();
-    }
-
-    /// <inheritdoc />
-    public async Task<Result<Guid?>> VerifyCodeByAddressAndMarkUsedAsync(string address, string code, TwoFactorType type)
-    {
-        if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(code))
-        {
-            return Fail<Guid?>("Address and code are required", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        var cacheKey = $"2FA_Verify_Fail_Count:{address}:{(int)type}";
-
-        // 检查锁定
-        if (_cache != null)
-        {
-            var failCount = await _cache.GetCounterAsync(cacheKey);
-            if (failCount >= MaxTwoFactorFailureAttempts)
-            {
-                return Fail<Guid?>("Too many failed attempts. Please try again later.", 429, ErrorCodes.VALIDATION_ERROR);
-            }
-        }
-
-        // 查找未使用且未过期的验证码
-        var twoFactorCode = await _repository
-            .Where(tfc => tfc.Address == address
-                && tfc.Code == code
-                && tfc.Type == type
-                && !tfc.IsUsed
-                && tfc.ExpiresAt > DateTime.UtcNow)
-            .OrderByDescending(tfc => tfc.CreationTime)
-            .FirstOrDefaultAsync();
-
-        if (twoFactorCode == null)
-        {
-            // 记录失败
-            if (_cache != null)
-            {
-                await _cache.IncrementAsync(cacheKey, 1, TwoFactorFailureCacheExpiration);
-            }
-            return Fail<Guid?>("Invalid or expired verification code", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 标记为已使用
-        twoFactorCode.IsUsed = true;
-        twoFactorCode.UsedAt = DateTime.UtcNow;
-        await _repository.UpdateAsync(twoFactorCode);
-
-        // 清除失败记录
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(cacheKey);
-        }
-
-        LogInformation("Verification code verified and marked used for address {Address}, type {Type}", address, type);
-
-        // 返回关联的 UserId（可能为空）
-        return Ok<Guid?>(twoFactorCode.UserId);
     }
 
     #endregion

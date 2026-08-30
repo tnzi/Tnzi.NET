@@ -49,7 +49,11 @@ const ALLOWED_ENTRY = 'src/workflow/index.ts';
 function buildEntries(): string[] {
   const config = readFileSync(resolve(pkgRoot, 'vite.config.ts'), 'utf8');
   const entryBlock = config.slice(config.indexOf('entry: {'), config.indexOf('name: '));
-  return [...entryBlock.matchAll(/resolve\(__dirname,\s*'([^']+)'\)/g)].map((m) => m[1]);
+  // Accepts both `__dirname` and `import.meta.dirname`: Vite 8's native config
+  // loader cannot see `__dirname`, so the configs moved to `import.meta.dirname`.
+  // Matching only one spelling would silently return zero entries - which is
+  // exactly what the "can see the build entries" assertion below exists to catch.
+  return [...entryBlock.matchAll(/resolve\((?:__dirname|import\.meta\.dirname),\s*'([^']+)'\)/g)].map((m) => m[1]);
 }
 
 /** Resolve a relative specifier the way the bundler would. */

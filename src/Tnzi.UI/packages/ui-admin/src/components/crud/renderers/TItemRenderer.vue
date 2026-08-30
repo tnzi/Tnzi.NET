@@ -124,8 +124,10 @@ function toggle(row: T): void {
 </script>
 
 <style scoped>
+/* Clearance - see TCardRenderer. */
 .t-item-renderer {
   width: 100%;
+  padding: var(--tnzi-surface-card-gutter);
 }
 /* In page mode the shell hands the renderer a bounded height through the flex
    chain; a row list has no internal scroller of its own, so it must fill the
@@ -140,8 +142,6 @@ function toggle(row: T): void {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* Headroom for the row card's hover shadow inside the scroll container. */
-  padding-top: 2px;
 }
 .t-item-renderer__skeleton {
   height: 66px;

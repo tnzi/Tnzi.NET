@@ -23,7 +23,7 @@ export type { MetricBarItem, MetricBarClickEvent } from './TMetricBars.vue'
 export { default as TNoteCard } from './TNoteCard.vue'
 export { default as TActivityFeed } from './TActivityFeed.vue'
 export { default as TAttachmentWall } from './TAttachmentWall.vue'
-export type { Attachment } from './TAttachmentWall.vue'
+export type { Attachment, AttachmentReorderPayload } from './TAttachmentWall.vue'
 // Read-only counterpart of a form: a record's fields as `label: value` rows in
 // a container-derived grid, so a detail surface stops rendering a column of
 // switched-off inputs.

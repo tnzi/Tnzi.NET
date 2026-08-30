@@ -17,7 +17,7 @@
  * that feed the color pickers and the non-privileged user's preset picker.
  */
 import type { ThemeColors, ThemeContext } from '@tnzi/ui'
-import type { AdminLayoutMode, TabStyle } from '../stores/useAdminThemeStore'
+import type { AdminLayoutMode, AdminSurfaceStyle, TabStyle } from '../stores/useAdminThemeStore'
 import type { AdminThemeStore } from './snapshot'
 
 export interface AdminThemePreset {
@@ -33,6 +33,8 @@ export interface AdminThemePreset {
   colors?: Partial<Omit<ThemeColors, 'primary'>>
   /** Corner radius (0-16). */
   themeRadius?: number
+  /** Container chrome: elevated (shadow) / outlined (border) / flat (neither). */
+  surfaceStyle?: AdminSurfaceStyle
   /** Built-in dark sider shorthand (ignored when `siderBg` is set). */
   invertSider?: boolean
   /** Per-surface background overrides - omitted / null clears the surface. */
@@ -191,6 +193,7 @@ export function applyAppearancePreset(
   }
   if (preset.mode) ctx.setMode(preset.mode)
   if (typeof preset.themeRadius === 'number') themeStore.setThemeRadius(preset.themeRadius)
+  if (preset.surfaceStyle) themeStore.setSurfaceStyle(preset.surfaceStyle)
   if (typeof preset.invertSider === 'boolean' && preset.invertSider !== themeStore.invertSider) {
     themeStore.toggleInvertSider()
   }

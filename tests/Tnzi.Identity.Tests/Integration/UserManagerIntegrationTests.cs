@@ -76,43 +76,6 @@ public class IdentityDbContextIntegrationTests : IntegrationTestBase
     }
 
     [Fact]
-    public async Task Should_Create_Organization_Hierarchy()
-    {
-        // Arrange
-        var rootOrg = new Organization
-        {
-            Id = Guid.NewGuid(),
-            Name = "Root Organization",
-            Code = "ROOT",
-            CreationTime = DateTime.UtcNow
-        };
-
-        var childOrg = new Organization
-        {
-            Id = Guid.NewGuid(),
-            Name = "Child Organization",
-            Code = "CHILD",
-            ParentId = rootOrg.Id,
-            CreationTime = DateTime.UtcNow
-        };
-
-        // Act
-        await DbContext.Organizations.AddAsync(rootOrg);
-        await DbContext.Organizations.AddAsync(childOrg);
-        await DbContext.SaveChangesAsync();
-
-        // Assert
-        var savedRoot = await DbContext.Organizations
-            .Include(o => o.Children)
-            .FirstOrDefaultAsync(o => o.Code == "ROOT");
-        
-        savedRoot.ShouldNotBeNull();
-        savedRoot!.Children.ShouldNotBeNull();
-        savedRoot.Children.Count.ShouldBe(1);
-        savedRoot.Children.First().Name.ShouldBe("Child Organization");
-    }
-
-    [Fact]
     public async Task Should_Create_LoginLog()
     {
         // Arrange

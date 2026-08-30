@@ -19,6 +19,7 @@ public class PayslipLineConfiguration : EntityTypeConfigurationBase<PayslipLine,
         builder.Property(l => l.FormulaSnapshot).HasMaxLength(4000);
         builder.Property(l => l.Amount).HasMoneyPrecision();
         builder.Property(l => l.YtdAmount).HasMoneyPrecision();
+        builder.Property(l => l.InputAmount).HasMoneyPrecision();
 
         builder.HasIndex(l => new { l.PayslipId, l.Sequence });
 

@@ -46,9 +46,76 @@
           mobile="scroll"
           :pagination="false"
         />
+
+        <!-- One-time inputs: bonus / back pay / one-off deduction for THIS run. -->
+        <div class="pr-run-detail__section-head">
+          <h4 class="pr-run-detail__subtitle">{{ t('inputs.title') }}</h4>
+          <NButton v-if="canEditRunInputs" size="tiny" type="primary" @click="openInputEditor()">
+            {{ t('inputs.add') }}
+          </NButton>
+        </div>
+        <p class="pr-run-detail__hint">{{ t('inputs.hint') }}</p>
+        <TResponsiveTable
+          :columns="inputColumns"
+          :data="runInputs"
+          :row-actions="inputRowActions"
+          :translate="t"
+          :bordered="false"
+          size="small"
+          mobile="scroll"
+          :pagination="false"
+        />
       </template>
     </template>
   </TCrudPage>
+
+  <!-- Enter / overwrite one one-time input. -->
+  <TDetailHost :state="inputDetail" :title="t('inputs.editorTitle')" :width="480" :footer="false" :translate="t">
+    <div class="pr-input-form">
+      <div class="pr-input-form__field">
+        <span class="pr-input-form__label">{{ t('inputs.employee') }}</span>
+        <NSelect
+          v-model:value="inputModel.employeeId"
+          :options="sources.employeeOptions.value"
+          filterable
+          :disabled="inputModel.locked"
+          :placeholder="t('inputs.employeePlaceholder')"
+          size="small"
+        />
+      </div>
+      <div class="pr-input-form__field">
+        <span class="pr-input-form__label">{{ t('inputs.component') }}</span>
+        <NSelect
+          v-model:value="inputModel.componentId"
+          :options="inputComponentOptions"
+          filterable
+          :disabled="inputModel.locked"
+          :placeholder="t('inputs.componentPlaceholder')"
+          size="small"
+        />
+      </div>
+      <div class="pr-input-form__field">
+        <span class="pr-input-form__label">{{ t('inputs.amount') }}</span>
+        <NInputNumber v-model:value="inputModel.amount" size="small" :show-button="false" class="pr-input-form__grow" />
+      </div>
+      <div class="pr-input-form__field">
+        <span class="pr-input-form__label">{{ t('inputs.note') }}</span>
+        <NInput v-model:value="inputModel.note" :placeholder="t('inputs.notePlaceholder')" size="small" />
+      </div>
+      <div class="pr-input-form__actions">
+        <NButton size="small" @click="inputDetail.close()">{{ t('inputs.cancel') }}</NButton>
+        <NButton
+          size="small"
+          type="primary"
+          :loading="savingInput"
+          :disabled="!inputModel.employeeId || !inputModel.componentId"
+          @click="submitInput"
+        >
+          {{ t('inputs.submit') }}
+        </NButton>
+      </div>
+    </div>
+  </TDetailHost>
 
   <!-- Single payslip: lines + (Calculated only) worked-days correction. -->
   <TDetailHost :state="payslipDetail" :title="payslipTitle" :width="640" :footer="false" :translate="t">
@@ -138,8 +205,10 @@ import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { viewAction, type RowAction } from '../../headless/row-actions'
 import {
   createPayrollBridge,
+  PayRunSource,
   PayRunStatus,
   type PayRunDto,
+  type PayRunInputDto,
   type PayslipDto,
   type PayslipLineDto,
   type PayslipListDto,
@@ -204,14 +273,17 @@ async function run(action: () => Promise<unknown>, successKey: string) {
 // ── Run detail (#detail slot) ───────────────────────────────────
 const viewedRun = ref<PayRunDto | null>(null)
 const runPayslips = ref<PayslipListDto[]>([])
+const runInputs = ref<PayRunInputDto[]>([])
 
 async function loadRunDetail(row: PayRunRow) {
   viewedRun.value = null
   runPayslips.value = []
+  runInputs.value = []
   const id = String(row.id ?? '')
   try {
     viewedRun.value = await bridge.runs.getById(id)
     runPayslips.value = await bridge.runs.payslips(id)
+    runInputs.value = await bridge.runs.inputs(id)
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   }
@@ -270,8 +342,93 @@ const lineColumns: DataTableColumns<PayslipLineDto> = [
   { key: 'componentName', title: t('payslip.component'), minWidth: 150, render: (r) => `${r.componentCode} · ${r.componentName}` },
   { key: 'componentType', title: t('payslip.type'), width: 150, render: (r) => t(`componentType.${enumKey(r.componentType)}`) },
   { key: 'amount', title: t('payslip.amount'), width: 120, render: (r) => amountCell(fmtAmount(r.amount)) },
+  // 公式可以是 BASE + Input()，单看 amount 分不出哪部分是这一期批准的。
+  { key: 'inputAmount', title: t('payslip.inputAmount'), width: 120, render: (r) => (r.inputAmount == null ? EMPTY_DASH : amountCell(fmtAmount(r.inputAmount))) },
   { key: 'ytdAmount', title: t('payslip.ytd'), width: 120, render: (r) => amountCell(fmtAmount(r.ytdAmount)) },
 ]
+
+// ── One-time inputs (bonus / back pay / one-off deduction) ──────
+// 后端只在 Internal 批次的 Draft|Calculated 态接受改动（过账之后改就与总账对不上了）。
+const canEditRunInputs = computed(
+  () =>
+    can('payroll.run.update') &&
+    viewedRun.value?.source === PayRunSource.Internal &&
+    (viewedRun.value?.status === PayRunStatus.Draft || viewedRun.value?.status === PayRunStatus.Calculated),
+)
+
+const inputColumns: DataTableColumns<PayRunInputDto> = [
+  { key: 'employeeName', title: t('inputs.employee'), minWidth: 130, render: (r) => r.employeeName || r.employeeCode },
+  { key: 'componentName', title: t('inputs.component'), minWidth: 150, render: (r) => `${r.componentCode} · ${r.componentName}` },
+  { key: 'componentType', title: t('payslip.type'), width: 150, render: (r) => t(`componentType.${enumKey(r.componentType)}`) },
+  { key: 'amount', title: t('inputs.amount'), width: 120, render: (r) => amountCell(fmtAmount(r.amount)) },
+  { key: 'note', title: t('inputs.note'), minWidth: 140, render: (r) => r.note ?? EMPTY_DASH },
+]
+
+const inputRowActions: RowAction<PayRunInputDto>[] = [
+  { key: 'edit', label: 'inputs.edit', show: () => canEditRunInputs.value, onClick: (r) => openInputEditor(r) },
+  { key: 'delete', label: 'inputs.remove', type: 'error', show: () => canEditRunInputs.value, confirm: 'inputs.confirmRemove', onClick: (r) => void removeInput(r) },
+]
+
+const inputDetail = useDetail<{ id: string }>({ mode: 'drawer' })
+const savingInput = ref(false)
+const inputModel = reactive<{ employeeId: string | null; componentId: string | null; amount: number | null; note: string | null; locked: boolean }>({
+  employeeId: null,
+  componentId: null,
+  amount: null,
+  note: null,
+  locked: false,
+})
+
+const inputComponentOptions = computed(() =>
+  sources.componentList.value.map((c) => ({ label: `${c.code} · ${c.name}`, value: c.id })),
+)
+
+function openInputEditor(existing?: PayRunInputDto) {
+  inputModel.employeeId = existing?.employeeId ?? null
+  inputModel.componentId = existing?.componentId ?? null
+  inputModel.amount = existing?.amount ?? null
+  inputModel.note = existing?.note ?? null
+  // (批次, 员工, 组件) 是唯一键：改一笔已有的输入只能改金额与事由。
+  inputModel.locked = !!existing
+  void sources.ensureEmployees()
+  void sources.ensureComponents()
+  void inputDetail.open('view', { id: String(viewedRun.value?.id ?? '') })
+}
+
+async function submitInput() {
+  const runId = String(viewedRun.value?.id ?? '')
+  if (!runId || !inputModel.employeeId || !inputModel.componentId) return
+  savingInput.value = true
+  try {
+    await bridge.runs.setInput(runId, {
+      employeeId: inputModel.employeeId,
+      componentId: inputModel.componentId,
+      amount: Number(inputModel.amount ?? 0),
+      note: inputModel.note || null,
+    })
+    message.success(t('inputs.saveSuccess'))
+    inputDetail.close()
+    await loadRunDetail({ id: runId })
+    await crud.refresh()
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    savingInput.value = false
+  }
+}
+
+async function removeInput(row: PayRunInputDto) {
+  const runId = String(viewedRun.value?.id ?? '')
+  if (!runId) return
+  try {
+    await bridge.runs.deleteInput(runId, row.id)
+    message.success(t('inputs.removeSuccess'))
+    await loadRunDetail({ id: runId })
+    await crud.refresh()
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  }
+}
 
 // ── Pay drawer ──────────────────────────────────────────────────
 const payDetail = useDetail<{ id: string }>({ mode: 'drawer' })
@@ -393,6 +550,46 @@ const rowActions: RowAction<PayRunRow>[] = [
 
 .pr-payslip__inputs-field {
   width: 140px;
+}
+
+.pr-run-detail__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pr-run-detail__hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.pr-input-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pr-input-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pr-input-form__label {
+  font-size: 13px;
+  color: var(--tnzi-text-secondary, rgba(0, 0, 0, 0.65));
+}
+
+.pr-input-form__grow {
+  width: 100%;
+}
+
+.pr-input-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .pr-pay {

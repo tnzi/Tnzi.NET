@@ -1,7 +1,7 @@
 <template>
   <NCard
     size="small"
-    class="t-entity-card"
+    class="t-entity-card t-surface-card"
     :class="{ 't-entity-card--clickable': clickable }"
     :bordered="bordered"
     :role="clickable ? 'button' : undefined"
@@ -82,15 +82,19 @@ function onKeydown(event: KeyboardEvent): void {
 <style scoped>
 .t-entity-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
+  /* Overrides naive's own Card colour on purpose: an entity card is always a
+     card inside the list card, so it has to paint the stepped material or it
+     has no edge against its parent at all. */
+  background: var(--tnzi-surface-card-bg);
+  transition: box-shadow 0.15s ease;
 }
 .t-entity-card--clickable {
   cursor: pointer;
 }
 .t-entity-card--clickable:hover {
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
-  transform: translateY(-1px);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-entity-card--clickable:focus-visible {
   outline: 2px solid var(--tnzi-primary, #6d5ce7);

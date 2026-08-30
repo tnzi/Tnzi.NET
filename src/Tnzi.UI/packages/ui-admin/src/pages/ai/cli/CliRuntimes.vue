@@ -211,7 +211,7 @@ const rowActions: RowAction<CliRuntimeDto>[] = [editAction(crud), deleteAction(c
   overflow: hidden;
   font-family: var(--tnzi-font-mono);
   font-size: 12px;
-  color: var(--tnzi-text-3);
+  color: var(--tnzi-base-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

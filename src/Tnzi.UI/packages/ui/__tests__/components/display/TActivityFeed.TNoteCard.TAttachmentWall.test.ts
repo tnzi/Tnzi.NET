@@ -68,6 +68,19 @@ describe('TAttachmentWall', () => {
     expect(w.emitted('add')).toBeTruthy()
   })
 
+  it('draws the remove chip with the shared classes, on a tile that hosts the hover', () => {
+    // The material, the visibility rule and the hover feedback are shared with
+    // TImageUpload (`styles/media-chip.css`); the tile is the hover host so
+    // that hovering one tile reveals only that tile's chip.
+    const w = mount(TAttachmentWall, {
+      props: { attachments: [{ url: '/a.png' }, { url: '/b.png' }], removable: true },
+    })
+    const chip = w.find('.t-attachment-wall__remove')
+    expect(chip.classes()).toContain('t-media-remove')
+    expect(chip.element.parentElement?.classList.contains('t-media-frame')).toBe(true)
+    expect(w.findAll('.t-media-frame')).toHaveLength(2)
+  })
+
   it('shows empty text when no attachments and not addable', () => {
     const w = mount(TAttachmentWall, { props: { attachments: [], emptyText: 'None' } })
     expect(w.text()).toContain('None')

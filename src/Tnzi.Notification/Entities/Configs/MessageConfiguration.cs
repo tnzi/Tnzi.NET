@@ -11,7 +11,8 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
 
         builder.Property(n => n.Subject).IsRequired().HasMaxLength(500);
         builder.Property(n => n.Content);
-        builder.Property(n => n.FailureReason).HasMaxLength(1000);
+        // 列宽常量与 NotificationFieldLimits 共用（理由见 RecipientConfiguration）。
+        builder.Property(n => n.FailureReason).HasMaxLength(NotificationFieldLimits.FailureReasonMaxLength);
         builder.Property(n => n.Category).IsRequired().HasMaxLength(100).HasDefaultValue("General");
         builder.Property(n => n.TemplateName).HasMaxLength(200);
         builder.Property(n => n.TotalRecipientCount).HasDefaultValue(0);
@@ -35,5 +36,7 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
         builder.HasIndex(n => new { n.Type, n.Status, n.CreationTime });
         // 复合索引：用于按发送者查询
         builder.HasIndex(n => new { n.SenderId, n.CreationTime });
+        // 复合索引：派发恢复每轮都要扫「到期却仍是 Scheduled」的消息
+        builder.HasIndex(n => new { n.Status, n.ScheduledTime });
     }
 }

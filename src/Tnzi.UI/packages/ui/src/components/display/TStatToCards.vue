@@ -86,7 +86,7 @@ const cardCount = computed(() => props.stats.length)
     </div>
     <NGrid :cols="Math.min(cols, cardCount)" :x-gap="12" :y-gap="12">
       <NGridItem v-for="(card, i) in stats" :key="`${card.label}-${i}`">
-        <NCard class="t-stat-cards__card" :bordered="false">
+        <NCard class="t-stat-cards__card t-surface-card" :bordered="false">
           <NSkeleton v-if="loading" text :repeat="2" />
           <template v-else>
             <NStatistic :label="card.label">
@@ -132,8 +132,11 @@ const cardCount = computed(() => props.stats.length)
   z-index: 1;
 }
 .t-stat-cards__card {
-  background: var(--tnzi-container-bg);
-  box-shadow: var(--tnzi-shadow-card, 0 1px 2px rgb(0 0 0 / 4%));
+  background: var(--tnzi-surface-card-bg);
+  /* Card tier - see `styles/variables.css`. These tiles sit on the page
+     canvas beside KPI cards and list cards, so they take the same pair. */
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-md, 8px);
 }
 .t-stat-cards__value {

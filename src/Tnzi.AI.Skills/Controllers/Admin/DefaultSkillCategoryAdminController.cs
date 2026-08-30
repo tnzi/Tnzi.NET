@@ -67,4 +67,16 @@ public class DefaultSkillCategoryAdminController : ApiAdminControllerBase
         var result = await CategoryService.GetSkillsByCategoryAsync(categoryId);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 重排同一父分类下的技能分类（拖拽排序）
+    /// </summary>
+    /// <remarks>请求体是当前可见的顺序，不必是全量：范围外的分类保持原位。</remarks>
+    [HttpPost("reorder")]
+    [ApiAuthorize(PermissionName = "ai.skill.update")]
+    public virtual async Task<ApiResult> Reorder([FromBody] ReorderRequestDto request, [FromQuery] Guid? parentId = null)
+    {
+        var result = await CategoryService.ReorderAsync(request.Ids, parentId);
+        return result.ToApiResult();
+    }
 }

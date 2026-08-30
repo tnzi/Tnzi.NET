@@ -114,19 +114,29 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     public string? ExtraData { get; set; }
 
     /// <summary>
-    /// 优惠券ID
+    /// 本次收款用掉的那张促销（优惠券）的 Id。<b>不是外键</b>。
     /// </summary>
+    /// <remarks>
+    /// 促销表随折扣域搬去了可选子模块 <c>Tnzi.Payment.Promotions</c>，而这一列<b>刻意保留</b>：
+    /// 它从来就没有被配置成外键（两侧的 Configuration 里都没提过它），删掉它是一次
+    /// <c>DropColumn</c>，会给每一个既有部署换来一条迁移，而拆程序集本身不该动 schema。
+    /// 不加载那个包时它恒为 null —— 那台宿主上不存在任何优惠券，没有值可写。
+    /// 加载了则由 <c>PaymentService</c> 在建单时写入，用途是一个快速判据：
+    /// 支付失败/过期要还券时，先看这一列，为 null 就连问都不用问。
+    /// </remarks>
     public Guid? CouponId { get; set; }
 
     /// <summary>
-    /// 发票ID
+    /// 发票 ID。<b>不是外键</b>，也从来没有代码写过它。
     /// </summary>
+    /// <remarks>
+    /// 「支付 ↔ 发票」的外键一直在发票那一侧（<c>Invoice.PaymentId</c> + 一个唯一索引），
+    /// 这一列只是个从未被赋值的标量。发票域搬去可选子模块 <c>Tnzi.Payment.Billing</c> 之后，
+    /// 它<b>刻意保留</b>：删掉它是一次 <c>DropColumn</c>，会给每一个既有部署换来一条迁移，
+    /// 而拆程序集本身不该动 schema。要不要清掉这列是一个独立的、可能有数据损失的决定，
+    /// 不该搭本次拆分的便车。导航属性则必须删 —— 那是一条父 → 子的编译期依赖。
+    /// </remarks>
     public Guid? InvoiceId { get; set; }
-
-    /// <summary>
-    /// 发票实体
-    /// </summary>
-    public virtual Invoice? Invoice { get; set; }
 
     /// <summary>
     /// 退款记录集合

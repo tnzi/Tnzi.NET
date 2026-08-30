@@ -18,7 +18,7 @@
   <ItemGroup>
     <!-- 支票 PDF 渲染（纯托管、MIT）；把 PdfSharp 依赖从 Finance 核心收进本可选子模块，
          纯会计消费者不再被传递拉入 PdfSharp。EFT 文件为纯文本，不经此渲染。 -->
-    <PackageReference Include="PdfSharp" Version="6.2.1" />
+    <PackageReference Include="PdfSharp" Version="6.2.4" />
   </ItemGroup>
 
   <ItemGroup>

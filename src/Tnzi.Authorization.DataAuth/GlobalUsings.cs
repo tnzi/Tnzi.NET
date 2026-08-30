@@ -1,0 +1,36 @@
+global using System;
+global using System.Collections.Generic;
+global using System.Linq;
+global using System.Linq.Expressions;
+global using System.Threading.Tasks;
+
+global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.EntityFrameworkCore;
+global using Microsoft.EntityFrameworkCore.Metadata.Builders;
+global using Microsoft.Extensions.Caching.Memory;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+
+global using Tnzi.Application;
+global using Tnzi.AspNetCore.Extensions;
+global using Tnzi.AspNetCore.Models;
+global using Tnzi.AspNetCore.Mvc;
+global using Tnzi.Authorization.DataAuth.Dtos;
+global using Tnzi.Authorization.DataAuth.Entities;
+global using Tnzi.Authorization.DataAuth.Permissions;
+global using Tnzi.Authorization.DataAuth.Services;
+global using Tnzi.Caching;
+global using Tnzi.Data.Filtering;
+global using Tnzi.Domain.Entities;
+global using Tnzi.Domain.Repositories;
+global using Tnzi.EFCore;
+global using Tnzi.EFCore.Internal;
+global using Tnzi.Exceptions;
+global using Tnzi.Extensions;
+global using Tnzi.Identity.Services;
+global using Tnzi.Mapster;
+global using Tnzi.Modules;
+global using Tnzi.Results;
+global using Tnzi.Security.Authorization;
+global using Tnzi.Security.Claims;
+global using Tnzi.Utilities;

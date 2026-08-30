@@ -52,6 +52,7 @@ public class NotificationDeepIterationTests
             emailSenderMock.Object,
             smsSenderMock.Object,
             pushSenderMock.Object,
+            new Mock<IFaxSender>().Object,
             _unitOfWorkMock.Object,
             optionsMock.Object,
             serviceProviderMock.Object,

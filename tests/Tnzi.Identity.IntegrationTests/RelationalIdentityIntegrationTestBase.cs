@@ -12,6 +12,9 @@ using Tnzi.Mapster;
 
 namespace Tnzi.Identity.IntegrationTests;
 
+// 见 IntegrationTestBase.cs 顶部：`Organization` 的 using 必须在命名空间体内。
+using Tnzi.Identity.Organization.Entities;
+
 public abstract class RelationalIdentityIntegrationTestBase : IDisposable
 {
     private readonly SqliteConnection _connection;

@@ -62,5 +62,28 @@ public class ModuleFunction : FullAuditedEntity<Guid>
     /// temporarily disable a permission without redeploying code).
     /// </remarks>
     public bool IsSystemManaged { get; set; }
+
+    /// <summary>
+    /// True when no <see cref="Tnzi.Security.Authorization.IPermissionDefinitionProvider"/> declares this
+    /// code any more, i.e. the seeder retired it. The row and every grant referencing it are kept.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the row is kept instead of deleted.</b> Retirement fires whenever a code stops being
+    /// declared, and the commonest cause is not "the product removed the permission" but
+    /// "this deployment does not load that module" (a module split moves the provider class into the
+    /// sub-module, so an upgraded host that has not added the <c>[DependsOn]</c> stops declaring its
+    /// codes). Deleting the row and its grants would make that a silent, one-way authorization loss:
+    /// the soft-delete filter hides the tombstone, so re-adding the dependency inserts a fresh row with
+    /// a new id and the old grants never reattach.
+    /// </para>
+    /// <para>
+    /// A retired row is excluded from permission resolution and from the assignment matrix, so it grants
+    /// nothing while retired. Re-declaring the code clears this flag and every existing grant comes back.
+    /// A separate flag is required rather than reusing <see cref="IsEnabled"/>, because that one is the
+    /// admin's own toggle and the seeder must never overwrite it.
+    /// </para>
+    /// </remarks>
+    public bool IsRetired { get; set; }
 }
 

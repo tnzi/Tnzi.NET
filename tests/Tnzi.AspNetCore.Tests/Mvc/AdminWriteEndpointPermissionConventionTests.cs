@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Tnzi.Security.Authorization;
 
@@ -53,6 +53,11 @@ public class AdminWriteEndpointPermissionConventionTests
         //    所以判定放在 DocumentCommentService 里（Authorization 未加载时按"没有
         //    该权限"处理，只减权不增权）。
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceDocumentCollaborationAdminController.DeleteComment:DELETE",
+        //    双人授权撤回：只能撤自己发起、且尚未被决定的那一条（DualControlService.CancelAsync
+        //    比对 RequesterId，不是本人一律 403）。与上面那条同构 —— 静态方法级门会把发起人
+        //    本人也挡掉，而「撤回自己刚发起的请求」不该需要审批权。别人要让它不生效走拒绝，
+        //    那条挂着 authorization.dualControl.approve 并且会留下是谁拒的。
+        "Tnzi.Authorization.Controllers.Admin.DefaultDualControlAdminController.Cancel:POST",
 
         // ── (1) 真正的写操作缺码：已于 2026-07-07 补齐方法级操作码
         //    (system.diagnostics.execute / system.signalr.execute)，本区清空 ──
@@ -106,7 +111,7 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.Audit.Controllers.Admin.DefaultRecordAccessAdminController.GetList:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportCsv:POST",
         "Tnzi.Audit.Controllers.Admin.DefaultAuditOperationAdminController.ExportJson:POST",
-        "Tnzi.Authorization.Controllers.Admin.DefaultDataAuthAdminController.CheckDataPermission:POST",
+        "Tnzi.Authorization.DataAuth.Controllers.Admin.DefaultDataAuthAdminController.CheckDataPermission:POST",
         "Tnzi.Chat.Controllers.Admin.DefaultChatAdminController.QueryConversations:POST",
         "Tnzi.Identity.Controllers.Admin.DefaultLoginLogAdminController.GetList:POST",
         "Tnzi.Identity.Controllers.Admin.DefaultLoginSecurityAdminController.DetectAbnormalLogin:POST",

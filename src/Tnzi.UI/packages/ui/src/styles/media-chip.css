@@ -1,0 +1,107 @@
+/**
+ * The little round controls that sit on a picture.
+ *
+ * Three of them exist today: the remove chip on a `TAttachmentWall` tile, the
+ * remove chip on a `TImageUpload` frame, and the drag grip a reorderable wall
+ * puts on each tile. To an operator filling a single form they are one family
+ * of control, and the two remove chips had already drifted into two different
+ * ones - a black, always-visible chip on the gallery field and a white,
+ * hover-only chip on the image field, agreeing on nothing but the 18px circle.
+ *
+ * `t-media-chip` is the material and the visibility rule; `t-media-remove` and
+ * `t-media-grip` add only what makes each one itself.
+ *
+ * Global rather than scoped because the components live in different folders
+ * and a scoped block can only serve one of them. Whichever of the two had been
+ * copied into the other would have drifted again the next time either was
+ * touched, which is how the first divergence happened.
+ *
+ * ## What is NOT decided here
+ *
+ * The position. The wall's tile clips its overflow, so its chips have to sit
+ * inside the tile; the upload's frame does not clip, and its chip tucks onto
+ * the outer corner where it covers less of a small avatar. Each component
+ * states its own `position` / `top` / `right` in its scoped block, which also
+ * wins on specificity (a scoped rule carries an extra attribute selector).
+ *
+ * ## Why a dark scrim rather than the container colour
+ *
+ * The chip sits ON a picture whose colours nobody controls. Painted in the
+ * container colour it is white in the light theme, which disappears into a
+ * light photograph and leaves nothing but its own shadow. A translucent black
+ * disc with a white glyph reads over a snowfield and over a night shot alike,
+ * so that is the treatment they all use - and the glyph is `#fff` rather than a
+ * text token for the same reason: what it needs contrast against is the scrim,
+ * not the theme.
+ *
+ * ## Why the hiding is inside `@media (hover: hover)`
+ *
+ * A control that only appears on hover is, on a touch screen, a control that is
+ * permanently invisible and still tappable - worse than one that is always
+ * there. So it is the HIDING that is conditional, not the showing: a pointer
+ * that cannot hover never gets a hidden chip. `:focus-visible` re-reveals it for
+ * the keyboard, without which Tab lands on something nobody can see.
+ */
+
+.t-media-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+/* Removing is destructive, so its confirmation colour is the error token. */
+.t-media-remove:hover {
+  background: var(--tnzi-error, #d03050);
+}
+
+/* The grip is not a button - it is the surface a gesture starts on, so it says
+   so with the cursor rather than with a colour change. `grabbing` is bound to
+   the tile's `--chosen` state (Sortable puts that class on for the whole
+   gesture, including after the pointer has left the grip). */
+.t-media-grip {
+  cursor: grab;
+}
+
+.t-attachment-wall__tile--chosen .t-media-grip {
+  cursor: grabbing;
+}
+
+.t-media-chip:focus-visible {
+  outline: 2px solid var(--tnzi-primary, #646cff);
+  outline-offset: 1px;
+}
+
+@media (hover: hover) {
+  .t-media-frame .t-media-chip {
+    opacity: 0;
+    transform: scale(0.75);
+  }
+
+  .t-media-frame:hover .t-media-chip,
+  .t-media-frame .t-media-chip:focus-visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Reduced motion drops the fade, not the reveal: the chip still has to become
+   visible, it just arrives at once. */
+@media (prefers-reduced-motion: reduce) {
+  .t-media-chip {
+    transition: none;
+  }
+}

@@ -1099,7 +1099,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   width: 18px;
   height: 18px;
   border-radius: 4px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   background: repeating-linear-gradient(
     45deg,
     transparent,
@@ -1117,7 +1117,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   margin-left: 6px;
 }
 .t-perm-matrix__special-pill {
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
 }
 /* Grantable special (execute / assign / use) renders as a LABELLED checkbox so
    granted vs not is obvious from the checkmark, not colour alone. execute and
@@ -1162,7 +1162,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   gap: 10px;
 }
 .t-perm-matrix__mcard {
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
   overflow: hidden;
@@ -1226,7 +1226,7 @@ function toggleFunctions(fns: ModuleFunctionDto[], checked: boolean): void {
   align-items: center;
   padding: 4px 12px;
   border-radius: var(--tnzi-admin-radius-md, 6px);
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   font-size: 13px;
   color: var(--tnzi-base-text-muted);
   background: repeating-linear-gradient(

@@ -56,6 +56,7 @@ public class PreferenceSendPathTests : IntegrationTestBase
         services.AddSingleton(_ => _emailSender.Object);
         services.AddSingleton(_ => new Mock<ISmsSender>().Object);
         services.AddSingleton(_ => new Mock<IPushSender>().Object);
+        services.AddSingleton(_ => new Mock<IFaxSender>().Object);
 
         // 两个都用真实实现
         services.AddScoped<INotificationOptOutService, NotificationOptOutService>();

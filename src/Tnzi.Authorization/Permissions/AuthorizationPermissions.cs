@@ -1,4 +1,4 @@
-namespace Tnzi.Authorization.Permissions;
+﻿namespace Tnzi.Authorization.Permissions;
 
 /// <summary>
 /// Operation-level permission codes for the Authorization module's admin surfaces.
@@ -34,8 +34,15 @@ public class AuthorizationPermissions : IPermissionDefinitionProvider
         // action for every write (assign/remove/set/clear) on a user's direct
         // grants. The same delegation guard (grantable subset of grantor's own
         // set) applies on top of this code.
+        // 双人授权：粗码控制「能不能用这个功能」，服务层再按 {Operation}.approve 决定「能批哪些动作」。
+        context.AddPermission("authorization.dualControl.view", "View Dual-Control Requests", parentName: "authorization");
+        context.AddPermission("authorization.dualControl.approve", "Decide Dual-Control Requests", parentName: "authorization");
+
         context.AddPermission("authorization.userFunction.view", "View User Functions", parentName: "authorization");
         context.AddPermission("authorization.userFunction.assign", "Assign User Permissions", parentName: "authorization");
-        context.AddCrudPermissions("authorization.entityRole", "Entity Roles", parentName: "authorization");
+        // 行级数据授权的 authorization.entityRole.* 四个码不在这里 —— 它们随
+        // Tnzi.Authorization.DataAuth 子模块走（码串与父组均未改动，见该模块的
+        // AuthorizationDataAuthPermissions）。不加载那个包的宿主不该在权限矩阵里
+        // 多出一块点进去就 404 的功能面。
     }
 }

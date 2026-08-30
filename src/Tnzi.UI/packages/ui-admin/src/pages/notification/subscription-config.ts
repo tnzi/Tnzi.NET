@@ -41,9 +41,15 @@ export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
   // `type: 'user'` is a custom field rendered by the page via a TUserSelector
   // fieldRenderer (remote user search) instead of a raw GUID text input.
   { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'user',   required: true },
+  // The preference channel vocabulary is deliberately wider than the backend
+  // NotificationType enum: InApp / Webhook name channels that do not exist yet,
+  // and a preference row for a channel that never sends is simply never consulted.
+  // Email / Sms / Push / Fax are the four that actually deliver.
   { key: 'channel',   labelKey: 'form.channel', label: 'Channel', type: 'select', required: true, options: [
     { label: 'Email',   value: 'Email' },
     { label: 'SMS',     value: 'Sms' },
+    { label: 'Push',    value: 'Push' },
+    { label: 'Fax',     value: 'Fax' },
     { label: 'InApp',   value: 'InApp' },
     { label: 'Webhook', value: 'Webhook' },
   ] },

@@ -1,4 +1,4 @@
-// 别名：消除 Tnzi.Authorization.Services.IFunctionAuthorizationService 与 Tnzi.Security.Authorization.IFunctionAuthorizationService 的歧义
+﻿// 别名：消除 Tnzi.Authorization.Services.IFunctionAuthorizationService 与 Tnzi.Security.Authorization.IFunctionAuthorizationService 的歧义
 global using IFunctionAuthorizationService = Tnzi.Authorization.Services.IFunctionAuthorizationService;
 global using Microsoft.AspNetCore.Authorization;
 global using Microsoft.AspNetCore.Http;
@@ -6,7 +6,6 @@ global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.AspNetCore.Routing;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
-global using Microsoft.Extensions.Caching.Memory;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
@@ -15,7 +14,6 @@ global using System.Collections.Frozen;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations.Schema;
 global using System.Linq;
-global using System.Linq.Expressions;
 global using System.Text.Json.Serialization;
 global using System.Threading;
 global using System.Threading.Tasks;
@@ -32,7 +30,6 @@ global using Tnzi.Authorization.Services;
 global using Tnzi.EventBus;
 global using Tnzi.Caching;
 global using Tnzi.Data;
-global using Tnzi.Data.Filtering;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
@@ -48,4 +45,5 @@ global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Security.Claims;
+global using Tnzi.Settings;
 global using Tnzi.Utilities;

@@ -4,6 +4,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { ReorderRequest } from '../../types/api';
 import type {
   SettingDto,
   CreateSettingDto,
@@ -62,6 +63,15 @@ export function useAdminSettingApi(client: HttpClient) {
     /** Get setting groups with counts */
     getGroups: () =>
       client.get<SettingGroupDto[]>(`${ADMIN_SETTING_BASE}/groups`),
+
+    /**
+     * Reorder settings inside one group (drag-and-drop).
+     * `ids` is the visible order; settings outside those slots keep their positions.
+     */
+    reorder: (data: ReorderRequest, group?: string | null) =>
+      client.post<void>(`${ADMIN_SETTING_BASE}/reorder`, data, {
+        params: group ? { group } : undefined,
+      }),
   };
 }
 

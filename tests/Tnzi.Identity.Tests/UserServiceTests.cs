@@ -23,7 +23,6 @@ public class UserServiceTests
             .Map(dest => dest.IsEmailConfirmed, src => src.EmailConfirmed)
             .Map(dest => dest.IsPhoneNumberConfirmed, src => src.PhoneNumberConfirmed)
             .Map(dest => dest.IsLockedOut, src => src.LockoutEnd.HasValue && src.LockoutEnd.Value > DateTimeOffset.UtcNow)
-            .Map(dest => dest.OrganizationName, src => src.Organization != null ? src.Organization.Name : null)
             .Ignore(dest => dest.Roles); // Roles 在 MapUserToDtoAsync 中单独设置
 
         var mapper = new Mapper(config);

@@ -30,6 +30,7 @@ public class PayrollTestDbContext : TnziDbContext<PayrollTestDbContext>
         modelBuilder.ApplyConfiguration(new PayRunConfiguration());
         modelBuilder.ApplyConfiguration(new PayslipConfiguration());
         modelBuilder.ApplyConfiguration(new PayslipLineConfiguration());
+        modelBuilder.ApplyConfiguration(new PayRunInputConfiguration());
 
         // Finance 总账栈（过账/付款/作废经 ILedgerPostingService）
         modelBuilder.ApplyConfiguration(new AccountConfiguration());

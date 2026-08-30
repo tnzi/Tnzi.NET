@@ -1,8 +1,18 @@
 namespace Tnzi.Identity.Services;
 
 /// <summary>
-/// 双因素认证服务接口
+/// 一次性验证码服务：登录 2FA、免密验证码登录、找回密码、快速注册、换绑联系方式、
+/// 敏感操作二次确认共用这一套收发码能力。
 /// </summary>
+/// <remarks>
+/// ★★★ <strong>每个收发码方法都必须显式给出 <see cref="VerificationCodePurpose"/></strong>，
+/// 且验码时精确匹配 —— 一个用途发出的码不能完成另一个用途。参数刻意<strong>不给默认值</strong>：
+/// 少传会是编译错误，而一个默认值会让漏改的调用点静默落在错误的用途上。
+/// <para>
+/// ⚠ 用途绑定对<strong>存储型验证码（SMS / Email）</strong>生效。TOTP 是由时间与共享密钥派生的，
+/// 同一时间窗内的码天然无法区分用途，这是 TOTP 的固有性质，不是本接口的疏漏。
+/// </para>
+/// </remarks>
 public interface ITwoFactorService
 {
     /// <summary>
@@ -10,16 +20,18 @@ public interface ITwoFactorService
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="phoneNumber">手机号</param>
+    /// <param name="purpose">用途；验码时精确匹配。</param>
     /// <returns>是否发送成功</returns>
-    Task<Result> SendSmsCodeAsync(Guid userId, string phoneNumber);
+    Task<Result> SendSmsCodeAsync(Guid userId, string phoneNumber, VerificationCodePurpose purpose);
 
     /// <summary>
     /// 发送Email验证码
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="email">邮箱地址</param>
+    /// <param name="purpose">用途；验码时精确匹配。</param>
     /// <returns>是否发送成功</returns>
-    Task<Result> SendEmailCodeAsync(Guid userId, string email);
+    Task<Result> SendEmailCodeAsync(Guid userId, string email, VerificationCodePurpose purpose);
 
     /// <summary>
     /// 验证验证码
@@ -27,8 +39,9 @@ public interface ITwoFactorService
     /// <param name="userId">用户ID</param>
     /// <param name="code">验证码</param>
     /// <param name="type">验证方式</param>
+    /// <param name="purpose">用途；必须与发码时给出的用途一致，否则视为无效码。</param>
     /// <returns>是否验证成功</returns>
-    Task<Result> VerifyCodeAsync(Guid userId, string code, TwoFactorType type);
+    Task<Result> VerifyCodeAsync(Guid userId, string code, TwoFactorType type, VerificationCodePurpose purpose);
 
     /// <summary>
     /// 禁用全部 2FA(关闭所有方式 + 重置 authenticator key)。这是**销毁性**操作,
@@ -123,9 +136,23 @@ public interface ITwoFactorService
     /// </summary>
     /// <param name="address">接收地址（邮箱或手机号）</param>
     /// <param name="type">验证方式（Email/Sms）</param>
+    /// <param name="purpose">用途；验码时精确匹配。</param>
     /// <param name="userId">可选的用户ID（如果用户已存在）</param>
     /// <returns>是否发送成功</returns>
-    Task<Result> SendCodeByAddressAsync(string address, TwoFactorType type, Guid? userId = null);
+    Task<Result> SendCodeByAddressAsync(string address, TwoFactorType type, VerificationCodePurpose purpose, Guid? userId = null);
+
+    /// <summary>
+    /// 给指定用户按渠道发送验证码：地址取自用户档案（邮箱 / 手机号），成功时回执带脱敏地址。
+    /// </summary>
+    /// <param name="userId">用户ID。</param>
+    /// <param name="type">渠道（Email / Sms）；TOTP 无需发码，传入即拒绝。</param>
+    /// <param name="purpose">用途；验码时精确匹配。</param>
+    /// <returns>成功时 <c>Data</c> 为脱敏后的接收地址（如 <c>a***@example.com</c>）。</returns>
+    /// <remarks>
+    /// 给「地址就是当前用户自己的」那些流程用（二次确认等）：调用方不必先取一遍用户、
+    /// 再各自实现一遍脱敏。渠道开关与重发节流沿用 <see cref="SendCodeByAddressAsync"/>。
+    /// </remarks>
+    Task<Result<string?>> SendCodeToUserAsync(Guid userId, TwoFactorType type, VerificationCodePurpose purpose);
 
     /// <summary>
     /// 基于地址验证验证码（不标记为已使用，由调用方决定）
@@ -133,8 +160,9 @@ public interface ITwoFactorService
     /// <param name="address">接收地址（邮箱或手机号）</param>
     /// <param name="code">验证码</param>
     /// <param name="type">验证方式</param>
+    /// <param name="purpose">用途；必须与发码时给出的用途一致，否则视为无效码。</param>
     /// <returns>是否验证成功</returns>
-    Task<Result> VerifyCodeByAddressAsync(string address, string code, TwoFactorType type);
+    Task<Result> VerifyCodeByAddressAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose);
 
     /// <summary>
     /// 基于地址验证验证码并标记为已使用
@@ -142,8 +170,9 @@ public interface ITwoFactorService
     /// <param name="address">接收地址（邮箱或手机号）</param>
     /// <param name="code">验证码</param>
     /// <param name="type">验证方式</param>
+    /// <param name="purpose">用途；必须与发码时给出的用途一致，否则视为无效码。</param>
     /// <returns>验证成功时返回关联的 UserId（可能为空）</returns>
-    Task<Result<Guid?>> VerifyCodeByAddressAndMarkUsedAsync(string address, string code, TwoFactorType type);
+    Task<Result<Guid?>> VerifyCodeByAddressAndMarkUsedAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose);
 
     #endregion
 }

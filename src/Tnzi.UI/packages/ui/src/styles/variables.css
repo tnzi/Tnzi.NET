@@ -73,12 +73,177 @@
   --tnzi-bg-deep: rgb(246, 248, 250);
   --tnzi-bg-deep-rgb: 246 248 250;
 
-  /* Shadow tokens */
+  /* ── Shell rails (header / tab bar / footer / sider) ──────────────────
+   *
+   * The `--tnzi-shadow-*` values below are the ELEVATED look. They stay
+   * defined (and mode-varying) because `@tnzi/ui`'s own `TSiteHeader` reads
+   * `--tnzi-shadow-header` directly and has nothing to do with the admin's
+   * surface style; the admin rails read the switchable
+   * `--tnzi-surface-chrome-shadow-*` indirection instead, which defaults to
+   * `none` because the default style is `outlined`.
+   * Not one of the surface tiers below, and deliberately so: a rail is a
+   * fixed edge of the shell rather than something floating on a canvas, and
+   * its shadow points a different way on each of the four - down, down, up,
+   * right - so one value could never serve them.
+   *
+   * What they DO share is the pairing rule. Before these were lined up the
+   * four rails had four different recipes (header: line + shadow, tab bar:
+   * shadow only, footer: line only, sider: the faintest shadow in the shell
+   * and no line), which is the same inconsistency the card tier had, one
+   * level up. The divider is now one token across all four; only the shadow
+   * stays per-rail, because only the shadow has a direction.
+   *
+   * The divider survives `flat`. A shell whose header, footer and sider have
+   * no edge at all is not a flatter shell, it is one you cannot find your way
+   * around - the same reason popovers keep their shadow under every style. */
   --tnzi-shadow-header: 0 1px 2px rgb(0 21 41 / 8%);
-  --tnzi-shadow-sider: 2px 0 8px 0 rgb(29 35 41 / 5%);
+  /* The sider's edge was the weakest surface in the shell: a 5% shadow on a
+     white sider against a near-white canvas is not a boundary anyone can see. */
+  --tnzi-shadow-sider: 2px 0 8px -2px rgb(29 35 41 / 12%);
   --tnzi-shadow-tab: 0 1px 2px 0 rgb(0 21 41 / 8%);
+  --tnzi-shadow-footer: 0 -1px 2px 0 rgb(0 21 41 / 6%);
+
+  /* What the admin rails actually read. Defaults match the default style. */
+  --tnzi-surface-chrome-border: 1px solid var(--tnzi-border);
+  --tnzi-surface-chrome-shadow-header: none;
+  --tnzi-surface-chrome-shadow-tab: none;
+  --tnzi-surface-chrome-shadow-footer: none;
+  --tnzi-surface-chrome-shadow-sider: none;
   --tnzi-shadow-card: 0 1px 2px 0 rgb(0 0 0 / 3%), 0 1px 6px -1px rgb(0 0 0 / 2%);
   --tnzi-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
+
+  /* ── Surface chrome tiers ────────────────────────────────────────────
+   * A surface's chrome is a PAIR - a border and a shadow - and the two only
+   * read as one design language when they are decided together. Half of a
+   * flat design is not a flatter design, it is a mixed one: a card that drops
+   * its shadow but keeps no outline dissolves into the canvas, and a card that
+   * grows an outline while its neighbour keeps a shadow makes the two look
+   * like different kinds of thing when they are peers.
+   *
+   * So every reusable container reads BOTH halves from the same tier, and a
+   * consumer re-styles a whole tier by setting the pair:
+   *
+   *   :root {
+   *     --tnzi-surface-card-border: 1px solid var(--tnzi-border);
+   *     --tnzi-surface-card-shadow: none;
+   *     --tnzi-surface-card-shadow-hover: none;
+   *   }
+   *
+   * `@tnzi/ui-admin` exposes the three coherent combinations as a `surfaceStyle`
+   * theme setting (elevated / outlined / flat) that writes exactly these tokens.
+   *
+   * Four tiers, by what the surface sits ON:
+   *   card    - a content card on the page canvas (list card, KPI tile, panel)
+   *   inset   - a block nested INSIDE a card (code viewer, read-only field, row)
+   *   popover - a menu / dropdown / picker floating over the page
+   *   overlay - a modal / drawer / floating window
+   *
+   * `popover` and `overlay` keep their elevation under every style: their
+   * shadow is not decoration, it is the only thing separating them from the
+   * arbitrary content they float over. Only `card` and `inset` flatten. */
+
+  /* Tier 1 - content card on the canvas.
+   *
+   * These defaults ARE the `outlined` style, which is the shipped default:
+   * a crisp 1px line, no shadow, and no material step (the line is the visible
+   * separating signal and its colour is not the backdrop's, so a nested card
+   * has nothing to avoid). Every value here is mode-independent - the line
+   * follows `--tnzi-border`, `none` is `none`, and the hover ring follows the
+   * accent - which is why the theme setting can leave them alone and simply
+   * clear its overrides to get back here.
+   *
+   * Hover is a ring and NEVER a translate. A hover lift has to be paid for by
+   * every ancestor: the top row of a scroll container clips it, a grid with no
+   * gutter clips it sideways, and a scrollbar sits on top of it. */
+  --tnzi-surface-card-border: 1px solid var(--tnzi-border);
+  --tnzi-surface-card-shadow: none;
+  --tnzi-surface-card-shadow-hover: 0 0 0 1px rgb(var(--tnzi-primary-rgb) / 55%);
+
+  /* The `elevated` style's shadows. They live here rather than inline in the
+   * theme store because they vary with light/dark and an inline value cannot.
+   * The store switches to them by REFERENCE, so the `.dark` twin below still
+   * decides which value applies.
+   *
+   * Two layers, and the first is the important one: a drop shadow is cast
+   * DOWNWARD, so a card whose only shadow has a positive Y offset has nothing
+   * along its top edge and its upper half dissolves into a same-coloured
+   * backdrop. The zero-offset ambient layer wraps all four sides; the offset
+   * key layer under it is what reads as lift. */
+  --tnzi-surface-card-shadow-raised: 0 0 3px 0 rgb(0 0 0 / 7%), 0 1px 3px 0 rgb(0 0 0 / 7%);
+  --tnzi-surface-card-shadow-raised-hover: 0 0 4px 0 rgb(0 0 0 / 10%), 0 4px 12px -2px rgb(0 0 0 / 14%);
+
+  /* Tier 2 - a block inside a card. Separation by outline, never by shadow:
+     a shadow inside an already-elevated surface reads as a rendering bug. */
+  --tnzi-surface-inset-border: 1px solid var(--tnzi-border);
+  --tnzi-surface-inset-shadow: none;
+
+  /* Tier 3 - popover / dropdown / picker. Ambient + key, same as the card
+     tier: a shadow that only points down leaves the top edge unmarked. */
+  --tnzi-surface-popover-border: 1px solid var(--tnzi-border);
+  --tnzi-surface-popover-shadow: 0 0 3px 0 rgb(0 0 0 / 8%), 0 6px 20px -2px rgb(0 0 0 / 12%);
+
+  /* Tier 4 - modal / drawer / floating window. The ambient layer matters most
+     here: a floating window can sit over anything, including a surface within
+     a few steps of its own colour, and then the drop shadow below it is the
+     only edge it has. */
+  --tnzi-surface-overlay-border: none;
+  --tnzi-surface-overlay-shadow: 0 0 4px 0 rgb(0 0 0 / 10%), 0 12px 40px -4px rgb(0 0 0 / 20%);
+
+  /* Selection ring - the "this one is picked" idiom, shared by every
+     selectable tile so a picked card looks picked the same way everywhere.
+     A ring rather than a border change: a ring costs no layout, so selecting
+     a tile never reflows the grid around it. */
+  --tnzi-surface-ring-selected: 0 0 0 2px rgb(var(--tnzi-primary-rgb) / 45%);
+  /* Inset variant - for a drop target or a selected region whose outer edge
+     is already occupied (a grid that fills its container). */
+  --tnzi-surface-ring-inset: inset 0 0 0 2px var(--tnzi-primary);
+
+  /* Breathing room a container must leave around card-tier children.
+     A card's chrome lives OUTSIDE its border box - the hairline ring, the
+     selection ring, the drop shadow - so a container that packs cards flush
+     against its own edge crops all three, and in a scroll container the crop
+     lands right where the scrollbar is. Small on purpose: this is clearance,
+     not padding, and the container's own padding still does the spacing. */
+  --tnzi-surface-card-gutter: 4px;
+
+  /* ── Card material, and the step that keeps it off its backdrop ──────
+   *
+   * What separates a card from what is behind it is whichever of its two
+   * signals is visible: the border if it has one, otherwise its own material.
+   * When THAT signal is the same colour as the thing behind it, the card has
+   * no edge at all - which is exactly what a white tile inside a white list
+   * card looks like, and no amount of shadow tuning fixes it.
+   *
+   * So the card steps its own material instead. The step is a mix toward the
+   * text colour, which makes it darker in light mode and lighter in dark mode
+   * without anyone having to decide twice, and it follows a consumer's own
+   * card colour because it is computed FROM that colour rather than replacing
+   * it. `--tnzi-surface-card-step: 0%` turns the whole mechanism off, and that
+   * is precisely what the `outlined` style does: there the visible signal is
+   * the border, its colour is not the backdrop's, so nothing needs stepping.
+   *
+   * A container that IS a card hands `--tnzi-surface-card-bg-nested` down to
+   * its subtree (see the card-group renderers), so the decision is made once
+   * where the nesting is actually known rather than measured per element. */
+  --tnzi-surface-card-bg: var(--tnzi-container-bg);
+  /* 0 under the default `outlined` style: the visible separating signal there
+     is the border, whose colour is not the backdrop's, so a nested card has
+     nothing to avoid. The styles that drop the border raise it - 1.5% under
+     `elevated` (a 3-level drop off white, measured), more under `flat` where
+     material is the only channel left. Deliberately at the bottom of the
+     useful range: anything bigger reads as a grey tile rather than a card. */
+  --tnzi-surface-card-step: 0%;
+  /* `color-mix` has no fallback here on purpose. The usual two-declaration
+     trick does not survive the CSS minifier (it drops the shadowed one), and
+     an `@supports` block would be guarding a feature this package already
+     outranks - the stylesheet relies on `:has()`, which landed later in
+     Firefox than `color-mix` did. A consumer targeting something older sets
+     `--tnzi-surface-card-bg-nested` to a literal colour. */
+  --tnzi-surface-card-bg-nested: color-mix(
+    in oklab,
+    var(--tnzi-container-bg),
+    var(--tnzi-base-text) var(--tnzi-surface-card-step)
+  );
 }
 
 .dark {
@@ -100,8 +265,29 @@
   --tnzi-bg-deep: rgb(10, 10, 10);
   --tnzi-bg-deep-rgb: 10 10 10;
   --tnzi-shadow-header: 0 1px 4px 0 rgb(0 0 0 / 40%);
-  --tnzi-shadow-sider: 2px 0 8px 0 rgb(0 0 0 / 40%);
+  --tnzi-shadow-sider: 2px 0 8px -2px rgb(0 0 0 / 45%);
   --tnzi-shadow-tab: 0 1px 2px 0 rgb(0 0 0 / 40%);
+  --tnzi-shadow-footer: 0 -1px 2px 0 rgb(0 0 0 / 35%);
   --tnzi-shadow-card: 0 1px 2px 0 rgb(0 0 0 / 30%), 0 1px 6px -1px rgb(0 0 0 / 25%);
   --tnzi-shadow-drawer: 0 8px 24px rgb(0 0 0 / 50%);
+
+  /* Surface tiers - dark. Only the shadows change: on a dark canvas a 5%
+     black shadow is invisible, so the alphas climb. The border halves are
+     defined once above and follow `--tnzi-border`, which already flips.
+
+     These live ONLY in this stylesheet - unlike `--tnzi-shadow-*` above, they
+     are deliberately absent from `buildCssVars()`. `injectCssVars` writes its
+     map as INLINE style on `<html>`, which outranks every stylesheet rule
+     including this block, so a token that exists in both places is really
+     driven by the TypeScript copy and the CSS copy is dead weight that can
+     drift unnoticed. One writer is enough here because the `dark` class and
+     the injected vars are written by the same watcher (see
+     `headless/theme/useTheme.ts`), so this block is never out of step with
+     the mode. Anything a consumer overrides at `:root` still wins - an inline
+     override on the same element beats a stylesheet, and a consumer stylesheet
+     loaded after this one beats it on source order. */
+  --tnzi-surface-card-shadow-raised: 0 0 3px 0 rgb(0 0 0 / 45%), 0 1px 3px 0 rgb(0 0 0 / 45%);
+  --tnzi-surface-card-shadow-raised-hover: 0 0 4px 0 rgb(0 0 0 / 55%), 0 4px 12px -2px rgb(0 0 0 / 55%);
+  --tnzi-surface-popover-shadow: 0 0 3px 0 rgb(0 0 0 / 45%), 0 6px 20px -2px rgb(0 0 0 / 50%);
+  --tnzi-surface-overlay-shadow: 0 0 4px 0 rgb(0 0 0 / 50%), 0 12px 40px -4px rgb(0 0 0 / 60%);
 }

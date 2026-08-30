@@ -31,13 +31,9 @@ public class FinanceTestDbContext : TnziDbContext<FinanceTestDbContext>
         modelBuilder.ApplyConfiguration(new TaxCodeComponentConfiguration());
         modelBuilder.ApplyConfiguration(new DocumentAttachmentConfiguration());
         modelBuilder.ApplyConfiguration(new DocumentCommentConfiguration());
-        modelBuilder.ApplyConfiguration(new EstimateConfiguration());
-        modelBuilder.ApplyConfiguration(new EstimateLineConfiguration());
         modelBuilder.ApplyConfiguration(new RecurringDocumentConfiguration());
         modelBuilder.ApplyConfiguration(new RecurringLineConfiguration());
         modelBuilder.ApplyConfiguration(new RecurringRunConfiguration());
-        modelBuilder.ApplyConfiguration(new PurchaseOrderConfiguration());
-        modelBuilder.ApplyConfiguration(new PurchaseOrderLineConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceLineConfiguration());
         modelBuilder.ApplyConfiguration(new BillConfiguration());
@@ -49,6 +45,8 @@ public class FinanceTestDbContext : TnziDbContext<FinanceTestDbContext>
         modelBuilder.ApplyConfiguration(new PaymentEntryConfiguration());
         modelBuilder.ApplyConfiguration(new PaymentApplicationConfiguration());
         modelBuilder.ApplyConfiguration(new TransferConfiguration());
+        modelBuilder.ApplyConfiguration(new DepositConfiguration());
+        modelBuilder.ApplyConfiguration(new DepositLineConfiguration());
         modelBuilder.ApplyConfiguration(new LedgerLockConfiguration());
         modelBuilder.ApplyConfiguration(new ReconciliationConfiguration());
         modelBuilder.ApplyConfiguration(new ReconciliationLineConfiguration());

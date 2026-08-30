@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Tnzi.Domain.Repositories;
 using Tnzi.Mapster;
 using Tnzi.Payment.Dtos;
-using Tnzi.Payment.Entities;
 using Tnzi.Payment.Metadata;
 using Tnzi.Payment.Options;
 using Tnzi.Payment.Providers;
@@ -56,7 +55,6 @@ public class PaymentServiceTests
 
         _service = new PaymentService(
             _paymentRepositoryMock.Object,
-            new Mock<IRepository<CouponUsage, Guid>>().Object,
             _providerFactoryMock.Object,
             new DefaultPaymentTaxCalculator(taxOptionsMock.Object),
             new Mock<IPaymentMethodService>().Object,

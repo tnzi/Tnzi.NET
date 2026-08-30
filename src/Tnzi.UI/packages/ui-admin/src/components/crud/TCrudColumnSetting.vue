@@ -194,8 +194,9 @@ function onReset(): void {
 .t-crud-column-setting {
   min-width: 260px;
   background: var(--tnzi-container-bg, #fff);
+  border: var(--tnzi-surface-popover-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  box-shadow: var(--tnzi-surface-popover-shadow);
   padding: 6px;
 }
 .t-crud-column-setting__header {

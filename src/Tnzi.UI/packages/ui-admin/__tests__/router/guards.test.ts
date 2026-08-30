@@ -37,67 +37,59 @@ describe('createAuthGuard', () => {
 
   it('redirects to an explicit loginPath when not logged in and requiresAuth !== false', async () => {
     const guard = createAuthGuard({ loginPath: '/login' }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith('/login')
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
+    expect(result).toBe('/login')
   })
 
   it('redirects by route NAME when no loginPath is configured (prefix-agnostic default)', async () => {
     const guard = createAuthGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith({ name: 'login' })
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
+    expect(result).toEqual({ name: 'login' })
   })
 
   it('allows navigation when logged in', async () => {
     loginAs()
     const guard = createAuthGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('allows navigation when requiresAuth is false even without login', async () => {
     const guard = createAuthGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/login', { requiresAuth: false }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/login', { requiresAuth: false }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('calls resolveSession when signed out and allows navigation if it resolves true', async () => {
     const resolveSession = vi.fn(async () => true)
     const guard = createAuthGuard({ resolveSession }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
     expect(resolveSession).toHaveBeenCalledTimes(1)
-    expect(next).toHaveBeenCalledWith()
+    expect(result).toBe(true)
   })
 
   it('redirects to login when resolveSession resolves false (restore failed / no session)', async () => {
     const resolveSession = vi.fn(async () => false)
     const guard = createAuthGuard({ resolveSession }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
     expect(resolveSession).toHaveBeenCalledTimes(1)
-    expect(next).toHaveBeenCalledWith({ name: 'login' })
+    expect(result).toEqual({ name: 'login' })
   })
 
   it('always consults resolveSession when provided (token-authoritative, not short-circuited by persisted isLogin)', async () => {
     loginAs() // admin store shows isLogin, but the resolver is authoritative
     const resolveSession = vi.fn(async () => true)
     const guard = createAuthGuard({ resolveSession }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
     expect(resolveSession).toHaveBeenCalledTimes(1) // NOT skipped despite store isLogin
-    expect(next).toHaveBeenCalledWith()
+    expect(result).toBe(true)
   })
 
   it('without a resolver falls back to the plain store isLogin check (legacy)', async () => {
     loginAs()
     const guard = createAuthGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/users', { requiresAuth: true }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 })
 
@@ -108,45 +100,38 @@ describe('createPermissionGuard', () => {
 
   it('passes when route meta.permission is empty', async () => {
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/users'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/users'), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('redirects to an explicit forbiddenPath when permission missing', async () => {
     loginAs([])
     const guard = createPermissionGuard({ forbiddenPath: '/403' }) as any
-    const next = vi.fn()
-    await guard(
+    const result = await guard(
       fakeRoute('/admin/users', { permission: 'user.view' }),
       fakeRoute('/'),
-      next,
     )
-    expect(next).toHaveBeenCalledWith('/403')
+    expect(result).toBe('/403')
   })
 
   it('redirects by route NAME when no forbiddenPath is configured', async () => {
     loginAs([])
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(
+    const result = await guard(
       fakeRoute('/admin/users', { permission: 'user.view' }),
       fakeRoute('/'),
-      next,
     )
-    expect(next).toHaveBeenCalledWith({ name: 'forbidden' })
+    expect(result).toEqual({ name: 'forbidden' })
   })
 
   it('passes when user has required permission', async () => {
     loginAs(['user.view'])
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(
+    const result = await guard(
       fakeRoute('/admin/users', { permission: 'user.view' }),
       fakeRoute('/'),
-      next,
     )
-    expect(next).toHaveBeenCalledWith()
+    expect(result).toBe(true)
   })
 
   it('adds tab to tabStore on successful navigation', async () => {
@@ -168,9 +153,8 @@ describe('createPermissionGuard', () => {
     auth.setToken('t')
     auth.setUserInfo({ id: '1', username: 'u', roles: ['Lawyer'], permissions: [] })
     const guard = createPermissionGuard({ forbiddenPath: '/403' }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/staff', { roles: ['Owner', 'Management'] }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith('/403')
+    const result = await guard(fakeRoute('/admin/staff', { roles: ['Owner', 'Management'] }), fakeRoute('/'))
+    expect(result).toBe('/403')
   })
 
   it('passes a role-gated route when the user holds one of the roles', async () => {
@@ -178,9 +162,8 @@ describe('createPermissionGuard', () => {
     auth.setToken('t')
     auth.setUserInfo({ id: '1', username: 'u', roles: ['Management'], permissions: [] })
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/staff', { roles: ['Owner', 'Management'] }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/staff', { roles: ['Owner', 'Management'] }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('role gate is case-insensitive (backend role casing may differ from meta.roles)', async () => {
@@ -188,9 +171,8 @@ describe('createPermissionGuard', () => {
     auth.setToken('t')
     auth.setUserInfo({ id: '1', username: 'u', roles: ['owner'], permissions: [] }) // lowercase from backend
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'), next) // PascalCase meta
-    expect(next).toHaveBeenCalledWith() // passes - mirrors the case-insensitive sidebar filter, no phantom 403
+    const result = await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/')) // PascalCase meta
+    expect(result).toBe(true) // passes - mirrors the case-insensitive sidebar filter, no phantom 403
   })
 
   it('super-user bypasses the role gate', async () => {
@@ -199,18 +181,16 @@ describe('createPermissionGuard', () => {
     auth.setUserInfo({ id: '1', username: 'u', roles: [], permissions: [] })
     auth.setSuperUser(true)
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('fails open on a role-gated route while permissions are still loading (userInfo null)', async () => {
     const auth = useAdminAuthStore()
     auth.setToken('t') // token set, userInfo not yet loaded → fail-open
     const guard = createPermissionGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/admin/staff', { roles: ['Owner'] }), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 })
 
@@ -236,41 +216,36 @@ describe('createModuleGuard', () => {
   it('passes when the module signal is unavailable (fail-open)', async () => {
     seed(null)
     const guard = createModuleGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('bounces navigation into an unloaded module to the forbidden route', async () => {
     seed(new Set(['identity'])) // finance not loaded
     const guard = createModuleGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith({ name: 'forbidden' })
+    const result = await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'))
+    expect(result).toEqual({ name: 'forbidden' })
   })
 
   it('bounces a descendant of an unloaded module too', async () => {
     seed(new Set(['identity']))
     const guard = createModuleGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance/accounts', {}, 'finance.accounts'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith({ name: 'forbidden' })
+    const result = await guard(fakeRoute('/finance/accounts', {}, 'finance.accounts'), fakeRoute('/'))
+    expect(result).toEqual({ name: 'forbidden' })
   })
 
   it('redirects to an explicit forbiddenPath when configured', async () => {
     seed(new Set(['identity']))
     const guard = createModuleGuard({ forbiddenPath: '/403' }) as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith('/403')
+    const result = await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'))
+    expect(result).toBe('/403')
   })
 
   it('passes navigation into a loaded module', async () => {
     seed(new Set(['identity', 'finance']))
     const guard = createModuleGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith()
+    const result = await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'))
+    expect(result).toBe(true)
   })
 
   it('holds for super users (module gate is orthogonal to permissions)', async () => {
@@ -278,8 +253,7 @@ describe('createModuleGuard', () => {
     auth.isSuperUser = true
     seed(new Set(['identity']))
     const guard = createModuleGuard() as any
-    const next = vi.fn()
-    await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'), next)
-    expect(next).toHaveBeenCalledWith({ name: 'forbidden' })
+    const result = await guard(fakeRoute('/finance', {}, 'finance'), fakeRoute('/'))
+    expect(result).toEqual({ name: 'forbidden' })
   })
 })

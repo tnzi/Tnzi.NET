@@ -8,6 +8,7 @@ import {
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import { useAdminTabStore } from '../../stores/useAdminTabStore'
+import { navBadgeExtra } from './nav-badge'
 
 interface Props {
   /**
@@ -51,6 +52,10 @@ function toOption(item: AdminMenuItem): MenuOption {
   if (item.icon) {
     option.icon = () => h(TSvgIcon, { icon: item.icon as string, size: 16 })
   }
+  // Trailing count chip. The horizontal menu never collapses, so the row's
+  // `extra` region is always visible - no icon-corner variant needed here.
+  const extra = navBadgeExtra(item.badge)
+  if (extra) option.extra = extra
   if (props.mode === 'full' && item.children && item.children.length > 0) {
     option.children = item.children.map(toOption)
   }

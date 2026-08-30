@@ -51,6 +51,32 @@ public class AspNetCoreOptions
     public bool EnableSPANotFoundHandler { get; set; } = false;
 
     /// <summary>
+    /// 获取或设置 是否把框架欢迎页映射到根路径 <c>/</c>。默认 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 自带前端的宿主要把这项设为 <c>false</c>，否则 <c>GET /</c> 拿到的是框架欢迎页而不是
+    /// <c>wwwroot/index.html</c>。
+    /// </para>
+    /// <para>
+    /// <strong>为什么只有根路径受影响。</strong>欢迎页是一个<em>已匹配的端点</em>，
+    /// 而 <c>UseDefaultFiles()</c> / <c>UseStaticFiles()</c> 在
+    /// <c>HttpContext.GetEndpoint()</c> 非空时会主动让路（避免与端点抢同一个请求）。
+    /// 于是静态文件管线恰好在 <c>/</c> 上、也只在 <c>/</c> 上被跳过：
+    /// <c>/index.html</c> 与各级深链都匹配不到端点，照常由静态文件或
+    /// <see cref="EnableSPANotFoundHandler"/> 处理。这正是「整站都好，唯独首页是框架页」的成因，
+    /// 而它读起来像「站点起来了」不像故障。
+    /// </para>
+    /// <para>
+    /// <strong>刻意做成显式开关而不是自动让路。</strong>「web root 里有 index.html 就自动不映射」
+    /// 看似更省事，但框架在映射路由那一刻无从判断：默认文件名可被改写、文件提供程序可以是
+    /// 内存或复合实现、而宿主注册静态文件的时机在本模块之后。按猜测翻转行为，
+    /// 会让一个只是碰巧放了 index.html 的部署静默换掉首页。
+    /// </para>
+    /// </remarks>
+    public bool EnableWelcomePage { get; set; } = true;
+
+    /// <summary>
     /// 获取或设置 应用的基础路径（用于部署在子路径下，如 IIS 虚拟目录或反向代理未剥离路径的场景）
     /// 设置后将在所有中间件之前调用 UsePathBase()，把 Path 中匹配的前缀移到 PathBase，使路由能正确匹配。
     /// 示例："/myapp"（部署在 /myapp 虚拟目录下）
@@ -265,6 +291,31 @@ public class ControllerFilterOptions
     /// 例如: ["Tnzi.Hosting"] 禁用 Hosting 模块所有 Controller
     /// </summary>
     public string[]? DisabledAssemblies { get; set; }
+
+    /// <summary>
+    /// 要禁用的<strong>单个端点</strong>，按 <see cref="SensitiveEndpointAttribute.Name"/> 匹配
+    /// （支持 * 通配符，大小写不敏感）。例如: ["storage.presigned-url"] ["storage.*"]
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="DisabledControllers"/> 的区别是<strong>粒度</strong>：那个是整类开关，
+    /// 想摘掉存储模块的预签名 URL 就得连上传下载一起关掉，再自己重写一个控制器。
+    /// 这个只摘掉标了名字的那一个 action，控制器的其余端点照常工作。
+    /// </para>
+    /// <para>
+    /// ★ <strong>只能摘除标了 <see cref="SensitiveEndpointAttribute"/> 的端点。</strong>
+    /// 这是刻意的：一个能按任意方法名关端点的配置项，会变成绕开代码审查改 API 表面的工具，
+    /// 而且没有任何东西能保证被关掉的端点不是别人正在依赖的。
+    /// </para>
+    /// <para>
+    /// ★ <strong>配了却没匹配到任何端点时会记一条 Warning。</strong>
+    /// 名字写错（<c>storage.presignedurl</c>）与"已经关掉了"在运行时长得一模一样，
+    /// 而这正是本机制要消除的那类静默失效。
+    /// 时机是 MVC 构建应用模型时（首个请求或 Swagger/ApiExplorer 初始化，取决于部署），
+    /// 不是进程启动那一刻 —— 应用模型本身就是按需构建的。
+    /// </para>
+    /// </remarks>
+    public string[]? DisabledEndpoints { get; set; }
 
     /// <summary>
     /// 自定义过滤谓词（返回 true = 保留, false = 移除）

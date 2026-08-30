@@ -91,6 +91,13 @@ public class AuthServiceTests
         _serviceProviderMock.Setup(x => x.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
+        // ★ 守卫链装的是**真实**的求值器 + 框架内置的 LockedAccountLoginGuard，不是 mock。
+        // 账号锁定/停用的判定就住在这条链上，用 mock 顶替等于把被测对象换掉：
+        // 那样测试只能证明「AuthService 会问求值器」，证明不了「被停用的账号进不来」。
+        var loginGuardEvaluator = new LoginGuardEvaluator(
+            [new LockedAccountLoginGuard(_userManagerMock.Object)],
+            new Mock<ILogger<LoginGuardEvaluator>>().Object);
+
         _authService = new AuthService(
             _userManagerMock.Object,
             _signInManagerMock.Object,
@@ -103,7 +110,8 @@ public class AuthServiceTests
             _passwordPolicyServiceMock.Object,
             _sessionServiceMock.Object,
             _loginSecurityServiceMock.Object,
-            _twoFactorServiceMock.Object
+            _twoFactorServiceMock.Object,
+            loginGuardEvaluator: loginGuardEvaluator
         );
     }
 
@@ -118,6 +126,7 @@ public class AuthServiceTests
             Registration = { EnableQuickRegisterEmail = true, EnableQuickRegisterSms = false },
             Recovery = { EnablePasswordResetByEmail = true, EnablePasswordResetBySms = false },
             Captcha = { EnableCaptchaOnLogin = true, EnableCaptchaOnRegister = false },
+            Passkey = { Enabled = true },
             OAuth =
             {
                 GitHub = { ClientId = "gh-id", ClientSecret = "gh-secret" },
@@ -148,6 +157,7 @@ public class AuthServiceTests
         Assert.False(dto.RecoveryViaSms);
         Assert.True(dto.EnableCaptchaOnLogin);
         Assert.False(dto.EnableCaptchaOnRegister);
+        Assert.True(dto.EnablePasskey);
 
         // Only providers with BOTH ClientId + ClientSecret are listed - no secrets leak.
         Assert.Equal(2, dto.OAuthProviders.Count);
@@ -170,6 +180,10 @@ public class AuthServiceTests
         var dto = _authService.GetAuthConfig().Data!;
         Assert.False(dto.EnableCodeLogin);
         Assert.False(dto.EnableRegistration);
+        // Passkey defaults to off. The client gates its enrolment UI on this flag,
+        // so reporting it as available on a deployment that has it disabled would
+        // offer a flow that can only 400.
+        Assert.False(dto.EnablePasskey);
         Assert.False(dto.EnablePasswordRecovery);
         Assert.Empty(dto.OAuthProviders);
     }
@@ -651,7 +665,7 @@ public class AuthServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
-        _twoFactorServiceMock.Setup(x => x.SendEmailCodeAsync(userId, user.Email!))
+        _twoFactorServiceMock.Setup(x => x.SendEmailCodeAsync(userId, user.Email!, VerificationCodePurpose.TwoFactor))
             .ReturnsAsync(Result.Success());
 
         // Act
@@ -690,7 +704,7 @@ public class AuthServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
-        _twoFactorServiceMock.Setup(x => x.VerifyCodeAsync(userId, code, TwoFactorType.Email))
+        _twoFactorServiceMock.Setup(x => x.VerifyCodeAsync(userId, code, TwoFactorType.Email, VerificationCodePurpose.TwoFactor))
             .ReturnsAsync(Result.Success());
 
         _userManagerMock.Setup(x => x.GetRolesAsync(user))
@@ -737,7 +751,7 @@ public class AuthServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
-        _twoFactorServiceMock.Setup(x => x.VerifyCodeAsync(userId, code, TwoFactorType.Email))
+        _twoFactorServiceMock.Setup(x => x.VerifyCodeAsync(userId, code, TwoFactorType.Email, VerificationCodePurpose.TwoFactor))
             .ReturnsAsync(Result.Failure("Invalid code"));
 
         // Act
@@ -750,5 +764,412 @@ public class AuthServiceTests
 
         // Assert
         Assert.False(result.Succeeded);
+    }
+
+    // ------------------------------------------------- 账号锁定 / 停用：逐条签发路径
+
+    /// <summary>
+    /// A disabled account must not be able to sign in through a login method whose credential
+    /// check happens outside SignInManager (passkey today, anything added later).
+    /// </summary>
+    /// <remarks>
+    /// "Disable this account" is <c>SetLockoutEndDateAsync(+100 years)</c> in this framework.
+    /// Password login never reaches here while locked out because
+    /// <c>CheckPasswordSignInAsync</c> rejects first - which is exactly why the check had to be
+    /// pulled out into <c>LockedAccountLoginGuard</c>: it was riding on "verify the password",
+    /// so every credential-elsewhere method silently skipped it.
+    /// </remarks>
+    [Fact]
+    public async Task IssueTokenAsync_WhenAccountIsLockedOut_RejectsAndIssuesNothing()
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "disabled-user" };
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Passkey);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+
+        // Rejected before anything happens: no token minted, no login-success trace.
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+        _eventBusMock.Verify(
+            x => x.PublishAsync(It.IsAny<UserLoggedInEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// The lockout guard must not swallow the normal path - without this the previous test
+    /// would still pass on an implementation that rejects everyone.
+    /// </summary>
+    [Fact]
+    public async Task IssueTokenAsync_WhenAccountIsUsable_IssuesThroughTheSharedExit()
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "passkey-user" };
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string> { "User" });
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
+        });
+        _tokenServiceMock
+            .Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()))
+            .Returns("issued");
+        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("refresh");
+        _authTokenServiceMock
+            .Setup(x => x.SaveTokenAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<Guid>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Passkey);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("issued", result.Data!.AccessToken);
+    }
+
+    /// <summary>
+    /// 验证码登录同样挡得住被停用的账号。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这条路径的凭据是一次性验证码，全程不碰 <c>SignInManager</c> ——
+    /// 在守卫收口之前它和 passkey 一样是敞开的，只是没人注意到。
+    /// 单测守卫本身证明不了这个：守卫对不对，与它有没有挂在这条路径上，是两回事。
+    /// </remarks>
+    [Fact]
+    public async Task CodeLoginAsync_WhenAccountIsLockedOut_RejectsAndIssuesNothing()
+    {
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = "code-login-user",
+            Email = "code@example.com",
+            EmailConfirmed = true,
+            PasswordHash = "hash"
+        };
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.FindByEmailAsync(user.Email)).ReturnsAsync(user);
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(user.Email, It.IsAny<string>(), TwoFactorType.Email, VerificationCodePurpose.CodeLogin))
+            .ReturnsAsync(Result<Guid?>.Success(user.Id));
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto
+        {
+            Email = user.Email,
+            Code = "123456",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// ★★★ 验证码登录不再是 2FA 的绕过路径：账号开着 TOTP 时，一封邮件只完成第一步。
+    /// </summary>
+    /// <remarks>
+    /// 修复前这条路径手工复制了 <c>IssueTokenAsync</c> 的后半段、唯独漏掉 2FA 判定，
+    /// 于是强度阶梯是反的 —— passkey 这种强凭据要过 2FA，邮箱验证码反而不用。
+    /// </remarks>
+    [Fact]
+    public async Task CodeLoginAsync_WhenAnotherFactorIsEnabled_ChallengesInsteadOfIssuing()
+    {
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = "code-2fa-user",
+            Email = "code2fa@example.com",
+            EmailConfirmed = true,
+            PasswordHash = "hash"
+        };
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(false);
+        _userManagerMock.Setup(x => x.FindByEmailAsync(user.Email)).ReturnsAsync(user);
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(user.Email, It.IsAny<string>(), TwoFactorType.Email, VerificationCodePurpose.CodeLogin))
+            .ReturnsAsync(Result<Guid?>.Success(user.Id));
+
+        // 账号启用的是 TOTP —— 与本次用掉的邮箱渠道不是同一个因子，必须照常挑战。
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(user))
+            .ReturnsAsync(new List<TwoFactorType> { TwoFactorType.Totp });
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto
+        {
+            Email = user.Email,
+            Code = "123456",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_2FA_REQUIRED, result.ErrorCode);
+
+        // 临时令牌必须原样带出，否则前端拿不到 tempToken，挑战无从继续。
+        Assert.NotNull(result.ErrorDetails);
+
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 另一半：本次用掉的渠道正是账号唯一启用的 2FA 方式时，不再问第二遍 —— 那是同一个因子。
+    /// </summary>
+    /// <remarks>
+    /// ★ 少了这条，上一条会在一个「验证码登录一律挑战」的实现上照样通过，
+    /// 而那个实现会让邮箱 2FA 的用户连着输两次邮箱验证码。
+    /// </remarks>
+    [Fact]
+    public async Task CodeLoginAsync_WhenOnlyTheUsedFactorIsEnabled_IssuesWithoutSecondChallenge()
+    {
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = "code-email2fa-user",
+            Email = "email2fa@example.com",
+            EmailConfirmed = true,
+            PasswordHash = "hash"
+        };
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(false);
+        _userManagerMock.Setup(x => x.FindByEmailAsync(user.Email)).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string> { "User" });
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(user.Email, It.IsAny<string>(), TwoFactorType.Email, VerificationCodePurpose.CodeLogin))
+            .ReturnsAsync(Result<Guid?>.Success(user.Id));
+
+        // 唯一启用的 2FA 方式就是邮箱，而本次登录已经证明了「能收这个邮箱」。
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(user))
+            .ReturnsAsync(new List<TwoFactorType> { TwoFactorType.Email });
+
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
+        });
+        _tokenServiceMock
+            .Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()))
+            .Returns("issued");
+        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("refresh");
+        _authTokenServiceMock
+            .Setup(x => x.SaveTokenAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<Guid>()))
+            .ReturnsAsync(Guid.NewGuid());
+        _sessionServiceMock.Setup(x => x.CreateSessionAsync(user.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto
+        {
+            Email = user.Email,
+            Code = "123456",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("issued", result.Data!.AccessToken);
+
+        // 没有发出任何挑战：临时令牌一次都没存过。
+        _scopedAuthTokenServiceMock.Verify(
+            x => x.SaveTokenAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 开着登录图形验证码的部署，免密验证码登录的发码入口同样要过图形验证码。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这是唯一一条每次调用都真的产生短信/邮件费用的匿名入口。此前它完全不受
+    /// <c>EnableCaptchaOnLogin</c> 管辖，等于开着验证码的部署仍留着一个无门的发信口。
+    /// </remarks>
+    [Fact]
+    public async Task SendCodeLoginCodeAsync_WhenLoginCaptchaEnabledAndMissing_RejectsBeforeSending()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
+            Otp = new OtpOptions { EnableEmail = true }
+        });
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto
+        {
+            Email = "nocaptcha@example.com",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 对照组：图形验证码过了就照常发码，且用途必须是 <c>CodeLogin</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 用途写死在这条断言里 —— 发成别的用途，这枚码在 <c>code-login</c> 上验不过，
+    /// 而那种失效不会让任何编译或既有测试变红。
+    /// </remarks>
+    [Fact]
+    public async Task SendCodeLoginCodeAsync_WhenCaptchaValid_SendsWithCodeLoginPurpose()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
+            Otp = new OtpOptions { EnableEmail = true }
+        });
+        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "login")).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.FindByEmailAsync("captcha@example.com")).ReturnsAsync((User?)null);
+        _twoFactorServiceMock
+            .Setup(x => x.SendCodeByAddressAsync("captcha@example.com", TwoFactorType.Email, VerificationCodePurpose.CodeLogin, null))
+            .ReturnsAsync(Result.Success());
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto
+        {
+            Email = "captcha@example.com",
+            Type = TwoFactorType.Email,
+            CaptchaId = "cid",
+            CaptchaCode = "good"
+        });
+
+        Assert.True(result.Succeeded);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync("captcha@example.com", TwoFactorType.Email, VerificationCodePurpose.CodeLogin, null),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// ★ 关掉 `AllowCodeLogin` 的部署，发码入口自己就要拒绝，而不是靠前端不显示按钮。
+    /// </summary>
+    /// <remarks>
+    /// 这个开关存在的理由是解耦：在它之前，想关掉免密验证码登录只能关 OTP 渠道总闸，
+    /// 而那会连带关掉邮箱/短信 2FA 与验证码找回密码 —— 想少一种登录方式，
+    /// 不该被迫连 2FA 一起放弃。
+    /// </remarks>
+    [Fact]
+    public async Task SendCodeLoginCodeAsync_WhenCodeLoginDisabled_RefusesBeforeSending()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = false },
+            Otp = new OtpOptions { EnableEmail = true }
+        });
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto
+        {
+            Email = "disabled@example.com",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 登录入口也要挡：关掉开关之后，手里还攥着一枚未用码的人依然能直接调 code-login。
+    /// </summary>
+    /// <remarks>
+    /// ★ 只挡发码等于给那些已经发出去、尚未过期的码留了一扇后门。
+    /// </remarks>
+    [Fact]
+    public async Task CodeLoginAsync_WhenCodeLoginDisabled_RefusesEvenWithAValidCode()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = false }
+        });
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto
+        {
+            Email = "disabled@example.com",
+            Code = "123456",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        // 码根本没被核销 - 拒绝发生在验码之前。
+        _twoFactorServiceMock.Verify(
+            x => x.VerifyCodeByAddressAndMarkUsedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()),
+            Times.Never);
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// `/auth/config` 的 `enableCodeLogin` 是「登录方式开着 **且** 至少一条渠道能送达」。
+    /// </summary>
+    /// <remarks>
+    /// ★ 对照组不可省：只断言「关掉时为 false」的话，一个恒返回 false 的实现也能通过，
+    /// 而那会让每个部署的登录页都少一个入口。
+    /// </remarks>
+    [Fact]
+    public void GetAuthConfig_CodeLoginNeedsBothTheMethodAndAChannel()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = false },
+            Otp = new OtpOptions { EnableEmail = true, EnableSms = true }
+        });
+        var off = _authService.GetAuthConfig();
+        Assert.False(off.Data!.EnableCodeLogin);
+        Assert.False(off.Data.CodeLoginViaEmail);
+        Assert.False(off.Data.CodeLoginViaSms);
+
+        // 对照组：方式开着 + 渠道开着 → 可用（且渠道各自独立反映）。
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = true },
+            Otp = new OtpOptions { EnableEmail = true, EnableSms = false }
+        });
+        var on = _authService.GetAuthConfig();
+        Assert.True(on.Data!.EnableCodeLogin);
+        Assert.True(on.Data.CodeLoginViaEmail);
+        Assert.False(on.Data.CodeLoginViaSms);
+    }
+
+    /// <summary>
+    /// 2FA 第二步同样挡得住 —— 第一步之后账号才被停用的竞态。
+    /// </summary>
+    [Fact]
+    public async Task VerifyTwoFactorAndLoginAsync_WhenAccountIsLockedOut_RejectsAndIssuesNothing()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "2fa-user" };
+        const string tempToken = "temp_token";
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _authTokenServiceMock
+            .Setup(x => x.FindTokenByValueAsync(It.IsAny<string>(), It.IsAny<string>(), tempToken))
+            .ReturnsAsync(new AuthToken { UserId = userId, Value = tempToken, ExpiresAt = DateTime.UtcNow.AddMinutes(5) });
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeAsync(userId, It.IsAny<string>(), TwoFactorType.Email, VerificationCodePurpose.TwoFactor))
+            .ReturnsAsync(Result.Success());
+
+        var result = await _authService.VerifyTwoFactorAndLoginAsync(new VerifyTwoFactorDto
+        {
+            TempToken = tempToken,
+            Code = "123456",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
     }
 }

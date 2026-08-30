@@ -56,6 +56,35 @@ public class DocumentSequenceTests : FinanceIntegrationTestBase
     }
 
     [Fact]
+    public async Task NextAsync_ExistingSequence_RolledBackTransaction_RecyclesNumber()
+    {
+        // ★ 这条守的是 AllocateAsync 里的 EnsureTransactionStartedAsync，而上面那条
+        //   全新作用域的回滚用例守不住它：首次分配走「插入 + flush」路径，flush 顺手
+        //   BEGIN 了事务，于是去掉那行前置，首次分配的回滚照样全绿。
+        //   序列行已存在时（第二张及以后的每一张单据）没有任何 flush 先发生，
+        //   原子递增（ExecuteUpdate 裸 SQL）就落在自动提交模式下：
+        //   请求回滚了，号码却永久烧掉 —— 无缺口保证只剩下第一张单据是真的。
+        // 直接种下序列行（等价于「第一张单据已在别的请求里开出并提交」），
+        // 让事务内那一次 NextAsync 成为本用例唯一的服务调用。
+        DbContext.Set<DocumentSequence>().Add(new DocumentSequence { Scope = "steady-scope", NextValue = 2 });
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var uowManager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
+            var sequence = scope.ServiceProvider.GetRequiredService<IDocumentNumberService>();
+
+            uowManager.EnableTransaction();
+            (await sequence.NextAsync("steady-scope")).ShouldBe(2);
+            await uowManager.RollbackTransactionAsync();
+        }
+
+        var next = await InScopeAsync<IDocumentNumberService, long>(s => s.NextAsync("steady-scope"));
+        next.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task NextAsync_MultipleAllocationsInOneTransaction_AreConsecutive()
     {
         using (var scope = ServiceProvider.CreateScope())

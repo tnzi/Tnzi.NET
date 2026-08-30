@@ -73,7 +73,10 @@ import {
 // means the split is invisible to `createAdminApp`, `plugin/index` and any
 // consumer that imported it.
 export { normalizeBasePath } from './route-transforms'
-import { loadLocaleMessages } from '../i18n/messages'
+import { warnMisplacedTopLevelRoutes } from './route-diagnostics'
+import { runPeerChecks } from './peer-check'
+import { loadLocaleMessages, type AdminLocale } from '../i18n/messages'
+import { registerAdminLocales, type AdminLocaleDefinition } from '../i18n/locale-registry'
 import {
   createTnziUiAdmin,
   type TnziUiAdminInstance,
@@ -121,14 +124,53 @@ export interface DefineAdminAppOptions {
   runtime?: AdminAuthRuntime
 
   /**
-   * Host-app i18n message overrides, registered into `useAdminAppStore` at the
-   * correct time by `install()` (AFTER the pinia persistedstate plugin is set
-   * up, BEFORE first render). Pass `{ en, 'zh-cn' }` here instead of calling
-   * `useAdminAppStore().extendLocaleMessages(...)` in `main.ts` - that manual
-   * call had a subtle ordering footgun (touching the store before `install()`
-   * silently disabled persistence for the whole admin-app store).
+   * Host-app i18n message overrides, keyed by locale code, registered into
+   * `useAdminAppStore` at the correct time by `install()` (AFTER the pinia
+   * persistedstate plugin is set up, BEFORE first render). Pass them here
+   * instead of calling `useAdminAppStore().extendLocaleMessages(...)` in
+   * `main.ts` - that manual call had a subtle ordering footgun (touching the
+   * store before `install()` silently disabled persistence for the whole
+   * admin-app store).
+   *
+   * ANY locale code is accepted, including one this package ships no
+   * dictionary for:
+   *
+   *   locales: { en: myEn, fr: myFr }
+   *
+   * This slot only supplies STRINGS. Which languages the switcher offers is
+   * `localeOptions` below - the two are separate on purpose, because "extra
+   * strings for a language I already have" and "my app speaks this language"
+   * are different statements.
    */
-  locales?: { en?: Record<string, unknown>; 'zh-cn'?: Record<string, unknown> }
+  locales?: Partial<Record<AdminLocale, Record<string, unknown>>>
+
+  /**
+   * The languages this application offers, in switcher order.
+   *
+   * Omit it and the shell keeps today's behaviour: English and 简体中文, the
+   * two dictionaries this package bundles. Supply it and the array IS the set
+   * - it does not merge with the bundled two, so an app that supports English
+   * and French shows exactly those and no 中文 entry:
+   *
+   *   import { frFR, dateFrFR } from 'naive-ui'
+   *   localeOptions: [
+   *     { code: 'en', label: 'English' },
+   *     { code: 'fr', label: 'Français', messages: myFrDictionary,
+   *       naive: { locale: frFR, dateLocale: dateFrFR } },
+   *   ]
+   *
+   * `label` is the ENDONYM: a language menu is read by someone who cannot yet
+   * read the current interface language. `naive` is needed for any locale this
+   * package does not bundle - the framework cannot speculatively import all
+   * ~50 locales naive-ui ships; without it, naive's own strings (pagination,
+   * date picker, empty states) stay English while the rest of the interface
+   * does not. Registering a single entry hides the switcher entirely.
+   *
+   * A persisted locale that is not in this list is dropped on boot, so
+   * removing a language never strands a user in one they can no longer switch
+   * out of.
+   */
+  localeOptions?: AdminLocaleDefinition[]
 
   /**
    * LEGACY FALLBACK - normally unnecessary. `loadPermissions` resolves the
@@ -190,6 +232,9 @@ export interface DefineAdminAppOptions {
    *   - `login` (`/login/:module(...)?`) → `${basePath}/login/:module(...)?`
    *     (no prefix when `basePath === '/'`)
    *   - `forbidden` (`/403`) → `${basePath}/403`
+   *   - every consumer `rootRoutes` entry, on the same rule (since 0.2.71+;
+   *     they used to keep whatever absolute path the consumer wrote, which
+   *     put them outside the app's own prefix - see `rootRoutes`)
    *
    * Routes under `admin-root.children` use relative paths and are not
    * touched - they inherit the new parent automatically.
@@ -364,6 +409,51 @@ export interface DefineAdminAppOptions {
    * business pages that don't belong to any built-in module.
    */
   addModules?: RouteRecordRaw[]
+
+  /**
+   * Extra TOP-LEVEL routes - siblings of the admin shell root, not children of
+   * it. This is where public standalone pages go: e-signature invitations,
+   * shared documents, form packages - anything a recipient opens from a mailed
+   * link with no account and no admin chrome. Mark each one
+   * `meta: { requiresAuth: false }` or the auth guard bounces the visitor to
+   * login.
+   *
+   * **Write the paths prefix-free.** They go through the same `basePath` pass as
+   * the framework's own top-level routes (`/login`, `/403`, `/share/:token`), so
+   * `/forms/:token` resolves to `${basePath}/forms/:token`. That is what makes
+   * one route table work under both deployment shapes without the consumer
+   * hardcoding the deployment prefix:
+   *
+   *   - `basePath: '/'` + `createWebHistory('/admin/')` → `https://host/admin/forms/…`
+   *   - `basePath: '/admin'` + `createWebHistory()`     → `https://host/admin/forms/…`
+   *
+   * ⚠️ **Changed in 0.2.71+** - these used to be appended AFTER the basePath
+   * pass and kept whatever absolute path the consumer wrote. Under the second
+   * shape above that address was one nothing could ever navigate to (every URL
+   * the app produces lives under `/admin`), so the catch-all took the request
+   * and the recipient landed on the admin shell or the login page. If your app
+   * worked around that by building these paths from the same constant it passes
+   * as `basePath`, drop the prefix - a start-up warning names any record that
+   * still carries it.
+   *
+   * A route genuinely outside the app's prefix has no option here on purpose:
+   * in a sub-path deployment that position isn't served by the SPA at all. Add
+   * one with `createAdminApp(…).router.addRoute(record)` before `mount()` if a
+   * domain-root deployment really needs it.
+   *
+   * @example
+   * ```ts
+   * createAdminApp({
+   *   rootComponent: App as never,
+   *   runtime,
+   *   rootRoutes: [
+   *     { path: '/sign/:token', name: 'sign', component: SignPage,
+   *       meta: { requiresAuth: false } },
+   *   ],
+   * })
+   * ```
+   */
+  rootRoutes?: RouteRecordRaw[]
 
   /**
    * Replace the built-in `/login/:module(…)?` route component (rare -
@@ -723,6 +813,15 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   if (options.addModules && options.addModules.length > 0) {
     routes = appendUnderAdmin(routes, options.addModules)
   }
+  // Consumer top-level routes join the table BEFORE applyBasePath, so they are
+  // prefixed exactly like the framework's own public page (`/share/:token`).
+  // Appending them afterwards - which is what createAdminApp used to do - left
+  // them outside the app's own prefix, which in the sub-path deployment shape
+  // is an address nothing can navigate to. See `rootRoutes` above.
+  if (options.rootRoutes && options.rootRoutes.length > 0) {
+    warnMisplacedTopLevelRoutes(options.rootRoutes, basePath)
+    routes = [...routes, ...options.rootRoutes]
+  }
   routes = applyPlaceholders(routes, options.loginComponent, options.forbiddenComponent)
   routes = applyBasePath(routes, basePath)
 
@@ -871,6 +970,10 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   }
 
   function install(app: App, pinia?: Pinia, router?: Router): TnziUiAdminInstance {
+    // Dev-only: report a naive-ui older than this package's APIs require. The
+    // peer range cannot catch it for `link:` consumers - see peer-check.ts.
+    runPeerChecks()
+
     // Derive hub URL defaults from a single `apiBase` (see resolveHubConfigs).
     // Opt-in: no apiBase → root-relative '/hubs/*' defaults unchanged.
     const { chat: chatConfig, settings: settingsConfig } = resolveHubConfigs(
@@ -897,9 +1000,21 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // This is the framework-owned replacement for the consumer calling
     // `useAdminAppStore().extendLocaleMessages(...)` by hand with a fragile
     // "must run after install()" ordering comment.
+    // Register the languages this application offers BEFORE anything reads the
+    // active locale: the store's `ensureLocaleRegistered` below, the two
+    // switchers, and the naive-locale binding all derive from this registry.
+    if (options.localeOptions?.length) {
+      registerAdminLocales(options.localeOptions)
+    }
+
     if (options.locales) {
       useAdminAppStore().extendLocaleMessages(options.locales)
     }
+
+    // `locale` is persisted, so a user whose stored language the app no longer
+    // offers would boot pinned to a code with no dictionary and no switcher
+    // entry to leave it by. Reset to the first registered language instead.
+    useAdminAppStore().ensureLocaleRegistered()
 
     // Start fetching the ACTIVE locale's dictionary. The two bundled packs are
     // ~57 kB and ~62 kB gzipped and used to be statically imported by the

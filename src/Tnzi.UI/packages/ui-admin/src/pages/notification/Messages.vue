@@ -86,6 +86,20 @@
         </template>
         {{ t('actions.confirmBatchResend') }}
       </NPopconfirm>
+      <NPopconfirm @positive-click="() => batchCancel(selectedIds)">
+        <template #trigger>
+          <NButton
+            v-if="selectedIds.length > 0 && can('notification.message.update')"
+            size="small"
+            type="error"
+            ghost
+            :loading="batchCancelling"
+          >
+            {{ t('actions.batchCancel') }} ({{ selectedIds.length }})
+          </NButton>
+        </template>
+        {{ t('actions.confirmBatchCancel') }}
+      </NPopconfirm>
     </template>
     <!--
       Read-only detail in a right drawer, NOT the create/edit modal: a sent
@@ -101,14 +115,48 @@
         readonly
         :translate="t"
       />
+
+      <!--
+        Per-recipient delivery breakdown. A bulk send's row-level counters answer
+        "how many", never "which ones and why" - and "why" is the only question
+        anyone opens this drawer with after a partial failure.
+      -->
+      <div class="nm-report">
+        <h4 class="nm-report__title">{{ t('report.title') }}</h4>
+        <NSpin :show="reportLoading">
+          <TKpiRow v-if="report" :columns="4" class="nm-report__kpis">
+            <TKpiCard :label="t('report.total')" :value="report.totalRecipients" />
+            <TKpiCard :label="t('report.sent')" :value="report.sentCount" tone="success" />
+            <TKpiCard :label="t('report.failed')" :value="report.failedCount" :tone="report.failedCount > 0 ? 'error' : 'default'" />
+            <TKpiCard :label="t('report.pending')" :value="report.pendingCount" />
+          </TKpiRow>
+          <TResponsiveTable
+            v-if="report"
+            :columns="reportColumns"
+            :data="reportRows"
+            :row-key="(r: RecipientOutput) => r.id"
+            size="small"
+            :bordered="false"
+          />
+          <p v-if="reportTruncated" class="nm-report__truncated">
+            {{ t('report.truncated', { shown: REPORT_ROW_CAP, total: report!.recipients.length }) }}
+          </p>
+          <TEmpty v-else-if="!reportLoading" :text="reportError ?? t('report.empty')" />
+        </NSpin>
+      </div>
     </template>
   </TItemPage>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NButton, NPopconfirm } from 'naive-ui'
-import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import { computed, h, ref } from 'vue'
+import { NButton, NPopconfirm, NSpin, type DataTableColumns } from 'naive-ui'
+import { TEmpty, TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TKpiRow from '../../components/data/TKpiRow.vue'
+import TKpiCard from '../../components/data/TKpiCard.vue'
+import TStatusBadge from '../../components/display/TStatusBadge.vue'
+import type { StatusType } from '@tnzi/ui'
 import TItemPage from '../../components/crud/TItemPage.vue'
 import TItemCard, { type ItemCardTag, type ItemCardTone } from '../../components/data/TItemCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
@@ -121,11 +169,20 @@ import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { notificationMessageColumns, notificationMessageFormSchema } from './message-config'
 import { makePageTranslator } from '../_shared/translate'
-import { NotificationStatus, NotificationType, type NotificationInfo } from '@tnzi/core/services/notification'
+import { useSafeMessage } from '../_shared/safe-message'
+import {
+  NotificationStatus,
+  NotificationType,
+  type NotificationInfo,
+  type DeliveryReportDto,
+  type RecipientOutput,
+} from '@tnzi/core/services/notification'
+import { formatDateTime } from '@tnzi/core'
 
 const title = 'title'
 const bridge = createNotificationBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
+const message = useSafeMessage()
 
 const crud = useCrudPage<NotificationInfo>({
   pageId: 'notification.messages',
@@ -135,12 +192,41 @@ const crud = useCrudPage<NotificationInfo>({
   fetchData: (query) => bridge.messages.fetch(query),
   // Messages are immutable after sending - no create/update; delete stays.
   deleteData: (ids) => bridge.messages.delete(ids.map(String)),
+  onView: (row) => void loadReport(row),
 })
 
-// Delete is the only declarative action: Edit is impossible (a sent message is
-// immutable), View would duplicate the row click, and Resend is drawn by the
-// page itself in the card's #actions so it can carry its own per-row spinner.
-const rowActions: RowAction<NotificationInfo>[] = [deleteAction(crud)]
+/**
+ * Cancel + Delete are the declarative actions. Edit is impossible (a sent
+ * message is immutable), View would duplicate the row click, and Resend is drawn
+ * by the page itself in the card's #actions so it can carry its own per-row spinner.
+ *
+ * ★ Cancel is not the inverse of Resend and it is not Delete: the row survives
+ * and its recipients are marked Cancelled, so the record still shows that this
+ * notification was created and deliberately stopped. It only offers itself while
+ * the send can still be stopped - on a message already out the door the button
+ * would be a promise the backend cannot keep.
+ */
+const rowActions: RowAction<NotificationInfo>[] = [
+  {
+    key: 'cancel',
+    label: 'actions.cancel',
+    type: 'error',
+    confirm: 'actions.confirmCancel',
+    show: (row) => isCancellable(row) && can('notification.message.update'),
+    onClick: (row) => cancelMessage(row),
+  },
+  deleteAction(crud),
+]
+
+const CANCELLABLE = new Set<NotificationStatus>([
+  NotificationStatus.Pending,
+  NotificationStatus.Scheduled,
+  NotificationStatus.Sending,
+])
+
+function isCancellable(row: NotificationInfo): boolean {
+  return row.status != null && CANCELLABLE.has(row.status)
+}
 
 // ---- Resend action ----
 const resendingIds = ref<Set<string>>(new Set())
@@ -186,7 +272,135 @@ async function batchResend(ids: Array<string | number>): Promise<void> {
   }
 }
 
+// ---- Cancel ----
+const batchCancelling = ref(false)
+
+async function cancelMessage(row: NotificationInfo): Promise<void> {
+  try {
+    await bridge.messages.cancel(String(row.id ?? ''))
+    await crud.refresh()
+  } catch (err) {
+    // ★ 服务器拒绝取消是**正常结果**（消息刚刚发出去了、并发被人抢先），
+    // 而不是一个可以静静吞掉的意外。原话必须原样透出：只有服务器说得清为什么。
+    message.error(errorText(err))
+  }
+}
+
+async function batchCancel(ids: Array<string | number>): Promise<void> {
+  if (!ids.length) return
+  batchCancelling.value = true
+  try {
+    // One call: the backend skips ids that are past cancelling and answers with
+    // how many it actually stopped, so partial selections need no client-side
+    // pre-filtering to avoid a wall of rejections.
+    const stopped = await bridge.messages.batchCancel(ids.map(String))
+    await crud.refresh()
+    // 只报「停下了几条」：后端跳过来不及的那些，说「全部取消成功」会是一句谎。
+    message.success(t('actions.batchCancelResult', { n: stopped, total: ids.length }))
+  } catch (err) {
+    message.error(errorText(err))
+  } finally {
+    batchCancelling.value = false
+  }
+}
+
+// ---- Delivery report ----
+const report = ref<DeliveryReportDto | null>(null)
+const reportLoading = ref(false)
+const reportError = ref<string | null>(null)
+
+/**
+ * ★ 请求序号令牌：抽屉可以在上一份报告回来之前就被换到另一条消息上，而慢的那次后到
+ * 会把新的一份覆盖掉 —— 屏幕上于是显示着 A 的收件人、标题却是 B。这种错读起来完全
+ * 像真的，所以过期的答案一律丢弃。
+ */
+let reportSeq = 0
+
+async function loadReport(row: NotificationInfo): Promise<void> {
+  const id = String(row.id ?? '')
+  const seq = ++reportSeq
+  report.value = null
+  reportError.value = null
+  if (!id) return
+  reportLoading.value = true
+  try {
+    const loaded = await bridge.messages.getDeliveryReport(id)
+    if (seq !== reportSeq) return
+    report.value = loaded
+  } catch (err) {
+    if (seq !== reportSeq) return
+    // 抽屉里其余部分仍然值得读，所以报告失败降级成它自己那一块里的一句话，
+    // 而不是把整个面板拖下水。
+    reportError.value = errorText(err)
+  } finally {
+    if (seq === reportSeq) reportLoading.value = false
+  }
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * ★ 一次群发可以有几千个收件人，而这是一个抽屉不是一个页面。整份渲染出来会让抽屉
+ * 卡住，且没人会往下滚三千行 —— 报告要回答的是「哪些人、为什么」，失败的那些排在最前
+ * 就已经答完了。超出部分明说被截断，**不装作这就是全部**。
+ */
+const REPORT_ROW_CAP = 200
+
+const reportRows = computed<RecipientOutput[]>(() => {
+  const all = report.value?.recipients ?? []
+  if (all.length <= REPORT_ROW_CAP) return all
+  const rank = (r: RecipientOutput) =>
+    r.status === NotificationStatus.Failed ? 0 : r.status === NotificationStatus.Cancelled ? 1 : 2
+  return [...all].sort((a, b) => rank(a) - rank(b)).slice(0, REPORT_ROW_CAP)
+})
+
+const reportTruncated = computed(() => (report.value?.recipients?.length ?? 0) > REPORT_ROW_CAP)
+
 const t = makePageTranslator('notification.messages')
+
+/**
+ * ★ Cancelled reads as warning, not error: a recipient the framework held back
+ * (opted out, channel switched off, hourly limit) is a correct outcome, not a
+ * delivery that went wrong.
+ */
+function recipientTone(status?: NotificationStatus): StatusType {
+  switch (status) {
+    case NotificationStatus.Sent: return 'success'
+    case NotificationStatus.Failed: return 'error'
+    case NotificationStatus.Cancelled: return 'warning'
+    default: return 'default'
+  }
+}
+
+const reportColumns: DataTableColumns<RecipientOutput> = [
+  { key: 'address', title: () => t('report.columns.address'), minWidth: 200 },
+  {
+    key: 'status',
+    title: () => t('report.columns.status'),
+    width: 130,
+    // ★ 走 status.* 词典而不是把线缆枚举直接印出来 —— 同一页 48 行之下的行卡片已经
+    // 在译同一个枚举了，两处不一致比两处都不译更糟。
+    render: (row) => h(TStatusBadge, {
+      value: row.status,
+      type: recipientTone(row.status),
+      label: t(`status.${String(row.status ?? '').toLowerCase()}`),
+    }),
+  },
+  {
+    key: 'sentTime',
+    title: () => t('report.columns.sentTime'),
+    width: 170,
+    render: (row) => (row.sentTime ? formatDateTime(row.sentTime) : EMPTY_DASH),
+  },
+  {
+    key: 'failureReason',
+    title: () => t('report.columns.failureReason'),
+    minWidth: 220,
+    render: (row) => row.failureReason || EMPTY_DASH,
+  },
+]
 
 /**
  * Row title. Plenty of real sends carry no subject (an SMS has none, and a 2FA
@@ -204,6 +418,7 @@ function channelIcon(type?: NotificationType): string {
     case NotificationType.Email: return 'mdi:email-outline'
     case NotificationType.Sms: return 'mdi:message-text-outline'
     case NotificationType.Push: return 'mdi:bell-outline'
+    case NotificationType.Fax: return 'mdi:fax'
     default: return 'mdi:send-outline'
   }
 }
@@ -242,6 +457,28 @@ function messageTags(row: NotificationInfo): ItemCardTag[] {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+.nm-report {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.nm-report__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--tnzi-base-text-muted);
+}
+.nm-report__kpis {
+  margin-bottom: 12px;
+}
+.nm-report__truncated {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
 }
 .nm-error {
   display: flex;

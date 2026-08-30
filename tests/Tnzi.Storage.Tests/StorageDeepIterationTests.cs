@@ -1,4 +1,4 @@
-﻿using Mapster;
+using Mapster;
 using MapsterMapper;
 using Tnzi.Mapster;
 
@@ -7,13 +7,11 @@ namespace Tnzi.Storage.Tests;
 /// <summary>
 /// E1 深度迭代测试：文件完整性验证、分享管理增强、文件标签
 /// 覆盖 IFileStorageService 的 VerifyFileIntegrityAsync / BatchVerifyIntegrityAsync / SetFileTagsAsync / GetFilesByTagAsync
-/// 以及 IFileShareService 的 GetSharesByFileAsync / GetActiveSharesAsync / BatchRevokeSharesAsync
 /// </summary>
 public class StorageDeepIterationTests
 {
     private readonly Mock<IRepository<FileRecord, Guid>> _mockFileRepository;
     private readonly Mock<IRepository<FileReference, Guid>> _mockReferenceRepository;
-    private readonly Mock<IRepository<Entities.FileShare, Guid>> _mockShareRepository;
     private readonly Mock<IFileStorage> _mockStorage;
     private readonly StorageOptions _options;
     private readonly Mock<IServiceProvider> _mockServiceProvider;
@@ -22,7 +20,6 @@ public class StorageDeepIterationTests
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
         _mockReferenceRepository = new Mock<IRepository<FileReference, Guid>>();
-        _mockShareRepository = new Mock<IRepository<Entities.FileShare, Guid>>();
         _mockStorage = new Mock<IFileStorage>();
         _mockServiceProvider = new Mock<IServiceProvider>();
 
@@ -58,18 +55,8 @@ public class StorageDeepIterationTests
             TestFileAccessAuthorizer.AllowAll(),
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _mockServiceProvider.Object);
-    }
-
-    private FileShareService CreateShareService()
-    {
-        return new FileShareService(
-            _mockShareRepository.Object,
-            _mockFileRepository.Object,
-            TestFileAccessAuthorizer.AllowAll(),
-            new FileAccessGrantContext(),
-            new StaticOptionsMonitor<StorageOptions>(_options),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new UploadGuard(optionsMonitor.Object));
     }
 
     #region File Integrity Verification Tests
@@ -283,218 +270,7 @@ public class StorageDeepIterationTests
 
     #endregion
 
-    #region File Share Management Tests
 
-    [Fact]
-    public async Task CreateShareAsync_WithPassword_SetsRequirePasswordTrue()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord { Id = fileId, FileName = "test.pdf" };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        _mockShareRepository.Setup(r => r.InsertAsync(It.IsAny<Entities.FileShare>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.CreateShareAsync(fileId, password: "secret123");
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.True(result.Data.RequirePassword);
-        Assert.NotNull(result.Data.PasswordHash);
-        Assert.Contains(":", result.Data.PasswordHash); // HMAC-SHA256 格式: salt:hash
-    }
-
-    [Fact]
-    public async Task CreateShareAsync_WithExpirationAndMaxAccess_SetsProperties()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord { Id = fileId, FileName = "test.pdf" };
-        var expiresAt = DateTime.UtcNow.AddDays(7);
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        _mockShareRepository.Setup(r => r.InsertAsync(It.IsAny<Entities.FileShare>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.CreateShareAsync(fileId, expiresAt: expiresAt, maxAccessCount: 50);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(expiresAt, result.Data.ExpiresAt);
-        Assert.Equal(50, result.Data.MaxAccessCount);
-        Assert.Equal(0, result.Data.AccessCount);
-    }
-
-    [Fact]
-    public async Task CreateShareAsync_ReturnsFail_WhenFileNotFound()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var fileId = Guid.NewGuid();
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((FileRecord?)null);
-
-        // Act
-        var result = await service.CreateShareAsync(fileId);
-
-        // Assert
-        Assert.False(result.Succeeded);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsFalse_WhenMaxAccessCountReached()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "exhausted-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true,
-            MaxAccessCount = 10,
-            AccessCount = 10, // 已达上限
-            RequirePassword = false
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(
-                It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.False(result.Data);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsFalse_WhenShareIsDisabled()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "disabled-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = false, // 已禁用
-            RequirePassword = false
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(
-                It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.False(result.Data);
-    }
-
-    // IncrementShareAccessCountAsync is now an atomic DB-side ExecuteUpdateAsync operation that
-    // cannot be exercised with a mocked IRepository. Its behavior is covered by integration tests
-    // against a real SQLite database in StorageRelationalServiceTests.
-
-    #endregion
-
-    #region FileShareSummaryDto Computed Properties Tests
-
-    [Fact]
-    public void FileShareSummaryDto_IsExpired_ReturnsFalse_WhenNoExpiration()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            ExpiresAt = null
-        };
-
-        Assert.False(dto.IsExpired);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExpired_ReturnsTrue_WhenPastExpiration()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
-        };
-
-        Assert.True(dto.IsExpired);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExpired_ReturnsFalse_WhenFutureExpiration()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            ExpiresAt = DateTime.UtcNow.AddDays(1)
-        };
-
-        Assert.False(dto.IsExpired);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExhausted_ReturnsTrue_WhenAccessCountReachesMax()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            MaxAccessCount = 10,
-            AccessCount = 10
-        };
-
-        Assert.True(dto.IsExhausted);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExhausted_ReturnsFalse_WhenNoMaxAccessCount()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            MaxAccessCount = null,
-            AccessCount = 100
-        };
-
-        Assert.False(dto.IsExhausted);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExhausted_ReturnsFalse_WhenAccessCountBelowMax()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            MaxAccessCount = 10,
-            AccessCount = 5
-        };
-
-        Assert.False(dto.IsExhausted);
-    }
-
-    [Fact]
-    public void FileShareSummaryDto_IsExhausted_ReturnsTrue_WhenAccessCountExceedsMax()
-    {
-        var dto = new FileShareSummaryDto
-        {
-            MaxAccessCount = 10,
-            AccessCount = 15
-        };
-
-        Assert.True(dto.IsExhausted);
-    }
-
-    #endregion
 
     #region File Tags Tests
 

@@ -1,10 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Description>Document primitives for the Tnzi.NET framework: Office-to-PDF conversion (LibreOffice), PDF inspection with coordinate-bearing tag lookup (PdfPig), and coordinate-based PDF stamping and flattening (PDFsharp). Optional module with no entities and no tables; load it to get the three primitives out of the box.</Description>
+    <Description>Document primitives for the Tnzi.NET framework: Office-to-PDF conversion (LibreOffice), HTML-to-PDF and thumbnails through a local headless browser, PDF inspection with coordinate-bearing tag lookup (PdfPig), coordinate-based PDF stamping and flattening (PDFsharp), and page rasterisation of an existing PDF, scans and faxes included (PDFium). Optional module with no entities and no tables; load it to get the six primitives out of the box. Note that rasterisation carries native binaries: publish with a runtime identifier.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,12 +17,41 @@
       重量级 PDF 依赖收在本可选包内，核心与其它消费者不被传递拉入。
       版本与既有消费者对齐：PdfSharp 6.2.1（Tnzi.Finance.Documents）、PdfPig 0.1.15（Tnzi.AI / Tnzi.AI.Rag）。
     -->
-    <PackageReference Include="PdfSharp" Version="6.2.1" />
+    <PackageReference Include="PdfSharp" Version="6.2.4" />
     <PackageReference Include="PdfPig" Version="0.1.15" />
+    <!--
+      ★ 全仓唯一带**原生二进制**的文档依赖，代价要看清楚：
+      PDFtoImage (MIT) 传递引入 PDFium (BSD-3-Clause) 与 SkiaSharp (MIT)，两者各自按 RID 提供原生库。
+      指定 RID 发布约 19 MB（pdfium.dll 7 MB + libSkiaSharp.dll 12 MB），
+      不指定 RID 的可移植发布会把二十来个 RID 全带上（上百 MB）。
+      这笔账落在**每一个**引用本包的消费者身上，包括一行光栅化都不调的 Tnzi.Signing ——
+      合并前它曾是独立包 Tnzi.Documents.Raster，正是为了避免这一点。
+      下面那份随包发的 targets 至少把 89 MB/RID 的原生 pdb 剔掉。
+    -->
+    <PackageReference Include="PDFtoImage" Version="5.4.0" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <!--
+      CA1416：PDFtoImage 的 API 标注了 [SupportedOSPlatform]，而它列出的集合
+      （Windows / Linux / macOS / iOS / Android / browser）已经覆盖了 ASP.NET Core 能跑的每一个平台，
+      本包又不可能在编译期知道消费者的目标平台。真跑在没有原生库的 RID 上时，
+      PdfiumPdfRasterizer 会把 DllNotFoundException 翻译成一条说得清楚的 PdfRasterizationException，
+      而不是让它变成一个看不懂的类型初始化异常。
+    -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
-    <!-- 坐标换算/字体探测/soffice 定位都是 internal，测试须直达（src 下全部强命名同一 key，故须带 PublicKey）。 -->
+    <!-- 把「剔除 SkiaSharp 原生 pdb」这条规则随包发给消费者：它占了 Windows 每个 RID 89 MB，
+         而它唯一的用途是调试进 Skia 的 C++ 内部。消费者可用 TnziKeepNativeSymbols=true 关掉。 -->
+    <None Include="build\Tnzi.Documents.targets" Pack="true" PackagePath="buildTransitive\" />
+  </ItemGroup>
+
+  <Import Project="build\Tnzi.Documents.targets" />
+
+  <ItemGroup>
+    <!-- 坐标换算/字体探测/soffice 定位/原生库探测都是 internal，测试须直达（src 下全部强命名同一 key，故须带 PublicKey）。 -->
     <InternalsVisibleTo Include="Tnzi.Documents.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 

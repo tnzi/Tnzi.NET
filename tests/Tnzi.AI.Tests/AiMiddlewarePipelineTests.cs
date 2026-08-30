@@ -220,7 +220,8 @@ public class AiMiddlewarePipelineTests
         var userId = Guid.NewGuid();
         var quotaService = new Mock<IQuotaService>();
         quotaService.Setup(q => q.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<QuotaReservation>.Failure("Daily quota exceeded"));
+            // 错误码是「是否真的超限」的判据（QuotaMiddleware.IsQuotaExceeded），真实服务始终带码
+            .ReturnsAsync(Result<QuotaReservation>.Failure("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded));
 
         var middleware = new QuotaMiddleware(
             quotaService.Object,

@@ -23,6 +23,27 @@ namespace Tnzi.Notification.Services;
 /// 而不是"看见 Sending 就抢"。
 /// </para>
 /// <para>
+/// ★★ <b>第二遍扫描：到期却没人发的定时消息。</b><see cref="INotificationService.CreateAndSendAsync"/>
+/// 把定时消息的行落库（<c>Scheduled</c> + <c>ScheduledTime</c>）之后，真正会去发它的只有
+/// <see cref="ChannelQueueService.EnqueueWithDelayAsync"/> 起的一个<b>进程内</b>定时器。进程一停
+/// 那个定时器就没了，而多实例部署里它从一开始就只存在于接下这次创建请求的那一个实例上。
+/// 数据一行不丢，只是永远不会被发出去 —— 并且它会一直好端端地列在"已排期"里，
+/// 这比"消息不见了"更容易被当真。
+/// </para>
+/// <para>
+/// <b>两道防重发</b>：① 交给 <c>SendAsync</c> 之前先做一次条件更新
+/// （<c>Scheduled → Sending</c>，影响行数必须为 1），于是两个实例同时扫到也只有一个发得出去；
+/// ★★ 这一道**同时**挡住本进程那个定时器 —— 前提是 <c>SendAsync</c> 在进入收件人循环之前
+/// 就把 <c>Sending</c> 落了库（它现在会）。**不能靠宽限期去挡定时器**：定时器到点只是把工作项
+/// <b>入队</b>，而队列是单读者串行执行，真正开发的时刻取决于积压；一次几十分钟的群发期间，
+/// 库里那行会一直写着 <c>Scheduled</c>。② 宽限期（<see cref="DispatchOptions.StuckAfterMinutes"/>）
+/// 剩下的作用是别去抢刚刚到点、工作项还在队列里排着的消息 —— 它是节流不是正确性保证。
+/// <para>
+/// 卡住批次那一遍没有条件认领这层保护（状态本来就是 <c>Sending</c>，条件更新分不出谁在发），
+/// 那是既有形态，要根治得给消息加租约列。
+/// </para>
+/// </para>
+/// <para>
 /// <b>失败只记日志不崩服务</b> —— 与框架其它遥测/派发后台服务同款取舍：一批失败丢这一批，
 /// 下一轮扫描会再次遇到它（状态没推进），而让整个后台服务崩掉会让所有后续批次都停摆。
 /// </para>
@@ -94,8 +115,8 @@ public class NotificationDispatchBackgroundService : BackgroundService
         }
     }
 
-    /// <summary>一轮恢复扫描。</summary>
-    private async Task RecoverOnceAsync(DispatchOptions dispatch, CancellationToken cancellationToken)
+    /// <summary>一轮恢复扫描。<c>internal</c> 是为了让测试能跑单独一轮，而不必等 30 秒的启动延迟。</summary>
+    internal async Task RecoverOnceAsync(DispatchOptions dispatch, CancellationToken cancellationToken)
     {
         // 后台服务是 Singleton，仓储是 Scoped —— 每轮一个作用域。
         using var scope = _serviceProvider.CreateScope();
@@ -116,16 +137,21 @@ public class NotificationDispatchBackgroundService : BackgroundService
             .Select(m => m.Id)
             .ToListAsync(cancellationToken);
 
-        if (stuck.Count == 0)
-            return;
+        if (stuck.Count > 0)
+        {
+            _logger.LogInformation(
+                "Resuming {Count} interrupted notification batch(es) that stalled before {Cutoff:u}.",
+                stuck.Count, cutoff);
+        }
 
-        _logger.LogInformation(
-            "Resuming {Count} interrupted notification batch(es) that stalled before {Cutoff:u}.",
-            stuck.Count, cutoff);
+        var due = await ClaimDueScheduledAsync(repository, cutoff, batchSize, cancellationToken);
+
+        if (stuck.Count == 0 && due.Count == 0)
+            return;
 
         var pacer = new SendPacer(dispatch.RatePerMinute);
 
-        foreach (var messageId in stuck)
+        foreach (var messageId in stuck.Concat(due))
         {
             if (cancellationToken.IsCancellationRequested) return;
 
@@ -151,6 +177,80 @@ public class NotificationDispatchBackgroundService : BackgroundService
                 _logger.LogError(ex, "Resuming notification {MessageId} threw.", messageId);
             }
         }
+    }
+
+    /// <summary>
+    /// 认领到期已久却仍停在 <see cref="NotificationStatus.Scheduled"/> 的消息。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 认领方式是<b>条件更新</b>：<c>UPDATE … SET Status = Sending WHERE Id = @id AND
+    /// Status = Scheduled</c>。影响行数为 0 说明别人抢先了（另一个实例的扫描，或者本进程那个
+    /// 还活着的定时器刚开始发），这一条就跳过。没有这一步，两个实例同一分钟扫到同一条
+    /// 定时消息会各发一遍 —— 而重复投递正是本模块最贵的失败形态。
+    /// </para>
+    /// <para>
+    /// 顺带把 <c>LastModificationTime</c> 推到现在：认领之后这条消息就是一条"正在发送"的消息，
+    /// 卡住扫描的判据要能正确地重新计时，否则一条刚被认领的消息可能在同一轮里
+    /// 又被当成"卡了很久的 Sending"。
+    /// </para>
+    /// <para>
+    /// ★ 条件更新绕开变更跟踪器，所以这里<b>不</b>经 <c>IUnitOfWork</c>：它是一次独立的原子写，
+    /// 目的正是让它在交给 <c>SendAsync</c> 之前就对其它实例可见。
+    /// </para>
+    /// </remarks>
+    internal async Task<List<Guid>> ClaimDueScheduledAsync(
+        IRepository<Message, Guid> repository, DateTime cutoff, int batchSize, CancellationToken cancellationToken)
+    {
+        var candidates = await repository.AsQueryable()
+            .Where(m => m.Status == NotificationStatus.Scheduled
+                        && m.ScheduledTime != null
+                        && m.ScheduledTime <= cutoff)
+            .OrderBy(m => m.ScheduledTime)
+            .Take(batchSize)
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+            return [];
+
+        var claimed = new List<Guid>(candidates.Count);
+        foreach (var id in candidates)
+        {
+            if (await TryClaimScheduledAsync(repository, id, cancellationToken))
+                claimed.Add(id);
+        }
+
+        if (claimed.Count > 0)
+        {
+            _logger.LogWarning(
+                "Sending {Count} scheduled notification(s) that were due before {Cutoff:u} and had no in-process timer left to send them. This is expected after a restart or in a multi-instance deployment.",
+                claimed.Count, cutoff);
+        }
+
+        return claimed;
+    }
+
+    /// <summary>
+    /// 把一条消息从 <see cref="NotificationStatus.Scheduled"/> 抢到
+    /// <see cref="NotificationStatus.Sending"/>。抢到返回 <see langword="true"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>条件必须写在 UPDATE 里</b>，不能靠上一步的 SELECT。两个实例会在同一分钟各自
+    /// 选出同一条，谁先 UPDATE 谁发；后到的那次影响 0 行，于是安静地跳过。
+    /// 把条件留在 SELECT 上等于两边都认为自己抢到了 —— 那就是一条重复投递。
+    /// </remarks>
+    internal static async Task<bool> TryClaimScheduledAsync(
+        IRepository<Message, Guid> repository, Guid id, CancellationToken cancellationToken)
+    {
+        var affected = await repository.AsQueryable()
+            .Where(m => m.Id == id && m.Status == NotificationStatus.Scheduled)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.Status, NotificationStatus.Sending)
+                      .SetProperty(m => m.LastModificationTime, DateTime.UtcNow),
+                cancellationToken);
+
+        return affected == 1;
     }
 }
 

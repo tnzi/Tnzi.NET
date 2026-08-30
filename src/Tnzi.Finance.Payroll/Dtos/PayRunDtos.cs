@@ -178,6 +178,8 @@ public class PayslipLineDto
     public decimal Amount { get; set; }
     /// <summary>该组件年初至今累计额（含本期）——逐行 YTD。</summary>
     public decimal YtdAmount { get; set; }
+    /// <summary>本期为该组件录入的一次性金额（未录入为 null）。</summary>
+    public decimal? InputAmount { get; set; }
     public string? FormulaSnapshot { get; set; }
     public Guid? ExpenseAccountId { get; set; }
     public Guid? LiabilityAccountId { get; set; }
@@ -190,4 +192,41 @@ public class UpdatePayslipInputsDto
 {
     /// <summary>实际出勤天数（公式变量 WORKED_DAYS）</summary>
     public decimal WorkedDays { get; set; }
+}
+
+/// <summary>
+/// 一次性输入 DTO（批次 × 员工 × 组件）
+/// </summary>
+public class PayRunInputDto
+{
+    public Guid Id { get; set; }
+    public Guid PayRunId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeCode { get; set; } = string.Empty;
+    public string EmployeeName { get; set; } = string.Empty;
+    public Guid ComponentId { get; set; }
+    public string ComponentCode { get; set; } = string.Empty;
+    public string ComponentName { get; set; } = string.Empty;
+    public SalaryComponentType ComponentType { get; set; }
+    public decimal Amount { get; set; }
+    public string? Note { get; set; }
+    public DateTime CreationTime { get; set; }
+}
+
+/// <summary>
+/// 录入/覆盖一次性输入请求（Draft|Calculated 态；Calculated 时立即重算该员工的工资单）
+/// </summary>
+public class SetPayRunInputDto
+{
+    /// <summary>员工</summary>
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>薪资组件（其生效公式必须调用 <c>Input()</c>）</summary>
+    public Guid ComponentId { get; set; }
+
+    /// <summary>金额（本位币；非备注类组件不接受负值）</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>事由</summary>
+    public string? Note { get; set; }
 }

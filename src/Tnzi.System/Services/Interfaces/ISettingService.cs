@@ -106,4 +106,12 @@ public interface ISettingService
     {
         return Task.FromResult(Result.Failure<List<SettingGroupDto>>("Setting groups not implemented", 501));
     }
+
+    /// <summary>
+    /// 重排同一分组内的配置项（拖拽排序）
+    /// </summary>
+    /// <param name="ids">按新顺序排列的配置 Id，可以只是当前可见的一段</param>
+    /// <param name="group">分组范围；null = 未分组的配置项</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, string? group = null, CancellationToken cancellationToken = default);
 }

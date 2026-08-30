@@ -576,12 +576,12 @@ const batchColumns: DataTableColumns<BankImportBatchDto> = [
 .fin-feed__empty {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
   text-align: center;
 }
 
 .fin-feed__locked {
   font-size: 12px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 </style>

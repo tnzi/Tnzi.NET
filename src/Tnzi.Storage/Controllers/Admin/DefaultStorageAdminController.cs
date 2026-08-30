@@ -4,6 +4,16 @@ namespace Tnzi.Storage.Controllers.Admin;
 /// 文件存储管理控制器基类
 /// 提供文件管理类操作 API 端点，所有方法支持重写
 /// </summary>
+/// <remarks>
+/// ★ 三个分享管理端点的实现在可选包 <c>Tnzi.Storage.Workspace</c>，故
+/// <see cref="FileShareService"/> 是<b>可空可选注入</b>：没加载时它们返回 501 并指名要加载的包，
+/// 路由与其余端点一个字不变。理由与 <c>DefaultStorageController</c> 相同（见那里的类注释）。
+/// </remarks>
+/// <remarks>
+/// ★ 三个分享管理端点的实现在可选包 <c>Tnzi.Storage.Workspace</c>，故
+/// <see cref="FileShareService"/> 是<b>可空可选注入</b>：没加载时它们返回 501 并指名要加载的包，
+/// 路由与其余端点一个字不变。理由与 <c>DefaultStorageController</c> 相同（见那里的类注释）。
+/// </remarks>
 [DefaultController]
 [Route("admin/files")]
 [ApiAuthorize(PermissionName = "storage.file.view")]
@@ -11,7 +21,9 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
 {
     protected readonly IFileStorageService FileStorageService;
     protected readonly IFileReferenceService FileReferenceService;
-    protected readonly IFileShareService FileShareService;
+
+    /// <summary>分享链接服务；<c>null</c> = 未加载 <c>Tnzi.Storage.Workspace</c>。</summary>
+    protected readonly IFileShareService? FileShareService;
 
     /// <summary>
     /// 初始化文件存储管理控制器基类
@@ -19,12 +31,16 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     public DefaultStorageAdminController(
         IFileStorageService fileStorageService,
         IFileReferenceService fileReferenceService,
-        IFileShareService fileShareService)
+        IFileShareService? fileShareService = null)
     {
         FileStorageService = Check.NotNull(fileStorageService);
         FileReferenceService = Check.NotNull(fileReferenceService);
-        FileShareService = Check.NotNull(fileShareService);
+        FileShareService = fileShareService;
     }
+
+    /// <summary>工作区包缺席时的统一回答，措辞与 <c>DefaultStorageController</c> 一致。</summary>
+    private const string WorkspaceMissing =
+        "This capability requires the Tnzi.Storage.Workspace module, which this host has not loaded.";
 
     /// <summary>
     /// 批量删除文件
@@ -237,6 +253,9 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     [HttpGet("{id:guid}/shares")]
     public virtual async Task<ApiResult<IEnumerable<FileShareSummaryDto>>> GetSharesByFile(Guid id)
     {
+        if (FileShareService == null)
+            return Error<IEnumerable<FileShareSummaryDto>>(WorkspaceMissing, 501);
+
         var result = await FileShareService.GetSharesByFileAsync(id);
         return result.ToApiResult();
     }
@@ -247,6 +266,9 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     [HttpPost("shares/query")]
     public virtual async Task<ApiResult<IPagedList<FileShareSummaryDto>>> QueryActiveShares([FromBody] ActiveSharesQueryRequest request)
     {
+        if (FileShareService == null)
+            return Error<IPagedList<FileShareSummaryDto>>(WorkspaceMissing, 501);
+
         var result = await FileShareService.GetActiveSharesAsync(request);
         return result.ToApiResult();
     }
@@ -258,6 +280,9 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "storage.file.delete")]
     public virtual async Task<ApiResult<int>> BatchRevokeShares([FromBody] IEnumerable<Guid> shareIds)
     {
+        if (FileShareService == null)
+            return Error<int>(WorkspaceMissing, 501);
+
         var result = await FileShareService.BatchRevokeSharesAsync(shareIds);
         return result.ToApiResult();
     }

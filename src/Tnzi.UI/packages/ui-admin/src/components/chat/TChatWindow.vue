@@ -1,16 +1,21 @@
 <template>
-  <NModal
-    :show="show"
-    :mask-closable="false"
-    :close-on-esc="false"
-    :auto-focus="false"
-    transform-origin="center"
+  <!-- A window, not a dialog. `trap-focus` and `block-scroll` are off so the
+       rest of the admin stays keyboard-reachable and scrollable while chat is
+       open; the mask and the click-swallowing container are neutralised in
+       styles/polish.css (they live outside this component's Teleport). -->
+  <component
+    :is="embedded ? FrameFree : NModal"
+    v-bind="embedded ? {} : modalProps"
     @update:show="emit('update:show', $event)"
   >
     <div
       class="t-chat-window"
-      :class="{ 't-chat-window--max': maximized, 't-chat-window--dragging': dragging }"
-      :style="windowStyle"
+      :class="{
+        't-chat-window--max': maximized,
+        't-chat-window--dragging': dragging,
+        't-chat-window--embedded': embedded,
+      }"
+      :style="embedded ? undefined : windowStyle"
     >
       <!-- No separate title strip anywhere: each column's 52px header hosts the
            window controls - the pane via #winctl (desktop: maximize+close,
@@ -42,7 +47,7 @@
           @hide="(id) => store.hideConversation(id)"
           @delete="(id) => store.deleteConversation(id)"
         >
-          <template v-if="isSm" #actions>
+          <template v-if="isSm && !embedded" #actions>
             <button
               class="t-chat-window__winbtn t-chat-window__winbtn--close"
               :title="t('close')"
@@ -81,7 +86,9 @@
         >
           <!-- Window controls, rendered at the far right of the pane header on
                desktop (hidden on phones - the title strip has the close). -->
-          <template #winctl>
+          <!-- The desktop window frame draws these when embedded; a second set
+               inside the pane header would be two closes for one window. -->
+          <template v-if="!embedded" #winctl>
             <div class="t-chat-window__winctl">
               <button
                 v-if="!isSm"
@@ -103,7 +110,7 @@
         </TConversationPane>
       </Transition>
     </div>
-  </NModal>
+  </component>
 
   <!-- New chat dialog -->
   <TNewChatDialog
@@ -124,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, defineComponent, watch, onMounted, onUnmounted } from 'vue'
 import { NModal, useMessage } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { MessageContentType } from '@tnzi/core/services/chat'
@@ -141,8 +148,45 @@ import TConversationList from './TConversationList.vue'
 import TConversationPane from './TConversationPane.vue'
 import TNewChatDialog from './TNewChatDialog.vue'
 
-const props = defineProps<{ show: boolean }>()
+const props = withDefaults(
+  defineProps<{
+    show?: boolean
+    /**
+     * Rendered inside a desktop window instead of floating in its own modal.
+     *
+     * The frame then owns the chrome - title bar, close, maximise, dragging,
+     * z-order and the taskbar button - so this component must not draw a second
+     * set of window controls or size itself. Chat used to be a modal even on
+     * the desktop, which is why it sat permanently above every window and never
+     * appeared in the taskbar.
+     */
+    embedded?: boolean
+  }>(),
+  { show: true, embedded: false },
+)
 const emit = defineEmits<{ 'update:show': [v: boolean] }>()
+
+/**
+ * Renders the content and nothing else. Standing in for `NModal` is how the
+ * embedded mode drops the whole dialog apparatus (teleport, mask, container,
+ * transition) without a second copy of the template.
+ */
+const FrameFree = defineComponent({
+  setup: (_props, { slots }) => () => slots.default?.(),
+})
+
+const modalProps = computed(() => ({
+  show: props.show,
+  maskClosable: false,
+  closeOnEsc: false,
+  autoFocus: false,
+  // Chat is a companion surface, not a dialog: it must not trap focus or lock
+  // the page scroll. The mask and click-swallowing container are neutralised in
+  // styles/polish.css - they live outside this component's Teleport.
+  trapFocus: false,
+  blockScroll: false,
+  transformOrigin: 'center' as const,
+}))
 
 const store = useChatStore()
 const auth = useAdminAuthStore()
@@ -378,6 +422,20 @@ function onDroppedFile(file: File) {
 </script>
 
 <style scoped>
+/* Embedded in a desktop window: the frame owns the size, the position and the
+   chrome, so drop everything this component uses to be a floating window of its
+   own. Without this it would keep its fixed 840x670 and its own shadow inside a
+   frame that already has both. */
+.t-chat-window--embedded {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}
+
 .t-chat-window {
   /* Chat-scoped palette - derived from the admin theme tokens so the window
      follows the active primary colour AND light/dark mode. Accents (Send button,
@@ -427,7 +485,22 @@ function onDroppedFile(file: File) {
      onto :root, which cascades to this teleported modal). */
   border-radius: var(--tnzi-admin-radius-lg, 12px);
   overflow: hidden;
-  box-shadow: var(--tnzi-shadow-drawer, 0 12px 48px rgba(0, 0, 0, 0.22));
+  /* A 1px ring, then the lift. The ring is not decoration: this window floats
+     over an UNDIMMED page (chat is a companion surface, not a dialog - see the
+     mask removal in styles/polish.css), and `--chat-bg` resolves to
+     `--tnzi-bg-deep`, which is within a few RGB steps of the admin canvas.
+     While the mask was still there the page behind was dimmed 45%, which is
+     what used to draw that edge.
+
+     This used to be a hand-rolled 1px ring at 16% of the TEXT colour, which
+     drew the edge but drew it in a colour nothing else in the shell uses -
+     `--tnzi-border` is rgb(239 239 245); the text token is rgb(51 54 57), so
+     the window read as outlined in near-black while every other surface was
+     outlined in near-white. The overlay tier does the same job with the same
+     values as every other floating surface, and its ambient layer is what
+     marks the top edge that a purely downward shadow leaves bare. */
+  border: var(--tnzi-surface-overlay-border);
+  box-shadow: var(--tnzi-surface-overlay-shadow);
   /* transform animates the recenter snap (viewport resize / restore); while
      actively dragging the --dragging class suppresses it so the window stays
      glued to the cursor. */
@@ -505,6 +578,7 @@ function onDroppedFile(file: File) {
     height: 100vh;
     height: 100dvh;
     border-radius: 0;
+    border: none;
     box-shadow: none;
     /* Positioning context for the push-transition (children go absolute while
        sliding). */

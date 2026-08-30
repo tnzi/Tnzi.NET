@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router'
 import { useAdminBreadcrumbStore, type BreadcrumbItem } from '../stores/useAdminBreadcrumbStore'
 import { isMultiInstanceRoute, multiInstanceKey } from '../stores/useAdminTabStore'
+import { useDesktopWindowId } from './desktop-window-context'
 
 /**
  * Per-instance breadcrumb key for a route - identical logic to the tab store's
@@ -35,6 +36,12 @@ export function breadcrumbRouteKey(route: {
 function useBreadcrumbContribution(
   apply: (store: ReturnType<typeof useAdminBreadcrumbStore>, key: string) => void,
 ): void {
+  // The `desktop` layout renders no breadcrumb: there is no single "current
+  // page" for the header to describe, so location belongs to each window's own
+  // title bar. Contributing here would write to a global store nothing reads,
+  // and two windows on the same route would collide on one key while doing it.
+  if (useDesktopWindowId()) return
+
   let key: string
   let store: ReturnType<typeof useAdminBreadcrumbStore>
   try {

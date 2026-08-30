@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NCalc" Version="6.4.0" />
+    <PackageReference Include="NCalc" Version="7.1.0" />
   </ItemGroup>
 
 </Project>

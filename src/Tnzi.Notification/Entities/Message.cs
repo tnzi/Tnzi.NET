@@ -72,8 +72,13 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public virtual ICollection<Recipient> Recipients { get; set; } = new List<Recipient>();
 
     /// <summary>
-    /// 附件列表（仅Email）
+    /// 附件列表（<see cref="NotificationType.Email"/> 与 <see cref="NotificationType.Fax"/>）
     /// </summary>
+    /// <remarks>
+    /// 传真的附件不是"附带的"：一份传真的全部内容就是那一个 PDF，正文不参与投递。
+    /// 所以 <c>Type = Fax</c> 的消息必须<b>恰好一个</b> PDF 附件，多份先合并成一份
+    /// （<c>Tnzi.Documents</c> 的 <c>IPdfCombiner</c>）。
+    /// </remarks>
     public virtual ICollection<Attachment> Attachments { get; set; } = new List<Attachment>();
 
     /// <summary>

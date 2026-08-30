@@ -12,21 +12,29 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
 
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.9">
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.11" />
     <PackageReference Include="Dapper" Version="2.1.79" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <!-- 统一 IdentityModel 版本：SqlClient 只要求 >= 8.16.0 并解析到 8.16.0，而 Tnzi.Identity 钉了 8.19.1。
          EFCore 是这条链的共同底座，在此提升可让所有下游拿到同一版本，否则同时看到两个程序集版本的项目
          （如 tests/Tnzi.Tests：经 Tnzi.Hosting 拿到 Tnzi.Identity.dll，但 NuGet 图里没有 Identity 的提升）
          会报 MSB3277 冲突且无法解析。 -->
-    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.19.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.22.0" />
+    <!-- 统一 System.ClientModel 版本：Tnzi.Storage.Cloud 经 Azure.Storage.Blobs → Azure.Core 1.55.0
+         解析到 1.11.0，而 Tnzi.AI 经 Microsoft.Extensions.AI.OpenAI → OpenAI 拿 1.14.0。
+         同时引用两者的工程（Tnzi.Hosting）NuGet 会自己统一，所以框架自身的构建看不到问题；
+         但 Tnzi.Storage.Cloud.dll 是对着 1.11.0 编译的，它的程序集引用就写着 1.11.0 ——
+         于是任何把两条链的产物放进同一输出目录的消费应用都会报 MSB3277，
+         "chosen because it was primary"，而那是一个潜伏的 MissingMethodException。
+         在共同底座提升，让所有下游工程对着同一版本编译（与上面 IdentityModel 同一手法）。 -->
+    <PackageReference Include="System.ClientModel" Version="1.15.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

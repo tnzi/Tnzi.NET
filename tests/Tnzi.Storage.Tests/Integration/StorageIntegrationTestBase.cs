@@ -1,4 +1,4 @@
-﻿using Tnzi.EFCore;
+using Tnzi.EFCore;
 using Tnzi.Storage.Entities.Configs;
 using Tnzi.Storage.Helpers;
 using Tnzi.TestBase;
@@ -12,23 +12,16 @@ public class StorageTestDbContext : TnziDbContext<StorageTestDbContext>
     {
     }
 
+    // 只有父模块自己的两张表。目录 / 分享 / 版本 / 分片会话四类实体随
+    // Tnzi.Storage.Workspace 走，而本测试项目**刻意不引用那个包** ——
+    // 这才是「宿主没加载它」的真实现场，而不是一个模拟出来的现场。
     public DbSet<FileRecord> FileRecords => Set<FileRecord>();
     public DbSet<FileReference> FileReferences => Set<FileReference>();
-    public DbSet<FileVersion> FileVersions => Set<FileVersion>();
-    public DbSet<Tnzi.Storage.Entities.FileShare> FileShares => Set<Tnzi.Storage.Entities.FileShare>();
-    public DbSet<FileUploadSession> FileUploadSessions => Set<FileUploadSession>();
-    public DbSet<FileChunk> FileChunks => Set<FileChunk>();
-    public DbSet<FileFolder> FileFolders => Set<FileFolder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new FileRecordConfiguration());
         modelBuilder.ApplyConfiguration(new FileReferenceConfiguration());
-        modelBuilder.ApplyConfiguration(new FileVersionConfiguration());
-        modelBuilder.ApplyConfiguration(new FileShareConfiguration());
-        modelBuilder.ApplyConfiguration(new FileUploadSessionConfiguration());
-        modelBuilder.ApplyConfiguration(new FileChunkConfiguration());
-        modelBuilder.ApplyConfiguration(new FileFolderConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
@@ -67,11 +60,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         services.AddSingleton(eventBus.Object);
 
         // 仓储也进 DI（此前只在工厂方法里手工 new）：服务要从**子作用域**解析仓储来
-        // 逃出外层事务时（分享链接的口令失败计数就是），测试宿主必须解析得出来，
-        // 否则那条路径在测试里静默变成 no-op —— 而它恰恰是最需要被覆盖的一条。
-        services.AddScoped<IRepository<Tnzi.Storage.Entities.FileShare, Guid>>(sp =>
-            new EFCoreRepository<StorageTestDbContext, Tnzi.Storage.Entities.FileShare, Guid>(
-                sp.GetRequiredService<StorageTestDbContext>(), serviceProvider: sp));
+        // 逃出外层事务时，测试宿主必须解析得出来，否则那条路径在测试里静默变成 no-op。
         services.AddScoped<IRepository<FileRecord, Guid>>(sp =>
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(
                 sp.GetRequiredService<StorageTestDbContext>(), serviceProvider: sp));
@@ -86,6 +75,12 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
     {
         return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers);
     }
+
+    /// <summary>
+    /// 上传闸门。生产装配里它是一个 DI 服务（三条写路径共用一份），这里按用例给的净化器现造一个。
+    /// </summary>
+    protected static UploadGuard CreateUploadGuard(StorageOptions options, IEnumerable<IUploadSanitizer>? sanitizers = null)
+        => new(new StaticOptionsMonitor<StorageOptions>(options), sanitizers);
 
     /// <summary>
     /// Build a FileStorageService backed by a caller-supplied IFileStorage (e.g. a fake that
@@ -113,36 +108,7 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             publicFieldResolver ?? TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
             ServiceProvider,
-            sanitizers);
-    }
-
-    protected FileFolderService CreateFolderService()
-    {
-        return new FileFolderService(
-            ServiceProvider,
-            new EFCoreRepository<StorageTestDbContext, FileFolder, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider));
-    }
-
-    protected FileVersionService CreateVersionService()
-    {
-        return new FileVersionService(
-            new EFCoreRepository<StorageTestDbContext, FileVersion, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
-            Storage,
-            TestFileAccessAuthorizer.AllowAll(),
-            ServiceProvider);
-    }
-
-    protected FileChunkUploadService CreateChunkUploadService(StorageOptions? options = null)
-    {
-        return new FileChunkUploadService(
-            new EFCoreRepository<StorageTestDbContext, FileUploadSession, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
-            Storage,
-            new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions),
-            ServiceProvider);
+            CreateUploadGuard(effective, sanitizers));
     }
 
     protected FileReferenceProcessor CreateReferenceProcessor(StorageOptions? options = null)
@@ -152,21 +118,6 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             NullLogger<FileReferenceProcessor>.Instance,
             new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions));
-    }
-
-    /// <summary>
-    /// 传入同一个 <paramref name="grantContext"/> 给分享服务和读取服务，就能在测试里
-    /// 复现真实请求里的那条链路：分享校验写进授予表 → 授权器据此放行。
-    /// </summary>
-    protected FileShareService CreateShareService(IFileAccessGrantContext? grantContext = null)
-    {
-        return new FileShareService(
-            new EFCoreRepository<StorageTestDbContext, Tnzi.Storage.Entities.FileShare, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
-            TestFileAccessAuthorizer.AllowAll(),
-            grantContext ?? new FileAccessGrantContext(),
-            new StaticOptionsMonitor<StorageOptions>(StorageOptions),
-            ServiceProvider);
     }
 
     /// <summary>
@@ -197,17 +148,17 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
     protected FileCleanupService CreateCleanupService(
         Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null,
         IOrphanReferenceValidator? orphanReferenceValidator = null,
-        bool multiTenancyEnabled = false)
+        bool multiTenancyEnabled = false,
+        IEnumerable<IStorageCleanupContributor>? contributors = null)
     {
         return new FileCleanupService(
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileUploadSession, Guid>(DbContext, serviceProvider: ServiceProvider),
-            new EFCoreRepository<StorageTestDbContext, FileChunk, Guid>(DbContext, serviceProvider: ServiceProvider),
             Storage,
             currentTenant ?? new Tnzi.MultiTenancy.CurrentTenant(),
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider,
+            contributors,
             Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = multiTenancyEnabled }),
             orphanReferenceValidator);
     }

@@ -1,19 +1,29 @@
 namespace Tnzi.Storage.Services;
 
 /// <summary>
-/// 文件分享服务接口
+/// 文件分享服务接口。
 /// </summary>
+/// <remarks>
+/// ★ <b>契约留在父模块、实现在 <c>Tnzi.Storage.Workspace</c></b>：分享端点长在
+/// <c>DefaultStorageController</c>（<c>[Route("files")]</c>）与 <c>DefaultStorageAdminController</c>
+/// （<c>[Route("admin/files")]</c>）上，这两个控制器都留在父模块，子模块不得在同一路由模板上
+/// 另起一个 <c>[DefaultController]</c>。所以父模块<b>可选注入</b>本接口，没有实现时那批端点
+/// 回 501 并指名要加载的包 —— URL 一个字不变，少的是能力。
+///
+/// ★ 因此签名里<b>不出现 <c>FileShare</c> 实体</b>（它随表搬进了子模块）：一律走 DTO。
+/// 这也顺带修掉了「控制器边界才投影」这条约定的一个漏口 —— 实体从此没有机会漏进 API 契约。
+/// </remarks>
 public interface IFileShareService
 {
     /// <summary>
     /// 创建分享链接
     /// </summary>
-    Task<Result<FileShare>> CreateShareAsync(Guid fileId, DateTime? expiresAt = null, int? maxAccessCount = null, string? password = null, CancellationToken cancellationToken = default);
+    Task<Result<FileSharePublicDto>> CreateShareAsync(Guid fileId, DateTime? expiresAt = null, int? maxAccessCount = null, string? password = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取分享信息
+    /// 获取分享信息（管理视角，含令牌与计数；<b>绝不含 PasswordHash</b>）
     /// </summary>
-    Task<Result<FileShare>> GetShareAsync(string shareToken, CancellationToken cancellationToken = default);
+    Task<Result<FileSharePublicDto>> GetShareAsync(string shareToken, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 撤销分享

@@ -281,3 +281,255 @@ virtual Tnzi.BackgroundJobs.ChannelBatchProcessorBase<TItem>.ServiceName.get -> 
 ~override Tnzi.Domain.Entities.ChildCollectionSyncResult.ToString() -> string
 ~override Tnzi.Storage.FileReferenceDescriptor.Equals(object obj) -> bool
 ~override Tnzi.Storage.FileReferenceDescriptor.ToString() -> string
+Tnzi.Documents.DocumentImage
+Tnzi.Documents.DocumentImage.Content.get -> byte[]!
+Tnzi.Documents.DocumentImage.ContentType.get -> string!
+Tnzi.Documents.DocumentImage.DocumentImage(byte[]! content, string! contentType, int width, int height) -> void
+Tnzi.Documents.DocumentImage.FileExtension.get -> string!
+Tnzi.Documents.DocumentImage.Height.get -> int
+Tnzi.Documents.DocumentImage.Width.get -> int
+Tnzi.Documents.DocumentImageFormat
+Tnzi.Documents.DocumentImageFormat.Jpeg = 1 -> Tnzi.Documents.DocumentImageFormat
+Tnzi.Documents.DocumentImageFormat.Png = 0 -> Tnzi.Documents.DocumentImageFormat
+Tnzi.Documents.DocumentImageFormat.Webp = 2 -> Tnzi.Documents.DocumentImageFormat
+Tnzi.Documents.DocumentImageRequest
+Tnzi.Documents.DocumentImageRequest.DocumentImageRequest() -> void
+Tnzi.Documents.DocumentImageRequest.Format.get -> Tnzi.Documents.DocumentImageFormat
+Tnzi.Documents.DocumentImageRequest.Format.init -> void
+Tnzi.Documents.DocumentImageRequest.Height.get -> int?
+Tnzi.Documents.DocumentImageRequest.Height.init -> void
+Tnzi.Documents.DocumentImageRequest.Quality.get -> int
+Tnzi.Documents.DocumentImageRequest.Quality.init -> void
+Tnzi.Documents.DocumentImageRequest.Width.get -> int
+Tnzi.Documents.DocumentImageRequest.Width.init -> void
+Tnzi.Documents.IDocumentImageRenderer
+Tnzi.Documents.IDocumentImageRenderer.CanRender(string! fileName) -> bool
+Tnzi.Documents.IDocumentImageRenderer.IsAvailable.get -> bool
+Tnzi.Documents.IDocumentImageRenderer.IsAvailableFor(string! fileName) -> bool
+Tnzi.Documents.IDocumentImageRenderer.RenderFirstPageAsync(byte[]! source, string! sourceFileName, Tnzi.Documents.DocumentImageRequest? request = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Documents.DocumentImage!>!
+Tnzi.Security.OneTimeToken
+const Tnzi.Security.OneTimeToken.DefaultEntropyBytes = 32 -> int
+const Tnzi.Security.OneTimeToken.HashLength = 64 -> int
+const Tnzi.Security.OneTimeToken.MinimumEntropyBytes = 16 -> int
+static Tnzi.Security.OneTimeToken.Create(int entropyBytes = 32) -> string!
+static Tnzi.Security.OneTimeToken.Hash(string! token) -> string!
+static Tnzi.Security.OneTimeToken.MatchesHash(string? token, string? storedHash) -> bool
+Tnzi.Geometry.NormalizedRect
+Tnzi.Geometry.NormalizedRect.Bottom.get -> double
+Tnzi.Geometry.NormalizedRect.Height.get -> double
+Tnzi.Geometry.NormalizedRect.Height.init -> void
+Tnzi.Geometry.NormalizedRect.IsWithinUnitSquare() -> bool
+Tnzi.Geometry.NormalizedRect.NormalizedRect() -> void
+Tnzi.Geometry.NormalizedRect.NormalizedRect(double X, double Y, double Width, double Height) -> void
+Tnzi.Geometry.NormalizedRect.Right.get -> double
+Tnzi.Geometry.NormalizedRect.Area.get -> double
+Tnzi.Geometry.NormalizedRect.Width.get -> double
+Tnzi.Geometry.NormalizedRect.Width.init -> void
+Tnzi.Geometry.NormalizedRect.X.get -> double
+Tnzi.Geometry.NormalizedRect.X.init -> void
+Tnzi.Geometry.NormalizedRect.Y.get -> double
+Tnzi.Geometry.NormalizedRect.Y.init -> void
+static Tnzi.Geometry.NormalizedRect.Empty.get -> Tnzi.Geometry.NormalizedRect
+Tnzi.Imaging.EditedImage
+Tnzi.Imaging.EditedImage.Content.get -> byte[]!
+Tnzi.Imaging.EditedImage.Content.init -> void
+Tnzi.Imaging.EditedImage.ContentType.get -> string!
+Tnzi.Imaging.EditedImage.EditedImage() -> void
+Tnzi.Imaging.EditedImage.EditedImage(byte[]! Content, Tnzi.Imaging.ImageOutputFormat Format, int Width, int Height) -> void
+Tnzi.Imaging.EditedImage.Extension.get -> string!
+Tnzi.Imaging.EditedImage.Format.get -> Tnzi.Imaging.ImageOutputFormat
+Tnzi.Imaging.EditedImage.Format.init -> void
+Tnzi.Imaging.EditedImage.Height.get -> int
+Tnzi.Imaging.EditedImage.Height.init -> void
+Tnzi.Imaging.EditedImage.Width.get -> int
+Tnzi.Imaging.EditedImage.Width.init -> void
+Tnzi.Imaging.IImageEditor
+Tnzi.Imaging.IImageEditor.CanEdit(string! fileName) -> bool
+Tnzi.Imaging.IImageEditor.EditAsync(byte[]! source, string! sourceFileName, Tnzi.Imaging.ImageEditRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Imaging.EditedImage>!
+Tnzi.Imaging.ImageEditRequest
+Tnzi.Imaging.ImageEditRequest.BlurRegions.get -> System.Collections.Generic.IReadOnlyList<Tnzi.Geometry.NormalizedRect>!
+Tnzi.Imaging.ImageEditRequest.BlurRegions.set -> void
+Tnzi.Imaging.ImageEditRequest.BlurSigma.get -> float
+Tnzi.Imaging.ImageEditRequest.BlurSigma.set -> void
+Tnzi.Imaging.ImageEditRequest.Crop.get -> Tnzi.Geometry.NormalizedRect?
+Tnzi.Imaging.ImageEditRequest.Crop.set -> void
+Tnzi.Imaging.ImageEditRequest.ImageEditRequest() -> void
+Tnzi.Imaging.ImageEditRequest.MaxHeight.get -> int
+Tnzi.Imaging.ImageEditRequest.MaxHeight.set -> void
+Tnzi.Imaging.ImageEditRequest.MaxWidth.get -> int
+Tnzi.Imaging.ImageEditRequest.MaxWidth.set -> void
+Tnzi.Imaging.ImageEditRequest.OutputFormat.get -> Tnzi.Imaging.ImageOutputFormat?
+Tnzi.Imaging.ImageEditRequest.OutputFormat.set -> void
+Tnzi.Imaging.ImageEditRequest.Quality.get -> int
+Tnzi.Imaging.ImageEditRequest.Quality.set -> void
+Tnzi.Imaging.ImageEditRequest.RedactionColor.get -> string?
+Tnzi.Imaging.ImageEditRequest.RedactionColor.set -> void
+Tnzi.Imaging.ImageEditRequest.Redactions.get -> System.Collections.Generic.IReadOnlyList<Tnzi.Geometry.NormalizedRect>!
+Tnzi.Imaging.ImageEditRequest.Redactions.set -> void
+Tnzi.Imaging.ImageOutputFormat
+Tnzi.Imaging.ImageOutputFormat.Jpeg = 0 -> Tnzi.Imaging.ImageOutputFormat
+Tnzi.Imaging.ImageOutputFormat.Png = 1 -> Tnzi.Imaging.ImageOutputFormat
+Tnzi.Imaging.ImageOutputFormat.WebP = 2 -> Tnzi.Imaging.ImageOutputFormat
+~override Tnzi.Geometry.NormalizedRect.Equals(object obj) -> bool
+~override Tnzi.Geometry.NormalizedRect.ToString() -> string
+~override Tnzi.Imaging.EditedImage.Equals(object obj) -> bool
+~override Tnzi.Imaging.EditedImage.ToString() -> string
+override Tnzi.Geometry.NormalizedRect.GetHashCode() -> int
+override Tnzi.Imaging.EditedImage.GetHashCode() -> int
+static Tnzi.Geometry.NormalizedRect.operator !=(Tnzi.Geometry.NormalizedRect left, Tnzi.Geometry.NormalizedRect right) -> bool
+static Tnzi.Geometry.NormalizedRect.operator ==(Tnzi.Geometry.NormalizedRect left, Tnzi.Geometry.NormalizedRect right) -> bool
+static Tnzi.Imaging.EditedImage.operator !=(Tnzi.Imaging.EditedImage left, Tnzi.Imaging.EditedImage right) -> bool
+static Tnzi.Imaging.EditedImage.operator ==(Tnzi.Imaging.EditedImage left, Tnzi.Imaging.EditedImage right) -> bool
+Tnzi.Geometry.NormalizedRect.Deconstruct(out double X, out double Y, out double Width, out double Height) -> void
+Tnzi.Geometry.NormalizedRect.Equals(Tnzi.Geometry.NormalizedRect other) -> bool
+Tnzi.Imaging.EditedImage.Deconstruct(out byte[]! Content, out Tnzi.Imaging.ImageOutputFormat Format, out int Width, out int Height) -> void
+Tnzi.Imaging.EditedImage.Equals(Tnzi.Imaging.EditedImage other) -> bool
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED" -> string!
+~override Tnzi.Imaging.QrCodeScanResult.Equals(object obj) -> bool
+~override Tnzi.Imaging.QrCodeScanResult.ToString() -> string
+const Tnzi.Documents.PdfRasterRequest.DefaultDpi = 200 -> int
+const Tnzi.Imaging.QrCodeRequest.DefaultPixelsPerModule = 8 -> int
+const Tnzi.Imaging.QrCodeRequest.MinimumQuietZoneModules = 4 -> int
+override Tnzi.Imaging.QrCodeScanResult.GetHashCode() -> int
+static Tnzi.Imaging.QrCodeScanResult.NotFound.get -> Tnzi.Imaging.QrCodeScanResult
+static Tnzi.Imaging.QrCodeScanResult.operator !=(Tnzi.Imaging.QrCodeScanResult left, Tnzi.Imaging.QrCodeScanResult right) -> bool
+static Tnzi.Imaging.QrCodeScanResult.operator ==(Tnzi.Imaging.QrCodeScanResult left, Tnzi.Imaging.QrCodeScanResult right) -> bool
+Tnzi.Documents.IPdfRasterizer
+Tnzi.Documents.IPdfRasterizer.GetPageCountAsync(byte[]! source, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.Documents.IPdfRasterizer.IsAvailable.get -> bool
+Tnzi.Documents.IPdfRasterizer.RenderPageAsync(byte[]! source, int pageIndex, Tnzi.Documents.PdfRasterRequest? request = null, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Documents.DocumentImage!>!
+Tnzi.Documents.PdfRasterRequest
+Tnzi.Documents.PdfRasterRequest.Dpi.get -> int
+Tnzi.Documents.PdfRasterRequest.Dpi.set -> void
+Tnzi.Documents.PdfRasterRequest.Grayscale.get -> bool
+Tnzi.Documents.PdfRasterRequest.Grayscale.set -> void
+Tnzi.Documents.PdfRasterRequest.PdfRasterRequest() -> void
+Tnzi.Documents.PdfRasterRequest.WithAnnotations.get -> bool
+Tnzi.Documents.PdfRasterRequest.WithAnnotations.set -> void
+Tnzi.Imaging.IQrCodeGenerator
+Tnzi.Imaging.IQrCodeGenerator.Generate(Tnzi.Imaging.QrCodeRequest! request) -> Tnzi.Imaging.QrCodeImage!
+Tnzi.Imaging.IQrCodeReader
+Tnzi.Imaging.IQrCodeReader.ReadAsync(byte[]! image, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Imaging.QrCodeScanResult>!
+Tnzi.Imaging.QrCodeImage
+Tnzi.Imaging.QrCodeImage.Content.get -> byte[]!
+Tnzi.Imaging.QrCodeImage.ContentType.get -> string!
+Tnzi.Imaging.QrCodeImage.ErrorCorrection.get -> Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrCodeImage.FileExtension.get -> string!
+Tnzi.Imaging.QrCodeImage.Height.get -> int
+Tnzi.Imaging.QrCodeImage.ModuleCount.get -> int
+Tnzi.Imaging.QrCodeImage.PixelsPerModule.get -> int
+Tnzi.Imaging.QrCodeImage.QrCodeImage(byte[]! content, int version, int pixelsPerModule, int quietZoneModules, Tnzi.Imaging.QrErrorCorrection errorCorrection) -> void
+Tnzi.Imaging.QrCodeImage.QuietZoneModules.get -> int
+Tnzi.Imaging.QrCodeImage.Version.get -> int
+Tnzi.Imaging.QrCodeImage.Width.get -> int
+Tnzi.Imaging.QrCodeRequest
+Tnzi.Imaging.QrCodeRequest.BoostErrorCorrection.get -> bool
+Tnzi.Imaging.QrCodeRequest.BoostErrorCorrection.set -> void
+Tnzi.Imaging.QrCodeRequest.ErrorCorrection.get -> Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrCodeRequest.ErrorCorrection.set -> void
+Tnzi.Imaging.QrCodeRequest.MaxVersion.get -> int
+Tnzi.Imaging.QrCodeRequest.MaxVersion.set -> void
+Tnzi.Imaging.QrCodeRequest.MinVersion.get -> int
+Tnzi.Imaging.QrCodeRequest.MinVersion.set -> void
+Tnzi.Imaging.QrCodeRequest.Payload.get -> string!
+Tnzi.Imaging.QrCodeRequest.Payload.set -> void
+Tnzi.Imaging.QrCodeRequest.PixelsPerModule.get -> int
+Tnzi.Imaging.QrCodeRequest.PixelsPerModule.set -> void
+Tnzi.Imaging.QrCodeRequest.QrCodeRequest() -> void
+Tnzi.Imaging.QrCodeRequest.QuietZoneModules.get -> int
+Tnzi.Imaging.QrCodeRequest.QuietZoneModules.set -> void
+Tnzi.Imaging.QrCodeRequest.TargetSize.get -> int
+Tnzi.Imaging.QrCodeRequest.TargetSize.set -> void
+Tnzi.Imaging.QrCodeScanResult
+Tnzi.Imaging.QrCodeScanResult.Deconstruct(out string? Payload) -> void
+Tnzi.Imaging.QrCodeScanResult.Equals(Tnzi.Imaging.QrCodeScanResult other) -> bool
+Tnzi.Imaging.QrCodeScanResult.Found.get -> bool
+Tnzi.Imaging.QrCodeScanResult.Payload.get -> string?
+Tnzi.Imaging.QrCodeScanResult.Payload.init -> void
+Tnzi.Imaging.QrCodeScanResult.QrCodeScanResult() -> void
+Tnzi.Imaging.QrCodeScanResult.QrCodeScanResult(string? Payload) -> void
+Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrErrorCorrection.High = 3 -> Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrErrorCorrection.Low = 0 -> Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrErrorCorrection.Medium = 1 -> Tnzi.Imaging.QrErrorCorrection
+Tnzi.Imaging.QrErrorCorrection.Quartile = 2 -> Tnzi.Imaging.QrErrorCorrection
+const Tnzi.AI.Services.AiUtilityHttpClientNames.Fallback = "Tnzi.AiUtility" -> string!
+override Tnzi.AI.Options.AiProviderRegistryOptionsValidator.ValidateOptions(Tnzi.AI.Options.AiProviderRegistryOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.AI.Options.AiUtilityOptionsValidator.ValidateOptions(Tnzi.AI.Options.AiUtilityOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+override Tnzi.Modules.CoreServicesModule.PreConfigureServicesAsync(Tnzi.Modules.ServiceConfigurationContext! context) -> System.Threading.Tasks.Task!
+static Tnzi.AI.Extensions.AiUtilityExtensions.GenerateTitleAsync(this Tnzi.AI.Services.IAiUtility! utility, string! content, int maxLength = 50, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+static Tnzi.AI.Services.AiUtilityHttpClientNames.For(string? providerName) -> string!
+static Tnzi.Http.EgressGuard.CheckAsync(string! url, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+static Tnzi.Http.EgressGuard.CheckUriAsync(System.Uri! uri, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+Tnzi.AI.Extensions.AiUtilityExtensions
+Tnzi.AI.Options.AiProviderOptions
+Tnzi.AI.Options.AiProviderOptions.AiProviderOptions() -> void
+Tnzi.AI.Options.AiProviderOptions.ApiKey.get -> string?
+Tnzi.AI.Options.AiProviderOptions.ApiKey.set -> void
+Tnzi.AI.Options.AiProviderOptions.BaseUrl.get -> string?
+Tnzi.AI.Options.AiProviderOptions.BaseUrl.set -> void
+Tnzi.AI.Options.AiProviderOptions.DefaultModel.get -> string?
+Tnzi.AI.Options.AiProviderOptions.DefaultModel.set -> void
+Tnzi.AI.Options.AiProviderOptions.Enabled.get -> bool
+Tnzi.AI.Options.AiProviderOptions.Enabled.set -> void
+Tnzi.AI.Options.AiProviderOptions.MaxTokens.get -> int?
+Tnzi.AI.Options.AiProviderOptions.MaxTokens.set -> void
+Tnzi.AI.Options.AiProviderOptions.Models.get -> System.Collections.Generic.Dictionary<string!, string!>?
+Tnzi.AI.Options.AiProviderOptions.Models.set -> void
+Tnzi.AI.Options.AiProviderOptions.Name.get -> string!
+Tnzi.AI.Options.AiProviderOptions.Name.set -> void
+Tnzi.AI.Options.AiProviderOptions.Temperature.get -> double?
+Tnzi.AI.Options.AiProviderOptions.Temperature.set -> void
+Tnzi.AI.Options.AiProviderOptions.TimeoutSeconds.get -> int?
+Tnzi.AI.Options.AiProviderOptions.TimeoutSeconds.set -> void
+Tnzi.AI.Options.AiProviderRegistryOptions
+Tnzi.AI.Options.AiProviderRegistryOptions.AiProviderRegistryOptions() -> void
+Tnzi.AI.Options.AiProviderRegistryOptions.DefaultProvider.get -> string!
+Tnzi.AI.Options.AiProviderRegistryOptions.DefaultProvider.set -> void
+Tnzi.AI.Options.AiProviderRegistryOptions.Providers.get -> System.Collections.Generic.Dictionary<string!, Tnzi.AI.Options.AiProviderOptions!>!
+Tnzi.AI.Options.AiProviderRegistryOptions.Providers.set -> void
+Tnzi.AI.Options.AiProviderRegistryOptions.ResolveEnabled(string? providerName = null) -> Tnzi.AI.Options.AiProviderOptions?
+Tnzi.AI.Options.AiProviderRegistryOptionsValidator
+Tnzi.AI.Options.AiProviderRegistryOptionsValidator.AiProviderRegistryOptionsValidator() -> void
+Tnzi.AI.Options.AiUtilityCallOptions
+Tnzi.AI.Options.AiUtilityCallOptions.AiUtilityCallOptions() -> void
+Tnzi.AI.Options.AiUtilityCallOptions.MaxTokens.get -> int?
+Tnzi.AI.Options.AiUtilityCallOptions.MaxTokens.init -> void
+Tnzi.AI.Options.AiUtilityCallOptions.Model.get -> string?
+Tnzi.AI.Options.AiUtilityCallOptions.Model.init -> void
+Tnzi.AI.Options.AiUtilityCallOptions.Temperature.get -> double?
+Tnzi.AI.Options.AiUtilityCallOptions.Temperature.init -> void
+Tnzi.AI.Options.AiUtilityOptions
+Tnzi.AI.Options.AiUtilityOptions.AiUtilityOptions() -> void
+Tnzi.AI.Options.AiUtilityOptions.MaxTokens.get -> int
+Tnzi.AI.Options.AiUtilityOptions.MaxTokens.set -> void
+Tnzi.AI.Options.AiUtilityOptions.Model.get -> string?
+Tnzi.AI.Options.AiUtilityOptions.Model.set -> void
+Tnzi.AI.Options.AiUtilityOptions.Temperature.get -> double
+Tnzi.AI.Options.AiUtilityOptions.Temperature.set -> void
+Tnzi.AI.Options.AiUtilityOptionsValidator
+Tnzi.AI.Options.AiUtilityOptionsValidator.AiUtilityOptionsValidator() -> void
+Tnzi.AI.Services.AiUtilityHttpClientNames
+Tnzi.AI.Services.IAiUtility
+Tnzi.AI.Services.IAiUtility.ExecuteAsync(string! systemPrompt, string! userMessage, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+Tnzi.AI.Services.OpenAiCompatibleAiUtility
+Tnzi.AI.Services.OpenAiCompatibleAiUtility.ExecuteAsync(string! systemPrompt, string! userMessage, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+Tnzi.AI.Services.OpenAiCompatibleAiUtility.OpenAiCompatibleAiUtility(System.Net.Http.IHttpClientFactory! httpClientFactory, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiProviderRegistryOptions!>! providers, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiUtilityOptions!>! utilityOptions, Microsoft.Extensions.Logging.ILogger<Tnzi.AI.Services.OpenAiCompatibleAiUtility!>? logger = null) -> void
+Tnzi.Http.EgressGuard
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.Apply() -> System.Collections.Generic.IReadOnlyList<TEntity>!
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.Changes.get -> System.Collections.Generic.IReadOnlyList<(TEntity Entity, int SortOrder)>!
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.Error.get -> string?
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.ErrorStatusCode.get -> int
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.IsValid.get -> bool
+Tnzi.Domain.Entities.SortOrderPlan<TEntity>.Ordered.get -> System.Collections.Generic.IReadOnlyList<TEntity>!
+Tnzi.Domain.Entities.SortOrderPlanner
+Tnzi.Domain.Repositories.RepositoryReorderExtensions
+static Tnzi.Domain.Entities.SortOrderPlanner.Plan<TEntity, TKey>(System.Collections.Generic.IReadOnlyList<TEntity>! currentOrder, System.Collections.Generic.IReadOnlyList<TKey>! requestedIds, System.Func<TEntity, TKey>! keySelector, int startAt = 1) -> Tnzi.Domain.Entities.SortOrderPlan<TEntity>!
+static Tnzi.Domain.Repositories.RepositoryReorderExtensions.ReorderAsync<TEntity, TKey>(this Tnzi.Domain.Repositories.IRepository<TEntity!, TKey>! repository, System.Collections.Generic.IReadOnlyList<TKey>! orderedIds, System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>? scope = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.Results.Result<int>!>!
+Tnzi.Data.ReorderRequestDto
+Tnzi.Data.ReorderRequestDto.Ids.get -> System.Collections.Generic.List<System.Guid>!
+Tnzi.Data.ReorderRequestDto.Ids.set -> void
+Tnzi.Data.ReorderRequestDto.ReorderRequestDto() -> void
+Tnzi.AI.Services.IAiUtility.IsAvailable.get -> bool
+Tnzi.AI.Services.OpenAiCompatibleAiUtility.IsAvailable.get -> bool

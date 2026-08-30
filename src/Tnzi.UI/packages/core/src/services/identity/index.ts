@@ -7,4 +7,6 @@
 export * from './metadata';
 export * from './types';
 export * from './api';
+export * from './passkey';
+export * from './step-up';
 

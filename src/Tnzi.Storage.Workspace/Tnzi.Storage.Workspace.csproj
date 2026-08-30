@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Description>The human-facing file workspace for the Tnzi.NET storage module: a virtual folder tree, share links, file versions and resumable chunked uploads. Load it when people browse and organise files in a UI; a host that only stores and serves objects programmatically leaves it out and creates five fewer tables.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\Tnzi.Storage\Tnzi.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

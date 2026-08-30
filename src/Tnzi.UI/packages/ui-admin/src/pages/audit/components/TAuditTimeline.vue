@@ -502,7 +502,7 @@ onMounted(() => {
   transition: background-color 0.15s ease;
 }
 .t-audit-timeline__item:hover {
-  background: var(--tnzi-hover-color, rgba(0, 0, 0, 0.03));
+  background: var(--tnzi-hover-color, rgb(var(--tnzi-base-text-rgb) / 4%));
 }
 .t-audit-timeline__item:focus-visible {
   outline: 2px solid var(--tnzi-primary, #6d5ce7);

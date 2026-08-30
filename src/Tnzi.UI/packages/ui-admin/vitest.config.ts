@@ -6,11 +6,11 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: [
-      { find: '@', replacement: resolve(__dirname, 'src') },
+      { find: '@', replacement: resolve(import.meta.dirname, 'src') },
       // Stub virtual:uno.css so @tnzi/ui entry can be imported in tests
-      { find: 'virtual:uno.css', replacement: resolve(__dirname, '__tests__/stubs/empty.css') },
-      { find: '@tnzi/ui', replacement: resolve(__dirname, '../ui/src') },
-      { find: '@tnzi/core', replacement: resolve(__dirname, '../core/src') },
+      { find: 'virtual:uno.css', replacement: resolve(import.meta.dirname, '__tests__/stubs/empty.css') },
+      { find: '@tnzi/ui', replacement: resolve(import.meta.dirname, '../ui/src') },
+      { find: '@tnzi/core', replacement: resolve(import.meta.dirname, '../core/src') },
       // @tnzi/ui-ai is not built in test envs (heavy vue-flow deps).
       // Tests vi.mock(...) for bespoke stubs; the aliases here just satisfy
       // vite's resolver so dynamic import() in lazy-load shells doesn't fail at
@@ -18,8 +18,8 @@ export default defineConfig({
       // The `/workflow` subpath must come FIRST: vite string aliases match by
       // prefix, so the bare entry would otherwise rewrite it to
       // `<stub>/workflow` and fail to resolve.
-      { find: '@tnzi/ui-ai/workflow', replacement: resolve(__dirname, '__tests__/stubs/ui-ai.ts') },
-      { find: '@tnzi/ui-ai', replacement: resolve(__dirname, '__tests__/stubs/ui-ai.ts') },
+      { find: '@tnzi/ui-ai/workflow', replacement: resolve(import.meta.dirname, '__tests__/stubs/ui-ai.ts') },
+      { find: '@tnzi/ui-ai', replacement: resolve(import.meta.dirname, '__tests__/stubs/ui-ai.ts') },
       // Enable runtime template compilation so stub components using
       // `template: '...'` strings render correctly under vue-test-utils.
       { find: /^vue$/, replacement: 'vue/dist/vue.esm-bundler.js' },

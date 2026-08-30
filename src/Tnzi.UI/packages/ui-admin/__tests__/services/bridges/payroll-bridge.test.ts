@@ -7,7 +7,10 @@ function mockClient() {
   const ok = <T>(data: T) => ({ data, succeeded: true, success: true, code: 200, message: '' })
   return {
     get: vi.fn(async (url: string) =>
-      url.includes('/payslips') || url.includes('/assignments') || url.endsWith('/country-packs')
+      url.includes('/payslips') ||
+      url.endsWith('/inputs') ||
+      url.includes('/assignments') ||
+      url.endsWith('/country-packs')
         ? ok([])
         : ok({ items: [{ id: 'x1' }], totalCount: 1, pageIndex: 1, pageSize: 20 }),
     ),
@@ -62,6 +65,26 @@ describe('payroll-bridge', () => {
     expect(client.post).toHaveBeenCalledWith('/admin/payroll/runs/r1/post')
     expect(client.post).toHaveBeenCalledWith('/admin/payroll/runs/r1/void')
     expect(client.post).toHaveBeenCalledWith('/admin/payroll/runs/r1/pay', expect.objectContaining({ paymentAccountId: 'a1' }))
+  })
+
+  it('runs.inputs / setInput / deleteInput hit the run-level one-time input routes', async () => {
+    const client = mockClient()
+    const bridge = createPayrollBridge({ client })
+
+    // 一次性输入挂在**批次**上,不是挂在会被重建的 payslip 上。
+    await bridge.runs.inputs('r1')
+    expect(client.get).toHaveBeenCalledWith('/admin/payroll/runs/r1/inputs')
+
+    await bridge.runs.setInput('r1', { employeeId: 'e1', componentId: 'c1', amount: 5000, note: 'bonus' })
+    expect(client.post).toHaveBeenCalledWith('/admin/payroll/runs/r1/inputs', {
+      employeeId: 'e1',
+      componentId: 'c1',
+      amount: 5000,
+      note: 'bonus',
+    })
+
+    await bridge.runs.deleteInput('r1', 'i1')
+    expect(client.delete).toHaveBeenCalledWith('/admin/payroll/runs/r1/inputs/i1')
   })
 
   it('runs.updatePayslipInputs PUTs the nested payslip inputs route', async () => {

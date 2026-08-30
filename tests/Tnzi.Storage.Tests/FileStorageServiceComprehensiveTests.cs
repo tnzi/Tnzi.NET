@@ -1,18 +1,14 @@
-﻿
+
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
-/// FileStorageService 及拆分后各专职服务的全面单元测试
-/// 覆盖所有功能点，确保代码完整性
+/// FileStorageService 与 FileReferenceService 的全面单元测试。
+/// 分享 / 版本 / 分片上传三组随实现搬到了 Tnzi.Storage.Workspace.Tests。
 /// </summary>
 public class FileStorageServiceComprehensiveTests
 {
     private readonly Mock<IRepository<FileRecord, Guid>> _mockFileRepository;
     private readonly Mock<IRepository<FileReference, Guid>> _mockReferenceRepository;
-    private readonly Mock<IRepository<FileVersion, Guid>> _mockVersionRepository;
-    private readonly Mock<IRepository<Entities.FileShare, Guid>> _mockShareRepository;
-    private readonly Mock<IRepository<FileUploadSession, Guid>> _mockUploadSessionRepository;
-    private readonly Mock<IRepository<FileChunk, Guid>> _mockChunkRepository;
     private readonly Mock<IFileStorage> _mockStorage;
     private readonly Mock<IServiceProvider> _mockServiceProvider;
     private readonly StorageOptions _options;
@@ -21,10 +17,6 @@ public class FileStorageServiceComprehensiveTests
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
         _mockReferenceRepository = new Mock<IRepository<FileReference, Guid>>();
-        _mockVersionRepository = new Mock<IRepository<FileVersion, Guid>>();
-        _mockShareRepository = new Mock<IRepository<Entities.FileShare, Guid>>();
-        _mockUploadSessionRepository = new Mock<IRepository<FileUploadSession, Guid>>();
-        _mockChunkRepository = new Mock<IRepository<FileChunk, Guid>>();
         _mockStorage = new Mock<IFileStorage>();
         _mockServiceProvider = new Mock<IServiceProvider>();
 
@@ -34,6 +26,14 @@ public class FileStorageServiceComprehensiveTests
             .Returns(new Mock<ILogger>().Object);
         _mockServiceProvider.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
             .Returns(loggerFactory.Object);
+
+        // 会话归属判定要问「当前用户是谁」——这份夹具此前从不注册它，
+        // 于是上传会话的四个端点从来没有在「有人在操作」的语境下被测过。
+        var currentUser = new Mock<ICurrentUser>();
+        currentUser.Setup(u => u.Id).Returns(TestHelper.DefaultTestUserId);
+        currentUser.Setup(u => u.IsAuthenticated).Returns(true);
+        _mockServiceProvider.Setup(sp => sp.GetService(typeof(ICurrentUser)))
+            .Returns(currentUser.Object);
 
         _options = new StorageOptions
         {
@@ -55,7 +55,8 @@ public class FileStorageServiceComprehensiveTests
             TestFileAccessAuthorizer.AllowAll(),
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new UploadGuard(optionsMonitor.Object));
     }
 
     private FileReferenceService CreateReferenceService()
@@ -63,38 +64,6 @@ public class FileStorageServiceComprehensiveTests
         return new FileReferenceService(
             _mockFileRepository.Object,
             _mockReferenceRepository.Object,
-            _mockServiceProvider.Object);
-    }
-
-    private FileShareService CreateShareService()
-    {
-        return new FileShareService(
-            _mockShareRepository.Object,
-            _mockFileRepository.Object,
-            TestFileAccessAuthorizer.AllowAll(),
-            new FileAccessGrantContext(),
-            new StaticOptionsMonitor<StorageOptions>(_options),
-            _mockServiceProvider.Object);
-    }
-
-    private FileVersionService CreateVersionService()
-    {
-        return new FileVersionService(
-            _mockVersionRepository.Object,
-            _mockFileRepository.Object,
-            _mockStorage.Object,
-            TestFileAccessAuthorizer.AllowAll(),
-            _mockServiceProvider.Object);
-    }
-
-    private FileChunkUploadService CreateChunkUploadService()
-    {
-        return new FileChunkUploadService(
-            _mockUploadSessionRepository.Object,
-            _mockChunkRepository.Object,
-            _mockFileRepository.Object,
-            _mockStorage.Object,
-            new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object);
     }
 
@@ -677,115 +646,7 @@ public class FileStorageServiceComprehensiveTests
 
     #endregion
 
-    #region 文件版本管理测试（FileVersionService）
 
-    #endregion
-
-    #region 文件分享测试（FileShareService）
-
-    [Fact]
-    public async Task CreateShareAsync_CreatesShareWithToken()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord { Id = fileId };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        _mockShareRepository.Setup(r => r.InsertAsync(It.IsAny<Entities.FileShare>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.CreateShareAsync(fileId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(fileId, result.Data.FileId);
-        Assert.False(string.IsNullOrEmpty(result.Data.ShareToken));
-        Assert.True(result.Data.IsEnabled);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsTrue_WhenShareIsValid()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true,
-            ExpiresAt = DateTime.UtcNow.AddDays(1),
-            RequirePassword = false
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.True(result.Data);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsFalse_WhenPasswordIncorrect()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var correctPassword = "correct";
-        var incorrectPassword = "wrong";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true,
-            RequirePassword = true,
-            PasswordHash = ComputePasswordHash(correctPassword)
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken, incorrectPassword);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.False(result.Data);
-    }
-
-    [Fact]
-    public async Task RevokeShareAsync_DisablesShare()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Entities.FileShare, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-        _mockShareRepository.Setup(r => r.UpdateAsync(share, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.RevokeShareAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.False(share.IsEnabled);
-        _mockShareRepository.Verify(r => r.UpdateAsync(share, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    #endregion
 
     #region 文件压缩测试
 
@@ -879,102 +740,6 @@ public class FileStorageServiceComprehensiveTests
 
     #endregion
 
-    #region 分块上传测试（FileChunkUploadService）
-
-    [Fact]
-    public async Task InitiateChunkedUploadAsync_CreatesUploadSession()
-    {
-        // Arrange
-        var service = CreateChunkUploadService();
-        var fileName = "large.jpg";
-        var totalSize = 10 * 1024 * 1024; // 10MB
-        var chunkSize = 5 * 1024 * 1024; // 5MB
-
-        _mockUploadSessionRepository.Setup(r => r.InsertAsync(It.IsAny<FileUploadSession>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.InitiateChunkedUploadAsync(fileName, totalSize, chunkSize);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(fileName, result.Data.FileName);
-        Assert.Equal(totalSize, result.Data.TotalSize);
-        Assert.Equal(chunkSize, result.Data.ChunkSize);
-        Assert.Equal(2, result.Data.TotalChunks);
-        Assert.False(result.Data.IsCompleted);
-    }
-
-    [Fact]
-    public async Task CancelChunkedUploadAsync_CancelsSession()
-    {
-        // Arrange
-        var service = CreateChunkUploadService();
-        var sessionId = Guid.NewGuid();
-        var session = new FileUploadSession
-        {
-            Id = sessionId,
-            IsCompleted = false,
-            IsCancelled = false
-        };
-        var chunks = new[]
-        {
-            new FileChunk { ChunkPath = "path/to/chunk0" }
-        };
-
-        _mockUploadSessionRepository.Setup(r => r.GetAsync(sessionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(session);
-        // Mock ToListAsync directly since Where is an extension method
-        _mockChunkRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileChunk, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(chunks.ToList());
-        _mockStorage.Setup(s => s.DeleteAsync(It.IsAny<string>())).ReturnsAsync(true);
-        _mockChunkRepository.Setup(r => r.DeleteAsync(It.IsAny<FileChunk>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _mockUploadSessionRepository.Setup(r => r.UpdateAsync(session, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        await service.CancelChunkedUploadAsync(sessionId);
-
-        // Assert
-        Assert.True(session.IsCancelled);
-    }
-
-    [Fact]
-    public async Task GetUploadProgressAsync_ReturnsProgress()
-    {
-        // Arrange
-        var service = CreateChunkUploadService();
-        var sessionId = Guid.NewGuid();
-        var session = new FileUploadSession
-        {
-            Id = sessionId,
-            FileName = "test.jpg",
-            TotalSize = 10000,
-            UploadedSize = 5000,
-            TotalChunks = 2,
-            UploadedChunks = 1,
-            IsCompleted = false,
-            IsCancelled = false
-        };
-
-        _mockUploadSessionRepository.Setup(r => r.GetAsync(sessionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(session);
-
-        // Act
-        var result = await service.GetUploadProgressAsync(sessionId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(sessionId, result.Data.UploadSessionId);
-        Assert.Equal(10000, result.Data.TotalSize);
-        Assert.Equal(5000, result.Data.UploadedSize);
-        Assert.Equal(50.0, result.Data.ProgressPercentage, 1);
-    }
-
-    #endregion
 
     #region 辅助方法
 

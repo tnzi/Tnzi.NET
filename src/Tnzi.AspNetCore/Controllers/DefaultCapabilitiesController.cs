@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
-
 namespace Tnzi.AspNetCore.Controllers;
 
 /// <summary>

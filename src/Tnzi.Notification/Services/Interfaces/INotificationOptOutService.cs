@@ -54,6 +54,11 @@ public interface INotificationOptOutService
     /// 从一批地址里滤掉已退订的，返回仍可发送的那些（保持输入顺序，去重）。
     /// 群发前应当调这个，而不是逐个判定。
     /// </summary>
+    /// <remarks>
+    /// <b>返回的是传进来的那个原样地址</b>，不是内部用于比对的归一化形态：调用方拿着返回值
+    /// 要跟自己手里的收件人对上号。地址按渠道归一化后比对（邮箱去空白加小写，
+    /// 传真另走号码归一化），所以写法不同的同一个地址算同一个人，去重也按这个口径。
+    /// </remarks>
     Task<IReadOnlyList<string>> FilterAllowedAsync(
         IEnumerable<string> addresses,
         NotificationType channel,

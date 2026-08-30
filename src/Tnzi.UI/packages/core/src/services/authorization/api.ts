@@ -6,6 +6,13 @@
  *   - /admin/user-functions          (DefaultUserFunctionAdminController)
  *   - /admin/data-auth               (DefaultDataAuthAdminController)
  *   - /admin/function-authorization  (DefaultFunctionAuthorizationAdminController)
+ *
+ * `/admin/data-auth` (the entity-info + entity-role surface below) is served by the
+ * optional `Tnzi.Authorization.DataAuth` sub-module, not by `Tnzi.Authorization`
+ * itself. Routes, DTO shapes and permission codes are unchanged by that split, so
+ * nothing here differs - but a host that did not load the package answers 404, and
+ * the admin route for that page carries `meta.moduleGate: 'authorization-dataauth'`
+ * so the menu entry is hidden instead of turning into a dead link.
  */
 
 import type { HttpClient } from '../../http/http'
@@ -28,6 +35,9 @@ import type {
   PermissionComparisonDto,
   CloneRolePermissionsRequest,
   AccessProfileDto,
+  DualControlRequestDto,
+  DualControlQueryDto,
+  DualControlDecisionDto,
 } from './types'
 
 const MODULES_BASE = '/admin/modules'
@@ -35,6 +45,7 @@ const MODULE_FUNCTIONS_BASE = '/admin/module-functions'
 const ROLE_FUNCTIONS_BASE = '/admin/role-functions'
 const USER_FUNCTIONS_BASE = '/admin/user-functions'
 const DATA_AUTH_BASE = '/admin/data-auth'
+const DUAL_CONTROL_BASE = '/admin/dual-control'
 const FUNCTION_AUTH_BASE = '/admin/function-authorization'
 
 // ─── Module Function (permission) API ────────────────────────────────────────
@@ -302,5 +313,38 @@ export function useAdminFunctionAuthorizationApi(client: HttpClient) {
       client.get<boolean>(`${FUNCTION_AUTH_BASE}/check`, {
         params: { userId, permissionName },
       }),
+  }
+}
+
+/**
+ * Dual-control (four-eyes) approval queue.
+ *
+ * ★ There is deliberately no "request" call: initiating happens inside a
+ * business action (it carries that action's parameter snapshot), so the
+ * business module's own endpoint calls `IDualControlService.RequestAsync`.
+ * Reviewing, approving, rejecting and cancelling are the generic half.
+ *
+ * Approving needs two things: `authorization.dualControl.approve` to reach the
+ * endpoint, and `{operation}.approve` - checked in the service layer - to
+ * decide that particular kind of action. The second one is what keeps an
+ * approver of expense reports from also approving account deletions.
+ */
+export function useAdminDualControlApi(client: HttpClient) {
+  return {
+    /** Page through requests. */
+    query: (params?: DualControlQueryDto) =>
+      client.get<PagedList<DualControlRequestDto>>(DUAL_CONTROL_BASE, { params }),
+    /** Get one request. */
+    get: (id: string) =>
+      client.get<DualControlRequestDto>(`${DUAL_CONTROL_BASE}/${id}`),
+    /** Approve a request. Fails when you are the requester. */
+    approve: (id: string, input?: DualControlDecisionDto) =>
+      client.post<DualControlRequestDto>(`${DUAL_CONTROL_BASE}/${id}/approve`, input ?? {}),
+    /** Reject a request. Same permission as approving. */
+    reject: (id: string, input?: DualControlDecisionDto) =>
+      client.post<DualControlRequestDto>(`${DUAL_CONTROL_BASE}/${id}/reject`, input ?? {}),
+    /** Withdraw your own pending request. */
+    cancel: (id: string) =>
+      client.post(`${DUAL_CONTROL_BASE}/${id}/cancel`),
   }
 }

@@ -176,6 +176,21 @@ const innerStyle = computed<CSSProperties>(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Only bites once the bar stacks below - at that point the actions own the
+     full row, so a wide control plus a button wraps instead of overflowing. */
+  flex-wrap: wrap;
+}
+/* Phones: the actions drop to their own row under the title, the same way
+   TRecordHeader handles its bar. Without this, anything wider than a couple of
+   buttons in `#actions` (a date-range picker plus an export button, say) leaves
+   no room for the heading - which is `min-width: 0`, so it collapses to one
+   word per line - and still overflows the bar's right edge, where the enclosing
+   panel clips it away. `#actions` is not restricted to narrow buttons. */
+@media (max-width: 640px) {
+  .t-detail-section__bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 /* Body claims the rest of the panel height and owns the scroll. */
 .t-detail-section__body {

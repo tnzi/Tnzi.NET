@@ -16,6 +16,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { ReorderRequest } from '../../types/api';
 import type {
   // Chat
   ChatRequestDto,
@@ -528,6 +529,17 @@ export function useAdminProviderApi(client: HttpClient) {
     delete: (id: string) =>
       client.delete(`${base}/entities/${id}`),
 
+    /**
+     * Reorder the provider list (drag-and-drop).
+     *
+     * Writes display order only. `Priority` is untouched: that one decides which
+     * row wins at runtime when several share a name, and rearranging a list
+     * should not change which provider actually gets called. Configuration-source
+     * entries have no row and cannot take part.
+     */
+    reorder: (data: ReorderRequest) =>
+      client.post<void>(`${base}/reorder`, data),
+
     /** Test Provider connection (shallow probe) */
     test: (id: string) =>
       client.post<ProviderTestResultDto>(`${base}/entities/${id}/test`, {}),
@@ -898,6 +910,15 @@ export function useAdminSkillCategoryApi(client: HttpClient) {
     /** Get skills in a category */
     getSkillsByCategory: (categoryId: string) =>
       client.get<SkillSummaryDto[]>(`${base}/${categoryId}/skills`),
+
+    /**
+     * Reorder categories under one parent (drag-and-drop).
+     * `ids` is the visible order; categories outside those slots keep their positions.
+     */
+    reorder: (data: ReorderRequest, parentId?: string | null) =>
+      client.post<void>(`${base}/reorder`, data, {
+        params: parentId ? { parentId } : undefined,
+      }),
   };
 }
 

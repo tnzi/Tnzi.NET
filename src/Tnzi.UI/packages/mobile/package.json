@@ -56,19 +56,19 @@
   },
   "dependencies": {
     "@tnzi/core": "workspace:*",
-    "vant": "^4.9.24"
+    "vant": "^4.10.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.7",
+    "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
-    "happy-dom": "^20.10.6",
+    "happy-dom": "^20.11.6",
     "pinia": "catalog:",
     "typescript": "^6.0.3",
-    "unocss": "^66.7.2",
-    "vite": "^7.3.5",
-    "vitest": "^4.1.9",
+    "unocss": "^66.8.0",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.11",
     "vue": "catalog:",
-    "vue-tsc": "^3.3.5"
+    "vue-tsc": "^3.3.10"
   },
   "peerDependencies": {
     "pinia": ">=3.0.0",

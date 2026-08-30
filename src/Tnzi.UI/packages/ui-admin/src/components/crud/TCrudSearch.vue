@@ -2,7 +2,7 @@
   <NCard
     :bordered="false"
     size="small"
-    class="t-crud-search t-crud-page__search-card t-crud-page__search"
+    class="t-crud-search t-crud-page__search-card t-crud-page__search t-surface-card"
   >
     <!-- ── Simple row - ALWAYS visible ──
          Keyword input + Search + (toggle) "Advanced ▾". Clicking the
@@ -133,11 +133,14 @@ const effectiveSearchPlaceholder = computed(
 </script>
 
 <style scoped>
-/* Card chrome - bordered=false NCard still carries a soft shadow +
-   8px border-radius to match soybean. */
+/* Card chrome - the NCard is `bordered=false` so the card tier owns both
+   halves of the chrome (see `@tnzi/ui/styles/variables.css`). */
 .t-crud-page__search-card {
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  /* Paints the tier token so the nesting step in `surfaces.css` reaches it. */
+  background: var(--tnzi-surface-card-bg);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   flex-shrink: 0;
 }
 

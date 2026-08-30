@@ -8,18 +8,23 @@ namespace Tnzi.Storage.Services;
 /// 以避免改变 <c>FileStorageService.SaveAsync</c> 的去重语义。
 /// Versions are created explicitly via <see cref="CreateVersionAsync"/>; an overwriting upload does not
 /// automatically create a version, so the dedup semantics of the save path remain unchanged.
+///
+/// ★ 契约留在父模块、实现在 <c>Tnzi.Storage.Workspace</c>（理由同 <see cref="IFileShareService"/>：
+/// 版本端点长在父模块的 <c>files</c> 路由上）。故签名里不出现 <c>FileVersion</c> 实体 ——
+/// 它随 <c>Storage_Version</c> 表搬进了子模块，这里一律走 <see cref="FileVersionDto"/>。
+/// <c>FileRecord</c> 仍可出现：那是父模块自己的核心表。
 /// </remarks>
 public interface IFileVersionService
 {
     /// <summary>
     /// 创建文件版本
     /// </summary>
-    Task<Result<FileVersion>> CreateVersionAsync(Guid fileId, Stream stream, string? description = null, CancellationToken cancellationToken = default);
+    Task<Result<FileVersionDto>> CreateVersionAsync(Guid fileId, Stream stream, string? description = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取文件版本列表
     /// </summary>
-    Task<Result<IEnumerable<FileVersion>>> GetVersionsAsync(Guid fileId, CancellationToken cancellationToken = default);
+    Task<Result<IEnumerable<FileVersionDto>>> GetVersionsAsync(Guid fileId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 恢复指定版本

@@ -56,10 +56,12 @@ export function useRouteProgress(router: Router): void {
       })
     }
 
-    router.beforeEach((_to, _from, next) => {
+    // No third parameter on purpose: vue-router 5.2 deprecated that callback
+    // (R0025) and only routes the return-value protocol to guards declaring
+    // fewer than three parameters. Returning nothing means "continue".
+    router.beforeEach(() => {
       seq += 1
       root.dataset.tnziRouteLoading = 'on'
-      next()
     })
 
     router.afterEach(() => scheduleFinish(seq))

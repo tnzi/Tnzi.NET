@@ -1,8 +1,8 @@
 namespace Tnzi.Identity.Entities;
 
 /// <summary>
-/// 双因素认证验证码实体
-/// 用于 2FA 验证（已登录用户）和验证码登录（用户可能不存在）两种场景
+/// 一次性验证码实体。承载登录 2FA、免密验证码登录、找回密码、快速注册、换绑联系方式、
+/// 敏感操作二次确认等多个流程的码 —— 由 <see cref="Purpose"/> 区分，**不同用途之间不可互换**。
 /// </summary>
 public class TwoFactorCode : EntityBase<Guid>, IHasCreationTime
 {
@@ -27,6 +27,12 @@ public class TwoFactorCode : EntityBase<Guid>, IHasCreationTime
     /// 获取或设置 验证方式（SMS/Email）
     /// </summary>
     public TwoFactorType Type { get; set; }
+
+    /// <summary>
+    /// 获取或设置 用途。★ 验码时**精确匹配**：为某个流程发出的码不能用于另一个流程。
+    /// 详见 <see cref="VerificationCodePurpose"/>（含 <c>Unknown</c> 为何永不匹配）。
+    /// </summary>
+    public VerificationCodePurpose Purpose { get; set; }
 
     /// <summary>
     /// 获取或设置 接收地址（手机号或邮箱）

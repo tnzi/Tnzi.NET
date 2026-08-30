@@ -80,9 +80,10 @@ public class AuthService : ApplicationService, IAuthService
             AllowSmsLogin = signIn.AllowSmsLogin,
             UseEmailAsUserName = signIn.UseEmailAsUserName,
 
-            EnableCodeLogin = otp.EnableSms || otp.EnableEmail,
-            CodeLoginViaSms = otp.EnableSms,
-            CodeLoginViaEmail = otp.EnableEmail,
+            // 与渠道开关是「与」的关系：登录方式本身要开着，且至少有一条渠道能送达。
+            EnableCodeLogin = signIn.AllowCodeLogin && (otp.EnableSms || otp.EnableEmail),
+            CodeLoginViaSms = signIn.AllowCodeLogin && otp.EnableSms,
+            CodeLoginViaEmail = signIn.AllowCodeLogin && otp.EnableEmail,
 
             EnableRegistration = registration.EnableQuickRegisterEmail || registration.EnableQuickRegisterSms,
             RegisterViaEmail = registration.EnableQuickRegisterEmail,
@@ -94,6 +95,8 @@ public class AuthService : ApplicationService, IAuthService
 
             EnableCaptchaOnLogin = captcha.EnableCaptchaOnLogin,
             EnableCaptchaOnRegister = captcha.EnableCaptchaOnRegister,
+
+            EnablePasskey = opt.Passkey.Enabled,
 
             OAuthProviders = BuildEnabledOAuthProviders(opt.OAuth),
         };
@@ -261,6 +264,83 @@ public class AuthService : ApplicationService, IAuthService
 
         return Result<TokenResult>.Success(tokenResult);
     }
+
+    /// <inheritdoc />
+    public async Task<Result<TokenResult>> IssueTokenAsync(User user, LoginMethod method, TwoFactorType? satisfiedFactor = null)
+    {
+        Check.NotNull(user);
+
+        // 与 LoginWithRefreshTokenAsync 的后半段**逐步同构**，这是刻意的：
+        // 凭据校验可以发生在别处（passkey 的断言由运行时完成），但校验通过之后的每一步
+        // 都必须与密码登录一致，否则准入策略、多设备策略、会话绑定、登录日志
+        // 会在每一条新增的登录方式上重新失效一遍。
+
+        // ★ 账号锁定 / 停用由守卫链上的 LockedAccountLoginGuard 判定，不在这里单独查一遍：
+        // 那道检查在密码路径上是 SignInManager 顺手做掉的，凭据校验挪到别处就跟着消失，
+        // 所以它被收口成了框架内置守卫 —— 一处实现覆盖全部签发路径。
+        var guardResult = await RunLoginGuardsAsync(user, method, loginIdentifier: null);
+        if (!guardResult.Allowed)
+        {
+            return Fail<TokenResult>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+        }
+
+        // 2FA 照常判定：框架不替部署方决定「passkey 是否已经算两个因子」。
+        if (await _userManager.GetTwoFactorEnabledAsync(user))
+        {
+            var supportedTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+
+            // ★ 扣除本次校验已经证明过的那个因子 —— 再问一次问的是同一件事。
+            // 扣的是**一个**因子，不是整张表：还开着别的方式就照样挑战。
+            var challengeTypes = satisfiedFactor.HasValue
+                ? supportedTypes.Where(t => t != satisfiedFactor.Value).ToList()
+                : supportedTypes;
+
+            if (challengeTypes.Count > 0)
+            {
+                return await Handle2FAChallengeAsync<TokenResult>(user, challengeTypes);
+            }
+
+            if (supportedTypes.Count > 0)
+            {
+                LogInformation(
+                    "User {UserId} signed in via {Method} using {Factor}, which already satisfies every enabled two-factor method; no further challenge.",
+                    user.Id, method, satisfiedFactor);
+            }
+            else
+            {
+                LogInformation("User {UserId} has 2FA enabled but no usable method (all channels disabled); signing in without challenge.", user.Id);
+            }
+        }
+
+        var sessionResult = await EstablishLoginSessionAsync(user);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<TokenResult>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
+        }
+
+        // 刷新令牌照部署配置签发。此前这里硬编码 true，于是把 EnableRefreshToken 关掉的部署
+        // 在这条出口上仍会拿到刷新令牌 —— 一个配置项对不同登录方式给出不同结果。
+        var tokenResult = await GenerateAndSaveTokenResultAsync(
+            user, sessionResult.Data, enableRefreshToken: IdentityOptions.Jwt.EnableRefreshToken);
+
+        var ipAddress = ScopedContext?.ClientIpAddress;
+        var userAgent = ScopedContext?.UserAgent;
+        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, ResolveLoginProvider(method));
+        await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
+
+        return Result<TokenResult>.Success(tokenResult);
+    }
+
+    /// <summary>
+    /// 登录方式到登录日志里 provider 名的映射。
+    /// </summary>
+    private static string ResolveLoginProvider(LoginMethod method) => method switch
+    {
+        LoginMethod.Passkey => IdentityConstants.LoginProvider.Passkey,
+        LoginMethod.VerificationCode => IdentityConstants.LoginProvider.CodeLogin,
+        LoginMethod.Registration => IdentityConstants.LoginProvider.Registration,
+        _ => IdentityConstants.LoginProvider.JWT
+    };
 
     /// <summary>
     /// 公共的登录验证逻辑
@@ -498,9 +578,9 @@ public class AuthService : ApplicationService, IAuthService
             {
                 return Fail<TwoFactorChallengeDto>("Phone number is not set", 400);
             }
-            var smsResult = await _twoFactorService.SendSmsCodeAsync(userId, user.PhoneNumber);
+            var smsResult = await _twoFactorService.SendSmsCodeAsync(userId, user.PhoneNumber, VerificationCodePurpose.TwoFactor);
             sent = smsResult.Succeeded;
-            maskedAddress = MaskPhone(user.PhoneNumber);
+            maskedAddress = ContactAddressMasking.MaskPhone(user.PhoneNumber);
         }
         else if (input.Type == TwoFactorType.Email)
         {
@@ -508,9 +588,9 @@ public class AuthService : ApplicationService, IAuthService
             {
                 return Fail<TwoFactorChallengeDto>("Email is not set", 400);
             }
-            var emailResult = await _twoFactorService.SendEmailCodeAsync(userId, user.Email);
+            var emailResult = await _twoFactorService.SendEmailCodeAsync(userId, user.Email, VerificationCodePurpose.TwoFactor);
             sent = emailResult.Succeeded;
-            maskedAddress = MaskEmail(user.Email);
+            maskedAddress = ContactAddressMasking.MaskEmail(user.Email);
         }
         else
         {
@@ -615,7 +695,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 验证2FA验证码
-        var isValid = await _twoFactorService.VerifyCodeAsync(userId, input.Code, input.Type);
+        var isValid = await _twoFactorService.VerifyCodeAsync(userId, input.Code, input.Type, VerificationCodePurpose.TwoFactor);
         if (!isValid.Succeeded)
         {
             await PublishLoginFailedEventAsync(userId, user.UserName, "Invalid 2FA code", ipAddress, userAgent);
@@ -1010,6 +1090,31 @@ public class AuthService : ApplicationService, IAuthService
                 400);
         }
 
+        // 图形验证码校验（启用登录验证码时，发出短信/邮件之前先过图形验证码）。
+        // ★ 与密码登录的「自适应」刻意不同，这里**无条件**要求：发码这条路径没有「失败次数」
+        // 可以累计（发码本身不会失败），而它恰恰是唯一一条每次调用都真的产生短信/邮件费用的入口。
+        // 少了这道门，开着 EnableCaptchaOnLogin 的部署仍然留着一个无验证码的发信入口。
+        // 图形验证码校验（启用登录验证码时，发出短信/邮件之前先过图形验证码）。
+        // ★ 与密码登录的「自适应」刻意不同，这里**无条件**要求：发码这条路径没有「失败次数」
+        // 可以累计（发码本身不会失败），而它恰恰是唯一一条每次调用都真的产生短信/邮件费用的入口。
+        // 少了这道门，开着 EnableCaptchaOnLogin 的部署仍然留着一个无验证码的发信入口。
+        var captchaOptions = IdentityOptions.Captcha;
+        if (captchaOptions.EnableCaptchaOnLogin)
+        {
+            var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "login");
+            if (!captchaValid)
+            {
+                return await BuildCaptchaRequiredResultAsync<string>("login");
+            }
+        }
+
+        // ★ 登录方式本身被关掉时，在**发码之前**就拒绝：这是端点自己的门，
+        // 不能只靠 /auth/config 让前端隐藏入口 —— 隐藏的是入口，端点仍然可达。
+        if (!IdentityOptions.SignIn.AllowCodeLogin)
+        {
+            return Fail<string>("Verification-code sign-in is not enabled", 400);
+        }
+
         // 检查配置
         var otpOptions = IdentityOptions.Otp;
         if (input.Type == TwoFactorType.Email && !otpOptions.EnableEmail)
@@ -1035,7 +1140,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 发送验证码
-        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, userId);
+        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, VerificationCodePurpose.CodeLogin, userId);
         if (!result.Succeeded)
         {
             return Fail<string>(result.Message ?? "Failed to send verification code", result.Code ?? 500);
@@ -1050,6 +1155,13 @@ public class AuthService : ApplicationService, IAuthService
         if (_twoFactorService == null)
         {
             return Fail<CodeLoginResultDto>("Two-factor service is not available", 500);
+        }
+
+        // 与发码入口同一道门。两处都要有：关掉开关之后，手里还攥着一枚未用码的人
+        // 依然能直接调这里，只挡发码等于给那些码留了一扇后门。
+        if (!IdentityOptions.SignIn.AllowCodeLogin)
+        {
+            return Fail<CodeLoginResultDto>("Verification-code sign-in is not enabled", 400);
         }
 
         var ipAddress = ScopedContext?.ClientIpAddress;
@@ -1067,8 +1179,9 @@ public class AuthService : ApplicationService, IAuthService
                 400);
         }
 
-        // 验证验证码
-        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(address, input.Code, input.Type);
+        // 验证验证码。★ 用途限定为 CodeLogin：为找回密码 / 换绑 / 二次确认发出的码到不了这里。
+        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(
+            address, input.Code, input.Type, VerificationCodePurpose.CodeLogin);
         if (!verifyResult.Succeeded)
         {
             await PublishLoginFailedEventAsync(null, address, "Invalid verification code", ipAddress, userAgent);
@@ -1130,7 +1243,28 @@ public class AuthService : ApplicationService, IAuthService
             }
         }
 
-        // 检查用户是否需要设置密码
+        // ★★★ 签发一律经 IssueTokenAsync：登录守卫 → 2FA 判定 → 会话协调器 → 带 session_id
+        // 的令牌 → 登录成功事件，与 passkey 走同一条出口。此前这里手工复制了它的后半段、
+        // 唯独漏掉 2FA 那一步 —— 于是开着 TOTP 的账号只要能收到一封邮件就绕过了 TOTP，
+        // 强度阶梯还是反的（passkey 这种强凭据要过 2FA，邮箱验证码反而不用）。
+        //
+        // satisfiedFactor 传本次真正用掉的那个渠道：邮箱验证码登录已经证明「能收这个邮箱」，
+        // 邮箱 2FA 再问一遍问的是同一件事（消除冗余）；TOTP / 短信仍留在挑战列表里（不放宽）。
+        var issueResult = await IssueTokenAsync(user!, LoginMethod.VerificationCode, satisfiedFactor: input.Type);
+        if (!issueResult.Succeeded)
+        {
+            // 2FA 挑战也从这里出来（403 + IDENTITY_2FA_REQUIRED + 临时令牌）。
+            // ErrorDetails 必须原样带出，否则前端拿不到 tempToken，挑战无从继续。
+            return Fail<CodeLoginResultDto>(
+                issueResult.Message ?? "Login rejected",
+                issueResult.Code ?? 400,
+                issueResult.ErrorCode,
+                issueResult.ErrorDetails);
+        }
+
+        // 设置密码令牌放在签发成功之后才生成：挑战没过就先发一枚令牌是没有意义的。
+        // ⚠ 需要走 2FA 挑战的账号完成 verify-2fa 后拿到的是 TokenResult，不含这枚令牌 ——
+        // 「还没设过密码」是一句提示而不是安全边界，用户可在个人中心补设。
         var requirePasswordSetup = string.IsNullOrEmpty(user!.PasswordHash);
         string? setPasswordToken = null;
 
@@ -1151,31 +1285,12 @@ public class AuthService : ApplicationService, IAuthService
             }
         }
 
-        // 凭据之外的准入策略（免密的验证码登录同样要过）。
-        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.VerificationCode, loginIdentifier: null);
-        if (!guardResult.Allowed)
-        {
-            return Fail<CodeLoginResultDto>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
-        }
-
-        // 建立登录会话（应用多登录策略；Reject 达上限则拒绝本次登录）
-        var sessionResult = await EstablishLoginSessionAsync(user);
-        if (!sessionResult.Succeeded)
-        {
-            return Fail<CodeLoginResultDto>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
-        }
-
-        // 生成Token和RefreshToken并保存
-        var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: jwtOptions.EnableRefreshToken);
-
-        // 发布登录成功事件
-        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.CodeLogin);
-        await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
+        var tokenResult = issueResult.Data!;
 
         return Result<CodeLoginResultDto>.Success(new CodeLoginResultDto
         {
             AccessToken = tokenResult.AccessToken,
-            RefreshToken = jwtOptions.EnableRefreshToken ? tokenResult.RefreshToken : null,
+            RefreshToken = tokenResult.RefreshToken,
             ExpiresIn = jwtOptions.AccessTokenExpirationMinutes * 60,
             RefreshTokenExpiresIn = tokenResult.RefreshTokenExpiresIn,
             RequirePasswordSetup = requirePasswordSetup,
@@ -1299,7 +1414,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 发送验证码
-        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, user.Id);
+        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, VerificationCodePurpose.PasswordRecovery, user.Id);
         if (!result.Succeeded)
         {
             return Fail<string>(result.Message ?? "Failed to send verification code", (int)(result.Code ?? 400));
@@ -1337,8 +1452,9 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<string>("Two-factor service is not available", 500);
         }
 
-        // 验证验证码
-        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(address, input.Code, input.Type);
+        // 验证验证码。★ 用途限定为 PasswordRecovery：拿一枚登录码来重置密码会在这里落空。
+        var verifyResult = await _twoFactorService.VerifyCodeByAddressAndMarkUsedAsync(
+            address, input.Code, input.Type, VerificationCodePurpose.PasswordRecovery);
         if (!verifyResult.Succeeded)
         {
             return Fail<string>(verifyResult.Message ?? "Verification failed", (int)(verifyResult.Code ?? 400));

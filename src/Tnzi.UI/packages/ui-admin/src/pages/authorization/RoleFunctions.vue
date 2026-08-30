@@ -771,7 +771,12 @@ async function loadModulesAndFunctions(): Promise<void> {
     await Promise.all(
       modules.value.map(async (m) => {
         try {
-          next.set(m.id, await authBridge.permissions.getByModule(m.id))
+          // 退役的码要排除在分配矩阵之外。该端点同时服务权限管理页（那一页**要**看得见
+          // 退役行并打标），所以过滤发生在消费侧而不是端点侧。
+          // 后端本来就会拒绝授予退役码（整批 404 "Functions not found"），
+          // 这里过滤是为了不呈现一个必然让整次保存失败的勾选框。
+          const list = await authBridge.permissions.getByModule(m.id)
+          next.set(m.id, list.filter((f) => !f.isRetired))
         } catch {
           next.set(m.id, [])
         }

@@ -14,10 +14,10 @@ namespace Tnzi.Audit.Services;
 /// 列表页扫过一百条与详情页打开一条，合规意义完全不同。典型调用点是详情查询与导出：
 /// <code>
 /// var record = await _repository.GetAsync(id);
-/// // 配额超限，拒绝这次读取
-/// var audit = await _auditor.RecordAsync(nameof(Tip), id.ToString(), "case-review");
-/// if (!audit.Succeeded) return Fail&lt;TipDto&gt;(audit.Message!, audit.Code ?? 429);
+/// // 配额超限或登记失败，拒绝这次读取（429/500，返回值不可能被丢弃）
+/// await _auditor.RecordOrDenyAsync(nameof(Tip), id.ToString(), "case-review");
 /// </code>
+/// 只想告警不想拒绝时用 <see cref="RecordAsync"/> 并自行消费返回的 <see cref="Result"/>。
 /// </para>
 /// <para>
 /// <strong>未启用时所有方法都是空操作</strong>（返回成功），调用方无需判断开关。
@@ -43,6 +43,45 @@ public interface IRecordAccessAuditor
         string resourceId,
         string? purpose = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 登记一次记录级读取，登记不下来就拒绝这次读取（抛异常）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="RecordAsync"/> 把「拒绝还是仅告警」交给调用方，但那要求调用方检查返回值——
+    /// 而 <c>await auditor.RecordAsync(...)</c> 丢弃返回值是最顺手的写法，配额闸门就此静默失效：
+    /// 界面上写着有导出配额，实际谁也没被拦过。选「拒绝」的调用方应当用本方法，
+    /// 把这个决定压缩成无法写错的一行。
+    /// </para>
+    /// <para>
+    /// 超出配额抛 <see cref="RateLimitException"/>（429）；审计条目写不进去（链尾争用重试耗尽）抛
+    /// <see cref="BusinessException"/>（500）——审计写不下来时放行读取，等于这条读取没有痕迹，
+    /// 与「拒绝」这个选择矛盾。仅告警的场景请继续用 <see cref="RecordAsync"/> 自行处理返回值。
+    /// 未启用时与 <see cref="RecordAsync"/> 一样是空操作。
+    /// </para>
+    /// </remarks>
+    async Task RecordOrDenyAsync(
+        string resourceType,
+        string resourceId,
+        string? purpose = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await RecordAsync(resourceType, resourceId, purpose, cancellationToken);
+        if (result.Succeeded)
+        {
+            return;
+        }
+
+        if (result.Code == 429)
+        {
+            throw new RateLimitException(result.Message ?? "Data access quota exceeded.");
+        }
+
+        throw new BusinessException(
+            result.Message ?? "Failed to record data access audit entry.",
+            httpStatusCode: result.Code ?? 500);
+    }
 
     /// <summary>
     /// 校验某个用户的审计链是否完整未被篡改。

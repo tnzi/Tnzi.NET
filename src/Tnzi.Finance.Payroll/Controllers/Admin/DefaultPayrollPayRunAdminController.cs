@@ -146,6 +146,38 @@ public class DefaultPayrollPayRunAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 列出批次的一次性输入
+    /// </summary>
+    [HttpGet("{id:guid}/inputs")]
+    public virtual async Task<ApiResult<List<PayRunInputDto>>> GetInputs(Guid id)
+    {
+        var result = await _payRunService.GetInputsAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 录入/覆盖一次性输入（Calculated 态下立即重算该员工的工资单）
+    /// </summary>
+    [HttpPost("{id:guid}/inputs")]
+    [ApiAuthorize(PermissionName = "payroll.run.update")]
+    public virtual async Task<ApiResult<PayRunInputDto>> SetInput(Guid id, [FromBody] SetPayRunInputDto request)
+    {
+        var result = await _payRunService.SetInputAsync(id, request);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 删除一次性输入（Calculated 态下立即重算该员工的工资单）
+    /// </summary>
+    [HttpDelete("{id:guid}/inputs/{inputId:guid}")]
+    [ApiAuthorize(PermissionName = "payroll.run.update")]
+    public virtual async Task<ApiResult> DeleteInput(Guid id, Guid inputId)
+    {
+        var result = await _payRunService.DeleteInputAsync(id, inputId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 外部批次幂等摄取（External/OpeningBalance）
     /// </summary>
     [HttpPost("external")]

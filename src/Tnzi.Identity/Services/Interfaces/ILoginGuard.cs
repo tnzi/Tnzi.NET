@@ -22,6 +22,9 @@ public enum LoginMethod
 
     /// <summary>注册后自动登录</summary>
     Registration = 5,
+
+    /// <summary>Passkey（WebAuthn）断言通过后的令牌签发</summary>
+    Passkey = 6,
 }
 
 /// <summary>
@@ -114,7 +117,13 @@ public readonly record struct LoginGuardResult
 /// <para>
 /// 用于 IP 白名单、设备绑定、可登录时段、地理围栏这类「凭据之外」的准入策略。
 /// 消费应用实现并注册（可注册多个），框架经 <see cref="ILoginGuardEvaluator"/>
-/// 按 <see cref="Order"/> 升序执行，**首个拒绝即短路**。未注册任何实现时零开销。
+/// 按 <see cref="Order"/> 升序执行，**首个拒绝即短路**。
+/// </para>
+/// <para>
+/// ★ <b>框架自带一个守卫</b>：<see cref="LockedAccountLoginGuard"/>（<c>Order = int.MinValue</c>，
+/// 账号锁定 / 停用即否决）。它挂在这条链上而不是散落在每条签发路径里，是因为求值器
+/// 是全部签发路径的<b>唯一共同调用点</b>。所以守卫链在任何部署下都至少有一个成员 ——
+/// 消费应用的守卫排在它之后。
 /// </para>
 /// <para>
 /// <b>为什么必须是前置守卫，而不是在控制器里事后检查：</b>

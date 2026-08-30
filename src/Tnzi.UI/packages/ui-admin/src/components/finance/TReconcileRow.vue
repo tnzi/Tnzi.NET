@@ -254,7 +254,7 @@ function confirm() {
   gap: 12px;
   align-items: center;
   padding: 10px 14px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-inset-border);
   border-radius: var(--tnzi-admin-radius-md, 6px);
   background: var(--tnzi-container-bg);
 }

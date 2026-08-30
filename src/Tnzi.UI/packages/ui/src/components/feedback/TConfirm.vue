@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useId } from 'vue'
 import { useFocusTrap } from '../../headless/feedback/useFocusTrap'
 
 interface Props {
@@ -64,7 +64,11 @@ const emit = defineEmits<{
 const rootRef = ref<HTMLElement | null>(null)
 const primaryBtnRef = ref<HTMLButtonElement | null>(null)
 
-const titleId = `t-confirm-title-${Math.random().toString(36).slice(2, 10)}`
+// Vue 3.5's built-in id generator: unique per app instance and stable across
+// SSR hydration, which a `Math.random()` suffix is not - server and client
+// each roll their own value, so `aria-labelledby` points at nothing until
+// the client re-renders.
+const titleId = useId()
 
 function handleCancel() {
   emit('update:show', false)
@@ -103,7 +107,8 @@ useFocusTrap(rootRef, () => props.show, {
   padding: 24px;
   min-width: 320px;
   max-width: 480px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  border: var(--tnzi-surface-overlay-border);
+  box-shadow: var(--tnzi-surface-overlay-shadow);
 }
 .t-confirm__title {
   font-size: 18px;

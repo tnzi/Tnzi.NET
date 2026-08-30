@@ -54,7 +54,7 @@
       :value="active"
       type="line"
       animated
-      class="t-table-tabs"
+      class="t-table-tabs t-surface-card"
       @update:value="onTab"
     >
       <NTabPane

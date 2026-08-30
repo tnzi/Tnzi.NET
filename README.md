@@ -65,7 +65,7 @@ pnpm test
 
 ## Modules
 
-45 .NET projects. Modules declare hard dependencies with `[DependsOn]`
+57 .NET projects. Modules declare hard dependencies with `[DependsOn]`
 and soft ones with `[OptionalDependsOn]` — the latter are used when present and silently
 skipped when not.
 

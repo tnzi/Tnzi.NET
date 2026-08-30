@@ -13,6 +13,9 @@ namespace Tnzi.Storage.Tests.Integration;
 /// 单独搭建一个 MultiTenancy.Enabled=true 的 DbContext（共享同一个 CurrentTenant 实例），
 /// 验证清理任务遍历每个租户、在该租户上下文内借助框架全局租户过滤器只删自己租户的数据，
 /// 不会跨租户误删别人的文件。
+///
+/// 分片上传会话那一趟随两张表搬到了 Tnzi.Storage.Workspace.Tests，同款隔离用例在那边
+/// （<c>ExpiredUploadSessionMultiTenantTests</c>）—— 逻辑是同一条，只是数据属于另一个程序集。
 /// </summary>
 public class FileCleanupMultiTenantTests : IDisposable
 {
@@ -25,19 +28,11 @@ public class FileCleanupMultiTenantTests : IDisposable
 
         public DbSet<FileRecord> FileRecords => Set<FileRecord>();
         public DbSet<FileReference> FileReferences => Set<FileReference>();
-        public DbSet<FileVersion> FileVersions => Set<FileVersion>();
-        public DbSet<Tnzi.Storage.Entities.FileShare> FileShares => Set<Tnzi.Storage.Entities.FileShare>();
-        public DbSet<FileUploadSession> FileUploadSessions => Set<FileUploadSession>();
-        public DbSet<FileChunk> FileChunks => Set<FileChunk>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new FileRecordConfiguration());
             modelBuilder.ApplyConfiguration(new FileReferenceConfiguration());
-            modelBuilder.ApplyConfiguration(new FileVersionConfiguration());
-            modelBuilder.ApplyConfiguration(new FileShareConfiguration());
-            modelBuilder.ApplyConfiguration(new FileUploadSessionConfiguration());
-            modelBuilder.ApplyConfiguration(new FileChunkConfiguration());
             base.OnModelCreating(modelBuilder);
             TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
         }
@@ -86,12 +81,11 @@ public class FileCleanupMultiTenantTests : IDisposable
         return new FileCleanupService(
             new EFCoreRepository<MtStorageDbContext, FileRecord, Guid>(_db, serviceProvider: sp),
             new EFCoreRepository<MtStorageDbContext, FileReference, Guid>(_db, serviceProvider: sp),
-            new EFCoreRepository<MtStorageDbContext, FileUploadSession, Guid>(_db, serviceProvider: sp),
-            new EFCoreRepository<MtStorageDbContext, FileChunk, Guid>(_db, serviceProvider: sp),
             _storage,
             _currentTenant,
             new StaticOptionsMonitor<StorageOptions>(_options),
             sp,
+            contributors: null,
             MsOptions.Create(new MultiTenancyOptions { Enabled = true }));
     }
 
@@ -135,24 +129,6 @@ public class FileCleanupMultiTenantTests : IDisposable
         Assert.Equal(tenantB, survivors[0].TenantId);
     }
 
-    [Fact]
-    public async Task CleanupExpiredSessions_IsolatedPerTenant()
-    {
-        var tenantA = Guid.NewGuid();
-        var tenantB = Guid.NewGuid();
-
-        var sessionA = await SeedSessionAsync(tenantA, expired: true);
-        var sessionB = await SeedSessionAsync(tenantB, expired: false); // 未过期，应保留
-
-        var service = CreateService();
-
-        var deleted = await service.CleanupExpiredUploadSessionsAsync();
-
-        Assert.Equal(1, deleted);
-        Assert.Equal(0, await _db.FileUploadSessions.IgnoreQueryFilters().CountAsync(s => s.Id == sessionA));
-        Assert.Equal(1, await _db.FileUploadSessions.IgnoreQueryFilters().CountAsync(s => s.Id == sessionB));
-    }
-
     // ---- seed helpers (绕过 SaveChanges 审计填租户，直接写 TenantId) ----
 
     private async Task<FileRecord> SeedOrphanAsync(Guid tenantId, string name, int agedHours, int referenceCount = 0)
@@ -186,25 +162,6 @@ public class FileCleanupMultiTenantTests : IDisposable
 
         _db.ChangeTracker.Clear();
         return record;
-    }
-
-    private async Task<Guid> SeedSessionAsync(Guid tenantId, bool expired)
-    {
-        var session = new FileUploadSession
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            FileName = "s.zip",
-            TotalSize = 3,
-            ChunkSize = 3,
-            TotalChunks = 1,
-            CreationTime = DateTime.UtcNow.AddHours(-2),
-            ExpiresAt = expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddHours(24)
-        };
-        _db.FileUploadSessions.Add(session);
-        await _db.SaveChangesAsync();
-        _db.ChangeTracker.Clear();
-        return session.Id;
     }
 
     public void Dispose()

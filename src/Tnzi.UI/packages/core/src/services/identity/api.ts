@@ -5,6 +5,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { ReorderRequest } from '../../types/api';
 import type {
   // Auth
   LoginDto,
@@ -33,6 +34,10 @@ import type {
   SendTwoFactorCodeDto,
   TwoFactorChallengeDto,
   VerifyTwoFactorDto,
+  PasskeyOptionsDto,
+  PasskeyCompleteDto,
+  PasskeyCredentialDto,
+  PasskeyAssertionBeginDto,
   EnableTwoFactorDto,
   TwoFactorStatusDto,
   TwoFactorMethodRequestDto,
@@ -99,6 +104,11 @@ import type {
   TenantQueryDto,
   CreateTenantDto,
   UpdateTenantDto,
+  // Step-up
+  StepUpGrantDto,
+  SendStepUpCodeDto,
+  StepUpCodeDto,
+  StepUpPasskeyDto,
 } from './types';
 
 // Route constants aligned with backend controllers
@@ -221,6 +231,103 @@ export function useAuthApi(client: HttpClient) {
     /** Verify 2FA and login */
     verifyTwoFactor: (data: VerifyTwoFactorDto) =>
       client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data, { skipAuthRefresh: true }),
+
+    // -- Passkey (WebAuthn) --
+    // Two-step by nature: begin produces browser options plus an opaque state
+    // handle, complete posts the credential back with that handle. The handle is
+    // single-use. Prefer the `registerPasskey` / `signInWithPasskey` helpers in
+    // `services/identity/passkey` over calling these four directly.
+
+    /**
+     * Begin passkey registration.
+     *
+     * @param enrollmentToken Optional one-time enrollment token. Without it the
+     *   credential is attached to the currently signed-in user; with it, to the
+     *   user the token points at (which is what lets someone who has no
+     *   credentials yet register one).
+     */
+    beginPasskeyRegistration: (enrollmentToken?: string) =>
+      client.post<PasskeyOptionsDto>(
+        `${AUTH_BASE}/passkey/register/begin`,
+        undefined,
+        { params: enrollmentToken ? { enrollmentToken } : undefined },
+      ),
+
+    /** Complete passkey registration. */
+    completePasskeyRegistration: (data: PasskeyCompleteDto, enrollmentToken?: string) =>
+      client.post<PasskeyCredentialDto>(
+        `${AUTH_BASE}/passkey/register/complete`,
+        data,
+        { params: enrollmentToken ? { enrollmentToken } : undefined },
+      ),
+
+    /**
+     * Begin passkey sign-in. Anonymous.
+     *
+     * Omit `userName` for a discoverable-credential flow (the user picks the
+     * account in the system dialog, so the login page needs no username field).
+     * An unknown username still returns options - the endpoint deliberately does
+     * not reveal whether an account exists.
+     */
+    beginPasskeyAssertion: (data?: PasskeyAssertionBeginDto) =>
+      client.post<PasskeyOptionsDto>(`${AUTH_BASE}/passkey/assert/begin`, data ?? {}),
+
+    /**
+     * Complete passkey sign-in.
+     *
+     * Issues through the same exit as password login, so this can still come
+     * back with `2FA_REQUIRED` when the user has two-factor enabled - continue
+     * with the existing 2FA flow in that case.
+     */
+    completePasskeyAssertion: (data: PasskeyCompleteDto) =>
+      client.post<TokenResultDto>(`${AUTH_BASE}/passkey/assert/complete`, data, { skipAuthRefresh: true }),
+
+    /** List the current user's registered passkeys. */
+    getPasskeyCredentials: () =>
+      client.get<PasskeyCredentialDto[]>(`${AUTH_BASE}/passkey/credentials`),
+
+    /** Remove one of the current user's passkeys. */
+    deletePasskeyCredential: (credentialId: string) =>
+      client.delete(`${AUTH_BASE}/passkey/credentials/${encodeURIComponent(credentialId)}`),
+
+    // -- Step-up (re-authentication for one action) --
+    // A valid session is not always enough: a few actions (taking an original
+    // attachment out, a bulk export, releasing a payment) need proof that the
+    // person is here right now. The server answers those endpoints with
+    // `IDENTITY_STEP_UP_REQUIRED`; verify here, then retry the original call
+    // unchanged. Prefer the `stepUp` helper in `services/identity/step-up`.
+
+    /**
+     * Re-authenticate with a passkey.
+     *
+     * Reuses the ordinary assertion challenge (`beginPasskeyAssertion`) - there
+     * is no separate step-up challenge endpoint, because a second parallel
+     * challenge flow would be one more piece of state to keep in sync.
+     */
+    stepUpWithPasskey: (data: StepUpPasskeyDto) =>
+      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/passkey`, data),
+
+    /**
+     * Re-authenticate with a two-factor code.
+     *
+     * Weaker than a passkey (SMS and email codes can both be relayed). Offer it
+     * where passkeys are not available, not as the easier of two options.
+     */
+    stepUpWithCode: (data: StepUpCodeDto) =>
+      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/code`, data),
+
+    /**
+     * Send a step-up-only verification code to the signed-in user's confirmed
+     * email / phone. Resolves to the masked destination.
+     *
+     * The code is bound to step-up: it cannot sign anyone in, reset a password
+     * or confirm a contact change, and codes issued by those flows cannot
+     * complete a step-up either. No address parameter - what has to be proven
+     * is that *this account's owner* is here, and letting the caller name the
+     * recipient would hand that decision to a possibly-hijacked session.
+     */
+    stepUpSendCode: (data: SendStepUpCodeDto) =>
+      client.post<string | null>(`${AUTH_BASE}/step-up/send-code`, data),
   };
 }
 
@@ -604,6 +711,18 @@ export function useAdminOrganizationApi(client: HttpClient) {
     /** Batch update sort orders */
     batchUpdateSortOrder: (data: BatchSortOrderItemDto[]) =>
       client.put<void>(`${ADMIN_ORG_BASE}/batch/sort-order`, data),
+
+    /**
+     * Reorder organizations inside one parent (drag-and-drop).
+     *
+     * Prefer this over `batchUpdateSortOrder` for drag results: it takes a
+     * relative order and the server merges it by slot, so organizations
+     * outside the submitted positions are never pushed around.
+     */
+    reorder: (data: ReorderRequest, parentId?: string | null) =>
+      client.post<void>(`${ADMIN_ORG_BASE}/reorder`, data, {
+        params: parentId ? { parentId } : undefined,
+      }),
 
     /** Get users in organization (paged) */
     getUsers: (id: string, params?: { pageIndex?: number; pageSize?: number; includeChildren?: boolean }) =>

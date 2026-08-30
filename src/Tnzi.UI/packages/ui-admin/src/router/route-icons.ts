@@ -47,6 +47,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'authorization.permissions': 'mdi:key-outline',
   'authorization.roleFunctions': 'mdi:account-cog-outline',
   'authorization.entityRoles': 'mdi:account-group-outline',
+  'authorization.dualControl': 'mdi:account-multiple-check-outline',
 
   // ── System sub-routes ───────────────────────────────────────────
   'system.dictionaries': 'mdi:book-alphabet',
@@ -113,6 +114,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'finance.creditMemos': 'mdi:receipt-text-minus-outline',
   'finance.payments': 'mdi:cash-check',
   'finance.transfers': 'mdi:bank-transfer',
+  'finance.deposits': 'mdi:bank-plus',
   'finance.reconciliations': 'mdi:scale-balance',
   'finance.statements': 'mdi:file-document-multiple-outline',
   'finance.recurring': 'mdi:calendar-sync-outline',

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Tnzi.AI.Tools.Sql;
 using McpClientFactory = Tnzi.AI.Infrastructure.Mcp.McpClientFactory;
 
@@ -19,6 +20,29 @@ namespace Tnzi.AI;
 public partial class AIModule
 {
     // ───────────────────────── 可选子模块 NoOp 回退（PostConfigure 阶段） ─────────────────────────
+
+    /// <summary>
+    /// 为 SQL 工具套件补一个「解析得出来、一调用就报错」的连接工厂回退。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>必须在 PostConfigure 阶段注册，不能挪到 Configure。</b>本模块 LoadOrder=50，业务模块在其后；
+    /// 若在 Configure 阶段 <c>TryAdd</c>，本回退会<b>先</b>落地，之后应用模块同样用 <c>TryAdd</c> 注册
+    /// 真实工厂时会看到「已存在」而被静默跳过——应用明明接了数据库，跑起来却撞上本回退的异常。
+    /// 放在 PostConfigure（框架保证晚于所有模块的 Configure）则相反：应用的注册先到，这里见到即跳过。
+    /// 应用在 <c>Program.cs</c> 里更晚注册的情形也安全——同类型后注册者胜出。
+    /// </para>
+    /// <para>
+    /// 刻意<b>不</b>并入 <see cref="RegisterOptionalSubmoduleFallbacks"/>：那批回退的语义是
+    /// 「可选<b>子模块</b>没加载」，本条的语义是「<b>应用</b>没接入自己的数据库连接」，
+    /// 两者的排查方向完全不同，混在一起会让诊断日志把人指向错误的方向。
+    /// </para>
+    /// </remarks>
+    private static void RegisterSqlConnectionFactoryFallback(IServiceCollection services)
+    {
+        services.TryAddScoped<Func<string?, DbConnection>>(
+            _ => UnconfiguredSqlConnectionFactory.Create);
+    }
 
     private static void RegisterOptionalSubmoduleFallbacks(IServiceCollection services)
     {
@@ -415,8 +439,13 @@ public partial class AIModule
 
     private static void RegisterUtilitiesWorkspaceAndEvents(IServiceCollection services)
     {
-        // IAiUtility - 轻量级系统级 AI 调用
-        services.TryAddScoped<IAiUtility, AiUtilityService>();
+        // IAiUtility - 轻量级系统级 AI 调用。
+        // ★必须显式替换而非 TryAdd：契约与一个 OpenAI 兼容的默认实现
+        // （OpenAiCompatibleAiUtility）已下沉到核心，由 CoreServicesModule 在 LoadOrder 0
+        // 注册，TryAdd 会被它挡掉。本实现走 IChatClientFactory，多出原生 Anthropic 协议、
+        // 数据库来源的提供商、降级链与 thinking 支持，加载本模块即应升级到它。
+        services.RemoveAll<IAiUtility>();
+        services.AddScoped<IAiUtility, AiUtilityService>();
 
         // Workspace agent provider (file-based AGENT.md discovery)
         services.AddSingleton<IWorkspaceAgentProvider, WorkspaceAgentProvider>();
@@ -459,8 +488,15 @@ public partial class AIModule
         // SQL tool suite - manual registration per framework rule #1.
         // Permission check defaults to DenyAll (fail-secure); applications opt into a permissive
         // implementation by replacing this registration with FrameworkPermissionSqlCheck or
-        // their own IReadOnlySqlPermissionCheck. The DbConnection factory MUST be registered
-        // by the application - without it, IReadOnlySqlExecutor cannot be resolved.
+        // their own IReadOnlySqlPermissionCheck.
+        //
+        // The DbConnection factory is the application's part of the contract, but it is NOT
+        // required for the container to be valid: RegisterSqlConnectionFactoryFallback (called
+        // from PostConfigureServicesAsync) TryAdds a fallback that throws an actionable
+        // ConfigurationException on first use. Without that fallback these two Scoped
+        // registrations make every application that merely loads Tnzi.AI fail ValidateOnBuild -
+        // and the cheapest way out of that failure is to disable scope validation host-wide.
+        // See UnconfiguredSqlConnectionFactory for the full reasoning.
         services.AddSingleton<ISqlValidator, RestrictiveSqlValidator>();
         services.AddSingleton<ISqlColumnInferrer, HeuristicSqlColumnInferrer>();
         services.AddSingleton<ISqlSchemaProvider, TSqlSchemaProvider>();

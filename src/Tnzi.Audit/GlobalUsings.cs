@@ -45,6 +45,7 @@ global using Tnzi.EFCore.Encryption;
 global using Tnzi.EFCore.Extensions;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.EFCore.Outbox;
+global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;

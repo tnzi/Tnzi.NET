@@ -129,6 +129,9 @@
                             <NTag v-if="!row.fn.isSystemManaged" size="tiny" :bordered="false" type="info">
                               {{ t('customBadge') }}
                             </NTag>
+                            <NTag v-if="row.fn.isRetired" size="tiny" :bordered="false" type="default">
+                              {{ t('retiredBadge') }}
+                            </NTag>
                           </span>
                           <span v-if="row.fn.description" class="t-permission-page__desc">
                             {{ row.fn.description }}

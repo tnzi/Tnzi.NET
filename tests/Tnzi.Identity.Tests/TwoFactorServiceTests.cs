@@ -84,7 +84,7 @@ public class TwoFactorServiceTests
         );
 
         // Act
-        var result = await service.SendSmsCodeAsync(Guid.NewGuid(), "13800138000");
+        var result = await service.SendSmsCodeAsync(Guid.NewGuid(), "13800138000", VerificationCodePurpose.TwoFactor);
 
         // Assert
         Assert.False(result.Succeeded);

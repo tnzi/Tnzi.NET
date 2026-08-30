@@ -264,6 +264,9 @@ export function useAdminShellLayout(
   // top-hybrid-header-first keeps a sider but it's compact /
   // context-dependent (and may hide entirely), so the brand belongs in the
   // header. vertical / vertical-mix keep it in the sider.
+  //
+  // `desktop` is absent on purpose: it has neither sider nor header, and its
+  // brand lives at the left edge of the taskbar.
   const shouldRenderHeaderLogo = computed<boolean>(
     () =>
       effectiveMode.value === 'horizontal' ||
@@ -304,17 +307,35 @@ export function useAdminShellLayout(
     // eats ~14% of the scarce vertical space (a 40px bar under a 52px header).
     // Hide it below md so the content area gets that height back - the tab
     // state itself is untouched, it's just not rendered on phones.
-    () => tabs.value.visible !== false && themeStore.tabVisible && !appStore.isMobile,
+    //
+    // The `desktop` layout hides it for a different reason: the taskbar IS the
+    // open-things bar there, and two of them would compete for the same job
+    // while disagreeing (a tab per route vs a button per window).
+    () =>
+      tabs.value.visible !== false &&
+      themeStore.tabVisible &&
+      !appStore.isMobile &&
+      effectiveMode.value !== 'desktop',
   )
 
   const footerVisible = computed<boolean>(
-    () => footer.value.visible !== false && themeStore.footerVisible,
+    // `desktop` owns the bottom edge with its taskbar - a footer underneath it
+    // would sit below the thing that is supposed to be the bottom of a desktop.
+    () =>
+      footer.value.visible !== false &&
+      themeStore.footerVisible &&
+      effectiveMode.value !== 'desktop',
   )
 
   const headerVisible = computed<boolean>(() => {
     // In horizontal/hybrid layouts the header hosts the menu - hiding
     // it strands the user with no way to navigate. Force visible.
     if (HORIZONTAL_HOSTED_MODES.includes(effectiveMode.value)) return true
+    // `desktop` is a full-screen shell: a desktop rendered under a page header
+    // reads as a widget embedded in an admin page, which is the opposite of
+    // what the mode is for. The header's actions are not lost - the taskbar's
+    // system tray carries the same set, gated by the same theme-store flags.
+    if (effectiveMode.value === 'desktop') return false
     return header.value.visible !== false && themeStore.headerVisible
   })
 

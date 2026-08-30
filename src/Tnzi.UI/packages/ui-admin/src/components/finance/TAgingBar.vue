@@ -38,7 +38,7 @@
  */
 import { computed } from 'vue'
 import TMoney from './TMoney.vue'
-import { formatMoney } from '../../utils/finance-format'
+import { agingBucketLabels, formatMoney } from '../../utils/finance-format'
 
 export interface AgingBuckets {
   current: number
@@ -47,6 +47,8 @@ export interface AgingBuckets {
   days61To90: number
   over90: number
   total: number
+  /** 生效切分点（天，长度 3）；缺省按 30/60/90 出标签 */
+  agingBucketDays?: readonly number[] | null
 }
 
 const props = withDefaults(
@@ -59,19 +61,15 @@ const props = withDefaults(
   {},
 )
 
-const FALLBACK: Record<string, string> = {
-  current: 'Current',
-  d1to30: '1-30',
-  d31to60: '31-60',
-  d61to90: '61-90',
-  over90: '90+',
-}
-
 function label(key: string): string {
   const translated = props.translate?.(`aging.${key}`)
   if (translated && !translated.includes(`aging.${key}`)) return translated
-  return FALLBACK[key] ?? key
+  return key === 'current' ? 'Current' : key
 }
+
+// 范围标签由随桶下发的切分点生成（数字区间语言中立，不走 i18n）；
+// 只有 "Current" 仍可翻译。写死 1-30/31-60/61-90/90+ 会在自定义切分点部署里说谎。
+const rangeLabels = computed(() => agingBucketLabels(props.buckets.agingBucketDays))
 
 /** Only positive buckets take width; a credit balance has no bar to draw. */
 const total = computed(() =>
@@ -80,16 +78,16 @@ const total = computed(() =>
 )
 
 const segments = computed(() => {
+  const [b1, b2, b3, over] = rangeLabels.value
   const raw = [
-    { key: 'current', tone: 'ok', value: props.buckets.current },
-    { key: 'd1to30', tone: 'warn1', value: props.buckets.days1To30 },
-    { key: 'd31to60', tone: 'warn2', value: props.buckets.days31To60 },
-    { key: 'd61to90', tone: 'warn3', value: props.buckets.days61To90 },
-    { key: 'over90', tone: 'bad', value: props.buckets.over90 },
+    { key: 'current', tone: 'ok', value: props.buckets.current, label: label('current') },
+    { key: 'd1to30', tone: 'warn1', value: props.buckets.days1To30, label: b1 },
+    { key: 'd31to60', tone: 'warn2', value: props.buckets.days31To60, label: b2 },
+    { key: 'd61to90', tone: 'warn3', value: props.buckets.days61To90, label: b3 },
+    { key: 'over90', tone: 'bad', value: props.buckets.over90, label: over },
   ]
   return raw.map((s) => ({
     ...s,
-    label: label(s.key),
     percent: total.value > 0 ? (Math.max(0, s.value) / total.value) * 100 : 0,
   }))
 })

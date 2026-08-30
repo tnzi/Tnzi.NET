@@ -38,12 +38,15 @@ public static class FinanceSourceTypes
     /// <summary>资金划转单</summary>
     public const string Transfer = "Transfer";
 
+    /// <summary>银行存款单（待存款项 → 银行）</summary>
+    public const string Deposit = "Deposit";
+
     /// <summary>期末汇兑重估（SourceId = 基准日 yyyy-MM-dd，非实体 Id）</summary>
     public const string Revaluation = "Revaluation";
 
     /// <summary>框架写入的全部来源令牌（消费方自定义令牌不在内）</summary>
     public static readonly IReadOnlyList<string> All =
     [
-        Invoice, Bill, CreditMemo, Expense, PaymentEntry, PaymentApplication, Transfer, Revaluation
+        Invoice, Bill, CreditMemo, Expense, PaymentEntry, PaymentApplication, Transfer, Deposit, Revaluation
     ];
 }

@@ -19,6 +19,7 @@ import TChatHost from '../chat/TChatHost.vue'
 import TBackTop from '../utility/TBackTop.vue'
 import { TPinToggler } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
+import type { AdminLocale } from '../../i18n/messages'
 import type { TAdminFooterLink } from './TAdminFooter.vue'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import {
@@ -31,8 +32,10 @@ import {
   type AdminMenuItem,
 } from '../../stores/useAdminRouteStore'
 import type { AdminTab } from '../../stores/useAdminTabStore'
+import { routeToWindowInput, useAdminDesktopStore } from '../../stores/useAdminDesktopStore'
 import { useAdminMenuContext } from '../../headless/useAdminMenuContext'
 import { useAdminShellLayout } from '../../headless/useAdminShellLayout'
+import { provideAdminShellActions } from '../../headless/admin-shell-actions'
 
 interface SiderConfig {
   visible?: boolean
@@ -135,7 +138,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   openSearch: []
   openThemeDrawer: []
-  localeChange: [locale: 'en' | 'zh-cn']
+  localeChange: [locale: AdminLocale]
   menuSelect: [menu: AdminMenuItem]
   /** Phase I.7.8: forwarded from TAdminTabs so AdminShellRoot can `router.push`. */
   tabClick: [tab: AdminTab]
@@ -302,16 +305,39 @@ function onOpenSearch(): void {
   }
   emit('openSearch')
 }
+/**
+ * Open a global-search hit.
+ *
+ * In the `desktop` layout a `router.push` navigates a router whose outlet the
+ * window manager replaced - the address bar moves and the screen does not. So
+ * there the hit opens as a window instead, through the same one-window-per-
+ * module rule the desktop's own icons use.
+ */
 function onSelectSearchResult(item: { path?: string }): void {
   if (!router || !item.path) return
-  router.push(item.path).catch(() => undefined)
+  if (effectiveMode.value !== 'desktop') {
+    router.push(item.path).catch(() => undefined)
+    return
+  }
+  const resolved = router.resolve(item.path)
+  const name = typeof resolved.name === 'string' ? resolved.name : ''
+  if (!name) return
+  useAdminDesktopStore().openOrFocusRoute(
+    routeToWindowInput({ name, path: resolved.path, meta: resolved.meta as Record<string, unknown> }),
+  )
 }
 
 function onOpenThemeDrawer(): void {
   emit('openThemeDrawer')
 }
 
-function onLocaleChange(locale: 'en' | 'zh-cn'): void {
+/** Hand the two chrome commands down to whatever renders the chrome for the
+ *  current layout mode. The header is a direct child and could take them as
+ *  props; the desktop taskbar is rendered inside the DEFAULT SLOT, several
+ *  components below content the consumer supplied, and cannot. */
+provideAdminShellActions({ openSearch: onOpenSearch, openThemeDrawer: onOpenThemeDrawer })
+
+function onLocaleChange(locale: AdminLocale): void {
   emit('localeChange', locale)
 }
 
@@ -703,12 +729,19 @@ function onMixMouseleave(): void {
              menu already lives in the header and provides the navigation
              context, so a breadcrumb in the left region only steals
              horizontal space from (and shifts) the menu. Keep it for the
-             vertical / vertical-mix modes where the header has no top menu. -->
+             vertical / vertical-mix modes where the header has no top menu.
+
+             `desktop` suppresses it too, for a different reason: there is no
+             single "current page" there. The header breadcrumb would describe
+             whichever route the router happens to sit on, which is not the
+             window the user is looking at. Location belongs to each window's
+             own title bar. -->
         <template
           v-if="
             header.showBreadcrumb !== false &&
             themeStore.breadcrumbVisible &&
-            !topMenuVariant
+            !topMenuVariant &&
+            effectiveMode !== 'desktop'
           "
           #breadcrumb
         >
@@ -781,7 +814,14 @@ function onMixMouseleave(): void {
             @tab-click="(tab) => emit('tabClick', tab)"
           />
 
-          <TAdminContent :transition-name="resolvedTransition" :surface="contentSurface">
+          <!-- `bleed` for the desktop layout: its wallpaper is the canvas,
+               so a 16px gutter around it would frame the desktop like a card
+               instead of letting it reach the window edges. -->
+          <TAdminContent
+            :transition-name="resolvedTransition"
+            :surface="contentSurface"
+            :bleed="effectiveMode === 'desktop'"
+          >
             <slot />
           </TAdminContent>
 
@@ -909,7 +949,8 @@ function onMixMouseleave(): void {
   border-right: 1px solid var(--tnzi-border, #e5e7eb);
   overflow: hidden;
   white-space: nowrap;
-  box-shadow: var(--tnzi-shadow-sider, 2px 0 8px 0 rgb(29 35 41 / 5%));
+  border-right: var(--tnzi-surface-chrome-border);
+  box-shadow: var(--tnzi-surface-chrome-shadow-sider);
   /* Must outrank TAdminHeader (z-index 80) so the drawer's own header
      row - which sits at y=0 to align with the layout header line -
      isn't clipped by the (sticky) page header. soybean avoids this by

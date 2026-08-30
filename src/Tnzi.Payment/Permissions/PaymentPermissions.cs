@@ -25,9 +25,12 @@ public class PaymentPermissions : IPermissionDefinitionProvider
         // Refunds gained a create action: support agents raise refunds on behalf
         // of customers, which is a distinct capability from approving one.
         context.AddCrudPermissions("payment.refund", "Refunds", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
-        context.AddCrudPermissions("payment.subscription", "Payment Subscriptions", parentName: "payment");
-        context.AddCrudPermissions("payment.invoice", "Invoices", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
-        context.AddCrudPermissions("payment.promotion", "Promotions", parentName: "payment", actions: CrudActions.View | CrudActions.Create | CrudActions.Update);
+        // payment.subscription.* 随续费域搬去了可选子模块 Tnzi.Payment.Subscriptions
+        // （PaymentSubscriptionsPermissions，4 个码逐字节相同，父组仍是这里声明的 "payment"）。
+        // payment.invoice.* 随发票域搬去了可选子模块 Tnzi.Payment.Billing
+        // （PaymentBillingPermissions，码串逐字节相同，父组仍是这里声明的 "payment"）。
+        // payment.promotion.* 随折扣域搬去了可选子模块 Tnzi.Payment.Promotions
+        // （PaymentPromotionsPermissions，3 个码逐字节相同，父组仍是这里声明的 "payment"）。
         context.AddPermission("payment.statistics.view", "View Payment Statistics", parentName: "payment");
     }
 }

@@ -89,6 +89,8 @@ import TEntityCard from '../../components/data/TEntityCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import TemplateFieldsEditor from './components/TemplateFieldsEditor.vue'
+import SourceDocumentPicker, { type PickedSourceDocument } from './components/SourceDocumentPicker.vue'
+import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { deleteAction, type RowAction } from '../../headless/row-actions'
 import { createSigningBridge } from '../../services/bridges/signing-bridge'
@@ -106,7 +108,12 @@ import {
 
 type TemplateRow = EnvelopeTemplateListDto
 
-const bridge = createSigningBridge({ client: useAdminClient() })
+const adminClient = useAdminClient()
+const bridge = createSigningBridge({ client: adminClient })
+const storage = createStorageBridge({ client: adminClient })
+
+/** The live write model. `FieldRenderContext` carries only the field's own value. */
+const model = () => crud.formModal.formData.value as Record<string, unknown> | null
 const t = makePageTranslator('signing.templates')
 const message = useSafeMessage()
 
@@ -158,6 +165,26 @@ const fieldRenderers: Record<string, FieldRenderer> = {
       readonly: ctx.readonly,
       translate: t,
       'onUpdate:modelValue': (v: TemplateFieldInputDto[]) => ctx.onUpdate(v),
+    }),
+  // The picker writes three sibling keys (source id / name / rendered pdf), and
+  // FieldRenderContext deliberately carries only this field's own value - so it
+  // gets the live form model instead of `ctx.onUpdate`.
+  'signing-source-file': (ctx) =>
+    h(SourceDocumentPicker, {
+      fileName: (model()?.sourceFileName as string | null) ?? null,
+      readonly: ctx.readonly,
+      translate: t,
+      upload: (file: File) => storage.files.upload(file),
+      onChange: (picked: PickedSourceDocument | null) => {
+        const m = model()
+        if (!m) return
+        m.sourceFileId = picked?.fileId ?? null
+        m.sourceFileName = picked?.fileName ?? null
+        // The source IS the rendered document when it is already a PDF - that is
+        // the whole conversion step for this case, and the signing flow reads
+        // this key rather than `sourceFileId`.
+        m.renderedPdfFileId = picked?.fileId ?? null
+      },
     }),
 }
 

@@ -205,6 +205,16 @@ vi.mock('../../src/services/bridges/finance-bridge', () => ({
       post: vi.fn(),
       voidDoc: vi.fn(),
     },
+    deposits: {
+      fetch: vi.fn(async () => pagedOne('dep1')),
+      getById: vi.fn(async () => null),
+      createDraft: vi.fn(),
+      updateDraft: vi.fn(),
+      deleteDraft: vi.fn(),
+      post: vi.fn(),
+      voidDoc: vi.fn(),
+      undeposited: vi.fn(async () => []),
+    },
     reconciliations: {
       fetch: vi.fn(async () => pagedOne('r1')),
       getById: vi.fn(async () => null),

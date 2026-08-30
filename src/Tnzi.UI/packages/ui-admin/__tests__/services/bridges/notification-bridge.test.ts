@@ -72,6 +72,22 @@ function mockNotificationApi() {
   }
 }
 
+function mockTemplateApi() {
+  return {
+    getPagedList: vi.fn(async () => ({
+      items: [{ id: 't1', name: 'welcome', module: 'Notification' }],
+      totalCount: 1,
+      pageIndex: 1,
+      pageSize: 20,
+    })),
+    getById: vi.fn(async () => ({ id: 't1', name: 'welcome' })),
+    create: vi.fn(async (data) => ({ id: 't-new', ...data })),
+    update: vi.fn(async (id, data) => ({ id, ...data })),
+    delete: vi.fn(async () => undefined),
+    batchDelete: vi.fn(async () => undefined),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -148,7 +164,83 @@ describe('notification-bridge', () => {
     await expect(bridge.messages.update('id', {})).rejects.toThrow()
   })
 
-  // ---- templates sub-contract (backend gap - stubs reject) ----
+  it('messages.cancel calls notificationApi.cancel with the id', async () => {
+    const notificationApi = mockNotificationApi()
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await bridge.messages.cancel('n1')
+    expect(notificationApi.cancel).toHaveBeenCalledWith('n1')
+  })
+
+  it('messages.cancel rejects when the API resolves a failure envelope', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.cancel = vi.fn(async () => ({
+      succeeded: false,
+      success: false,
+      message: 'Already sent',
+    })) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.messages.cancel('n1')).rejects.toThrow('Already sent')
+  })
+
+  it('messages.batchCancel returns how many were actually stopped', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.batchCancel = vi.fn(async () => 2) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.messages.batchCancel(['n1', 'n2', 'n3'])).resolves.toBe(2)
+    expect(notificationApi.batchCancel).toHaveBeenCalledWith(['n1', 'n2', 'n3'])
+  })
+
+  it('messages.getDeliveryReport unwraps the report', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.getDeliveryReport = vi.fn(async () => ({
+      messageId: 'n1',
+      totalRecipients: 3,
+      sentCount: 2,
+      failedCount: 1,
+      pendingCount: 0,
+      readCount: 0,
+      successRate: 66.7,
+      recipients: [{ id: 'r1', address: 'a@example.com', status: 'Sent', isRead: false }],
+    })) as never
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    const report = await bridge.messages.getDeliveryReport('n1')
+    expect(notificationApi.getDeliveryReport).toHaveBeenCalledWith('n1')
+    expect(report.recipients).toHaveLength(1)
+    expect(report.failedCount).toBe(1)
+  })
+
+  // ---- templates sub-contract ----
+
+  it('templates.fetch goes through the core template api factory, not a hand-built URL', async () => {
+    const notificationApi = mockNotificationApi()
+    const templateApi = mockTemplateApi()
+    const bridge = createNotificationBridge({
+      notificationApi: notificationApi as never,
+      templateApi: templateApi as never,
+    })
+
+    const result = await bridge.templates.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
+
+    expect(templateApi.getPagedList).toHaveBeenCalled()
+    expect(result.items).toHaveLength(1)
+  })
+
+  it('templates.delete uses the single-id endpoint for one and batch for many', async () => {
+    const templateApi = mockTemplateApi()
+    const bridge = createNotificationBridge({
+      notificationApi: mockNotificationApi() as never,
+      templateApi: templateApi as never,
+    })
+
+    await bridge.templates.delete(['t1'])
+    expect(templateApi.delete).toHaveBeenCalledWith('t1')
+    expect(templateApi.batchDelete).not.toHaveBeenCalled()
+
+    await bridge.templates.delete(['t1', 't2'])
+    expect(templateApi.batchDelete).toHaveBeenCalledWith(['t1', 't2'])
+  })
+
+  // ---- templates sub-contract (no template api - stubs reject) ----
 
   it('templates.fetch rejects with backend-gap error', async () => {
     const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never })

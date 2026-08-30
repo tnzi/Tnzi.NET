@@ -76,7 +76,7 @@ public class EnvelopeTemplate : FullAuditedEntity<Guid>, IMultiTenant
 /// 那才是"这份文件当初照的是什么"的权威答案，而它与模板行没有任何外键关系。</item>
 /// </list>
 /// </remarks>
-public class Field : EntityBase<Guid>, IMultiTenant
+public class Field : EntityBase<Guid>, IMultiTenant, IHasOrder
 {
     /// <summary>租户ID</summary>
     public Guid? TenantId { get; set; }

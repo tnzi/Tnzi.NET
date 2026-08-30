@@ -4,6 +4,7 @@
     :class="{
       't-admin-content--inverted': surface === 'dark',
       't-admin-content--surface-light': surface === 'light',
+      't-admin-content--bleed': bleed,
     }"
     :data-full-content="appStore.fullContent ? 'true' : undefined"
   >
@@ -59,12 +60,23 @@ interface Props {
    * foreground (dark-mode only). Cards on the canvas keep their own surface.
    */
   surface?: 'dark' | 'light'
+  /**
+   * Drop the canvas gutter and let the slot run edge to edge.
+   *
+   * For content that IS the canvas rather than sitting on it - today the
+   * `desktop` layout's wallpaper, which has to reach the window edges or it
+   * reads as a panel inset into an admin page. Distinct from
+   * `appStore.fullContent`, which is the user's own "hide the chrome" toggle
+   * and can be turned back off; this one is a property of the layout mode.
+   */
+  bleed?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   transitionName: 'fade-slide',
   routeKey: 'default',
   surface: undefined,
+  bleed: false,
 })
 
 const appStore = useAdminAppStore()
@@ -125,7 +137,8 @@ defineExpose({ currentTransition })
   background-color: var(--tnzi-admin-content-bg, var(--tnzi-layout-bg));
   padding: var(--tnzi-admin-content-padding, 16px);
 }
-.t-admin-content[data-full-content='true'] {
+.t-admin-content[data-full-content='true'],
+.t-admin-content--bleed {
   padding: 0;
 }
 /* Adaptive surface - a custom canvas background flips foreground tokens for

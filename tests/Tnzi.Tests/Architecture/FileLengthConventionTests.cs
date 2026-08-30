@@ -19,11 +19,11 @@ public class FileLengthConventionTests
         "src/Tnzi.Identity/Services/UserService.cs",
         "src/Tnzi.Storage/Services/FileStorageService.cs",
         "src/Tnzi.Identity/Services/AuthService.cs",
-        "src/Tnzi.Identity/Services/OrganizationService.cs",
+        "src/Tnzi.Identity.Organization/Services/OrganizationService.cs",
         "src/Tnzi.Redis/RedisCacheService.cs",
         "src/Tnzi.Identity/Services/IdentityPageService.cs",
         "src/Tnzi.EFCore/EfCoreRepository.cs",
-        "src/Tnzi.Authorization/Services/DataAuthService.cs",
+        "src/Tnzi.Authorization.DataAuth/Services/DataAuthService.cs",
     };
 
     [Fact]

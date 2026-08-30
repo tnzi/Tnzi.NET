@@ -13,7 +13,7 @@
   /* ------ Layout sizing ------ */
   --tnzi-admin-header-height: 56px;
   --tnzi-admin-tab-height: 44px;
-  --tnzi-admin-footer-height: 32px;
+  --tnzi-admin-footer-height: 28px;
 
   /* 4-tier sider width system (matches soybean-admin) */
   --tnzi-admin-sider-width: 220px;
@@ -60,6 +60,18 @@
      sider fall back to `--tnzi-admin-sider-inverted-bg` when there is no user
      override, and lets a null override truly clear. */
 
+  /* ------ Card material (see the surface tiers in @tnzi/ui) ------
+     Same two tokens, re-derived from the admin card colour so the step follows
+     whatever the theme drawer's "Card / List" picker is set to. Redefining
+     them here rather than in the base package keeps `--tnzi-admin-card-bg` -
+     an admin concept - out of @tnzi/ui. */
+  --tnzi-surface-card-bg: var(--tnzi-admin-card-bg, var(--tnzi-container-bg));
+  --tnzi-surface-card-bg-nested: color-mix(
+    in oklab,
+    var(--tnzi-admin-card-bg, var(--tnzi-container-bg)),
+    var(--tnzi-base-text) var(--tnzi-surface-card-step)
+  );
+
   /* ------ NProgress (route loading bar) ------ */
   --tnzi-admin-nprogress-color: var(--tnzi-primary);
   --tnzi-admin-nprogress-height: 2px;
@@ -94,6 +106,54 @@
 
   /* Overlay / mask */
   --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.45);
+
+  /* ------ Desktop shell (layoutMode: 'desktop') ------
+     The wallpaper stays a deep blue in BOTH modes - it is a picture behind the
+     windows, not a surface, and a light desktop background would leave the
+     white icon labels unreadable. The taskbar and window chrome DO follow the
+     mode: the taskbar hosts consumer-supplied components (notification bell,
+     user avatar, chat launcher) that all paint themselves with the standard
+     `--tnzi-base-text`, so a permanently dark bar would render them dark-on-
+     dark under the light theme. */
+  --tnzi-desktop-wallpaper: #12467e;
+  --tnzi-desktop-glow-1: radial-gradient(900px 700px at 46% 52%, rgb(96 190 255 / 55%), transparent 60%);
+  --tnzi-desktop-glow-2: radial-gradient(1300px 900px at 78% 96%, rgb(20 90 170 / 75%), transparent 66%);
+  --tnzi-desktop-icon-color: #fff;
+
+  /* ── Desktop material ──────────────────────────────────────────────
+     One "glass" recipe shared by every chrome surface (taskbar, start panel,
+     window title bar, in-window nav). `solidity` is how much of the surface
+     colour survives; the rest is let through to `backdrop` behind it.
+
+     The two move together on purpose: transparency WITHOUT the blur is not
+     frosted glass, it is a muddy surface with the wallpaper's own detail
+     legible straight through it, and any text on top competes with whatever
+     happens to be behind. `solidity: 100%` + `backdrop: none` is "off", and
+     the store writes exactly that at vibrancy 0.
+
+     Base surface colours below are OPAQUE. Alpha lives in `solidity` alone -
+     baking it into the colour too would multiply the two, so a user-picked
+     opaque hex from the theme drawer would land more solid than the default
+     and no slider position could explain the difference. */
+  --tnzi-desktop-solidity: 76%;
+  --tnzi-desktop-backdrop: blur(30px) saturate(150%);
+
+  --tnzi-desktop-taskbar-height: 40px;
+  --tnzi-desktop-taskbar-bg: rgb(243 246 250);
+  --tnzi-desktop-taskbar-fg: var(--tnzi-base-text);
+  --tnzi-desktop-taskbar-hover: rgb(0 0 0 / 7%);
+  --tnzi-desktop-taskbar-border: rgb(0 0 0 / 10%);
+
+  --tnzi-desktop-window-bar-bg: rgb(249 250 252);
+  --tnzi-desktop-window-border: rgb(0 0 0 / 12%);
+  --tnzi-desktop-window-border-active: rgb(0 0 0 / 20%);
+  --tnzi-desktop-window-hover: rgb(0 0 0 / 7%);
+  --tnzi-desktop-window-shadow: 0 6px 18px rgb(0 0 0 / 16%);
+  --tnzi-desktop-window-shadow-active: 0 16px 44px rgb(0 0 0 / 30%);
+  --tnzi-desktop-window-radius: var(--tnzi-admin-radius-md);
+
+  --tnzi-desktop-z-taskbar: 2000;
+  --tnzi-desktop-z-start: 2100;
 }
 
 /* Dark mode adjustments - the per-surface bg tokens stay unset (surfaces read
@@ -106,6 +166,23 @@
   --tnzi-admin-menu-item-active-bg: rgb(var(--tnzi-primary-rgb) / 0.16);
 
   --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.6);
+
+  /* Desktop shell - wallpaper deepens, chrome inverts. */
+  --tnzi-desktop-wallpaper: #071322;
+  --tnzi-desktop-glow-1: radial-gradient(900px 700px at 46% 52%, rgb(56 120 200 / 42%), transparent 60%);
+  --tnzi-desktop-glow-2: radial-gradient(1300px 900px at 78% 96%, rgb(12 48 96 / 80%), transparent 66%);
+
+  --tnzi-desktop-taskbar-bg: rgb(24 29 36);
+  --tnzi-desktop-taskbar-fg: rgb(255 255 255 / 88%);
+  --tnzi-desktop-taskbar-hover: rgb(255 255 255 / 12%);
+  --tnzi-desktop-taskbar-border: rgb(255 255 255 / 8%);
+
+  --tnzi-desktop-window-bar-bg: rgb(38 38 38);
+  --tnzi-desktop-window-border: rgb(255 255 255 / 12%);
+  --tnzi-desktop-window-border-active: rgb(255 255 255 / 22%);
+  --tnzi-desktop-window-hover: rgb(255 255 255 / 10%);
+  --tnzi-desktop-window-shadow: 0 6px 18px rgb(0 0 0 / 45%);
+  --tnzi-desktop-window-shadow-active: 0 16px 44px rgb(0 0 0 / 62%);
 }
 
 /* Responsive token steps. The admin shell consumes these tokens for
@@ -132,5 +209,24 @@
     --tnzi-admin-header-height: 48px;
     --tnzi-admin-tab-height: 38px;
     --tnzi-admin-content-padding: 8px;
+  }
+}
+
+/**
+ * Someone who asked their OS to reduce transparency gets solid chrome by
+ * DEFAULT - translucent chrome is exactly what that setting exists to turn off.
+ *
+ * Deliberately NOT `!important`: the theme store writes an inline `:root` value
+ * only when the vibrancy differs from the default, so an OS preference decides
+ * for everyone who has not said otherwise, and a person who reaches into the
+ * theme drawer and asks for glass still gets it. Same rule this package already
+ * applies to light/dark: an app default is a default, an explicit choice wins.
+ * (The corollary is that dragging the slider back to exactly the default reads
+ * as "no opinion" and hands control back to the OS.)
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --tnzi-desktop-solidity: 100%;
+    --tnzi-desktop-backdrop: none;
   }
 }

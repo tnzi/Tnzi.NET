@@ -1,6 +1,6 @@
 <template>
   <div
-    class="t-item-card"
+    class="t-item-card t-surface-card"
     :class="{
       't-item-card--clickable': clickable,
       't-item-card--selected': selected,
@@ -201,9 +201,10 @@ function onKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 14px;
   padding: 12px 14px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
+  background: var(--tnzi-surface-card-bg);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .t-item-card--clickable {
@@ -211,7 +212,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 .t-item-card--clickable:hover {
   border-color: var(--tnzi-primary);
-  box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
 }
 .t-item-card--clickable:focus-visible {
   outline: 2px solid var(--tnzi-primary);
@@ -219,6 +220,7 @@ function onKeydown(event: KeyboardEvent): void {
 }
 .t-item-card--selected {
   border-color: var(--tnzi-primary);
+  box-shadow: var(--tnzi-surface-ring-selected);
   background: rgb(var(--tnzi-primary-rgb) / 0.05);
 }
 /* A voided document stays listed and readable, but reads as retired rather

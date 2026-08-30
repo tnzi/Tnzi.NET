@@ -28,7 +28,7 @@
  */
 import { watchEffect, type App, type Component } from 'vue';
 import type { Router, RouteRecordRaw } from 'vue-router';
-import { createTnziAuthGuard } from '@tnzi/core';
+import { createTnziAuthGuard } from '@tnzi/core/guards';
 import {
   THEME_CONTEXT_KEY,
   createThemeContext,

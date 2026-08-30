@@ -1,0 +1,35 @@
+<Project>
+
+  <!--
+    引用了 Tnzi.Documents（直接或传递，经 Tnzi.Signing / Tnzi.Hosting）的**测试项目**导入本文件。
+
+    ★ 为什么需要它：Tnzi.Documents 自 2026-08-29 合并 Tnzi.Documents.Raster 起带上了 PDFtoImage，
+    它传递引入 PDFium 与 SkiaSharp 的**原生**资产，两者都按 RID 分发。测试项目会把
+    runtimes/ 整个复制进 bin —— 不加约束的话是二十来个 RID（android / browser-wasm /
+    linux-loongarch64 / musl 各档…），实测单个测试项目 381 MB、引用全部模块的架构测试 599 MB。
+    这是合并付出的代价，摊在每一个直接或间接引用 Tnzi.Documents 的项目上。
+
+    两条约束：
+      1. 只为**当前主机**的 RID 构建。测试只会在构建它的这台机器上跑，别的 RID 是纯浪费。
+         仍是框架依赖式（不 self-contained），`dotnet test` 照常工作。
+      2. 剔除 libSkiaSharp.pdb（Windows 每个 RID 89 MB，只在调试进 Skia 的 C++ 内部时有用）。
+         规则的唯一定义在 src/Tnzi.Documents/build/Tnzi.Documents.targets —— NuGet 消费者
+         经 buildTransitive 自动拿到，而 MSBuild 的 targets **不跨 ProjectReference 流动**，
+         所以仓内项目要显式导入同一份。
+
+    需要完整 RID 面或原生符号时：TnziPinHostRuntimeIdentifier=false / TnziKeepNativeSymbols=true。
+
+    ★ 放在 tests/ 而不是 build/：公开镜像的允许列表只收 build/ 下四个具名文件
+    （version.props / public.props / icon.png / Tnzi.snk），而 tests/ 是整目录投影。
+    放进 build/ 的话，公开仓拿到的六个测试项目会导入一个不存在的文件 —— 而镜像的四道门禁
+    一条都不编译，这种失效会全绿放行（2026-08-15 已经这样炸过一次）。
+  -->
+
+  <PropertyGroup Condition="'$(TnziPinHostRuntimeIdentifier)' != 'false'">
+    <RuntimeIdentifier>$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\src\Tnzi.Documents\build\Tnzi.Documents.targets" />
+
+</Project>

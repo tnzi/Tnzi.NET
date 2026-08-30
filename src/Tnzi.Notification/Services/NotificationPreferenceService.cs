@@ -258,6 +258,49 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         return enabled;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, int>> GetFrequencyCapsAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, string? category = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(userIds);
+
+        var ids = userIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return new Dictionary<Guid, int>();
+
+        var channelName = channel.ToString().ToLower();
+        var normalizedCategory = string.IsNullOrWhiteSpace(category) ? null : category;
+
+        // 一次查完（分类级 + 渠道级），在内存里定夺 —— 与 FilterEnabledUsersAsync 同款。
+        var rows = await _repository
+            .AsQueryable()
+            .AsNoTracking()
+            .Where(p => ids.Contains(p.UserId)
+                        && p.Channel.ToLower() == channelName
+                        && p.MaxFrequencyPerHour != null
+                        && (p.Category == null || p.Category == normalizedCategory))
+            .Select(p => new { p.UserId, p.Category, p.MaxFrequencyPerHour })
+            .ToListAsync(cancellationToken);
+
+        var caps = new Dictionary<Guid, int>();
+        foreach (var group in rows.GroupBy(r => r.UserId))
+        {
+            var userRows = group.ToList();
+            // 分类级优先于渠道级 —— 与 IsChannelEnabledAsync / FilterEnabledUsersAsync 同序。
+            var categoryRow = normalizedCategory == null
+                ? null
+                : userRows.Find(r => r.Category == normalizedCategory);
+            var channelRow = userRows.Find(r => r.Category == null);
+
+            var cap = categoryRow?.MaxFrequencyPerHour ?? channelRow?.MaxFrequencyPerHour;
+            // 写入路径已校验为正数；这里再挡一次，因为 0 或负数会把上限读成「一条都不许发」。
+            if (cap is > 0)
+                caps[group.Key] = cap.Value;
+        }
+
+        return caps;
+    }
+
     public async Task<bool> IsInQuietHoursAsync(Guid userId, string channel, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(channel);

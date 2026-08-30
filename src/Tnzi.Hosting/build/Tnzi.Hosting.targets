@@ -36,12 +36,15 @@
   </ItemGroup>
 
   <!--
-    'Documents.Signing' is specific enough to need no stripping, and asking for it SHOULD
-    also bring in Tnzi.Documents (the signing module [DependsOn] it) - which the condition
-    above already does, because 'Documents.Signing' contains 'Documents'.
+    Signing was promoted out of Documents (the judgement is归属 not 依赖: it owns a Signing_
+    prefix while Documents owns no table), so the package is Tnzi.Signing, not
+    Tnzi.Documents.Signing. Asking for it SHOULD also bring in Tnzi.Documents, which it
+    [DependsOn] - the condition above does not do that any more now that the token no longer
+    contains 'Documents', so this block pulls both.
   -->
-  <ItemGroup Condition="$(TnziModules.Contains('Documents.Signing'))">
-    <PackageReference Include="Tnzi.Documents.Signing" Version="$(TnziVersion)" />
+  <ItemGroup Condition="$(TnziModules.Contains('Signing'))">
+    <PackageReference Include="Tnzi.Signing" Version="$(TnziVersion)" />
+    <PackageReference Include="Tnzi.Documents" Version="$(TnziVersion)" />
   </ItemGroup>
 
   <ItemGroup Condition="$(TnziModules.Contains('Notification'))">
@@ -134,6 +137,54 @@
 
   <ItemGroup Condition="$(TnziModules.Contains('Finance.Payroll'))">
     <PackageReference Include="Tnzi.Finance.Payroll" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Finance.Offers'))">
+    <PackageReference Include="Tnzi.Finance.Offers" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Identity.Organization'))">
+    <PackageReference Include="Tnzi.Identity.Organization" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Authorization.DataAuth'))">
+    <PackageReference Include="Tnzi.Authorization.DataAuth" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Storage.Workspace'))">
+    <PackageReference Include="Tnzi.Storage.Workspace" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Storage.Cloud'))">
+    <PackageReference Include="Tnzi.Storage.Cloud" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Notification.Push'))">
+    <PackageReference Include="Tnzi.Notification.Push" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment.Billing'))">
+    <PackageReference Include="Tnzi.Payment.Billing" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment.Subscriptions'))">
+    <PackageReference Include="Tnzi.Payment.Subscriptions" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment.Promotions'))">
+    <PackageReference Include="Tnzi.Payment.Promotions" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment.Stripe'))">
+    <PackageReference Include="Tnzi.Payment.Stripe" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('Payment.PayPal'))">
+    <PackageReference Include="Tnzi.Payment.PayPal" Version="$(TnziVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TnziModules.Contains('AI.Cli'))">
+    <PackageReference Include="Tnzi.AI.Cli" Version="$(TnziVersion)" />
   </ItemGroup>
 
 </Project>

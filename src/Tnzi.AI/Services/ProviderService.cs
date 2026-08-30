@@ -79,6 +79,7 @@ public partial class ProviderService : ApplicationService, IProviderService
         Endpoint = entity.Endpoint,
         DefaultModel = entity.DefaultModel,
         Priority = entity.Priority,
+        SortOrder = entity.SortOrder,
         IsEnabled = entity.IsEnabled,
         Description = entity.Description,
         HasApiKey = !string.IsNullOrEmpty(entity.ApiKeyEncrypted),
@@ -110,7 +111,10 @@ public partial class ProviderService : ApplicationService, IProviderService
                 .WhereIf(
                     p => p.Name.ToLower().Contains(keyword!) || (p.Description != null && p.Description.ToLower().Contains(keyword!)),
                     !string.IsNullOrEmpty(keyword))
-                .OrderByDescending(p => p.Priority)
+                // 展示顺序优先（拖拽写的就是它）；Priority 退为同序号内的次级判据，
+                // 它回答的是「同名时实际连哪个」而不是「列表怎么摆」。
+                .OrderBy(p => p.SortOrder)
+                .ThenByDescending(p => p.Priority)
                 .ThenByDescending(p => p.CreationTime);
 
             // Configuration-defined providers (AI:Providers) - hidden when an enabled DB
@@ -577,5 +581,23 @@ public partial class ProviderService : ApplicationService, IProviderService
         if (type.Contains("openai") || type.Contains("azure"))
             return ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3", "o4-mini"];
         return [];
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> ReorderAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default)
+    {
+        Check.NotNullOrEmpty(ids);
+
+        // 范围是「当前可见的数据库条目」——配置条目没有实体行，本来就不在这里面；
+        // 提交里混进它们的伪 id 会被重排原语当作范围外记录挡掉（404），而不是被悄悄忽略。
+        var result = await ExecuteInUnitOfWorkAsync(
+            c => _repository.ReorderAsync(ids, cancellationToken: c),
+            ct);
+
+        if (!result.Succeeded)
+            return Result.Failure(result.Message ?? "Reorder failed.", result.Code ?? 400, result.ErrorCode);
+
+        LogInformation("Reordered {Count} provider(s)", result.Data);
+        return Ok();
     }
 }

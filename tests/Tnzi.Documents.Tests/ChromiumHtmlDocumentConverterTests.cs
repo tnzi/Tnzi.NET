@@ -104,7 +104,7 @@ public class ChromiumHtmlDocumentConverterTests
         if (paperSize != null)
             options.PaperSize = paperSize;
 
-        var resolved = ChromiumHtmlDocumentConverter.ResolvePaperSize(options);
+        var resolved = HtmlPageGeometry.ResolvePaperSizePt(options);
 
         resolved.WidthPt.ShouldBe(expectedWidth);
         resolved.HeightPt.ShouldBe(expectedHeight);

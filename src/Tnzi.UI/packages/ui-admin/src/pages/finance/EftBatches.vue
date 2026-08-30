@@ -431,7 +431,7 @@ const rowActions: RowAction<EftBatchRow>[] = [
 .fin-eft__hint {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3, #999);
+  color: var(--tnzi-base-text-muted);
 }
 
 .fin-eft__full {

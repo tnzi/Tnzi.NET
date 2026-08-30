@@ -51,12 +51,21 @@ public class QuotaMiddleware : IAiMiddleware
 
         if (!reserveResult.Succeeded)
         {
+            // 只有真的超限才叫超限：配额记录缺失 / 并发冲突走的是另一条 finish reason，
+            // 也不该污染 QuotaExceededEvent（那条事件喂告警与用量分析）。
+            if (!IsQuotaExceeded(reserveResult))
+            {
+                return BuildQuotaFailureResult(userId.Value, reserveResult);
+            }
+
             _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
             await PublishQuotaExceededEventAsync(userId.Value, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
             return new AgentRunResult
             {
                 Response = reserveResult.Message ?? "Quota exceeded",
-                FinishReason = FinishReasons.QuotaExceeded
+                FinishReason = FinishReasons.QuotaExceeded,
+                // 归一化为框架码：可替换实现可能只给了 429 不给码
+                ErrorCode = ErrorCodes.QuotaExceeded
             };
         }
 
@@ -122,6 +131,18 @@ public class QuotaMiddleware : IAiMiddleware
 
         if (!reserveResult.Succeeded)
         {
+            // 与非流式路径同一判据：配额记录缺失 / 并发冲突不是超限（见 IsQuotaExceeded）
+            if (!IsQuotaExceeded(reserveResult))
+            {
+                var failure = BuildQuotaFailureResult(userId, reserveResult);
+                yield return new AgentStreamChunk
+                {
+                    Text = failure.Response,
+                    FinishReason = failure.FinishReason
+                };
+                yield break;
+            }
+
             _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
             await PublishQuotaExceededEventAsync(userId, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
             yield return new AgentStreamChunk
@@ -189,6 +210,47 @@ public class QuotaMiddleware : IAiMiddleware
         {
             Response = budgetCheck.Reason ?? "Budget exceeded",
             FinishReason = FinishReasons.QuotaExceeded
+        };
+    }
+
+    /// <summary>
+    /// 预留失败是不是「配额真的用完了」。
+    /// </summary>
+    /// <remarks>
+    /// ★ 判据是错误码而不是「预留失败了」。<see cref="IQuotaService.ReserveQuotaAsync"/> 还会因为
+    /// <b>配额记录缺失</b>（<c>AI_QUOTA_CHECK_FAILED</c>）与<b>并发冲突</b>
+    /// （<c>AI_QUOTA_CONCURRENCY_CONFLICT</c>）而失败，这两种把用户和运维指向的方向完全不同：
+    /// 前者要去看那一行为什么不在，后者重试即可，都不该去调额度。全部贴成「配额耗尽」，
+    /// 排查会一路走到配额配置上去，而那里什么问题都没有。
+    /// <para>
+    /// ★ HTTP 429 也算超限：<see cref="IQuotaService"/> 是可替换契约，自定义实现按 HTTP 语义写
+    /// <c>Result.Failure("Quota exceeded", 429)</c>（带状态码不带框架错误码）是完全合理的形态。
+    /// 只认框架常量会把这类实现的超限贴成通用错误——429 丢了、告警事件也不发。
+    /// 内建实现的 429 只可能是超限（缺行 500 / 冲突 409），此判据不会误收。
+    /// </para>
+    /// </remarks>
+    private static bool IsQuotaExceeded(Result<QuotaReservation> reserveResult)
+        => string.Equals(reserveResult.ErrorCode, ErrorCodes.QuotaExceeded, StringComparison.Ordinal)
+           || reserveResult.Code == 429;
+
+    /// <summary>
+    /// 把「配额子系统失败」构造成一条如实的运行结果：finish reason 用 error 而非 quota_exceeded，
+    /// 且不发 QuotaExceededEvent（那条事件喂告警与用量分析，混进基础设施故障会让超限统计失真）。
+    /// </summary>
+    private AgentRunResult BuildQuotaFailureResult(Guid userId, Result<QuotaReservation> reserveResult)
+    {
+        _logger.LogError(
+            "Quota reservation could not be completed for user {UserId} ({ErrorCode}): {Error}",
+            userId, reserveResult.ErrorCode, reserveResult.Message);
+
+        return new AgentRunResult
+        {
+            Response = reserveResult.Message ?? "Quota reservation could not be completed.",
+            FinishReason = FinishReasons.Error,
+            // 原样携带服务层错误码：并发冲突（AI_QUOTA_CONCURRENCY_CONFLICT）在服务层定的是
+            // 「可重试的 409」，丢掉这个码，HTTP 边界只能按 FinishReason=Error 贴 500，
+            // 「重试即可」就被翻译成了「内部错误」。
+            ErrorCode = reserveResult.ErrorCode
         };
     }
 

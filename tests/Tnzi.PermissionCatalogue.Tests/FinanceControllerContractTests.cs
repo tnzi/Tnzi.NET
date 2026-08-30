@@ -1,9 +1,10 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Tnzi.AspNetCore.Mvc;
 using Tnzi.Finance.Permissions;
 using Tnzi.Finance.Banking.Permissions;
 using Tnzi.Finance.Recurring.Permissions;
+using Tnzi.Finance.Offers.Permissions;
 using Tnzi.Finance.Payroll.Permissions;
 using Tnzi.Security.Authorization;
 
@@ -28,6 +29,8 @@ public class FinanceControllerContractTests
         typeof(FinanceBankingPermissions).Assembly,
         // 周期性单据同为独立程序集（2026-07-25），同一套控制器契约适用
         typeof(FinanceRecurringPermissions).Assembly,
+        // 报价单 / 采购订单同为独立程序集（2026-08-29），两个 admin 控制器整体搬了过去
+        typeof(FinanceOffersPermissions).Assembly,
         typeof(PayrollPermissions).Assembly,
     ];
 

@@ -1,6 +1,6 @@
 <template>
   <div class="t-share">
-    <div class="t-share__card">
+    <div class="t-share__card t-surface-card">
       <NSpin :show="loading">
         <!-- 链接用不了：撤销 / 过期 / 次数用尽 / 根本不存在，一律同一句话。
              区分开就等于告诉试探者哪些令牌是真的。 -->
@@ -146,9 +146,10 @@ async function download(): Promise<void> {
   width: 100%;
   max-width: 380px;
   padding: 32px 28px;
-  border: 1px solid var(--tnzi-border);
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
   border-radius: var(--tnzi-admin-radius-lg, 10px);
-  background: var(--tnzi-container-bg);
+  background: var(--tnzi-surface-card-bg);
 }
 
 .t-share__body,
@@ -161,7 +162,7 @@ async function download(): Promise<void> {
 }
 
 .t-share__state-icon {
-  color: var(--tnzi-text-3);
+  color: var(--tnzi-base-text-muted);
 }
 
 .t-share__name {
@@ -181,7 +182,7 @@ async function download(): Promise<void> {
 .t-share__state-hint {
   margin: 0;
   font-size: 13px;
-  color: var(--tnzi-text-3);
+  color: var(--tnzi-base-text-muted);
 }
 
 .t-share__state-title {

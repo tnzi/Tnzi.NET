@@ -1,4 +1,4 @@
-﻿
+
 namespace Tnzi.Storage.Tests;
 
 /// <summary>
@@ -9,7 +9,6 @@ public class FileStorageServiceEnhancedTests
 {
     private readonly Mock<IRepository<FileRecord, Guid>> _mockFileRepository;
     private readonly Mock<IRepository<FileReference, Guid>> _mockReferenceRepository;
-    private readonly Mock<IRepository<Entities.FileShare, Guid>> _mockShareRepository;
     private readonly Mock<IFileStorage> _mockStorage;
     private readonly StorageOptions _options;
     private readonly Mock<IServiceProvider> _mockServiceProvider;
@@ -19,7 +18,6 @@ public class FileStorageServiceEnhancedTests
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
         _mockReferenceRepository = new Mock<IRepository<FileReference, Guid>>();
-        _mockShareRepository = new Mock<IRepository<Entities.FileShare, Guid>>();
         _mockStorage = new Mock<IFileStorage>();
         _options = new StorageOptions();
         _mockServiceProvider = new Mock<IServiceProvider>();
@@ -44,18 +42,8 @@ public class FileStorageServiceEnhancedTests
             TestFileAccessAuthorizer.AllowAll(),
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
-            _mockServiceProvider.Object);
-    }
-
-    private FileShareService CreateShareService()
-    {
-        return new FileShareService(
-            _mockShareRepository.Object,
-            _mockFileRepository.Object,
-            TestFileAccessAuthorizer.AllowAll(),
-            new FileAccessGrantContext(),
-            new StaticOptionsMonitor<StorageOptions>(_options),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new UploadGuard(optionsMonitor.Object));
     }
 
     #region 文件查询功能测试
@@ -134,84 +122,6 @@ public class FileStorageServiceEnhancedTests
 
     #endregion
 
-    #region 文件分享功能测试（FileShareService）
-
-    [Fact]
-    public async Task CreateShareAsync_CreatesShare_WithGeneratedToken()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord { Id = fileId, FileName = "test.jpg" };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>())).ReturnsAsync(fileRecord);
-        _mockShareRepository.Setup(r => r.InsertAsync(It.IsAny<Entities.FileShare>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.CreateShareAsync(fileId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(fileId, result.Data.FileId);
-        Assert.False(string.IsNullOrEmpty(result.Data.ShareToken));
-        Assert.True(result.Data.IsEnabled);
-        _mockShareRepository.Verify(r => r.InsertAsync(It.IsAny<Entities.FileShare>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsTrue_WhenShareIsValid()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true,
-            ExpiresAt = DateTime.UtcNow.AddDays(1),
-            MaxAccessCount = 10,
-            AccessCount = 5,
-            RequirePassword = false
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<System.Func<Entities.FileShare, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.True(result.Data);
-    }
-
-    [Fact]
-    public async Task ValidateShareAccessAsync_ReturnsFalse_WhenShareIsExpired()
-    {
-        // Arrange
-        var service = CreateShareService();
-        var shareToken = "test-token";
-        var share = new Entities.FileShare
-        {
-            ShareToken = shareToken,
-            IsEnabled = true,
-            ExpiresAt = DateTime.UtcNow.AddDays(-1), // 已过期
-            RequirePassword = false
-        };
-
-        _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<System.Func<Entities.FileShare, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(share);
-
-        // Act
-        var result = await service.ValidateShareAccessAsync(shareToken);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.False(result.Data);
-    }
-
-    #endregion
 
     #region 文件压缩功能测试
 

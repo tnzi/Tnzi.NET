@@ -237,6 +237,9 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         FinanceSourceTypes.Expense,
         FinanceSourceTypes.PaymentEntry,
         FinanceSourceTypes.Transfer,
+        // 存款单尤其不能从总账绕过去：那样凭证冲销了、单据仍是 Posted，
+        // 它收走的那几张收款也还被声明占着，永远回不到候选清单。
+        FinanceSourceTypes.Deposit,
     };
 
     public async Task<Result<JournalEntryDto>> ReverseAsync(Guid id, ReverseJournalEntryDto input, CancellationToken cancellationToken = default)

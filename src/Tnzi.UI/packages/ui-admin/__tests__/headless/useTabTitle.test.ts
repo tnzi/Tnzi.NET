@@ -4,7 +4,9 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
 import { useTabTitle } from '../../src/headless/useTabTitle'
+import { provideDesktopWindowId } from '../../src/headless/desktop-window-context'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
+import { useAdminDesktopStore } from '../../src/stores/useAdminDesktopStore'
 
 const Blank = defineComponent({ render: () => h('div') })
 
@@ -57,5 +59,65 @@ describe('useTabTitle', () => {
     })
     // No router plugin → useRoute throws internally → swallowed, no crash.
     expect(() => mount(Host)).not.toThrow()
+  })
+})
+
+describe('useTabTitle inside a desktop window', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('retargets to the window title bar instead of the tab store', async () => {
+    const desktop = useAdminDesktopStore()
+    const tabs = useAdminTabStore()
+    const id = desktop.open({ name: 'ai.agents.detail', path: '/a/1', title: 'Agent Detail' })
+
+    const Page = defineComponent({
+      setup() {
+        useTabTitle(ref('Support Bot'))
+        return () => h('div')
+      },
+    })
+    const Shell = defineComponent({
+      setup() {
+        provideDesktopWindowId(id)
+        return () => h(Page)
+      },
+    })
+
+    mount(Shell)
+    await flushPromises()
+
+    expect(desktop.find(id)!.title).toBe('Support Bot')
+    // Nothing leaked into the tab bar - which the desktop layout does not even
+    // render, and where two windows on one route would collide on a single key.
+    expect(tabs.tabs).toHaveLength(0)
+  })
+
+  it('gives two windows on the same route independent titles', async () => {
+    const desktop = useAdminDesktopStore()
+    const a = desktop.open({ name: 'ai.agents.detail', path: '/a/1', title: 'Agent Detail' })
+    const b = desktop.open({ name: 'ai.agents.detail', path: '/a/2', title: 'Agent Detail' })
+
+    const makeShell = (id: string, name: string) =>
+      defineComponent({
+        setup() {
+          provideDesktopWindowId(id)
+          return () =>
+            h(
+              defineComponent({
+                setup() {
+                  useTabTitle(ref(name))
+                  return () => h('div')
+                },
+              }),
+            )
+        },
+      })
+
+    mount(makeShell(a, 'Support Bot'))
+    mount(makeShell(b, 'Sales Bot'))
+    await flushPromises()
+
+    expect(desktop.find(a)!.title).toBe('Support Bot')
+    expect(desktop.find(b)!.title).toBe('Sales Bot')
   })
 })

@@ -962,7 +962,10 @@ export interface ProviderDto {
   providerType: string;
   endpoint?: string | null;
   defaultModel?: string | null;
+  /** Runtime tie-break when several rows share a name - NOT the list order. */
   priority: number;
+  /** Display order (lower first), written by drag-to-reorder. */
+  sortOrder: number;
   isEnabled: boolean;
   description?: string | null;
   hasApiKey: boolean;

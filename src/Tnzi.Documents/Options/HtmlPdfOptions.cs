@@ -101,7 +101,8 @@ public class HtmlPdfOptions
     /// <remarks>
     /// 与 LibreOffice 那条路径「全局串行」的原因不同：浏览器各用各的 profile 目录，并发本身是安全的，
     /// 这里限的是**内存**（每个 headless 实例是百 MB 量级，不设上限就是一个现成的拒绝服务面）。
-    /// 改这个值需要重启进程。
+    /// 既然限的是这台机器的内存，闸门就是**进程级**的：出 PDF 与出缩略图两条路共用这一个上限，
+    /// 而不是各占一份。容量在首次渲染时定死，改这个值需要重启进程。
     /// </remarks>
     public int MaxConcurrency { get; set; } = 2;
 

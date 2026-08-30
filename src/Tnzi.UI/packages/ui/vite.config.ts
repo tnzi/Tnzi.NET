@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import UnoCSS from 'unocss/vite';
 import vue from '@vitejs/plugin-vue';
 import { resolve } from 'path';
+import { preservedModuleFileName } from '../../tools/vite/preserved-module-filename.mjs';
 
 export default defineConfig({
   // NOTE: .d.ts are emitted by `vue-tsc -p tsconfig.build.json` in the `build`
@@ -13,12 +14,12 @@ export default defineConfig({
   build: {
     lib: {
       entry: {
-        index: resolve(__dirname, 'src/index.ts'),
-        components: resolve(__dirname, 'src/components/index.ts'),
-        stores: resolve(__dirname, 'src/stores/index.ts'),
-        headless: resolve(__dirname, 'src/headless/index.ts'),
-        resolvers: resolve(__dirname, 'src/resolvers/index.ts'),
-        utils: resolve(__dirname, 'src/utils/index.ts'),
+        index: resolve(import.meta.dirname, 'src/index.ts'),
+        components: resolve(import.meta.dirname, 'src/components/index.ts'),
+        stores: resolve(import.meta.dirname, 'src/stores/index.ts'),
+        headless: resolve(import.meta.dirname, 'src/headless/index.ts'),
+        resolvers: resolve(import.meta.dirname, 'src/resolvers/index.ts'),
+        utils: resolve(import.meta.dirname, 'src/utils/index.ts'),
       },
       name: 'TnziUi',
       formats: ['es'],
@@ -41,8 +42,9 @@ export default defineConfig({
         || id.startsWith('@iconify/vue'),
       output: {
         preserveModules: true,
-        preserveModulesRoot: resolve(__dirname, 'src'),
+        preserveModulesRoot: resolve(import.meta.dirname, 'src'),
         exports: 'named',
+        entryFileNames: preservedModuleFileName,
         globals: {
           vue: 'Vue',
           'naive-ui': 'NaiveUi',

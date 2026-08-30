@@ -31,3 +31,6 @@ global using Tnzi.Utilities;
 global using Xunit;
 global using Tnzi.AI.Services;
 global using Tnzi.TestBase;
+global using System.Net.Http;
+global using System.Text.Json;
+global using Tnzi.AI.Options;

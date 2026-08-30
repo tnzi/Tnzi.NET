@@ -7,11 +7,15 @@ namespace Tnzi.Payment.Services;
 public partial class PaymentService : ApplicationService, IPaymentService
 {
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
-    private readonly IRepository<CouponUsage, Guid> _couponUsageRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
     private readonly IPaymentTaxCalculator _taxCalculator;
     private readonly IPaymentMethodService _paymentMethodService;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+
+    /// <summary>
+    /// 折扣能力。未加载促销包时为 null —— 那台宿主上不存在任何优惠券码，
+    /// 于是带券码的建单被拒（400 <c>COUPON_INVALID</c>），不带券码的建单一个字节不差。
+    /// </summary>
     private readonly ICouponService? _couponService;
     private readonly ICache? _cache;
 
@@ -21,7 +25,6 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     public PaymentService(
         IRepository<PaymentEntity, Guid> paymentRepository,
-        IRepository<CouponUsage, Guid> couponUsageRepository,
         IPaymentProviderFactory paymentProviderFactory,
         IPaymentTaxCalculator taxCalculator,
         IPaymentMethodService paymentMethodService,
@@ -32,7 +35,6 @@ public partial class PaymentService : ApplicationService, IPaymentService
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
-        _couponUsageRepository = Check.NotNull(couponUsageRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
         _taxCalculator = Check.NotNull(taxCalculator);
         _paymentMethodService = Check.NotNull(paymentMethodService);
@@ -393,6 +395,16 @@ public partial class PaymentService : ApplicationService, IPaymentService
             : DateTime.UtcNow.AddMinutes(PaymentOptions.AutoCloseExpireMinutes);
     }
 
+    /// <summary>
+    /// 试算券码带来的折扣。没带券码时直接放行（返回一个成功但无数据的结果）。
+    /// </summary>
+    /// <remarks>
+    /// 未加载促销包时返回 400 <c>COUPON_INVALID</c> 而不是 501：501 是「本服务器不提供此功能」，
+    /// 适合一个整体只讲促销的端点；而这里是<b>建单</b>端点，它本身好端端的，
+    /// 只是收到了一个在这台宿主上不可能有效的券码 —— 那正是 <c>COUPON_INVALID</c> 的意思。
+    /// 但服务端要把话说全：记一条 Error 指名要加载哪个包，否则一次部署疏漏会被读成
+    /// 「用户老是输错码」，而两者在客户端看起来完全一样。
+    /// </remarks>
     private async Task<Result<CouponPreviewDto>> PreviewCouponAsync(
         CreatePaymentDto request, string currency, Guid? userId, CancellationToken cancellationToken)
     {
@@ -400,7 +412,14 @@ public partial class PaymentService : ApplicationService, IPaymentService
             return Result.Success<CouponPreviewDto>(null!);
 
         if (_couponService == null)
+        {
+            Logger.LogError(
+                "A payment named coupon code '{CouponCode}', but no ICouponService is registered, so every coupon code "
+                + "is rejected. Load the Tnzi.Payment.Promotions module ([DependsOn(typeof(PaymentPromotionsModule))]) "
+                + "or register your own ICouponService.", request.CouponCode);
+
             return Result.Failure<CouponPreviewDto>(ErrorCodes.CouponInvalid, 400);
+        }
 
         // 优惠券按用户维度限量与去重，没有用户上下文就无法保证不被反复使用
         if (!userId.HasValue)

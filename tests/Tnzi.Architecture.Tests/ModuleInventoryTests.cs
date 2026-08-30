@@ -57,7 +57,7 @@ public class ModuleInventoryTests
 
         // 下界而不是 ShouldNotBeEmpty：正则一旦退化成只匹配到一两个模块，
         // 「扫到的都在图里」照样成立，整条门禁会安静地失效 —— 这正是它要防的那种假绿。
-        // 数字取当前 43 个具体模块类的保守下界（源码共 44 个模块类，HostingModule 是 abstract 不进图），新增模块只会让它更宽松，删模块删到 40 以下才需要调。
+        // 数字取当前 42 个具体模块类的保守下界（源码共 43 个模块类，HostingModule 是 abstract 不进图），新增模块只会让它更宽松，删模块删到 40 以下才需要调。
         declared.Count.ShouldBeGreaterThanOrEqualTo(40,
             $"源码只扫到 {declared.Count} 个模块类，远少于预期 —— 是扫描/正则坏了，不是模块真的变少了");
 

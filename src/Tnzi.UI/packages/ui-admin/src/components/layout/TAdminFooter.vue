@@ -56,12 +56,16 @@ withDefaults(defineProps<Props>(), { fixed: false, surface: undefined })
   /* Compact: a single copyright/links line - min-height centers it, no
      vertical padding so the footer doesn't eat content height. Horizontal
      padding matches the 12px content gutter. */
-  min-height: var(--tnzi-admin-footer-height, 32px);
+  min-height: var(--tnzi-admin-footer-height, 28px);
   padding: 0 12px;
-  font-size: 12px;
+  /* 11px rather than 12: at a 28px bar the old size filled 43% of it and read
+     as body copy in a strip that is chrome. 11px is already in this package's
+     type scale, so nothing new is introduced. */
+  font-size: 11px;
   color: var(--tnzi-base-text-muted);
   background-color: var(--tnzi-admin-footer-bg, transparent);
-  border-top: 1px solid var(--tnzi-border);
+  border-top: var(--tnzi-surface-chrome-border);
+  box-shadow: var(--tnzi-surface-chrome-shadow-footer);
 }
 .t-admin-footer--fixed {
   position: sticky;

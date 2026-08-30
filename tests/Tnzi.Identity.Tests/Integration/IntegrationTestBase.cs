@@ -25,14 +25,12 @@ public class IdentityTestDbContext : TnziDbContext<IdentityTestDbContext>
 
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
-    public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // 应用 Identity 实体配置
         modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.UserConfiguration());
-        modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.OrganizationConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.LoginLogConfiguration());
 
         base.OnModelCreating(modelBuilder);

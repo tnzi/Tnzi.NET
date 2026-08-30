@@ -8,13 +8,14 @@
  * String enum (member name = value) - the backend registers a global
  * JsonStringEnumConverter, so every enum field serializes as its PascalCase
  * member name; the enum members mirror Tnzi.Notification.Metadata.NotificationType
- * (Email / Sms / Push - there is no InApp on the backend). Inbound query params
+ * (Email / Sms / Push / Fax - there is no InApp on the backend). Inbound query params
  * accept both the string and the legacy numeric value.
  */
 export enum NotificationType {
   Email = 'Email',
   Sms = 'Sms',
   Push = 'Push',
+  Fax = 'Fax',
 }
 
 /**
@@ -28,6 +29,8 @@ export function getNotificationTypeLabel(type: NotificationType): string {
       return 'SMS';
     case NotificationType.Push:
       return 'Push';
+    case NotificationType.Fax:
+      return 'Fax';
     default:
       return 'Unknown';
   }

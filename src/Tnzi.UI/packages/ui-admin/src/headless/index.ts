@@ -22,6 +22,7 @@ export * from './useNaiveForm'
 export * from './useEcharts'
 export * from './useRouteProgress'
 export * from './useBreakpoint'
+export * from './useAdminLocale'
 export * from './useFileUrl'
 export * from './useChatSound'
 export * from './chat-sounds'
@@ -115,6 +116,14 @@ export {
 export * from './account-type'
 
 // --- Shell / chrome --------------------------------------------------------
+// The two chrome commands the shell owns (global search, theme drawer), handed
+// down by provide/inject so a layout mode with its own chrome - the desktop
+// taskbar, or a consumer's hand-rolled header - can trigger them.
+export * from './admin-shell-actions'
+// The Settings entry + built-in-menus toggle, and the gate deciding whether to
+// show them. Shared by the sidebar footer and the desktop start menu, which has
+// no sidebar to put them in.
+export * from './useSettingsEntry'
 // Menu context (which first-level module a route belongs to) pairs with
 // `useAdminShellLayout` for consumers assembling a custom shell.
 export * from './useAdminMenuContext'
@@ -132,3 +141,16 @@ export * from './useWidgetData'
 // Settings hot-reload (`/hubs/settings`) and the presence auto-away reporter.
 export * from './useSettingsRealtime'
 export * from './usePresenceActivity'
+
+// --- Desktop layout --------------------------------------------------------
+// Per-window route context (what lets N pages mount side by side, each seeing
+// its own URL state), the move/resize gesture engine behind the chrome, and the
+// marker that tells route-keyed global facilities they are inside a window.
+export * from './useWindowRoute'
+export * from './useWindowGeometry'
+// Window sizing / placement policy: the presets a route names through
+// `meta.window`, and the "enough of it is on screen" rule the drag gesture and
+// the off-screen rescue both apply.
+export * from './window-sizing'
+export * from './desktop-panels'
+export * from './desktop-window-context'

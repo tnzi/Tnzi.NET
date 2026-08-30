@@ -98,9 +98,9 @@ function select(key: UserPresenceStatus) {
 /* Unscoped - the menu renders inside the teleported popover (`raw`). */
 .t-presence-menu {
   background: var(--chat-surface, #fff);
-  border: 1px solid var(--chat-border, #e6e6e6);
+  border: var(--tnzi-surface-popover-border);
   border-radius: var(--tnzi-admin-radius-md, 8px);
-  box-shadow: var(--tnzi-shadow-popover, 0 6px 24px rgba(0, 0, 0, 0.16));
+  box-shadow: var(--tnzi-surface-popover-shadow);
   padding: 5px;
   overflow: hidden;
 }

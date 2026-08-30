@@ -216,20 +216,36 @@ describe('TThemeDrawer', () => {
     expect(store.layoutMode).toBe('horizontal')
   })
 
-  it('renders all 4 layout mode cards', () => {
+  it('renders a card for every layout mode', () => {
     const wrapper = mount(TThemeDrawer, {
       props: { show: true, themeContext: createCtx() },
     })
     const cards = wrapper.findAll('.layout-mode-card')
-    expect(cards.length).toBe(4)
+    expect(cards.length).toBe(5)
     const modes = cards.map((c) => c.attributes('data-mode'))
     expect(modes).toContain('vertical')
     expect(modes).toContain('horizontal')
     expect(modes).toContain('vertical-mix')
     expect(modes).toContain('top-hybrid-header-first')
+    // A mode absent from this grid is unreachable from the UI no matter how
+    // completely it is wired elsewhere - which is what this count is guarding.
+    expect(modes).toContain('desktop')
     // The two buggy hybrid modes were removed (2026-06-26).
     expect(modes).not.toContain('vertical-hybrid-header-first')
     expect(modes).not.toContain('top-hybrid-sidebar-first')
+  })
+
+  it('selecting the desktop card switches the layout mode', async () => {
+    const store = useAdminThemeStore()
+    const wrapper = mount(TThemeDrawer, {
+      props: { show: true, themeContext: createCtx() },
+    })
+    const card = wrapper.find('[data-mode="desktop"]')
+    expect(card.exists()).toBe(true)
+    await card.trigger('click')
+    // `setLayoutMode` silently no-ops on a value missing from
+    // VALID_LAYOUT_MODES, so this also pins the runtime mirror to the type.
+    expect(store.layoutMode).toBe('desktop')
   })
 
   it('buildSnapshot exposes a v1 admin + ui shape', () => {

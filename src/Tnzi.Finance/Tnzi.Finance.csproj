@@ -23,6 +23,10 @@
     <InternalsVisibleTo Include="Tnzi.Finance.Tests, PublicKey=$(TnziPublicKey)" />
     <InternalsVisibleTo Include="Tnzi.Finance.Documents, PublicKey=$(TnziPublicKey)" />
     <InternalsVisibleTo Include="Tnzi.Finance.Banking, PublicKey=$(TnziPublicKey)" />
+    <!-- Tnzi.Finance.Offers（报价单 / 采购订单）复用 internal 的 UnitOfWorkAbortException：
+         转换成发票/账单草稿时，lambda 内已发生写入之后的失败必须 abort 而不是 return，
+         那是本模块的铁律而不是要约模块自己的规矩，故信号类型留在核心。 -->
+    <InternalsVisibleTo Include="Tnzi.Finance.Offers, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
 </Project>

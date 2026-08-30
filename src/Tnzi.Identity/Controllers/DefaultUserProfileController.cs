@@ -560,7 +560,8 @@ public class DefaultUserProfileController : ApiControllerBase
             return Error("Two-factor service is not available", 503);
         }
 
-        var result = await TwoFactorService.SendCodeByAddressAsync(input.NewAddress, TwoFactorType.Email);
+        var result = await TwoFactorService.SendCodeByAddressAsync(
+            input.NewAddress, TwoFactorType.Email, VerificationCodePurpose.ChangeContact);
         return result.ToApiResult();
     }
 
@@ -581,7 +582,8 @@ public class DefaultUserProfileController : ApiControllerBase
         }
 
         // 验证验证码
-        var verifyResult = await TwoFactorService.VerifyCodeByAddressAndMarkUsedAsync(input.NewEmail, input.Code, TwoFactorType.Email);
+        var verifyResult = await TwoFactorService.VerifyCodeByAddressAndMarkUsedAsync(
+            input.NewEmail, input.Code, TwoFactorType.Email, VerificationCodePurpose.ChangeContact);
         if (!verifyResult.Succeeded)
         {
             return Error(verifyResult.Message ?? "Verification failed", verifyResult.Code ?? 400);
@@ -608,7 +610,8 @@ public class DefaultUserProfileController : ApiControllerBase
             return Error("Two-factor service is not available", 503);
         }
 
-        var result = await TwoFactorService.SendCodeByAddressAsync(input.NewAddress, TwoFactorType.Sms);
+        var result = await TwoFactorService.SendCodeByAddressAsync(
+            input.NewAddress, TwoFactorType.Sms, VerificationCodePurpose.ChangeContact);
         return result.ToApiResult();
     }
 
@@ -629,7 +632,8 @@ public class DefaultUserProfileController : ApiControllerBase
         }
 
         // 验证验证码
-        var verifyResult = await TwoFactorService.VerifyCodeByAddressAndMarkUsedAsync(input.NewPhoneNumber, input.Code, TwoFactorType.Sms);
+        var verifyResult = await TwoFactorService.VerifyCodeByAddressAndMarkUsedAsync(
+            input.NewPhoneNumber, input.Code, TwoFactorType.Sms, VerificationCodePurpose.ChangeContact);
         if (!verifyResult.Succeeded)
         {
             return Error(verifyResult.Message ?? "Verification failed", verifyResult.Code ?? 400);

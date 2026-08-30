@@ -53,6 +53,18 @@ public class EmailMessage
     public List<EmailAttachment>? Attachments { get; set; }
 
     /// <summary>
+    /// 获取或设置 额外的信头（例如 RFC 8058 的 <c>List-Unsubscribe</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 有些事只有发信方做得了：一键退订按钮由邮件客户端读信头渲染，正文里的链接替代不了它。
+    /// <para>
+    /// ★ 自定义 <see cref="IEmailSender"/> 实现<b>可以忽略这个字典</b>，那只是少一个信头 ——
+    /// 见 <see cref="IEmailSender.SendToWithHeadersAsync"/> 的降级说明。
+    /// </para>
+    /// </remarks>
+    public Dictionary<string, string>? Headers { get; set; }
+
+    /// <summary>
     /// 创建一封只有单个收件人的邮件
     /// </summary>
     public static EmailMessage Create(string to, string? name = null, string subject = "", string body = "", bool isHtml = true, List<EmailAttachment>? attachments = null)
