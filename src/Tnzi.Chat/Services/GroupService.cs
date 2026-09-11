@@ -84,6 +84,12 @@ public class GroupService : ApplicationService, IGroupService
         if (!opts.EnableGroups)
             return Fail<ConversationDto>("Group chat is disabled.", 403);
 
+        // ★ 越界的群名在 SQL Server / PostgreSQL 上是一次 DbUpdateException（给用户 500）。
+        // 判定落在**修剪后**的值上 —— 那才是要落库的那一个。
+        var titleTooLong = ChatFieldLimits.Exceeded(input.Title.Trim(), ChatFieldLimits.Title, "Group name");
+        if (titleTooLong != null)
+            return Fail<ConversationDto>(titleTooLong, 400);
+
         var me = GetRequiredCurrentUser().Id!.Value;
 
         var memberIds = (input.MemberIds ?? new List<Guid>()).Where(id => id != Guid.Empty && id != me).Distinct().ToList();
@@ -238,7 +244,11 @@ public class GroupService : ApplicationService, IGroupService
         if (conv == null || conv.Type != ConversationType.Group) return Fail("Group not found.", 404);
         if (!IsOwner(conv, me)) return Fail("Only the group owner can rename the group.", 403);
 
-        conv.Title = title.Trim();
+        var trimmedTitle = title.Trim();
+        var titleTooLong = ChatFieldLimits.Exceeded(trimmedTitle, ChatFieldLimits.Title, "Group name");
+        if (titleTooLong != null) return Fail(titleTooLong, 400);
+
+        conv.Title = trimmedTitle;
         await _conversationRepository.UpdateAsync(conv);
         await PublishChangedAsync(conversationId, ConversationChangeType.Renamed);
         return Ok();
@@ -253,7 +263,11 @@ public class GroupService : ApplicationService, IGroupService
         if (!IsOwner(conv, me))
             return Fail("Only the group owner can edit the notice.", 403);
 
-        conv.Notice = string.IsNullOrWhiteSpace(notice) ? null : notice.Trim();
+        var trimmedNotice = string.IsNullOrWhiteSpace(notice) ? null : notice.Trim();
+        var noticeTooLong = ChatFieldLimits.Exceeded(trimmedNotice, ChatFieldLimits.Notice, "Group notice");
+        if (noticeTooLong != null) return Fail(noticeTooLong, 400);
+
+        conv.Notice = trimmedNotice;
         await _conversationRepository.UpdateAsync(conv);
         return Ok();
     }

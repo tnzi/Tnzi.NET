@@ -27,23 +27,11 @@ public class CachingOptionsValidator : OptionsValidatorBase<CachingOptions>
             }
         }
 
-        // 条件验证：当使用 Redis 时，验证 Redis 配置
-        if (string.Equals(options.Type, "Redis", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrEmpty(options.RedisConnectionString))
-            {
-                errors.Add("Caching.RedisConnectionString is required when Type is Redis.");
-            }
-        }
+        // 刻意不在这里要求 RedisConnectionString：连接串有三个来源
+        // （Redis.ConnectionString > Caching.RedisConnectionString > ConnectionStrings:Redis），
+        // 本类只看得见第二个。此前在这里硬性要求它，让按文档只配 Redis.ConnectionString 的应用
+        // 启动即 OptionsValidationException。三个来源都没配时由 RedisCachingModule 在解析处抛出，
+        // 错误消息列出全部三个键；Type=Redis 却没加载 Redis 模块则由 CachingModule 的启动自证拦住。
 
-        // 验证过期策略
-        if (!string.IsNullOrEmpty(options.ExpirationStrategy))
-        {
-            var validStrategies = new[] { "Fixed", "Pattern", "Sliding", "Composite" };
-            if (!validStrategies.Contains(options.ExpirationStrategy, StringComparer.OrdinalIgnoreCase))
-            {
-                errors.Add($"Caching.ExpirationStrategy must be one of: {string.Join(", ", validStrategies)}.");
-            }
-        }
     }
 }

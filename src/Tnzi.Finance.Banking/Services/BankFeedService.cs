@@ -14,7 +14,6 @@ public class BankFeedService : ApplicationService, IBankFeedService
     private readonly IRepository<BankTransaction, Guid> _txnRepository;
     private readonly IRepository<BankImportBatch, Guid> _batchRepository;
     private readonly IRepository<ReconciliationLine, Guid> _reconLineRepository;
-    private readonly IRepository<BankAccount, Guid> _bankAccountRepository;
     private readonly IRepository<Reconciliation, Guid> _reconRepository;
     private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
     private readonly FinanceDocumentHelper _helper;
@@ -24,7 +23,6 @@ public class BankFeedService : ApplicationService, IBankFeedService
     private readonly BankDocumentDrafter _drafter;
     private readonly BankStatementIngestor _ingestor;
     private readonly ILedgerPostingService _postingService;
-    private readonly IEnumerable<IBankFeedProvider> _providers;
     private readonly FinanceOptions _options;
 
     public BankFeedService(
@@ -32,7 +30,6 @@ public class BankFeedService : ApplicationService, IBankFeedService
         IRepository<BankTransaction, Guid> txnRepository,
         IRepository<BankImportBatch, Guid> batchRepository,
         IRepository<ReconciliationLine, Guid> reconLineRepository,
-        IRepository<BankAccount, Guid> bankAccountRepository,
         IRepository<Reconciliation, Guid> reconRepository,
         IReadOnlyRepository<Account, Guid> accountRepository,
         FinanceDocumentHelper helper,
@@ -42,14 +39,12 @@ public class BankFeedService : ApplicationService, IBankFeedService
         BankDocumentDrafter drafter,
         BankStatementIngestor ingestor,
         ILedgerPostingService postingService,
-        IOptionsSnapshot<FinanceOptions> options,
-        IEnumerable<IBankFeedProvider>? providers = null)
+        IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
         _txnRepository = Check.NotNull(txnRepository);
         _batchRepository = Check.NotNull(batchRepository);
         _reconLineRepository = Check.NotNull(reconLineRepository);
-        _bankAccountRepository = Check.NotNull(bankAccountRepository);
         _reconRepository = Check.NotNull(reconRepository);
         _accountRepository = Check.NotNull(accountRepository);
         _helper = Check.NotNull(helper);
@@ -60,7 +55,6 @@ public class BankFeedService : ApplicationService, IBankFeedService
         _ingestor = Check.NotNull(ingestor);
         _postingService = Check.NotNull(postingService);
         _options = Check.NotNull(options).Value;
-        _providers = providers ?? Enumerable.Empty<IBankFeedProvider>();
     }
 
     private string BaseCurrency => _helper.NormalizeCurrency(null);
@@ -195,13 +189,22 @@ public class BankFeedService : ApplicationService, IBankFeedService
         // 是什么已经知道了。一次评估整批，逐条查规则表会把 N 条流水变成 N 次往返。
         var ruleMatches = await _ruleEvaluator.EvaluateManyAsync(pending, cancellationToken);
 
+        // ★ 候选集同样一次取回。逐条流水问一次是 N 次三层反连接查询，而下面那个循环
+        // 跑在一个物理事务里 —— 于是一次几千行的导入点一下「建议匹配」，就是几千次
+        // 往返串行发生在一把写锁下面。候选只取决于科目与金额，与是哪一条流水无关。
+        // 事务体内此后不再有任何一次读：它只做内存计算，最后一次性落盘。
+        var candidatesByAmount = await _engine.GetCandidatesByAmountAsync(
+            accountId, pending.Select(t => t.Amount).ToList(), cancellationToken);
+        var noCandidates = new List<BankMatchCandidate>();
+
         try
         {
             await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
                 foreach (var txn in pending)
                 {
-                    var suggestion = await _engine.SuggestAsync(txn, ct);
+                    var suggestion = _engine.Suggest(
+                        txn, candidatesByAmount.TryGetValue(txn.Amount, out var forAmount) ? forAmount : noCandidates);
                     if (suggestion == null || assigned.Contains(suggestion.JournalLineId))
                     {
                         txn.SuggestedJournalLineId = null;
@@ -495,8 +498,17 @@ public class BankFeedService : ApplicationService, IBankFeedService
         txn.SuggestedRuleId = null;
         txn.MatchConfidence = null;
         txn.MatchRule = null;
-        await _txnRepository.UpdateAsync(txn, cancellationToken);
-        await _txnRepository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _txnRepository.UpdateAsync(txn, cancellationToken);
+            await _txnRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 同文件其余写路径都把并发戳失配翻译成 409；这两条漏了，于是它们会把一个
+            // 「有人抢先改了这行」的正常竞态抛成 500。
+            return Fail<BankTransactionDto>("The transaction was modified by another operation. Reload and retry.", 409);
+        }
         return await GetDtoAsync(txn.Id, cancellationToken);
     }
 
@@ -509,8 +521,15 @@ public class BankFeedService : ApplicationService, IBankFeedService
             return Fail<BankTransactionDto>("Only excluded transactions can be restored.", 409);
 
         txn.Status = BankTransactionStatus.Pending;
-        await _txnRepository.UpdateAsync(txn, cancellationToken);
-        await _txnRepository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _txnRepository.UpdateAsync(txn, cancellationToken);
+            await _txnRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail<BankTransactionDto>("The transaction was modified by another operation. Reload and retry.", 409);
+        }
         return await GetDtoAsync(txn.Id, cancellationToken);
     }
 

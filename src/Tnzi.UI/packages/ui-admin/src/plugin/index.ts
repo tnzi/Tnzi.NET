@@ -35,6 +35,10 @@ import {
   provideAdminUserCenterConfig,
   type AdminUserCenterConfig,
 } from './user-center-config'
+import {
+  provideAdminShellConfig,
+  type AdminShellConfig,
+} from './shell-config'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -114,6 +118,13 @@ export interface TnziUiAdminOptions {
    * renders the six built-in sections.
    */
   userCenter?: AdminUserCenterConfig
+  /**
+   * Chrome-level configuration - currently the host's own chrome `actions`,
+   * icon buttons rendered beside the built-in Settings entry in whichever
+   * utility strip the active layout mode provides. When omitted the chrome
+   * renders exactly its built-ins.
+   */
+  shell?: AdminShellConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -167,6 +178,10 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   if (options.userCenter) {
     provideAdminUserCenterConfig(app, options.userCenter)
   }
+
+  // Chrome config - always provided (stable empty object) so `useChromeActions()`
+  // resolves without a null check from every strip that renders host actions.
+  provideAdminShellConfig(app, options.shell ?? {})
 
   // Install global directives (v-permission, etc).
   installDirectives(app)
@@ -288,6 +303,13 @@ export {
   type UserCenterIdentityField,
   type UserCenterReadonlyField,
 } from './user-center-config'
+export {
+  ADMIN_SHELL_CONFIG_KEY,
+  provideAdminShellConfig,
+  useAdminShellConfig,
+  type AdminShellConfig,
+  type AdminChromeAction,
+} from './shell-config'
 export {
   fetchAdminManifest,
   type AdminManifest,

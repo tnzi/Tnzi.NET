@@ -1,4 +1,4 @@
-global using System.Globalization;
+﻿global using System.Globalization;
 global using System.Net;
 global using System.Net.Http.Headers;
 global using System.Net.Http.Json;
@@ -22,4 +22,5 @@ global using Tnzi.Payment.Providers;
 
 global using Tnzi.Payment.PayPal.Options;
 global using Tnzi.Payment.PayPal.Providers;
+global using System.Collections.Concurrent;
 global using Tnzi.Payment.PayPal.Providers.Models;

@@ -138,6 +138,50 @@ public partial class AIModule
     }
 
     /// <summary>
+    /// 交叉校验预算与成本追踪：预算开着而配置里根本产不出成本时告警。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>AI:Budget:Enabled</c> 与 <c>AI:CostTracking:Enabled</c> 是同组的两个热设置，而费率
+    /// （<c>ModelCosts</c> / <c>DefaultCostRate</c>）不是热设置。只开预算不开成本追踪、
+    /// 或开了成本追踪却一条费率都没配，<c>ICostCalculator</c> 恒返回 null，
+    /// <c>EstimatedCostUsd</c> 恒为 null，预算聚合恒为 0，闸门恒判「未超限」——
+    /// 而界面显示「已启用、用量 0%」，没有任何症状。
+    /// </para>
+    /// <para>
+    /// 只告警不抛出：成本也可以由宿主经
+    /// <c>IUsageLogService.LogUsageAsync(..., estimatedCostUsd, ...)</c> 直接写入，
+    /// 那种部署里成本追踪关着预算照样是准的，拒绝启动会误伤它们。
+    /// 运行期的兜底判据取自数据而不是配置，见 <c>BudgetService</c> 的 Indeterminate 状态。
+    /// </para>
+    /// </remarks>
+    private static void ValidateBudgetCostWiring(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
+        if (!options.Budget.Enabled)
+        {
+            return;
+        }
+
+        var costTracking = options.CostTracking;
+        if (!costTracking.Enabled)
+        {
+            logger.LogWarning(
+                "AI:Budget:Enabled is true but AI:CostTracking:Enabled is false. No cost will be calculated for usage, " +
+                "so the budget will aggregate to $0 and never trigger unless the host supplies estimatedCostUsd when logging usage.");
+            return;
+        }
+
+        if (costTracking.ModelCosts.Count == 0 && costTracking.DefaultCostRate == null)
+        {
+            logger.LogWarning(
+                "AI:Budget:Enabled and AI:CostTracking:Enabled are both true, but no cost rate is configured. " +
+                "Configure AI:CostTracking:ModelCosts or AI:CostTracking:DefaultCostRate, " +
+                "otherwise every usage entry is costed as null and the budget will never trigger.");
+        }
+    }
+
+    /// <summary>
     /// 校验所有工具的 [RequiresSkill] 引用是否指向已注册的 Skill
     /// </summary>
     private static async Task ValidateRequiresSkillReferencesAsync(IToolRegistry toolRegistry, IServiceProvider serviceProvider, ILogger logger)

@@ -7,40 +7,58 @@ namespace Tnzi.Feature.Services;
 public class FeatureUsageService : ApplicationService, IFeatureUsageService
 {
     private readonly IRepository<FeatureUsageRecord, long> _repository;
+    private readonly IFeatureUsageSender _sender;
+    private readonly IOptionsMonitor<FeatureOptions> _options;
+    private readonly ICurrentTenant? _currentTenant;
 
     /// <summary>
     /// Initialize FeatureUsageService
     /// </summary>
+    /// <param name="serviceProvider">Service provider.</param>
+    /// <param name="repository">Usage record repository (analytics queries and cleanup).</param>
+    /// <param name="sender">Request-side queue the records are handed to; a hosted service writes them in batches.</param>
+    /// <param name="options">Feature options, read hot for <see cref="FeatureOptions.UsageTrackingEnabled"/>.</param>
+    /// <param name="currentTenant">Current tenant accessor, absent when multi-tenancy is not loaded.</param>
     public FeatureUsageService(
         IServiceProvider serviceProvider,
-        IRepository<FeatureUsageRecord, long> repository)
+        IRepository<FeatureUsageRecord, long> repository,
+        IFeatureUsageSender sender,
+        IOptionsMonitor<FeatureOptions> options,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
+        _sender = Check.NotNull(sender);
+        _options = Check.NotNull(options);
+        _currentTenant = currentTenant;
     }
 
     /// <inheritdoc />
-    public async Task RecordUsageAsync(string featureName, bool isEnabled, string? source = null)
+    public Task RecordUsageAsync(string featureName, bool isEnabled, string? source = null)
     {
         Check.NotNullOrWhiteSpace(featureName);
 
-        try
+        if (!_options.CurrentValue.UsageTrackingEnabled)
         {
-            var record = new FeatureUsageRecord
-            {
-                FeatureName = featureName,
-                UserId = CurrentUser?.Id,
-                IsEnabled = isEnabled,
-                Source = source
-            };
+            return Task.CompletedTask;
+        }
 
-            await _repository.InsertAsync(record);
-        }
-        catch (Exception ex)
+        // 谁、哪个租户、什么时候 —— 全部在入队这一刻定格。后台落库的作用域里没有当前用户也没有
+        // 当前租户，而 SaveChanges 的审计填充只补空值，不会替我们找回请求上下文。
+        // 租户取法与 EF 审计填充同一优先级：ICurrentTenant 先、用户声明里的租户其次。
+        var record = new FeatureUsageRecord
         {
-            // Fire-and-forget: log but do not propagate errors
-            Logger.LogWarning(ex, "Failed to record feature usage for '{FeatureName}'", featureName);
-        }
+            FeatureName = featureName,
+            UserId = CurrentUser?.Id,
+            TenantId = _currentTenant?.Id ?? CurrentUser?.TenantId,
+            IsEnabled = isEnabled,
+            Source = source,
+            CreationTime = DateTime.UtcNow
+        };
+
+        // 非阻塞：队列满时丢弃并由 sender 计数记日志，绝不让功能检查等一次写库。
+        _sender.TrySend(record);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

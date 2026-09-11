@@ -42,7 +42,7 @@ resolve the modules you name:
 
 ```xml
 <PropertyGroup>
-  <TnziVersion>0.1.1</TnziVersion>
+  <TnziVersion>0.1.28</TnziVersion>
   <TnziModules>Identity;Authorization;Storage;Finance.Payroll</TnziModules>
 </PropertyGroup>
 
@@ -73,9 +73,9 @@ skipped when not.
 |---|---|
 | **Core** | `Tnzi` — base types, utilities, caching, event bus, result types, exception hierarchy |
 | **Framework** | `AspNetCore` · `EFCore` · `Mapster` · `Localization` · `Swagger` · `SignalR` |
-| **Infrastructure** | `Redis` · `RabbitMQ` · `Kafka` · `Hangfire` · `Logging` · `OpenTelemetry` · `Performance` · `HealthChecks` · `Imaging` · `Feature` |
-| **Business** | `Identity` (+`Presence`) · `Authorization` · `Storage` · `Template` · `Notification` · `System` · `Audit` · `Chat` · `Payment` · `Signing` · `Documents` |
-| **Finance** | `Finance` plus six sub-modules: `Payroll` · `Banking` (statements, cheques, EFT) · `Recurring` · `Ai` (receipt extraction) · `Documents` (cheque rendering) · `Tax.Ca` |
+| **Infrastructure** | `Redis` · `RabbitMQ` · `Kafka` · `Hangfire` · `Logging` · `OpenTelemetry` · `Performance` · `HealthChecks` · `Imaging` |
+| **Business** | `Identity` (+`Presence`, `Organization`) · `Authorization` (+`DataAuth`) · `Storage` (+`Workspace`, `Cloud`) · `Template` · `Notification` (+`Push`) · `System` · `Audit` · `Chat` · `Payment` (+`Billing`, `Subscriptions`, `Promotions`, `Stripe`, `PayPal`) · `Feature` · `Signing` · `Documents` |
+| **Finance** | `Finance` plus seven sub-modules: `Payroll` · `Banking` (statements, cheques, EFT) · `Offers` (quotes, purchase orders) · `Recurring` · `Ai` (receipt extraction) · `Documents` (cheque rendering) · `Tax.Ca` |
 | **AI** | `AI` (agent runtime, tool pipeline, guardrails) plus seven sub-modules: `Skills` · `Workflow` · `Rag` · `Sandbox` · `Mcp` · `Channels` · `Cli` |
 | **Host** | `Hosting` — adaptive host that configures itself from whichever modules are loaded |
 

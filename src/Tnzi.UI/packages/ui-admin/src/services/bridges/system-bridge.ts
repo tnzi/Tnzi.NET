@@ -13,9 +13,10 @@
  *                     DefaultScheduledJobAdminController). Calls go through the
  *                     HttpClient directly because @tnzi/core/services/system has
  *                     not been regenerated since those endpoints shipped.
- *   - features      → live wiring to /admin/feature-definitions (Tnzi.Feature),
- *                     same direct-HttpClient reason as scheduledJobs.
  *   - settingsCenter→ useAdminSettingsCenterApi (schema-driven module settings)
+ *
+ * Feature flags moved to `feature-bridge.ts` (`@tnzi/core/services/feature`)
+ * once the module grew a values and a usage surface next to definitions.
  */
 import {
   useAdminSettingApi,
@@ -30,9 +31,11 @@ import {
   type AccessLogInfoDto,
   type AccessLogQueryDto,
   type SettingsCenterGroupDto,
+  useAdminScheduledJobApi,
+  type ScheduledJobDto,
 } from '@tnzi/core/services/system'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pageArray, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminSettingApi>[0]
 
@@ -64,12 +67,6 @@ export interface SystemBridge {
     trigger(id: string): Promise<void>
     delete(id: string): Promise<void>
   }
-  /**
-   * Feature flags - Tnzi.Feature module's FeatureDefinition/Value admin
-   * surface. Scaffolded in 0.2.8 (Phase E). Endpoints wired in Phase E
-   * backend follow-up.
-   */
-  features: BridgeCrudContract<FeatureDto, CreateFeatureDto, UpdateFeatureDto>
   /** Settings center - schema-driven module settings (definitions / save / reset). */
   settingsCenter: {
     getDefinitions(): Promise<SettingsCenterGroupDto[]>
@@ -91,77 +88,21 @@ export interface SystemBridge {
   }
 }
 
-/**
- * Mirror of Tnzi.Feature.Dtos.FeatureDefinitionDto.
- * Kept inline here until `pnpm contracts:sync` regenerates
- * `@tnzi/core/services/system` with the feature endpoints.
- *
- * `valueType` is the `FeatureValueType` enum, serialized by the backend's global
- * JsonStringEnumConverter as its member name: "Boolean" | "Integer" | "String"
- * (input still accepts the legacy integer too).
- *
- * `source` is "Database" (DB-stored, fully editable) or "Code" (defined by
- * `IFeatureDefinitionProvider`, edit/delete disabled in the admin UI).
- */
-export type FeatureValueType = 'Boolean' | 'Integer' | 'String'
 
-export interface FeatureDto {
-  id: string
-  name: string
-  displayName?: string | null
-  description?: string | null
-  defaultValue?: string | null
-  valueType: FeatureValueType
-  parentName?: string | null
-  isEnabled: boolean
-  group?: string | null
-  source?: string
-  isReadOnly?: boolean
-}
-
-export interface CreateFeatureDto {
-  name: string
-  displayName?: string | null
-  description?: string | null
-  defaultValue?: string | null
-  valueType: FeatureValueType
-  parentName?: string | null
-  group?: string | null
-}
-
-export interface UpdateFeatureDto {
-  displayName?: string | null
-  description?: string | null
-  defaultValue?: string | null
-  valueType: FeatureValueType
-  parentName?: string | null
-  isEnabled?: boolean
-  group?: string | null
-}
-
-/**
- * Inline ScheduledJobDto mirror of Tnzi.Hangfire.Dtos.ScheduledJobDto.
- * Lives here until contracts:sync regenerates @tnzi/core/services/system.
- * Keep in sync with src/Tnzi.Hangfire/Dtos/ScheduledJobDtos.cs.
- */
-export interface ScheduledJobDto {
-  id: string
-  cron?: string | null
-  queue?: string | null
-  lastExecution?: string | null
-  nextExecution?: string | null
-  createdAt?: string | null
-  timeZoneId?: string | null
-  lastJobId?: string | null
-  lastJobState?: string | null
-  error?: string | null
-  removed: boolean
-}
+// ScheduledJobDto now comes from @tnzi/core (re-exported so the scheduled-jobs
+// page keeps importing it from this bridge).
+export type { ScheduledJobDto } from '@tnzi/core/services/system'
 
 export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
   const settingApi = deps.settingApi ?? (deps.client ? useAdminSettingApi(deps.client) : null)
   const accessLogApi = deps.accessLogApi ?? (deps.client ? useAdminAccessLogApi(deps.client) : null)
   const settingsCenterApi = deps.settingsCenterApi ?? (deps.client ? useAdminSettingsCenterApi(deps.client) : null)
+  // Hangfire's admin surface; went through hand-written paths until 2026-09-04.
+  const jobApi = deps.client ? useAdminScheduledJobApi(deps.client) : null
+  const requireJobApi = (op: string) => {
+    if (!jobApi) throw new Error(`${op}: HttpClient (deps.client) is required`)
+    return jobApi
+  }
 
   if (!settingApi || !accessLogApi || !settingsCenterApi) {
     const noOp = () => Promise.reject(new Error('createSystemBridge: no deps provided'))
@@ -171,12 +112,6 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       scheduledJobs: {
         fetch: noOp as never,
         trigger: noOp as never,
-        delete: noOp as never,
-      },
-      features: {
-        fetch: noOp as never,
-        create: noOp as never,
-        update: noOp as never,
         delete: noOp as never,
       },
       settingsCenter: {
@@ -208,8 +143,8 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
         : source
       return pageArray(filtered, query)
     },
-    create: async (data) => unwrap(await settingApi.create(data)) as SettingDto,
-    update: async (id, data) => unwrap(await settingApi.update(String(id), data)) as SettingDto,
+    create: async (data) => unwrapOk(await settingApi.create(data)) as SettingDto,
+    update: async (id, data) => unwrapOk(await settingApi.update(String(id), data)) as SettingDto,
     delete: async (ids) => {
       ensureOk(await settingApi.batchDelete(ids.map(String)))
     },
@@ -232,74 +167,14 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
 
   const scheduledJobs: SystemBridge['scheduledJobs'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<ScheduledJobDto>> => {
-      if (!deps.client) {
-        throw new Error('scheduledJobs.fetch: HttpClient (deps.client) is required')
-      }
-      // TODO(contracts-sync): replace with useAdminScheduledJobApi(deps.client)
-      // once `pnpm contracts:sync` regenerates @tnzi/core/services/system with
-      // the 2026-04-14 Hangfire admin endpoints.
-      const res = await deps.client.get<ScheduledJobDto[]>('/admin/scheduled-jobs')
-      const items = unwrap<ScheduledJobDto[]>(res) ?? []
+      const items = unwrap<ScheduledJobDto[]>(await requireJobApi('scheduledJobs.fetch').getList()) ?? []
       return pageArray(items, query)
     },
     trigger: async (id: string): Promise<void> => {
-      if (!deps.client) {
-        throw new Error('scheduledJobs.trigger: HttpClient (deps.client) is required')
-      }
-      ensureOk(await deps.client.post(`/admin/scheduled-jobs/${encodeURIComponent(id)}/trigger`))
+      ensureOk(await requireJobApi('scheduledJobs.trigger').trigger(id))
     },
     delete: async (id: string): Promise<void> => {
-      if (!deps.client) {
-        throw new Error('scheduledJobs.delete: HttpClient (deps.client) is required')
-      }
-      ensureOk(await deps.client.delete(`/admin/scheduled-jobs/${encodeURIComponent(id)}`))
-    },
-  }
-
-  // Wired directly to /admin/feature-definitions (Tnzi.Feature module).
-  // Bypasses @tnzi/core's generated factory because contracts:sync hasn't been
-  // re-run since DefaultFeatureDefinitionAdminController shipped - same pattern
-  // as scheduledJobs above. Replace with useAdminFeatureDefinitionApi once the
-  // SDK is regenerated.
-  const FEATURES_BASE = '/admin/feature-definitions'
-  const features: SystemBridge['features'] = {
-    fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FeatureDto>> => {
-      if (!deps.client) {
-        throw new Error('features.fetch: HttpClient (deps.client) is required')
-      }
-      const res = await deps.client.get<FeatureDto[]>(FEATURES_BASE)
-      const items = unwrap<FeatureDto[]>(res) ?? []
-      // Backend returns the full list; client-side filter by keyword on
-      // name/displayName/group + paginate locally - feature definition
-      // counts are small (typically <100) so this stays cheap.
-      const keyword = typeof query.searchText === 'string'
-        ? query.searchText.trim().toLowerCase()
-        : ''
-      const filtered = keyword
-        ? items.filter((f) =>
-            (f.name ?? '').toLowerCase().includes(keyword) ||
-            (f.displayName ?? '').toLowerCase().includes(keyword) ||
-            (f.group ?? '').toLowerCase().includes(keyword),
-          )
-        : items
-      return pageArray(filtered, query)
-    },
-    create: async (data) => {
-      if (!deps.client) throw new Error('features.create: HttpClient required')
-      const res = await deps.client.post<FeatureDto>(FEATURES_BASE, data)
-      return unwrap(res) as FeatureDto
-    },
-    update: async (id, data) => {
-      if (!deps.client) throw new Error('features.update: HttpClient required')
-      const res = await deps.client.put<FeatureDto>(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`, data)
-      return unwrap(res) as FeatureDto
-    },
-    delete: async (ids) => {
-      if (!deps.client) throw new Error('features.delete: HttpClient required')
-      // Backend has no batch endpoint - loop sequentially.
-      for (const id of ids) {
-        ensureOk(await deps.client.delete(`${FEATURES_BASE}/${encodeURIComponent(String(id))}`))
-      }
+      ensureOk(await requireJobApi('scheduledJobs.delete').delete(id))
     },
   }
 
@@ -307,9 +182,9 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     getDefinitions: async () =>
       unwrap<SettingsCenterGroupDto[]>(await settingsCenterApi.getDefinitions()),
     saveGroup: async (groupKey, changedValues) =>
-      unwrap<SettingsCenterGroupDto>(await settingsCenterApi.saveGroup(groupKey, changedValues)),
+      unwrapOk<SettingsCenterGroupDto>(await settingsCenterApi.saveGroup(groupKey, changedValues)),
     resetGroup: async (groupKey) =>
-      unwrap<SettingsCenterGroupDto>(await settingsCenterApi.resetGroup(groupKey)),
+      unwrapOk<SettingsCenterGroupDto>(await settingsCenterApi.resetGroup(groupKey)),
   }
 
   /**
@@ -352,5 +227,5 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     },
   }
 
-  return { settings, accessLogs, scheduledJobs, features, settingsCenter, appearance }
+  return { settings, accessLogs, scheduledJobs, settingsCenter, appearance }
 }

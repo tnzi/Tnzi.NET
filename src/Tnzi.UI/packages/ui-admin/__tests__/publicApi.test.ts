@@ -98,6 +98,26 @@ function isTypeOnlyExport(barrelFile: string, name: string): boolean {
   return false
 }
 
+/**
+ * Every barrel under `src/`, for the type-only lookup below.
+ *
+ * The doc names types as well as components, and `export *` carries a type
+ * from a folder barrel to the root just as it carries a value - but `in pkg`
+ * cannot see the type, so it has to be looked for in the source.
+ */
+function allBarrels(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) return allBarrels(full)
+    return entry.name === 'index.ts' ? [full] : []
+  })
+}
+
+/** True when some barrel exports `name` as a type (and so `in pkg` is blind). */
+function isTypeOnlyRootExport(name: string): boolean {
+  return allBarrels(path.resolve(__dirname, '../src')).some((f) => isTypeOnlyExport(f, name))
+}
+
 describe('package public surface', () => {
   describe('every component folder barrel reaches the package root', () => {
     const folders = fs
@@ -153,6 +173,8 @@ describe('package public surface', () => {
       const missing = [...named]
         .filter((name) => !(name in NOT_PACKAGE_ROOT_EXPORTS))
         .filter((name) => !(name in pkg))
+        // Types erase at runtime; a name the barrels export as one is exported.
+        .filter((name) => !isTypeOnlyRootExport(name))
         .sort()
 
       expect(

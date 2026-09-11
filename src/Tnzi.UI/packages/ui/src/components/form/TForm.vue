@@ -4,6 +4,9 @@ import { NForm, NSpace, NButton } from 'naive-ui'
 import type { FormInst, FormRules } from 'naive-ui'
 import type { IFormRule } from '@tnzi/core'
 import { convertFormRules } from '../../utils/naive-helpers'
+import { useI18n } from '@tnzi/core/adapters/i18n'
+
+const { t } = useI18n()
 
 interface Props {
   model: Record<string, unknown>
@@ -112,8 +115,8 @@ defineExpose({
     <slot />
     <slot name="actions">
       <NSpace justify="end">
-        <NButton @click="handleReset">Reset</NButton>
-        <NButton type="primary" @click="handleSubmit">Submit</NButton>
+        <NButton @click="handleReset">{{ t('common.reset') }}</NButton>
+        <NButton type="primary" @click="handleSubmit">{{ t('common.submit') }}</NButton>
       </NSpace>
     </slot>
   </NForm>

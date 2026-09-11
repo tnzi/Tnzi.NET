@@ -31,19 +31,57 @@ export interface BreadcrumbItem {
 export const useAdminBreadcrumbStore = defineStore('admin-breadcrumb', () => {
   const trails = ref<Record<string, BreadcrumbItem[]>>({})
   const leafLabels = ref<Record<string, string>>({})
+  const pending = ref<Record<string, true>>({})
 
   /** Replace the full trail contributed for `key`. */
   function setTrail(key: string, items: BreadcrumbItem[]): void {
     trails.value = { ...trails.value, [key]: items }
+    resolvePending(key)
   }
 
   /** Override just the trailing (leaf) crumb label for `key`. */
   function setLeafLabel(key: string, label: string): void {
     leafLabels.value = { ...leafLabels.value, [key]: label }
+    resolvePending(key)
+  }
+
+  /**
+   * Declare that `key`'s leaf is COMING - the page owns it, but the record it
+   * names has not loaded yet.
+   *
+   * Without this the breadcrumb had no way to tell "this page contributes
+   * nothing" from "this page contributes something it does not have yet", so it
+   * fell back to the route-derived title for the gap. On a detail route that
+   * title is inherited from the LIST (`Clients / Clients`), which is a wrong
+   * label the reader watches get replaced by the right one a moment later. A
+   * held leaf renders as a placeholder instead: one transition, from "loading"
+   * to the record, and never a name that was never true.
+   *
+   * Cleared by the first `setTrail` / `setLeafLabel`, by `clear`, and by the
+   * contributing composable's timeout (a record that never arrives must not
+   * leave a placeholder pulsing forever - see `use-breadcrumb`).
+   */
+  function markPending(key: string): void {
+    if (key in pending.value) return
+    pending.value = { ...pending.value, [key]: true }
+  }
+
+  /** Drop the held state for `key` - the leaf is known, or giving up on it. */
+  function resolvePending(key: string): void {
+    if (!(key in pending.value)) return
+    const next = { ...pending.value }
+    delete next[key]
+    pending.value = next
+  }
+
+  /** Is `key`'s leaf held pending its record? */
+  function isPending(key: string): boolean {
+    return key in pending.value
   }
 
   /** Drop every contribution for `key` (called on the contributing page's unmount). */
   function clear(key: string): void {
+    resolvePending(key)
     if (key in trails.value) {
       const next = { ...trails.value }
       delete next[key]
@@ -64,5 +102,17 @@ export const useAdminBreadcrumbStore = defineStore('admin-breadcrumb', () => {
     return leafLabels.value[key]
   }
 
-  return { trails, leafLabels, setTrail, setLeafLabel, clear, trailFor, leafLabelFor }
+  return {
+    trails,
+    leafLabels,
+    pending,
+    setTrail,
+    setLeafLabel,
+    markPending,
+    resolvePending,
+    isPending,
+    clear,
+    trailFor,
+    leafLabelFor,
+  }
 })

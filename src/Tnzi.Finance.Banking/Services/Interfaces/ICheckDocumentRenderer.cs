@@ -70,6 +70,17 @@ public class CheckRenderRequest
     public string? MicrFontPath { get; set; }
 
     /// <summary>
+    /// 支票号补零到的位数（null = <see cref="CheckNumberFormat.DefaultDigits"/>）。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>票面与 MICR 串行号必须同宽</b>，所以这是<b>一个</b>字段而不是两个 ——
+    /// 两个字段配不一致的话，纸上写着一个号、磁码行读出另一个，而两处看起来都很正常。
+    /// 规则在 <see cref="CheckNumberFormat"/>，消费应用可以用同一个方法把自己界面上的支票号
+    /// 渲染成与纸上逐字相同的样子。
+    /// </remarks>
+    public int? CheckNumberDigits { get; set; }
+
+    /// <summary>
     /// 支票版式模板名（模板驱动渲染器用；null = 渲染器的默认模板）。
     /// 取自 <c>BankAccount.CheckTemplateName</c>，不同银行可指向不同模板。
     /// </summary>
@@ -86,6 +97,29 @@ public class CheckRenderRequest
     /// 渲染器据此打上不可流通的水印/标记，避免预览件被误当成真票使用。
     /// </summary>
     public bool IsPreview { get; set; }
+
+    /// <summary>
+    /// 不可流通标记的文案（null = 渲染器的默认 <c>PREVIEW - NOT NEGOTIABLE</c>）
+    /// </summary>
+    /// <remarks>
+    /// 仅在 <see cref="IsPreview"/> 为真时有意义。存在的理由是<b>样张</b>：
+    /// 它拿占位数据渲染、会被下载被打印被截图，标成 "PREVIEW" 会让人以为那是某笔真实付款的预览。
+    /// </remarks>
+    public string? PreviewLabel { get; set; }
+
+    /// <summary>
+    /// 样张模式：占位数据渲染的版式样票，供选版式时与手上的票纸比对
+    /// </summary>
+    /// <remarks>
+    /// 蕴含 <see cref="IsPreview"/>（样张也是不可流通的），但比它多一件事：
+    /// 样张要在<b>屏幕上</b>把「票纸自带的元素」与「打印机这次真打上去的元素」分开。
+    /// <para>
+    /// ★ 为什么单独一个标志、而不是复用 <see cref="IsPreview"/>：付款预览屏幕上
+    /// <b>就该显示完整票面</b>——那时的任务是校对整张支票，把预印元素淡下去会妨碍校对。
+    /// 需要第三种呈现的只有样张。
+    /// </para>
+    /// </remarks>
+    public bool IsSpecimen { get; set; }
 
     public List<CheckRenderItem> Checks { get; set; } = new();
 }
@@ -127,6 +161,26 @@ public class CheckIssuerInfo
 }
 
 /// <summary>
+/// 存根联上的一行「标签 : 值」（消费应用自己域里的凭据信息）
+/// </summary>
+/// <remarks>
+/// 存根回答的是「这张票为什么开」，而那个理由长在<b>消费应用的域里</b>——案卷号、工单号、
+/// 保单号、租约期次。框架不认识这些字段，也不该认识；它只提供一个放它们的位置。
+/// <para>
+/// ★ 之所以是「标签 + 值」而不是一段自由文本：存根是拿来<b>对账</b>的，
+/// 收款方与自己的档案都要按字段核对。挤进 <see cref="CheckRenderItem.Memo"/> 的一行字
+/// 谁也对不了 —— 那正是本原语存在的理由。
+/// </para>
+/// <para>
+/// 条数与长度上限见 <c>CheckStubLineLimits</c>：存根是有限的物理空间，
+/// 一个失控的列表会把票面顶变形。
+/// </para>
+/// </remarks>
+/// <param name="Label">字段名（如 <c>File No.</c>）。空白的行会被丢弃。</param>
+/// <param name="Value">字段值。可空——只有标签的一行仍然有意义（作分节标题）。</param>
+public sealed record CheckStubLine(string Label, string? Value);
+
+/// <summary>
 /// 单张支票的渲染数据
 /// </summary>
 public class CheckRenderItem
@@ -148,4 +202,13 @@ public class CheckRenderItem
 
     /// <summary>关联付款单参考号（存根联明细用）</summary>
     public string? Reference { get; set; }
+
+    /// <summary>
+    /// 消费应用附加到本张支票存根上的「标签 : 值」行（空 = 存根按出厂样子排，与从前逐字相同）
+    /// </summary>
+    /// <remarks>
+    /// 由 <c>ICheckStubLineProvider</c>（有付款单的路径）或请求 DTO（临时预览）填充，
+    /// 已经过 <c>CheckStubLineLimits</c> 归一化。模板在既有固定行<b>之后</b>追加它们。
+    /// </remarks>
+    public List<CheckStubLine> StubLines { get; set; } = new();
 }

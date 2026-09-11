@@ -31,7 +31,7 @@ import {
   type CreateRefundDto,
 } from '@tnzi/core/services/payment'
 import type { CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPaymentApi>[0]
 
@@ -159,7 +159,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
       return unwrap<PaymentStatisticsDto>(await sta.getStatistics(query))
     },
     confirmOffline: async (tradeNo: string, data: ConfirmOfflinePaymentDto): Promise<PaymentDto> => {
-      return unwrap<PaymentDto>(await pa.confirm(tradeNo, data))
+      return unwrapOk<PaymentDto>(await pa.confirm(tradeNo, data))
     },
   }
 
@@ -212,7 +212,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
     fetch: fetchRefunds,
     create: async (tradeNo: string, refundAmount: number, reason: string): Promise<RefundDto> => {
       const payload: CreateRefundDto = { tradeNo, refundAmount, reason }
-      return unwrap<RefundDto>(await ra.create(payload))
+      return unwrapOk<RefundDto>(await ra.create(payload))
     },
     approve: async (id: string): Promise<void> => {
       ensureOk(await ra.approve(id, { approved: true }))

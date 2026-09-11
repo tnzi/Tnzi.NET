@@ -46,7 +46,9 @@ public abstract class TnziDbContext<TDbContext> : DbContext
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
         TimeProvider = timeProvider;
-        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        // 注入值优先；设计期（dotnet ef）没有容器，回退到工厂从 appsettings 读出的值。
+        // 见 DesignTimeMultiTenancy —— 少了这条回退，多租户应用生成的每条迁移都是错的。
+        _multiTenancyEnabled = DesignTimeMultiTenancy.Resolve(multiTenancyOptions?.Value.Enabled);
     }
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;

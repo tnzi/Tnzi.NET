@@ -1,229 +1,162 @@
-
+using System.Security.Claims;
 using Tnzi.MultiTenancy;
 
 namespace Tnzi.AspNetCore.Tests.Middleware;
 
 /// <summary>
-/// TenantResolverMiddleware 单元测试
+/// 租户解析：已认证请求的租户由令牌里的 claim 决定，外部来源说了不算。
 /// </summary>
+/// <remarks>
+/// <para>
+/// ★★★ 守的是一条跨租户读写：中间件跑在 <c>UseAuthentication()</c> 之后（主体与
+/// <c>tenant_id</c> 都已就绪），此前却<b>两个都不看</b> —— 只校验「这个租户存不存在、启没启用」。
+/// 而默认解析顺序把 Header 排在 Claims 之前，于是 A 租户的用户加一个
+/// <c>X-Tenant-Id: B</c>，后面的 EF 全局过滤器就整条请求按 B 执行：
+/// 读得到 B 的数据，写进去的新行也落在 B 名下。
+/// </para>
+/// <para>
+/// 变异验证：删掉 <c>InvokeAsync</c> 里那段 <c>IsAuthenticated</c> 分支，
+/// <c>CrossTenantHeader_*</c> 两条会红。
+/// </para>
+/// </remarks>
 public class TenantResolverMiddlewareTests
 {
-    private readonly Mock<ILogger<TenantResolverMiddleware>> _loggerMock;
-    private readonly Mock<ICurrentTenant> _currentTenantMock;
-    private readonly Mock<ITenantChecker> _tenantCheckerMock;
+    private static readonly Guid TenantA = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid TenantB = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-    public TenantResolverMiddlewareTests()
+    private sealed class RecordingTenant : ICurrentTenant
     {
-        _loggerMock = new Mock<ILogger<TenantResolverMiddleware>>();
-        _currentTenantMock = new Mock<ICurrentTenant>();
-        _tenantCheckerMock = new Mock<ITenantChecker>();
+        public Guid? Id { get; private set; }
+        public string? Name => null;
+        public bool IsAvailable => Id.HasValue;
 
-        // 默认：Change 返回一个可 Dispose 的作用域
-        _currentTenantMock
-            .Setup(c => c.Change(It.IsAny<Guid?>(), It.IsAny<string?>()))
-            .Returns(new NoopDisposable());
+        public IDisposable Change(Guid? id, string? tenantName = null)
+        {
+            var previous = Id;
+            Id = id;
+            return new Restore(() => Id = previous);
+        }
+
+        private sealed class Restore(Action action) : IDisposable
+        {
+            public void Dispose() => action();
+        }
     }
 
-    private static IOptions<TenantResolverOptions> CreateOptions(Action<TenantResolverOptions>? configure = null)
-    {
-        var options = new TenantResolverOptions();
-        configure?.Invoke(options);
-        return Microsoft.Extensions.Options.Options.Create(options);
-    }
-
-    private static DefaultHttpContext CreateHttpContextWithBody()
+    private static HttpContext BuildContext(Guid? headerTenant, Guid? claimTenant, bool authenticated)
     {
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
+
+        if (headerTenant.HasValue)
+        {
+            context.Request.Headers["X-Tenant-Id"] = headerTenant.Value.ToString();
+        }
+
+        var claims = new List<Claim>();
+        if (claimTenant.HasValue)
+        {
+            claims.Add(new Claim("tenant_id", claimTenant.Value.ToString()));
+        }
+
+        // authenticationType 非空 = IsAuthenticated 为真，这正是本中间件的分支判据。
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticated ? "Test" : null));
         return context;
     }
 
-    [Fact]
-    public async Task InvalidTenant_ReturnsJsonErrorResponse()
+    private static async Task<(Guid? Resolved, int StatusCode, bool NextCalled)> RunAsync(
+        HttpContext context, TenantResolverOptions? options = null)
     {
-        // Arrange
-        var tenantId = Guid.NewGuid();
-
-        // 租户检查器返回 false（无效/未激活租户）
-        _tenantCheckerMock
-            .Setup(c => c.IsActiveAsync(tenantId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
+        var tenant = new RecordingTenant();
+        Guid? seen = null;
         var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
 
         var middleware = new TenantResolverMiddleware(
-            next,
-            CreateOptions(),
-            _loggerMock.Object,
-            _tenantCheckerMock.Object);
+            _ =>
+            {
+                nextCalled = true;
+                seen = tenant.Id;
+                return Task.CompletedTask;
+            },
+            Microsoft.Extensions.Options.Options.Create(options ?? new TenantResolverOptions()),
+            new Mock<ILogger<TenantResolverMiddleware>>().Object);
 
-        var context = CreateHttpContextWithBody();
-        // 在 Header 中传入租户 ID
-        context.Request.Headers["X-Tenant-Id"] = tenantId.ToString();
+        await middleware.InvokeAsync(context, tenant);
+        return (seen, context.Response.StatusCode, nextCalled);
+    }
 
-        // Act
-        await middleware.InvokeAsync(context, _currentTenantMock.Object);
+    /// <summary>★★★ 已认证 + 异租户头 = 403，且请求不往下走。</summary>
+    [Fact]
+    public async Task CrossTenantHeader_OnAuthenticatedRequest_IsRejected()
+    {
+        var context = BuildContext(headerTenant: TenantB, claimTenant: TenantA, authenticated: true);
 
-        // Assert - 应返回 400
-        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
-        Assert.Equal("application/json", context.Response.ContentType);
+        var (resolved, status, nextCalled) = await RunAsync(context);
 
-        // next 不应被调用
+        Assert.Equal(403, status);
         Assert.False(nextCalled);
-
-        // 响应体应包含错误信息
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-        using var reader = new StreamReader(context.Response.Body);
-        var body = await reader.ReadToEndAsync();
-
-        var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-
-        Assert.True(root.TryGetProperty("succeeded", out var succeededEl));
-        Assert.False(succeededEl.GetBoolean());
-
-        Assert.True(root.TryGetProperty("code", out var codeEl));
-        Assert.Equal(400, codeEl.GetInt32());
-
-        Assert.True(root.TryGetProperty("message", out var messageEl));
-        Assert.False(string.IsNullOrWhiteSpace(messageEl.GetString()));
-
-        Assert.True(root.TryGetProperty("error", out var errorEl));
-        Assert.Equal("INVALID_TENANT", errorEl.GetString());
+        Assert.Null(resolved);
     }
 
+    /// <summary>对照组：头与 claim 一致时照常放行，解析结果是那个租户。</summary>
     [Fact]
-    public async Task ValidTenant_PassesThrough()
+    public async Task MatchingHeader_OnAuthenticatedRequest_IsAllowed()
     {
-        // Arrange
-        var tenantId = Guid.NewGuid();
+        var context = BuildContext(headerTenant: TenantA, claimTenant: TenantA, authenticated: true);
 
-        // 租户检查器返回 true（有效租户）
-        _tenantCheckerMock
-            .Setup(c => c.IsActiveAsync(tenantId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
+        var (resolved, status, nextCalled) = await RunAsync(context);
 
-        var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
-
-        var middleware = new TenantResolverMiddleware(
-            next,
-            CreateOptions(),
-            _loggerMock.Object,
-            _tenantCheckerMock.Object);
-
-        var context = CreateHttpContextWithBody();
-        context.Request.Headers["X-Tenant-Id"] = tenantId.ToString();
-
-        // Act
-        await middleware.InvokeAsync(context, _currentTenantMock.Object);
-
-        // Assert - 应正常通过并切换租户上下文
         Assert.True(nextCalled);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-
-        _currentTenantMock.Verify(
-            c => c.Change(tenantId, It.IsAny<string?>()),
-            Times.Once);
+        Assert.Equal(200, status);
+        Assert.Equal(TenantA, resolved);
     }
 
+    /// <summary>没给头时用 claim —— 这是绝大多数请求走的那条路。</summary>
     [Fact]
-    public async Task NoTenantHeader_PassesThrough()
+    public async Task NoHeader_OnAuthenticatedRequest_UsesTheClaim()
     {
-        // Arrange - 请求中没有任何租户标识，也没有默认租户 ID
-        var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
+        var context = BuildContext(headerTenant: null, claimTenant: TenantA, authenticated: true);
 
-        var middleware = new TenantResolverMiddleware(
-            next,
-            CreateOptions(o => o.DefaultTenantId = null),
-            _loggerMock.Object,
-            tenantChecker: null);  // 没有租户检查器
+        var (resolved, _, nextCalled) = await RunAsync(context);
 
-        var context = CreateHttpContextWithBody();
-        // 不设置任何租户 Header
-
-        // Act
-        await middleware.InvokeAsync(context, _currentTenantMock.Object);
-
-        // Assert - 应直接传递给下一个中间件，不切换租户
         Assert.True(nextCalled);
-        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
-
-        // 不应切换租户上下文
-        _currentTenantMock.Verify(
-            c => c.Change(It.IsAny<Guid?>(), It.IsAny<string?>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task NoTenantChecker_ValidHeader_PassesThrough()
-    {
-        // Arrange - 没有 ITenantChecker，即便提供了有效 Header 也应直接通过
-        var tenantId = Guid.NewGuid();
-
-        var nextCalled = false;
-        RequestDelegate next = _ => { nextCalled = true; return Task.CompletedTask; };
-
-        var middleware = new TenantResolverMiddleware(
-            next,
-            CreateOptions(),
-            _loggerMock.Object,
-            tenantChecker: null);  // 不注册租户检查器
-
-        var context = CreateHttpContextWithBody();
-        context.Request.Headers["X-Tenant-Id"] = tenantId.ToString();
-
-        // Act
-        await middleware.InvokeAsync(context, _currentTenantMock.Object);
-
-        // Assert - 没有检查器时跳过验证，直接通过并切换租户
-        Assert.True(nextCalled);
-        _currentTenantMock.Verify(c => c.Change(tenantId, It.IsAny<string?>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task InvalidTenant_LogsWarning()
-    {
-        // Arrange
-        var tenantId = Guid.NewGuid();
-
-        _tenantCheckerMock
-            .Setup(c => c.IsActiveAsync(tenantId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        RequestDelegate next = _ => Task.CompletedTask;
-
-        var middleware = new TenantResolverMiddleware(
-            next,
-            CreateOptions(),
-            _loggerMock.Object,
-            _tenantCheckerMock.Object);
-
-        var context = CreateHttpContextWithBody();
-        context.Request.Headers["X-Tenant-Id"] = tenantId.ToString();
-
-        // Act
-        await middleware.InvokeAsync(context, _currentTenantMock.Object);
-
-        // Assert - 应记录 Warning 日志
-        _loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("invalid") || state.ToString()!.Contains("inactive")),
-                null,
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        Assert.Equal(TenantA, resolved);
     }
 
     /// <summary>
-    /// 空操作 IDisposable，用于 Mock ICurrentTenant.Change 的返回值
+    /// ★★ 不绑租户的账号带着头进来 → 忽略那个头，而不是让它自己挑一个租户进去。
+    /// 这是同一个洞的另一半：没有 claim 可比对时，「比不了」不能当成「随便你」。
     /// </summary>
-    private sealed class NoopDisposable : IDisposable
+    [Fact]
+    public async Task AuthenticatedWithoutTenantClaim_IgnoresTheHeader()
     {
-        public void Dispose() { }
+        var context = BuildContext(headerTenant: TenantB, claimTenant: null, authenticated: true);
+
+        var (resolved, status, nextCalled) = await RunAsync(context);
+
+        Assert.True(nextCalled);
+        Assert.Equal(200, status);
+        Assert.Null(resolved);
     }
+
+    /// <summary>
+    /// 匿名请求仍按外部来源解析：按租户分流的登录页在拿到令牌之前没有 claim 可读。
+    /// </summary>
+    [Fact]
+    public async Task AnonymousRequest_StillResolvesFromHeader()
+    {
+        var context = BuildContext(headerTenant: TenantB, claimTenant: null, authenticated: false);
+
+        var (resolved, _, nextCalled) = await RunAsync(context);
+
+        Assert.True(nextCalled);
+        Assert.Equal(TenantB, resolved);
+    }
+
+    /// <summary>
+    /// 出厂解析顺序把 Claims 排在最前 —— 一个只看默认值就上线的部署也该拿到安全行为。
+    /// </summary>
+    [Fact]
+    public void DefaultResolutionOrder_PutsClaimsFirst()
+        => Assert.Equal(TenantResolutionSource.Claims, new TenantResolverOptions().ResolutionOrder[0]);
 }

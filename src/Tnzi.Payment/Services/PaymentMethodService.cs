@@ -34,6 +34,20 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     {
         Check.NotNull(request);
 
+        // 绑卡回跳同样把付款人的浏览器送出去（PayPal 走整页授权），与建单是同一条开放重定向面
+        foreach (var (url, field) in new[] { (request.ReturnUrl, nameof(request.ReturnUrl)), (request.CancelUrl, nameof(request.CancelUrl)) })
+        {
+            if (PaymentRedirectPolicy.IsAllowed(url, _paymentOptionsMonitor.CurrentValue))
+                continue;
+
+            Logger.LogError(
+                "Rejected {Field} '{Url}': the host is not in Payment:AllowedRedirectHosts (currently {Hosts}). "
+                + "Add the payer-facing host there, otherwise every caller-supplied redirect is refused.",
+                field, url, string.Join(", ", PaymentRedirectPolicy.AllowedHosts(_paymentOptionsMonitor.CurrentValue)));
+
+            return Fail<SetupSessionDto>(ErrorCodes.PaymentReturnUrlNotAllowed, 400);
+        }
+
         var channelCode = ResolveChannelCode(request.ChannelCode);
         var provider = _paymentProviderFactory.GetProvider(channelCode);
         if (provider == null)

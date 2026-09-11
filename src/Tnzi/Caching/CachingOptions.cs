@@ -31,15 +31,6 @@ public class CachingOptions
     /// </summary>
     public bool EnableKeyGenerator { get; set; } = true;
 
-    /// <summary>
-    /// 获取或设置 缓存过期策略类型（Fixed, Pattern, Sliding, Composite）
-    /// </summary>
-    public string ExpirationStrategy { get; set; } = "Fixed";
-
-    /// <summary>
-    /// 获取或设置 模式过期时间映射（当ExpirationStrategy为Pattern时使用）
-    /// </summary>
-    public Dictionary<string, int>? PatternExpirations { get; set; }
 
     /// <summary>
     /// 获取或设置 内存缓存最大条目数（仅 Type=Memory 时生效）

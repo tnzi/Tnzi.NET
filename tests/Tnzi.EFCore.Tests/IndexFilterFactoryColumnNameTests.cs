@@ -39,6 +39,27 @@ public class IndexFilterFactoryColumnNameTests
         Assert.Equal(expected, sql);
     }
 
+    /// <summary>
+    /// 单列「非空」过滤器在四个 provider 上的引号形式。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这个重载此前<b>没有任何测试</b>，而它的两个兄弟重载都有。它服务的是
+    /// 「可空列参与唯一索引」那一类：<b>PostgreSQL / SQLite 认为 NULL 互不相等
+    /// （多少行都行），SQL Server 认为 NULL 彼此相等（只许一行）</b>，所以少了这条过滤器，
+    /// 第二行 NULL 在 SQL Server 上直接插不进去，而在开发者本机的 SQLite 上跑得好好的。
+    /// 引号形式错了同样只在某一家上炸 —— 「在另一个库上是好的」正是这类缺陷的伪装。
+    /// </remarks>
+    [Theory]
+    [InlineData(DatabaseProvider.SqlServer, "[device_key_hash] IS NOT NULL")]
+    [InlineData(DatabaseProvider.PostgreSQL, "\"device_key_hash\" IS NOT NULL")]
+    [InlineData(DatabaseProvider.MySql, "`device_key_hash` IS NOT NULL")]
+    [InlineData(DatabaseProvider.Sqlite, "\"device_key_hash\" IS NOT NULL")]
+    public void GetColumnNotNull_ShouldQuotePerProvider(DatabaseProvider provider, string expected)
+    {
+        var sql = IndexFilterFactory.GetColumnNotNull("device_key_hash", provider);
+        Assert.Equal(expected, sql);
+    }
+
     [Fact]
     public void CustomColumnOverload_ShouldMatchDefault_WhenColumnEqualsPropertyName()
     {

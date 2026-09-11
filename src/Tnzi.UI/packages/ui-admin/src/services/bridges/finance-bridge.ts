@@ -177,6 +177,10 @@ import {
   type BankTransactionSource as CoreBankTransactionSource,
   type BankCheckDto as CoreBankCheckDto,
   type CheckQueueItemDto as CoreCheckQueueItemDto,
+  type CheckTemplateDto as CoreCheckTemplateDto,
+  // 值形态的 CheckStockType 在下方 `export { ... } from` 里转出，而**转出不引入本地作用域**，
+  // 故签名里要用它必须另外按类型导入一次。
+  type CheckStockType as CoreCheckStockType,
   type PrintChecksDto as CorePrintChecksDto,
   type RegisterManualCheckDto as CoreRegisterManualCheckDto,
   type VoidCheckDto as CoreVoidCheckDto,
@@ -197,7 +201,7 @@ import {
 } from '@tnzi/core/services/finance'
 import type { PagedList } from '@tnzi/core'
 import type { FinancePartyType, SettlementDocType } from '@tnzi/core/services/finance'
-import { ensureOk, unwrapResult as unwrap, pagedResult } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, pagedResult, unwrapOk } from '../_mappers'
 
 // Re-export the DTO types under bridge names consumed by pages/configs.
 export type AccountDto = CoreAccountDto
@@ -337,6 +341,7 @@ export type BankDocumentResultDto = CoreBankDocumentResultDto
 export type BankImportBatchDto = CoreBankImportBatchDto
 export type BankCheckDto = CoreBankCheckDto
 export type CheckQueueItemDto = CoreCheckQueueItemDto
+export type CheckTemplateDto = CoreCheckTemplateDto
 export type PrintChecksDto = CorePrintChecksDto
 export type RegisterManualCheckDto = CoreRegisterManualCheckDto
 export type VoidCheckDto = CoreVoidCheckDto
@@ -386,6 +391,7 @@ export {
   BankNumberScheme,
   CheckStockType,
   CheckLayout,
+  CheckPosition,
   BankAccountType,
   BankTransactionSource,
   BankTransactionStatus,
@@ -648,14 +654,29 @@ export interface FinanceBridge {
     queue(bankAccountId?: string): Promise<CheckQueueItemDto[]>
     /** Paged check register. */
     fetch(query: FinancePagedQuery): Promise<FinancePagedResult<BankCheckDto>>
-    /** Print checks → merged PDF blob. */
+    /**
+     * Available check layouts (shipped layouts + templates created here).
+     * Empty when the rendering module is not loaded (the endpoint answers 501)
+     * - the caller degrades to free entry rather than locking the field.
+     */
+    templates(): Promise<CheckTemplateDto[]>
+    /**
+     * Specimen sheet for one layout (placeholder data, zero side effects).
+     * Needs no payment, payee or bank account to exist; pass `bankAccountId`
+     * to borrow a real account's bank identity and print offsets.
+     */
+    templateSpecimen(
+      templateName: string,
+      options?: { stockType?: CoreCheckStockType; bankAccountId?: string },
+    ): Promise<Blob>
+    /** Print checks → one rendered document blob (PDF or HTML per the configured renderer). */
     print(data: CorePrintChecksDto): Promise<Blob>
     register(data: CoreRegisterManualCheckDto): Promise<BankCheckDto>
-    /** Reprint (void the original + new check) → merged PDF blob. */
+    /** Reprint (void the original + new check) → rendered document blob. */
     reprint(id: string): Promise<Blob>
     voidCheck(id: string, data: CoreVoidCheckDto): Promise<BankCheckDto>
     spoil(data: CoreSpoilCheckDto): Promise<BankCheckDto>
-    /** Alignment calibration test page → PDF blob. */
+    /** Alignment calibration test page → rendered document blob. */
     calibration(bankAccountId: string): Promise<Blob>
     /** Positive-pay issued-check file (CSV blob) over an issue-date window. */
     exportPositivePay(bankAccountId: string, from: string, to: string): Promise<Blob>
@@ -910,14 +931,14 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         accountIds.length === 0
           ? []
           : unwrap<AccountBalanceDto[]>(await accountApi.getBalances({ accountIds, asOf: asOf ?? null })) ?? [],
-      create: async (data) => unwrap<AccountDto>(await accountApi.create(data)),
-      update: async (id, data) => unwrap<AccountDto>(await accountApi.update(id, data)),
+      create: async (data) => unwrapOk<AccountDto>(await accountApi.create(data)),
+      update: async (id, data) => unwrapOk<AccountDto>(await accountApi.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) {
           ensureOk(await accountApi.delete(id))
         }
       },
-      seedDefault: async () => unwrap<number>(await accountApi.seedDefault()),
+      seedDefault: async () => unwrapOk<number>(await accountApi.seedDefault()),
     },
 
     journals: {
@@ -937,12 +958,12 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         return toPaged(result, query)
       },
       getById: async (id) => unwrap<JournalEntryDto | null>(await journalApi.get(id)),
-      createDraft: async (data) => unwrap<JournalEntryDto>(await journalApi.createDraft(data)),
-      updateDraft: async (id, data) => unwrap<JournalEntryDto>(await journalApi.updateDraft(id, data)),
+      createDraft: async (data) => unwrapOk<JournalEntryDto>(await journalApi.createDraft(data)),
+      updateDraft: async (id, data) => unwrapOk<JournalEntryDto>(await journalApi.updateDraft(id, data)),
       deleteDraft: async (id) => {
         ensureOk(await journalApi.deleteDraft(id))
       },
-      post: async (id) => unwrap<JournalEntryDto>(await journalApi.post(id)),
+      post: async (id) => unwrapOk<JournalEntryDto>(await journalApi.post(id)),
       reverse: async (id, data) => unwrap<JournalEntryDto>(await journalApi.reverse(id, data)),
     },
 
@@ -959,7 +980,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         )
         return toPaged(result, query)
       },
-      upsert: async (data) => unwrap<ExchangeRateDto>(await rateApi.upsert(data)),
+      upsert: async (data) => unwrapOk<ExchangeRateDto>(await rateApi.upsert(data)),
       delete: async (ids) => {
         for (const id of ids) {
           ensureOk(await rateApi.delete(id))
@@ -970,7 +991,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
 
     fiscalYears: {
       list: async () => unwrap<FiscalYearDto[]>(await fiscalApi.getList()) ?? [],
-      create: async (data) => unwrap<FiscalYearDto>(await fiscalApi.create(data)),
+      create: async (data) => unwrapOk<FiscalYearDto>(await fiscalApi.create(data)),
       close: async (id) => {
         ensureOk(await fiscalApi.close(id))
       },
@@ -978,7 +999,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         ensureOk(await fiscalApi.reopen(id))
       },
       getClosingDate: async () => unwrap<LedgerLockDto>(await fiscalApi.getClosingDate()),
-      setClosingDate: async (data) => unwrap<LedgerLockDto>(await fiscalApi.setClosingDate(data)),
+      setClosingDate: async (data) => unwrapOk<LedgerLockDto>(await fiscalApi.setClosingDate(data)),
       delete: async (ids) => {
         for (const id of ids) {
           ensureOk(await fiscalApi.delete(id))
@@ -1051,20 +1072,20 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
 
     taxes: {
       agencies: async () => unwrap<TaxAgencyDto[]>(await taxApi.getAgencies()) ?? [],
-      createAgency: async (data) => unwrap<TaxAgencyDto>(await taxApi.createAgency(data)),
-      updateAgency: async (id, data) => unwrap<TaxAgencyDto>(await taxApi.updateAgency(id, data)),
+      createAgency: async (data) => unwrapOk<TaxAgencyDto>(await taxApi.createAgency(data)),
+      updateAgency: async (id, data) => unwrapOk<TaxAgencyDto>(await taxApi.updateAgency(id, data)),
       deleteAgency: async (id) => {
         ensureOk(await taxApi.deleteAgency(id))
       },
       rates: async (agencyId) => unwrap<TaxRateDto[]>(await taxApi.getRates(agencyId)) ?? [],
-      createRate: async (data) => unwrap<TaxRateDto>(await taxApi.createRate(data)),
-      updateRate: async (id, data) => unwrap<TaxRateDto>(await taxApi.updateRate(id, data)),
+      createRate: async (data) => unwrapOk<TaxRateDto>(await taxApi.createRate(data)),
+      updateRate: async (id, data) => unwrapOk<TaxRateDto>(await taxApi.updateRate(id, data)),
       deleteRate: async (id) => {
         ensureOk(await taxApi.deleteRate(id))
       },
       codes: async () => unwrap<TaxCodeDto[]>(await taxApi.getCodes()) ?? [],
-      createCode: async (data) => unwrap<TaxCodeDto>(await taxApi.createCode(data)),
-      updateCode: async (id, data) => unwrap<TaxCodeDto>(await taxApi.updateCode(id, data)),
+      createCode: async (data) => unwrapOk<TaxCodeDto>(await taxApi.createCode(data)),
+      updateCode: async (id, data) => unwrapOk<TaxCodeDto>(await taxApi.updateCode(id, data)),
       deleteCode: async (id) => {
         ensureOk(await taxApi.deleteCode(id))
       },
@@ -1187,15 +1208,15 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           return toPaged(result, query)
         },
         getById: async (id: string) => unwrap<ReconciliationDto | null>(await api.get(id)),
-        create: async (data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.create(data)),
-        update: async (id: string, data: CoreCreateReconciliationDto) => unwrap<ReconciliationDto>(await api.update(id, data)),
+        create: async (data: CoreCreateReconciliationDto) => unwrapOk<ReconciliationDto>(await api.create(data)),
+        update: async (id: string, data: CoreCreateReconciliationDto) => unwrapOk<ReconciliationDto>(await api.update(id, data)),
         delete: async (id: string) => {
           ensureOk(await api.delete(id))
         },
         worksheet: async (id: string) => unwrap<ReconciliationWorksheetDto>(await api.getWorksheet(id)),
         setLines: async (id: string, journalLineIds: string[]) =>
-          unwrap<ReconciliationWorksheetDto>(await api.setLines(id, { journalLineIds })),
-        complete: async (id: string) => unwrap<ReconciliationDto>(await api.complete(id)),
+          unwrapOk<ReconciliationWorksheetDto>(await api.setLines(id, { journalLineIds })),
+        complete: async (id: string) => unwrapOk<ReconciliationDto>(await api.complete(id)),
       }
     })(),
 
@@ -1203,7 +1224,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       const api = useAdminFinanceRevaluationApi(client)
       return {
         preview: async (data: RunRevaluationDto) => unwrap<RevaluationPreviewDto>(await api.preview(data)),
-        run: async (data: RunRevaluationDto) => unwrap<RevaluationPreviewDto>(await api.run(data)),
+        run: async (data: RunRevaluationDto) => unwrapOk<RevaluationPreviewDto>(await api.run(data)),
       }
     })(),
 
@@ -1212,11 +1233,11 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         unwrap<PaymentApplicationDto[]>(await settlementApi.getApplications(docType, docId)) ?? [],
       openDocuments: async (partyType, partyId) =>
         unwrap<OpenDocumentDto[]>(await settlementApi.getOpenDocuments(partyType, partyId)) ?? [],
-      apply: async (data) => unwrap<PaymentApplicationDto[]>(await settlementApi.apply(data)),
+      apply: async (data) => unwrapOk<PaymentApplicationDto[]>(await settlementApi.apply(data)),
       unapply: async (applicationId) => {
         ensureOk(await settlementApi.unapply(applicationId))
       },
-      pay: async (data) => unwrap<BatchPaymentResultDto>(await settlementApi.pay(data)),
+      pay: async (data) => unwrapOk<BatchPaymentResultDto>(await settlementApi.pay(data)),
     },
 
     bankAccounts: (() => {
@@ -1237,10 +1258,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           return toPaged(result, query)
         },
         getById: async (id: string) => unwrap<BankAccountDto | null>(await api.get(id)),
-        create: async (data: CoreCreateBankAccountDto) => unwrap<BankAccountDto>(await api.create(data)),
-        update: async (id: string, data: CoreUpdateBankAccountDto) => unwrap<BankAccountDto>(await api.update(id, data)),
+        create: async (data: CoreCreateBankAccountDto) => unwrapOk<BankAccountDto>(await api.create(data)),
+        update: async (id: string, data: CoreUpdateBankAccountDto) => unwrapOk<BankAccountDto>(await api.update(id, data)),
         setNextCheckNumber: async (id: string, nextCheckNumber: number) =>
-          unwrap<BankAccountDto>(await api.setNextCheckNumber(id, { nextCheckNumber })),
+          unwrapOk<BankAccountDto>(await api.setNextCheckNumber(id, { nextCheckNumber })),
         delete: async (ids: string[]) => {
           for (const id of ids) ensureOk(await api.delete(id))
         },
@@ -1252,9 +1273,9 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         byParty: async (partyType, partyId) =>
           unwrap<PartyBankAccountDto[]>(await api.getByParty(partyType, partyId)) ?? [],
-        save: async (data: CoreSavePartyBankAccountDto) => unwrap<PartyBankAccountDto>(await api.create(data)),
-        update: async (id: string, data: CoreSavePartyBankAccountDto) => unwrap<PartyBankAccountDto>(await api.update(id, data)),
-        setDefault: async (id: string) => unwrap<PartyBankAccountDto>(await api.setDefault(id)),
+        save: async (data: CoreSavePartyBankAccountDto) => unwrapOk<PartyBankAccountDto>(await api.create(data)),
+        update: async (id: string, data: CoreSavePartyBankAccountDto) => unwrapOk<PartyBankAccountDto>(await api.update(id, data)),
+        setDefault: async (id: string) => unwrapOk<PartyBankAccountDto>(await api.setDefault(id)),
         delete: async (id: string) => {
           ensureOk(await api.delete(id))
         },
@@ -1281,17 +1302,17 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           return toPaged(result, query)
         },
         import: async (accountId, source, file, mapping) =>
-          unwrap<BankImportResultDto>(await api.import(accountId, source, file, mapping)),
+          unwrapOk<BankImportResultDto>(await api.import(accountId, source, file, mapping)),
         pull: async (accountId) => unwrap<BankImportResultDto>(await api.pull({ accountId })),
         suggest: async (accountId) => unwrap<BankSuggestResultDto>(await api.suggest(accountId)),
         candidates: async (transactionId) =>
           unwrap<BankMatchCandidateDto[]>(await api.getCandidates(transactionId)) ?? [],
-        confirm: async (transactionId, data) => unwrap<BankTransactionDto>(await api.confirm(transactionId, data)),
-        unmatch: async (transactionId) => unwrap<BankTransactionDto>(await api.unmatch(transactionId)),
-        exclude: async (transactionId) => unwrap<BankTransactionDto>(await api.exclude(transactionId)),
-        restore: async (transactionId) => unwrap<BankTransactionDto>(await api.restore(transactionId)),
+        confirm: async (transactionId, data) => unwrapOk<BankTransactionDto>(await api.confirm(transactionId, data)),
+        unmatch: async (transactionId) => unwrapOk<BankTransactionDto>(await api.unmatch(transactionId)),
+        exclude: async (transactionId) => unwrapOk<BankTransactionDto>(await api.exclude(transactionId)),
+        restore: async (transactionId) => unwrapOk<BankTransactionDto>(await api.restore(transactionId)),
         createDocument: async (transactionId, data) =>
-          unwrap<BankDocumentResultDto>(await api.createDocument(transactionId, data)),
+          unwrapOk<BankDocumentResultDto>(await api.createDocument(transactionId, data)),
         batches: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
           const result = unwrap<FinancePagedResult<BankImportBatchDto>>(
@@ -1327,10 +1348,30 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result, query)
         },
-        print: async (data: CorePrintChecksDto) => unwrap<Blob>(await api.print(data)),
-        register: async (data: CoreRegisterManualCheckDto) => unwrap<BankCheckDto>(await api.register(data)),
-        reprint: async (id: string) => unwrap<Blob>(await api.reprint(id)),
-        voidCheck: async (id: string, data: CoreVoidCheckDto) => unwrap<BankCheckDto>(await api.void(id, data)),
+        templates: async () => {
+          // 501 when Tnzi.Finance.Documents is not loaded. That is a deployment
+          // fact, not an error the operator can act on here, so swallow it and
+          // let the field fall back to free entry.
+          try {
+            return unwrap<CheckTemplateDto[]>(await api.getTemplates()) ?? []
+          } catch {
+            return []
+          }
+        },
+        /**
+         * A specimen sheet for one layout, rendered from placeholder data.
+         * Zero side effects and no business data required - this is what a
+         * layout picker shows so the operator can compare it against the paper
+         * stock in the printer.
+         */
+        templateSpecimen: async (
+          templateName: string,
+          options?: { stockType?: CoreCheckStockType; bankAccountId?: string },
+        ) => unwrap<Blob>(await api.getTemplateSpecimen(templateName, options)),
+        print: async (data: CorePrintChecksDto) => unwrapOk<Blob>(await api.print(data)),
+        register: async (data: CoreRegisterManualCheckDto) => unwrapOk<BankCheckDto>(await api.register(data)),
+        reprint: async (id: string) => unwrapOk<Blob>(await api.reprint(id)),
+        voidCheck: async (id: string, data: CoreVoidCheckDto) => unwrapOk<BankCheckDto>(await api.void(id, data)),
         spoil: async (data: CoreSpoilCheckDto) => unwrap<BankCheckDto>(await api.spoil(data)),
         calibration: async (bankAccountId: string) => unwrap<Blob>(await api.calibration(bankAccountId)),
         exportPositivePay: async (bankAccountId: string, from: string, to: string) =>
@@ -1356,9 +1397,9 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           return toPaged(result, query)
         },
         getById: async (id: string) => unwrap<EftBatchDto | null>(await api.get(id)),
-        create: async (data: CoreCreateEftBatchDto) => unwrap<EftBatchDto>(await api.create(data)),
-        generate: async (id: string) => unwrap<EftBatchDto>(await api.generate(id)),
-        voidBatch: async (id: string, data: CoreVoidEftBatchDto) => unwrap<EftBatchDto>(await api.void(id, data)),
+        create: async (data: CoreCreateEftBatchDto) => unwrapOk<EftBatchDto>(await api.create(data)),
+        generate: async (id: string) => unwrapOk<EftBatchDto>(await api.generate(id)),
+        voidBatch: async (id: string, data: CoreVoidEftBatchDto) => unwrapOk<EftBatchDto>(await api.void(id, data)),
         download: async (id: string) => unwrap<Blob>(await api.download(id)),
       }
     })(),
@@ -1379,10 +1420,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           return toPaged(result, query)
         },
         getById: async (id: string) => unwrap<ReceiptDto | null>(await api.get(id)),
-        create: async (data: CoreCreateReceiptDto) => unwrap<ReceiptDto>(await api.create(data)),
-        extract: async (id: string) => unwrap<ReceiptDto>(await api.extract(id)),
-        update: async (id: string, data: CoreUpdateReceiptExtractionDto) => unwrap<ReceiptDto>(await api.update(id, data)),
-        convert: async (id: string, data: CoreConvertReceiptDto) => unwrap<ReceiptConvertResultDto>(await api.convert(id, data)),
+        create: async (data: CoreCreateReceiptDto) => unwrapOk<ReceiptDto>(await api.create(data)),
+        extract: async (id: string) => unwrapOk<ReceiptDto>(await api.extract(id)),
+        update: async (id: string, data: CoreUpdateReceiptExtractionDto) => unwrapOk<ReceiptDto>(await api.update(id, data)),
+        convert: async (id: string, data: CoreConvertReceiptDto) => unwrapOk<ReceiptConvertResultDto>(await api.convert(id, data)),
         delete: async (id: string) => {
           ensureOk(await api.delete(id))
         },
@@ -1392,7 +1433,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     balanceSummary: (() => {
       const api = useAdminFinanceBalanceSummaryApi(client)
       return {
-        verify: async () => unwrap<BalanceSummaryVerifyDto>(await api.verify()),
+        verify: async () => unwrapOk<BalanceSummaryVerifyDto>(await api.verify()),
         rebuild: async () => unwrap<BalanceSummaryRebuildDto>(await api.rebuild()),
       }
     })(),

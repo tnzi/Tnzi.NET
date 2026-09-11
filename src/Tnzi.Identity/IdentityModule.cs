@@ -50,6 +50,13 @@ public class IdentityModule : TnziApplicationModule
         // 注册核心服务（Token）
         context.Services.AddScoped<ITokenService, JwtTokenService>();
 
+        // ★★ AuthToken.Value 以 IDataProtectionProvider 加密落库（刷新令牌、2FA 临时令牌、
+        // 设置密码令牌都在那一列上），所以这里必须有 key ring。AddDataProtection 内部走
+        // TryAdd，与别的模块重复调用不冲突。
+        // ⚠ 运维前提：key ring 必须持久化且多实例共享，否则重启 / 换实例后既有刷新令牌
+        // 全部解不开（表现为「所有人被登出一次」）。详见 docs/modules/identity.md。
+        context.Services.AddDataProtection();
+
         // 注册登录日志和令牌服务
         var loginLogSender = new LoginLogSender();
         context.Services.AddSingleton<ILoginLogSender>(loginLogSender);
@@ -97,8 +104,12 @@ public class IdentityModule : TnziApplicationModule
         // 按配置决定要不要注册，会让「配置中心把开关打开」在下次重启前不生效
         // （同 SecurityHeaders / RateLimit 中间件那条热开关判据）。
         context.Services.AddScoped<IPasskeyEnrollmentTokenService, PasskeyEnrollmentTokenService>();
+
+        // 邀请注册。两个接入点的默认实现**在 PostConfigure 阶段**才 TryAdd，见下。
+        context.Services.AddScoped<IInvitationService, InvitationService>();
         context.Services.AddScoped<IPasskeyService, PasskeyService>();
         context.Services.AddScoped<IStepUpService, StepUpService>();
+        context.Services.AddScoped<IPendingActionService, PendingActionService>();
 
         // 注册OAuth服务
         context.Services.AddScoped<IOAuthService, OAuthService>();
@@ -115,6 +126,11 @@ public class IdentityModule : TnziApplicationModule
         // 注册登录会话协调器（多设备/单设备/限并发策略 + 令牌签发前同步建立会话）
         context.Services.AddScoped<ILoginSessionCoordinator, LoginSessionCoordinator>();
 
+        // ★★ 会话撤销的唯一出口：撤会话 + 删该会话的刷新令牌 + 发事件。
+        // 无条件注册 —— 停用账号、改密码、登出、重放检测全都经它，
+        // 少了它这些动作会退化成「只撤了会话行、令牌还在」，而那正是本服务存在的理由。
+        context.Services.AddScoped<ISessionRevocationService, SessionRevocationService>();
+
         // 注册登录守卫求值器。始终注册，这样每条令牌签发路径无需判空；
         // 消费应用的守卫（IP 白名单 / 时段 / 设备）另行注册，按 Order 升序排在内置守卫之后。
         context.Services.AddScoped<ILoginGuardEvaluator, LoginGuardEvaluator>();
@@ -123,6 +139,13 @@ public class IdentityModule : TnziApplicationModule
         // 求值器是全部签发路径的唯一共同调用点，一处实现覆盖全部，
         // 且后续新增的登录方式自动受它保护。详见 LockedAccountLoginGuard 的注释。
         context.Services.AddScoped<ILoginGuard, LockedAccountLoginGuard>();
+
+        // ★★★ 内置守卫：账号已开好但本人还没接受邀请。与上面那条同理同源，
+        // 但**不能合并**：邀请状态是一个只有「接受邀请」能改的独立字段，
+        // 而账号锁定会被 UserService.EnableAsync 清掉（连同 LockoutEnabled），
+        // 那一刻 IsLockedOutAsync 恒为 false，上面那道守卫就不再拦任何东西了。
+        // 详见 PendingActionsLoginGuard 的注释。
+        context.Services.AddScoped<ILoginGuard, PendingActionsLoginGuard>();
 
         // 注册会话维护后台服务（定期清理过期/失活会话，避免幽灵会话累积影响并发计数）
         context.Services.AddHostedService<SessionMaintenanceBackgroundService>();
@@ -140,6 +163,16 @@ public class IdentityModule : TnziApplicationModule
 
         // 注册页面生成服务
         context.Services.AddScoped<IIdentityPageService, IdentityPageService>();
+
+        // ★★ 刷新令牌交付过滤器：cookie 模式下把响应体里的刷新令牌搬进 HttpOnly cookie。
+        // 全局注册而不是逐个端点调一次 —— 判据是**响应载荷的形状**，与谁产生了这个响应无关，
+        // 所以消费方覆写 [DefaultController] 的签发端点也照样受管辖。靠约定要求每个人
+        // 记得多调一步，是把一个安全前提押在纪律上（而这一轮已经漏过一次：OAuth 回调）。
+        // Bearer 模式（默认）下过滤器第一行就返回，行为与升级前逐字相同。
+        context.Services.Configure<MvcOptions>(options =>
+        {
+            options.Filters.Add<RefreshTokenDeliveryFilter>();
+        });
 
         // 配置JWT认证（使用 IOptions<IdentityOptions>）
         // 先配置 JwtBearerOptions，使用 IConfigureOptions 模式在运行时从配置获取值
@@ -254,10 +287,36 @@ public class IdentityModule : TnziApplicationModule
                         return;
                     }
 
-                    if (!await sessionService.IsSessionValidAsync(sessionId))
+                    // ★ 每请求校验的同时比对客户端特征。令牌是无记名凭证 —— 被搬到另一台机器上
+                    // 照样能用，而在此之前服务端没有任何一处会察觉：会话行里的 UserAgent
+                    // 从建立那天起就没有被读出来比对过。这里是唯一每请求都会经过的位置。
+                    var request = tokenContext.HttpContext.Request;
+                    var validationContext = new SessionValidationContext(
+                        request.Headers.UserAgent.ToString(),
+                        request.GetClientIp());
+
+                    var validation = await sessionService.ValidateAsync(sessionId, validationContext);
+                    if (validation == SessionValidationResult.Valid)
                     {
-                        tokenContext.Fail("Session has been revoked or expired");
+                        return;
                     }
+
+                    if (validation == SessionValidationResult.BindingMismatch)
+                    {
+                        // OWASP《Cookie Theft Mitigation》给的动作：尽快发现被盗用，
+                        // 作废会话并要求重新认证。撤销而不是只拒绝这一次请求 ——
+                        // 只拒绝的话，攻击者换个 UA 再试一次就进来了。
+                        var revocation = services.GetService<ISessionRevocationService>();
+                        if (revocation != null)
+                        {
+                            await revocation.RevokeSessionAsync(sessionId, SessionRevocationReason.BindingMismatch);
+                        }
+
+                        tokenContext.Fail("Session binding mismatch");
+                        return;
+                    }
+
+                    tokenContext.Fail("Session has been revoked or expired");
                 };
             });
 
@@ -269,6 +328,35 @@ public class IdentityModule : TnziApplicationModule
         })
         .AddJwtBearer()
         .AddTnziOAuth(configuration); // 添加OAuth2第三方登录
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 注册那些「消费应用没提供时才用框架默认」的接入点。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>必须在 PostConfigure 阶段，不能在 Configure 阶段。</strong>
+    /// 本模块的 <see cref="LoadOrder"/> 是 0（最先加载），如果在 Configure 阶段
+    /// <c>TryAdd</c> 这些默认实现，那么它<b>永远先到</b> —— 消费应用在自己的模块里
+    /// （LoadOrder 更大）注册的实现会被 <c>TryAdd</c> 语义挡在门外，
+    /// 而<b>调用照样成功</b>：邀请流程正常跑，只是永远跑的是框架那份默认逻辑，
+    /// 应用要求的字段和二次验证一个都没生效，且没有任何报错。
+    /// 放在 PostConfigure 则相反：所有模块的 Configure 都跑完了，
+    /// 此时还没人注册才轮到框架兜底。
+    /// </remarks>
+    public override Task PostConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        Check.NotNull(context);
+
+        context.Services.TryAddScoped<IInvitationAcceptanceHandler, DefaultInvitationAcceptanceHandler>();
+        context.Services.TryAddScoped<IInvitationUrlGenerator, DefaultInvitationUrlGenerator>();
+
+        // 第三方邮箱是否算「已验证」的判定。默认实现保守（只认 Google 的 email_verified
+        // 与 Microsoft），消费应用把自己接的提供商摸清楚之后注册自己的实现覆盖它。
+        // ★ 同上，必须在 PostConfigure 阶段 TryAdd —— 本模块 LoadOrder = 0，
+        // 在 Configure 阶段注册会让消费方的实现被静默挡在门外，而调用照样成功。
+        context.Services.TryAddScoped<IOAuthEmailVerificationPolicy, DefaultOAuthEmailVerificationPolicy>();
 
         return Task.CompletedTask;
     }

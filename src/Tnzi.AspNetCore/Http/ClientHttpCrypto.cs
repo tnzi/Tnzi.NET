@@ -44,20 +44,31 @@ public class ClientHttpCrypto : IClientHttpCrypto
     /// </summary>
     /// <param name="request">未加密的请求</param>
     /// <returns>加密后的请求</returns>
+    /// <remarks>
+    /// ★ <strong>公钥头不论有没有请求体都要带上。</strong>它是协商，不是「请求体的元数据」：
+    /// 服务端凭它决定要不要加密<b>响应</b>，而 <see cref="DecryptResponse"/> 对每个成功响应
+    /// 都会尝试解密。此前这里对 GET 与无体请求整条早退，于是那些请求收到的是明文响应、
+    /// 解密必然失败，客户端把它换成一个 500 —— GET 在这条链路上从来就走不通。
+    /// </remarks>
     public virtual async Task<HttpRequestMessage> EncryptRequest(HttpRequestMessage request)
     {
         Check.NotNull(request);
 
-        if (_encryptor == null || string.IsNullOrEmpty(_clientPublicKey) || request.Method == HttpMethod.Get || request.Content == null)
+        if (_encryptor == null || string.IsNullOrEmpty(_clientPublicKey))
         {
             return request;
         }
 
-        string data = await request.Content.ReadAsStringAsync();
-        data = _encryptor.EncryptData(data);
-        request = request.CreateNew(data);
+        if (request.Method != HttpMethod.Get && request.Content != null)
+        {
+            string data = await request.Content.ReadAsStringAsync();
+            data = _encryptor.EncryptData(data);
+            request = request.CreateNew(data);
+            _logger.LogDebug("Use client public key to encrypt client request data");
+        }
+
+        request.Headers.Remove(HttpHeaderNames.ClientPublicKey);
         request.Headers.Add(HttpHeaderNames.ClientPublicKey, _clientPublicKey);
-        _logger.LogDebug("Use client public key to encrypt client request data");
         return request;
     }
 

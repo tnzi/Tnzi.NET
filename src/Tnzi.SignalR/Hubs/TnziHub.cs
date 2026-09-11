@@ -7,8 +7,17 @@ namespace Tnzi.SignalR.Hubs;
 /// <typeparam name="TClient">客户端接口类型</typeparam>
 public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
 {
-    private readonly IConnectionManager? _connectionManager;
+    /// <summary>
+    /// 连接级缓存键：第一次解析出的 <see cref="IConnectionManager"/> 存进
+    /// <c>Context.Items</c>，供同一条连接后续的 Hub 实例复用。
+    /// </summary>
+    private const string ConnectionManagerItemKey = "Tnzi.SignalR.ConnectionManager";
+
+    private readonly IConnectionManager? _injectedConnectionManager;
     private readonly IPermissionChecker? _permissionChecker;
+
+    private IConnectionManager? _connectionManagerCache;
+    private bool _connectionManagerResolved;
 
     /// <summary>
     /// 初始化一个<see cref="TnziHub{TClient}"/>类型的新实例
@@ -24,8 +33,47 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     /// <param name="permissionChecker">权限检查器 (可选)</param>
     protected TnziHub(IConnectionManager connectionManager, IPermissionChecker? permissionChecker = null)
     {
-        _connectionManager = Check.NotNull(connectionManager);
+        _injectedConnectionManager = Check.NotNull(connectionManager);
         _permissionChecker = permissionChecker;
+    }
+
+    /// <summary>
+    /// 生效的连接管理器：构造注入优先，否则从连接的请求服务里解析。
+    ///
+    /// ★ 为什么必须能自己解析：基类提供了无参构造，用它继承是完全合法的写法
+    /// （框架自己的 <c>SettingsRealtimeHub</c> 就是 <c>: TnziHub { }</c>）。
+    /// 若此时连接管理器就是 null，这些连接会**静默地**不参与任何追踪 ——
+    /// 不出现在 admin 的在线用户/连接查询里、不计入 <c>MaxConnectionsPerUser</c>、
+    /// 强制断开对它们无效 —— 而连接本身一切正常，没有任何报错或日志。
+    ///
+    /// 解析结果同时写进 <c>Context.Items</c>：Hub 实例每次调用都是新的，而断开时
+    /// 请求作用域未必还可用，那时只能靠连接级的这一份。
+    /// </summary>
+    private IConnectionManager? ConnectionManager
+    {
+        get
+        {
+            if (_injectedConnectionManager != null) return _injectedConnectionManager;
+            if (_connectionManagerResolved) return _connectionManagerCache;
+
+            _connectionManagerResolved = true;
+
+            var items = Context?.Items;
+            if (items != null
+                && items.TryGetValue(ConnectionManagerItemKey, out var cached)
+                && cached is IConnectionManager fromItems)
+            {
+                return _connectionManagerCache = fromItems;
+            }
+
+            var resolved = GetRequestService<IConnectionManager>();
+            if (resolved != null && items != null)
+            {
+                items[ConnectionManagerItemKey] = resolved;
+            }
+
+            return _connectionManagerCache = resolved;
+        }
     }
 
     /// <summary>
@@ -134,6 +182,10 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     {
         await base.OnConnectedAsync();
 
+        // 登记到中断表。刻意**不**限于已登录用户：这张表按 connectionId 索引，
+        // 匿名连接同样应该是可中断的。
+        GetRequestService<IHubConnectionAborter>()?.Register(Context.ConnectionId, Context);
+
         // 将用户添加到用户组并记录连接
         if (CurrentUserId.HasValue)
         {
@@ -141,13 +193,14 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
 
             // 连接管理记录为辅助操作，不应影响核心连接生命周期
-            if (_connectionManager != null)
+            var connectionManager = ConnectionManager;
+            if (connectionManager != null)
             {
                 try
                 {
                     // Build connection metadata from HttpContext
                     var metadata = BuildConnectionMetadata();
-                    await _connectionManager.AddConnectionAsync(CurrentUserId.Value, Context.ConnectionId, metadata);
+                    await connectionManager.AddConnectionAsync(CurrentUserId.Value, Context.ConnectionId, metadata);
 
                     // Publish connection event (auxiliary, errors ignored)
                     await PublishConnectionEventAsync();
@@ -170,6 +223,8 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     /// <returns>任务</returns>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        GetRequestService<IHubConnectionAborter>()?.Unregister(Context.ConnectionId);
+
         // 从用户组移除并清理连接记录
         if (CurrentUserId.HasValue)
         {
@@ -177,11 +232,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
 
             // 连接管理清理为辅助操作，不应影响核心断开生命周期
-            if (_connectionManager != null)
+            var connectionManager = ConnectionManager;
+            if (connectionManager != null)
             {
                 try
                 {
-                    await _connectionManager.RemoveConnectionAsync(CurrentUserId.Value, Context.ConnectionId);
+                    await connectionManager.RemoveConnectionAsync(CurrentUserId.Value, Context.ConnectionId);
 
                     // Publish disconnection event (auxiliary, errors ignored)
                     await PublishDisconnectionEventAsync(exception);
@@ -224,11 +280,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     private async Task PublishConnectionEventAsync()
     {
         var eventBus = GetEventBus();
-        if (eventBus == null || !CurrentUserId.HasValue) return;
+        var connectionManager = ConnectionManager;
+        if (eventBus == null || connectionManager == null || !CurrentUserId.HasValue) return;
 
         try
         {
-            var connectionCount = await _connectionManager!.GetConnectionCountAsync(CurrentUserId.Value);
+            var connectionCount = await connectionManager.GetConnectionCountAsync(CurrentUserId.Value);
             await eventBus.PublishAsync(new Events.UserConnectedEvent
             {
                 UserId = CurrentUserId.Value,
@@ -251,11 +308,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     private async Task PublishDisconnectionEventAsync(Exception? disconnectException)
     {
         var eventBus = GetEventBus();
-        if (eventBus == null || !CurrentUserId.HasValue) return;
+        var connectionManager = ConnectionManager;
+        if (eventBus == null || connectionManager == null || !CurrentUserId.HasValue) return;
 
         try
         {
-            var remainingCount = await _connectionManager!.GetConnectionCountAsync(CurrentUserId.Value);
+            var remainingCount = await connectionManager.GetConnectionCountAsync(CurrentUserId.Value);
             await eventBus.PublishAsync(new Events.UserDisconnectedEvent
             {
                 UserId = CurrentUserId.Value,
@@ -273,35 +331,40 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     }
 
     /// <summary>
-    /// 获取日志记录器（从 Hub 上下文的请求服务中延迟解析）
+    /// 从连接的请求服务里延迟解析一个可选服务。
+    ///
+    /// Hub 的构造发生在 DI 之外（无参构造是允许的），而这些能力都是可选的：解析不到就
+    /// 少一项辅助功能，不该让连接失败。请求作用域在连接生命周期末尾可能已经不可用，
+    /// 所以吞掉解析异常是刻意的 —— 调用方按 null 处理。
     /// </summary>
-    private ILogger? GetLogger()
+    private TService? GetRequestService<TService>() where TService : class
     {
         try
         {
-            var loggerFactory = Context.GetHttpContext()?.RequestServices?.GetService<ILoggerFactory>();
-            return loggerFactory?.CreateLogger(GetType());
+            return Context?.GetHttpContext()?.RequestServices?.GetService<TService>();
         }
-        catch
+        catch (ObjectDisposedException)
         {
+            // 连接已经结束，请求作用域被释放
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            // 作用域已不可用于解析
             return null;
         }
     }
 
     /// <summary>
+    /// 获取日志记录器（从 Hub 上下文的请求服务中延迟解析）
+    /// </summary>
+    private ILogger? GetLogger() =>
+        GetRequestService<ILoggerFactory>()?.CreateLogger(GetType());
+
+    /// <summary>
     /// 获取事件总线（从 Hub 上下文的请求服务中延迟解析）
     /// </summary>
-    private IEventBus? GetEventBus()
-    {
-        try
-        {
-            return Context.GetHttpContext()?.RequestServices?.GetService<IEventBus>();
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private IEventBus? GetEventBus() => GetRequestService<IEventBus>();
 
     /// <summary>
     /// 将用户添加到指定组 (SignalR group + ConnectionManager tracking)
@@ -314,11 +377,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
         await Groups.AddToGroupAsync(Context.ConnectionId, groupId);
 
         // Track in connection manager as well
-        if (_connectionManager != null)
+        var connectionManager = ConnectionManager;
+        if (connectionManager != null)
         {
             try
             {
-                await _connectionManager.AddToGroupAsync(Context.ConnectionId, groupId);
+                await connectionManager.AddToGroupAsync(Context.ConnectionId, groupId);
             }
             catch (Exception ex)
             {
@@ -339,11 +403,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupId);
 
         // Track in connection manager as well
-        if (_connectionManager != null)
+        var connectionManager = ConnectionManager;
+        if (connectionManager != null)
         {
             try
             {
-                await _connectionManager.RemoveFromGroupAsync(Context.ConnectionId, groupId);
+                await connectionManager.RemoveFromGroupAsync(Context.ConnectionId, groupId);
             }
             catch (Exception ex)
             {

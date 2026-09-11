@@ -1,4 +1,4 @@
-// System
+﻿// System
 global using System;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations;
@@ -43,6 +43,7 @@ global using Tnzi.Utilities;
 // 不是支付域的 —— 父模块里它们的唯一使用者就是搬到本模块来的这个服务。
 global using Tnzi.Notification;
 global using Tnzi.Notification.Dtos;
+global using Tnzi.Notification.Metadata;
 global using Tnzi.Notification.Services;
 global using Tnzi.Storage;
 global using Tnzi.Storage.Services;

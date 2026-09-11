@@ -179,7 +179,8 @@ public class HealthChecksModule : TnziFrameworkModule
         var healthCheckOptions = new HealthCheckOptions();
         if (options.DetailedOutput)
         {
-            healthCheckOptions.ResponseWriter = WriteDetailedResponseAsync;
+            healthCheckOptions.ResponseWriter = (httpContext, report) =>
+                WriteDetailedResponseAsync(httpContext, report, options.ExposeErrorDetails);
         }
         webApp.MapHealthChecks(options.Path, healthCheckOptions);
 
@@ -193,7 +194,8 @@ public class HealthChecksModule : TnziFrameworkModule
         var readinessOptions = new HealthCheckOptions();
         if (options.DetailedOutput)
         {
-            readinessOptions.ResponseWriter = WriteDetailedResponseAsync;
+            readinessOptions.ResponseWriter = (httpContext, report) =>
+                WriteDetailedResponseAsync(httpContext, report, options.ExposeErrorDetails);
         }
         webApp.MapHealthChecks(options.ReadinessPath, readinessOptions);
 
@@ -203,7 +205,12 @@ public class HealthChecksModule : TnziFrameworkModule
     /// <summary>
     /// 输出详细的健康检查结果（JSON 格式），支持响应缓存
     /// </summary>
-    private static async Task WriteDetailedResponseAsync(HttpContext context, HealthReport report)
+    /// <remarks>
+    /// ★ 异常消息与检查项 <c>data</c> 只在 <see cref="HealthChecksOptions.ExposeErrorDetails"/>
+    /// 打开时才输出。此前它们随详细输出一起、默认发给<b>匿名</b>调用方：一次数据库连接失败
+    /// 会把连接串片段送出去，而文档承诺的「仅在非生产环境」在源码里没有任何东西去兑现。
+    /// </remarks>
+    private static async Task WriteDetailedResponseAsync(HttpContext context, HealthReport report, bool exposeErrorDetails)
     {
         context.Response.ContentType = "application/json";
 
@@ -216,6 +223,23 @@ public class HealthChecksModule : TnziFrameworkModule
             return;
         }
 
+        var response = BuildDetailedPayload(report, exposeErrorDetails);
+
+        // 更新缓存（含当前状态码）
+        ResponseCache.UpdateCache(response, context.Response.StatusCode);
+
+        await context.Response.WriteAsync(response);
+    }
+
+    /// <summary>
+    /// 构造详细输出的 JSON 负载。
+    /// </summary>
+    /// <remarks>
+    /// 单独抽出来是为了能在没有 HTTP 管线的情况下断言「默认不外泄异常消息」——
+    /// 那条纪律此前只写在注释里，没有任何东西守着它。
+    /// </remarks>
+    internal static string BuildDetailedPayload(HealthReport report, bool exposeErrorDetails)
+    {
         var result = new
         {
             status = report.Status.ToString(),
@@ -226,17 +250,12 @@ public class HealthChecksModule : TnziFrameworkModule
                 status = e.Value.Status.ToString(),
                 duration = e.Value.Duration.TotalMilliseconds,
                 description = e.Value.Description,
-                data = e.Value.Data.Count > 0 ? e.Value.Data : null,
-                exception = e.Value.Exception?.Message
+                data = exposeErrorDetails && e.Value.Data.Count > 0 ? e.Value.Data : null,
+                exception = exposeErrorDetails ? e.Value.Exception?.Message : null
             })
         };
 
-        var response = JsonSerializer.Serialize(result, DetailedResponseJsonOptions);
-
-        // 更新缓存（含当前状态码）
-        ResponseCache.UpdateCache(response, context.Response.StatusCode);
-
-        await context.Response.WriteAsync(response);
+        return JsonSerializer.Serialize(result, DetailedResponseJsonOptions);
     }
 
     /// <summary>

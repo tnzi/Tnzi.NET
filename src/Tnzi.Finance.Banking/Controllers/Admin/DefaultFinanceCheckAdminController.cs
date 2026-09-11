@@ -33,6 +33,40 @@ public class DefaultFinanceCheckAdminController : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
+    /// <summary>
+    /// 可选版式清单（出厂内置版式 + 库里自建模板）
+    /// </summary>
+    /// <remarks>
+    /// 只读，故跟随类级 <c>finance.check.view</c> 门。端点长在本控制器上、依赖可空的
+    /// <c>ICheckTemplateCatalog</c>（缺席 501），而不是由渲染子模块另起一个控制器 ——
+    /// 后者会在消费方覆写本控制器时被一并删掉（见框架 CLAUDE.md「控制器替换是定向的」）。
+    /// </remarks>
+    [HttpGet("templates")]
+    public virtual async Task<ApiResult<List<CheckTemplateDto>>> GetTemplates()
+    {
+        var result = await _service.GetTemplatesAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 某套版式的样张（占位数据，零副作用）
+    /// </summary>
+    /// <remarks>
+    /// 供版式选择器画缩略图 / 放大预览：<b>每套版式一次 GET</b>，呈现端直接
+    /// <c>&lt;iframe src&gt;</c> 或缩放显示。样张内容固定（不含当前时间），故可缓存。
+    /// 只读且产出的是打了 <c>SPECIMEN - NOT NEGOTIABLE</c> 的占位票据，
+    /// 与产出<b>可流通</b>票据的 <c>{id}/render</c> 不同级，故跟随类级 <c>finance.check.view</c>。
+    /// </remarks>
+    [HttpGet("templates/{templateName}/specimen")]
+    public virtual async Task<IActionResult> TemplateSpecimen(
+        string templateName,
+        [FromQuery] CheckStockType stockType = CheckStockType.PrePrinted,
+        [FromQuery] Guid? bankAccountId = null)
+    {
+        var result = await _service.GetTemplateSpecimenAsync(templateName, stockType, bankAccountId);
+        return RenderedFile(result);
+    }
+
     /// <summary>生成校准标尺测试页</summary>
     [HttpGet("calibration/{bankAccountId:guid}")]
     public virtual async Task<IActionResult> Calibration(Guid bankAccountId)

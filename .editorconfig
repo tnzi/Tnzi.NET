@@ -42,6 +42,16 @@ indent_style = tab
 #   **静默失效**（IDE 里仍提示，构建输出里一条都不出）——2026-07-31 全仓一次性清理出的数百条存量，
 #   正是 public.props 长期写着 false 积压出来的。
 dotnet_diagnostic.IDE0005.severity = warning
+# 高价值：未使用的私有成员 / 只写不读的私有字段。
+# 二者合起来盯的是同一类东西——**看起来接上了、其实没有的依赖**。典型形态不是"写了个没人调的方法"，
+# 而是提取类重构之后原类留着的那份注入：字段还在、Check.NotNull 还在、构造签名还在，
+# 读起来完全像是这个类在用它。2026-09-01 全仓一次性清出 18 处，其中 6 处正是这种遗留
+# （CheckService 的 protector/vendor/issuer、BankFeedService 的 providers、RagRetriever 的
+# docRepository），它们真正的使用者早就搬到各自的协作者里去了。
+# ⚠ 这两条报出来时**先判类型再动手**：可能是遗留（删），也可能是"能力接了一半"（要接上去，
+# 删掉反而抹掉证据）。判据是去找那个能力现在有没有别的落点。
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
 # 降噪：库代码是否 ConfigureAwait 由框架约定决定，不在此强制
 dotnet_diagnostic.CA2007.severity = none
 # 建议级（IDE 提示，不进构建警告）

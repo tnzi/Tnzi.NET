@@ -46,7 +46,7 @@ public class SigningRaceDbContext : TnziDbContext<SigningRaceDbContext>
 /// <remarks>
 /// <para>
 /// ★ <b>为什么要有这一组。</b><c>AdvanceAsync</c> 的判据是"所有收件人都已 Signed"，而
-/// <see cref="IRepository{TEntity,TKey}.ToListAsync"/> 走 <c>AsNoTracking</c> —— 两个并行的请求
+/// <c>IRepository.ToListAsync</c> 走 <c>AsNoTracking</c> —— 两个并行的请求
 /// 各自把自己那位标成 Signed 之后，都会从库里读到"全签完"。谁也没有拦住第二个人，于是密封执行两次：
 /// 两份成品、两个哈希，而<b>先交给宿主模块归档的那一份，不是最后记在请求上的那一份</b>。
 /// 哈希对不上就等于没有哈希 —— 这套东西全部的防篡改价值都在那条对应关系上。
@@ -208,7 +208,10 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
             new SigningSealer(_stamper, inspector, files, NullLogger<SigningSealer>.Instance),
             new SigningCertificateBuilder(_stamper, files, NullLogger<SigningCertificateBuilder>.Instance),
             new ComposedDocumentRenderer(_stamper),
-            files);
+            files,
+            // 这一组 mock 掉了存储，授予表在这里不参与判定；真实存储栈下的匿名读取
+            // 见 AnonymousRecipientStorageAccessTests。
+            new FileAccessGrantContext());
     }
 
     /// <summary>建一份两方并行签署、已发出的请求，返回两个人的令牌。</summary>

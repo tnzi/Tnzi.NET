@@ -14,15 +14,85 @@ public class LoggingModule : TnziInfrastructureModule
     public override int LoadOrder => 0;
 
     /// <summary>
-    /// 默认的来源级别覆盖(消费方可用 <c>Logging:MinimumLevelOverrides</c> 整体替换)。
+    /// 默认的来源级别覆盖。消费方经 <c>Logging:MinimumLevelOverrides</c> 补充的条目
+    /// 会**合并**在这份名单之上（同名键消费方胜），不是整体替换 —— 见
+    /// <see cref="ResolveMinimumLevelOverrides"/>。
     ///
     /// 与 ASP.NET Core 模板 <c>Logging:LogLevel</c> 一贯写的东西一致 —— 此前 Serilog
     /// 走扁平 MinimumLevel,那份配置对它完全无效。
     /// </summary>
-    private static readonly Dictionary<string, LogEventLevel> DefaultMinimumLevelOverrides = new()
+    private static readonly Dictionary<string, LogEventLevel> DefaultMinimumLevelOverrides =
+        new(StringComparer.Ordinal)
+        {
+            ["Microsoft.AspNetCore"] = LogEventLevel.Warning,
+        };
+
+    /// <summary>
+    /// 把消费方配置的来源级别覆盖**合并**到框架默认名单之上，同名键以消费方为准。
+    ///
+    /// ★ 为什么是合并而不是替换：<c>Microsoft.AspNetCore</c> → Warning 这一条不是噪音
+    /// 偏好，而是一条安全控制 —— ASP.NET Core 的 <c>Hosting.Diagnostics</c> 会在
+    /// Information 级把 <c>QueryString</c> 原文写进日志，而查询串里就有凭据
+    /// （SignalR 传输的 <c>access_token</c>、文件签名令牌 <c>sig</c>、分享链接
+    /// <c>password</c>）。整份替换意味着任何一条与它无关的覆盖
+    /// （比如 <c>"MyApp.Data": "Debug"</c>）都会顺手把这条控制删掉，且**毫无症状**：
+    /// 日志照常写、请求照常成功，只是从此每条带令牌的 URL 都留在磁盘上。
+    ///
+    /// 消费方仍然可以显式调整它 —— 把 <c>Microsoft.AspNetCore</c> 配成
+    /// <c>Information</c> 就拿回那些诊断行，那是一次知情的选择。
+    ///
+    /// ★ 比较器刻意用 <see cref="StringComparer.Ordinal"/>：Serilog 的来源前缀匹配是
+    /// 区分大小写的，用忽略大小写的比较器会让一条大小写写错的消费方配置
+    /// （<c>"microsoft.aspnetcore"</c>）顶掉默认条目，而它自己又匹配不上任何来源 ——
+    /// 于是两条都不生效。按 Ordinal 合并时两条并存，正确大小写的那条仍然拦得住。
+    /// </summary>
+    /// <param name="options">日志配置</param>
+    /// <returns>生效的来源 → 最低级别映射</returns>
+    public static IReadOnlyDictionary<string, LogEventLevel> ResolveMinimumLevelOverrides(LoggingOptions options)
     {
-        ["Microsoft.AspNetCore"] = LogEventLevel.Warning,
-    };
+        Check.NotNull(options);
+
+        var merged = new Dictionary<string, LogEventLevel>(DefaultMinimumLevelOverrides, StringComparer.Ordinal);
+        if (options.MinimumLevelOverrides != null)
+        {
+            foreach (var (source, level) in options.MinimumLevelOverrides)
+            {
+                if (!string.IsNullOrWhiteSpace(source))
+                {
+                    merged[source] = level;
+                }
+            }
+        }
+
+        return merged;
+    }
+
+    /// <summary>
+    /// 组装 logger 的**级别与扩充**部分（最低级别、来源级别覆盖、Enricher），
+    /// 不含任何 sink —— sink 由 <see cref="ConfigureServicesAsync"/> 按配置追加。
+    ///
+    /// 单独抽出来是为了让测试能对同一份级别配置接一个内存 sink 做取证，
+    /// 而不必写日志文件、也不必在测试里重抄一遍这段逻辑（重抄的话，
+    /// 测试证明的就是测试自己而不是模块）。
+    /// </summary>
+    /// <param name="options">日志配置</param>
+    /// <returns>已配置级别与 Enricher 的 <see cref="LoggerConfiguration"/></returns>
+    public static LoggerConfiguration CreateBaseLoggerConfiguration(LoggingOptions options)
+    {
+        Check.NotNull(options);
+
+        var loggerConfig = new LoggerConfiguration()
+            .MinimumLevel.Is(options.MinimumLevel)
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("Application", "Tnzi");
+
+        foreach (var (source, level) in ResolveMinimumLevelOverrides(options))
+        {
+            loggerConfig.MinimumLevel.Override(source, level);
+        }
+
+        return loggerConfig;
+    }
 
     /// <summary>
     /// 预配置服务
@@ -50,19 +120,10 @@ public class LoggingModule : TnziInfrastructureModule
             options.FileOutput.Debug.Enabled = true;
         }
 
-        var loggerConfig = new LoggerConfiguration()
-            .MinimumLevel.Is(options.MinimumLevel)
-            .Enrich.FromLogContext()
-            .Enrich.WithProperty("Application", "Tnzi");
-
-        // 按来源前缀压级。默认把 Microsoft.AspNetCore 压到 Warning:它的 Hosting 诊断
-        // 会在 Information 级回显**完整 URL**,而查询串里偶尔就是凭据(SignalR 的
-        // access_token、文件签名令牌 sig、分享链接口令 password)——框架自己的请求日志
-        // 已经把它们脱敏,这一条却在旁边把原文又写了一遍。
-        foreach (var (source, level) in options.MinimumLevelOverrides ?? DefaultMinimumLevelOverrides)
-        {
-            loggerConfig.MinimumLevel.Override(source, level);
-        }
+        // 最低级别 + 来源级别覆盖 + Enricher。默认把 Microsoft.AspNetCore 压到 Warning:
+        // 它的 Hosting 诊断会在 Information 级把 QueryString 原文写出去,而查询串里就有
+        // 凭据(SignalR 的 access_token、文件签名令牌 sig、分享链接口令 password)。
+        var loggerConfig = CreateBaseLoggerConfiguration(options);
 
         // 控制台输出
         if (options.EnableConsole)

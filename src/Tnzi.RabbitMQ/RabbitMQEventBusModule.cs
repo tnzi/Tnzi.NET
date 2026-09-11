@@ -129,6 +129,22 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
         services.AddSingleton<IDistributedEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
         services.AddSingleton<IIntegrationEventBus>(provider => provider.GetRequiredService<RabbitMQEventBus>());
 
+        // 连通性探针：健康检查此前注入 IEventBus，而总线分离后它永远是本地总线，
+        // 于是那个检查恒 Healthy —— 代理宕机时 /health/ready 照样报健康。
+        services.AddSingleton<IDistributedEventBusHealthProbe, RabbitMQHealthProbe>();
+
+        // ★ 启动时把已注册的集成事件处理器变成真正的队列绑定 + 消费者。
+        // 此前没有任何东西调用过订阅方法（全仓唯一调用点在测试里）：交换机上没有队列绑定，
+        // 发布的消息被代理直接丢弃，处理器永不执行，而日志里照常打 "Published…"。
+        // 闭包捕获 services 而不是在这里快照事件类型：本模块 LoadOrder 11 很靠前，
+        // 配置阶段还看不见后加载的业务模块注册的处理器；容器构建完成后再枚举才是全量。
+        services.AddSingleton<IHostedService>(provider => new DistributedEventSubscriptionInitializer(
+            services,
+            provider.GetRequiredService<RabbitMQEventBus>(),
+            provider.GetRequiredService<ILogger<DistributedEventSubscriptionInitializer>>(),
+            "RabbitMQ",
+            provider.GetService<IOptions<RabbitMQOptions>>()?.Value.AutoSubscribe ?? true));
+
         return Task.CompletedTask;
     }
 

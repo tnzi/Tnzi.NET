@@ -39,10 +39,15 @@ public class DefaultSlidingCaptchaController : ApiControllerBase
     /// <summary>
     /// Generate a sliding captcha with adaptive difficulty based on failure history
     /// </summary>
+    /// <remarks>
+    /// ★ 刻意<b>不接受</b>客户端标识：它此前是一个 <c>[FromQuery] clientId</c>，
+    /// 而难度正是按它查失败次数的 —— 不传或每次换一个值就永远是最低难度，
+    /// 填别人的值能把对方顶到最高。现在由服务端从当前请求派生。
+    /// </remarks>
     [HttpPost("generate-adaptive")]
-    public virtual async Task<ApiResult<SlidingCaptchaDto>> GenerateAdaptive([FromQuery] string? clientId = null)
+    public virtual async Task<ApiResult<SlidingCaptchaDto>> GenerateAdaptive()
     {
-        var result = await SlidingCaptchaService.GenerateAdaptiveAsync(clientId);
+        var result = await SlidingCaptchaService.GenerateAdaptiveAsync();
         return result.ToApiResult();
     }
 }

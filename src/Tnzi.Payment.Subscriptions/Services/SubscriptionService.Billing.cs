@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Subscriptions.Services;
+﻿namespace Tnzi.Payment.Subscriptions.Services;
 
 /// <summary>
 /// 订阅计费引擎（partial）：off-session 扣款、支付完成/失败回流状态机、
@@ -33,15 +33,31 @@ public partial class SubscriptionService
             try
             {
                 if (subscription.Plan == null)
+                {
+                    // 静默跳过等于这条订阅从此再也不被续费，而没有任何迹象。
+                    // 计划被硬删或数据迁移出错都会走到这里，两者都要有人知道。
+                    Logger.LogError(
+                        "Skipping renewal for {SubscriptionNo}: plan {PlanId} could not be loaded. "
+                        + "This subscription will never renew until the plan exists again.",
+                        subscription.SubscriptionNo, subscription.PlanId);
                     continue;
+                }
 
                 // 多实例原子抢占：抢到才处理，避免重复扣款
                 if (!await TryClaimAsync(subscription.Id, now, lockUntil, cancellationToken))
                     continue;
 
+                // ★ 先结算到期的待生效变更，再扣款。降级约定的就是「本周期末生效」，
+                // 而本周期末正是这一刻 —— 顺序反过来，用户在自己已经降级的那一期
+                // 仍被按旧价收钱，而订阅详情页此后显示的是新计划（账单与页面对不上，
+                // 且没有任何一条日志或状态能看出发生过这件事）。
+                var effectivePlan = await ApplyDuePlanChangeForSubscriptionAsync(subscription.Id, now, cancellationToken)
+                    ?? subscription.Plan;
+
                 // 发起 off-session 扣款；成功 → 发 PaymentCompletedEvent → 处理器推进周期；
                 // 失败/无支付方式 → 降级 PastDue（见 ApplyPaymentFailedAsync）
-                await ChargeSubscriptionAsync(subscription, SubscriptionBillingPurpose.Renewal, subscription.Plan.Price, cancellationToken);
+                await ChargeSubscriptionAsync(
+                    subscription, SubscriptionBillingPurpose.Renewal, effectivePlan.Price, cancellationToken, effectivePlan);
                 processed++;
             }
             catch (Exception ex)
@@ -114,9 +130,13 @@ public partial class SubscriptionService
             .Where(s =>
                 // 到期未续费（已关闭自动续费，周期自然结束）
                 (s.Status == SubscriptionStatus.PendingRenewal && s.NextBillingTime != null && s.NextBillingTime <= now)
-                // 逾期欠费超过宽限期或重试上限
+                // 逾期欠费超过宽限期或重试上限。
+                // ★ PastDueSince 为 null 时**不**立刻过期：那一列由 ApplyPaymentFailedAsync 写入，
+                // 为 null 说明这条订阅是经别的路径进的 PastDue（数据迁移、人工改状态），
+                // 「不知道欠了多久」不能读成「欠了很久」—— 那个方向是把宽限期直接跳过，
+                // 用户毫无预警地被停服。交给重试上限收口，重试计数同样为 0 时就等下一次扣款失败写上它。
                 || (s.Status == SubscriptionStatus.PastDue
-                    && (s.PastDueSince == null || s.PastDueSince <= graceLimit || s.RenewalRetryCount >= maxRetry)))
+                    && ((s.PastDueSince != null && s.PastDueSince <= graceLimit) || s.RenewalRetryCount >= maxRetry)))
             .OrderBy(s => s.NextBillingTime)
             .Take(BillingScanPageSize)
             .Select(s => s.Id)
@@ -589,6 +609,23 @@ public partial class SubscriptionService
 
         change.Status = SubscriptionChangeStatus.Applied;
         await _changeRepository.UpdateAsync(change, cancellationToken);
+
+        // 与到期结算的降级发同一条事件：判据是「一条 SubscriptionChange 变成 Applied」，
+        // 功能授权挂在这条上，两条路径必须对称，否则消费方只能收到一半的生效通知。
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new SubscriptionPlanChangeAppliedEvent
+            {
+                SubscriptionId = subscription.Id,
+                SubscriptionNo = subscription.SubscriptionNo,
+                UserId = subscription.UserId,
+                ChangeId = change.Id,
+                FromPlanId = change.FromPlanId,
+                ToPlanId = change.ToPlanId,
+                ChangeType = change.ChangeType,
+                AppliedTime = now
+            });
+        }
     }
 
     private async Task<Subscription?> LoadForBillingAsync(SubscriptionPaymentContext context, CancellationToken cancellationToken)
@@ -643,7 +680,7 @@ public partial class SubscriptionService
 
         var result = await _notificationService.CreateAndSendAsync(new CreateNotificationRequest
         {
-            Type = Tnzi.Notification.Metadata.NotificationType.Email,
+            Type = NotificationType.Email,
             // 事务性：订阅续费 / 扣款结果，属既有付费关系下必需的往来。
             IsTransactional = true,
             Subject = subject,

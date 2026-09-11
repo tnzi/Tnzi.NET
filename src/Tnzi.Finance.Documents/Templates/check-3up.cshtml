@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cheques</title>
+<style>
+/* ============================================================================
+   Three cheques per page
+   ---------------------------------------------------------------------------
+   Physical layout only. Every value is pre-formatted by the renderer, so this
+   template can be edited from the Template admin surface without touching code.
+
+   Geometry (Letter 215.9mm x 279.4mm):
+     cheque 1      top      0mm .. 88.9mm   (8.5in x 3.5in)
+     cheque 2      top   88.9mm .. 177.8mm
+     cheque 3      top  177.8mm .. 266.7mm
+     feed margin   top  266.7mm .. 279.4mm  (0.5in, nothing printed)
+   MICR clear band = bottom 15.9mm (5/8in) of EACH cheque: nothing but the
+   magnetic line may be printed there, or the reader rejects the item.
+
+   There are no voucher stubs on this stock, so the payment reference and memo
+   print on the cheque face itself - that is the only place left to carry them.
+
+   This template iterates `Model.Pages`, NOT `Model.Checks`: the renderer has
+   already grouped the batch into pages of `Model.ChecksPerPage`. The last page
+   may hold fewer than three - the empty slots simply stay blank, they must not
+   be filled with anything (a blank cheque form with a live MICR line is a
+   negotiable instrument waiting to be written on).
+
+   Pre-printed stock: the stock already carries the company/bank identity, the
+   cheque number, the "$", "PAY TO THE ORDER OF", "DOLLARS" and the MICR line.
+   Those elements carry Model.PrePrintedClass (= "noprint"), so they stay
+   VISIBLE on screen (full simulation for proof-reading) and become
+   visibility:hidden when printing - hidden but still occupying space.
+   ========================================================================= */
+
+@@page { size: auto; margin: 0; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #eef0f3;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+}
+
+.cheque-page {
+    position: relative;
+    width: 215.9mm;
+    height: 279.4mm;
+    margin: 0 auto 8mm;
+    background: #fff;
+    box-shadow: 0 1mm 3mm rgba(0, 0, 0, .18);
+    overflow: hidden;
+    page-break-after: always;
+}
+.cheque-page:last-child { page-break-after: auto; }
+
+.abs { position: absolute; }
+
+/* ---------- the three cheque bands ---------- */
+.cheque { position: absolute; left: 0; width: 215.9mm; height: 88.9mm; }
+.cheque.blank-stock { border-bottom: 0.3mm solid #444; }
+.slot-1 { top: 0; }
+.slot-2 { top: 88.9mm; }
+.slot-3 { top: 177.8mm; }
+
+/* Perforation guides between the bands (screen aid; they print faintly and stay
+   clear of every MICR band because they sit exactly on a band boundary). */
+.perforation { position: absolute; left: 0; width: 215.9mm; border-top: 0.2mm dashed #bbb; }
+.perf-1 { top: 88.9mm; }
+.perf-2 { top: 177.8mm; }
+.feed-margin { position: absolute; left: 0; top: 266.7mm; width: 215.9mm; height: 12.7mm; }
+
+.issuer { left: 10mm; top: 4mm; width: 92mm; }
+.issuer-logo { max-height: 9mm; max-width: 38mm; display: block; margin-bottom: .8mm; }
+.issuer-name { font-size: 10pt; font-weight: 700; letter-spacing: .2mm; }
+.issuer-line { font-size: 6.5pt; line-height: 1.3; color: #222; }
+
+/* Declared heights on the two top-right blocks are load-bearing, not decoration:
+   the courtesy-amount clear area below is measured against them (see `.courtesy`).
+   Three cheques to a sheet leaves 88.9mm per band, so this form is the tightest
+   of the six - the top-right cluster moves up to buy the amount field its space. */
+.cheque-no { right: 10mm; top: 4mm; width: 56mm; height: 4.5mm; text-align: right; font-size: 11pt; font-weight: 700; }
+.cheque-no-label { font-size: 6.5pt; font-weight: 400; color: #444; }
+
+.date-block { right: 10mm; top: 9mm; width: 58mm; height: 8mm; text-align: right; }
+.date-label { font-size: 6pt; text-transform: uppercase; letter-spacing: .4mm; color: #444; }
+.date-value { font-size: 9.5pt; letter-spacing: .6mm; border-bottom: 0.25mm solid #000; padding-top: .5mm; }
+
+.pay-label { left: 10mm; top: 28mm; font-size: 6pt; text-transform: uppercase; letter-spacing: .3mm; color: #333; }
+.payee { left: 10mm; top: 31.5mm; width: 128mm; font-size: 10.5pt; font-weight: 700; border-bottom: 0.25mm solid #000; padding-bottom: .5mm; white-space: nowrap; overflow: hidden; }
+
+/* ---- Courtesy amount ----
+   A clear area around the amount field is what lets a reader isolate it. This
+   layout is US 3-per-page stock and so is not governed by CPA-006, but its
+   geometry was copied from the Canadian one and inherited the same too-tight
+   numbers; the 6.4mm (0.25in) figure CPA-006 section 5.4.3 states is the only
+   written dimension we have.
+
+   Geometry (page is 215.9mm wide, band is 88.9mm tall):
+     amount field 152.9mm .. 205.9mm   x   26mm .. 34.5mm   ("$" + box together)
+     clear area   146.5mm .. 212.3mm   x   19.6mm .. 40.9mm
+     above  .date-block  ends at 17mm    (needs <= 19.6mm)
+     below  .legal       starts at 42mm  (needs >= 40.9mm)
+     left   .payee       ends at 138mm   (needs <= 146.5mm)
+   Nothing below the amount row moved: `.legal` at 42mm already cleared once the
+   box came up, and the band has no room to push the lower half down. */
+.courtesy { right: 10mm; top: 26mm; width: 48mm; height: 8.5mm; }
+.courtesy-box { position: absolute; inset: 0; border: 0.3mm solid #000; }
+.courtesy-sign { position: absolute; left: -5mm; top: 1.2mm; font-size: 10.5pt; font-weight: 700; }
+.courtesy-value { position: absolute; right: 1.6mm; top: 1.4mm; font-size: 11.5pt; font-weight: 700; white-space: nowrap; }
+
+.legal { left: 10mm; top: 42mm; width: 164mm; font-size: 9pt; border-bottom: 0.25mm solid #000; padding-bottom: .5mm; white-space: nowrap; overflow: hidden; }
+.legal-currency { left: 176mm; top: 42mm; font-size: 7.5pt; font-weight: 700; letter-spacing: .2mm; }
+
+.bank { left: 10mm; top: 49mm; width: 88mm; font-size: 7pt; line-height: 1.3; color: #222; }
+.bank-name { font-weight: 700; font-size: 8pt; }
+
+/* No stub on this stock, so the payment reference rides on the cheque face. */
+.memo-label { left: 10mm; top: 62mm; font-size: 6pt; text-transform: uppercase; letter-spacing: .3mm; color: #333; }
+.memo { left: 24mm; top: 61.5mm; width: 74mm; font-size: 7pt; border-bottom: 0.25mm solid #000; padding-bottom: .3mm; white-space: nowrap; overflow: hidden; }
+.reference { left: 10mm; top: 66mm; width: 88mm; font-size: 6.5pt; color: #555; white-space: nowrap; overflow: hidden; }
+
+.signature { left: 128mm; top: 50mm; width: 78mm; }
+.signature-image { height: 8mm; display: flex; align-items: flex-end; justify-content: center; }
+.signature-image img { max-height: 8mm; max-width: 68mm; }
+.signature-line { border-top: 0.25mm solid #000; margin-top: .4mm; }
+.signature-name { font-size: 7pt; text-align: center; padding-top: .3mm; }
+.signature-title { font-size: 6pt; text-align: center; color: #333; }
+
+.micr-band { left: 0; bottom: 0; width: 215.9mm; height: 15.9mm; }
+.micr-line { position: absolute; left: 32mm; bottom: 5mm; font-family: "MICR E13B", "E-13B", "GnuMICR", monospace; font-size: 12pt; letter-spacing: .5mm; white-space: nowrap; }
+.micr-readable { position: absolute; left: 32mm; bottom: 1.2mm; font-size: 5.5pt; letter-spacing: .4mm; color: #555; white-space: nowrap; }
+
+.preview-watermark {
+    left: 0; top: 26mm; width: 215.9mm;
+    text-align: center;
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: 1.6mm;
+    color: rgba(190, 30, 45, .22);
+    transform: rotate(-8deg);
+    pointer-events: none;
+}
+
+@@media print {
+    body { background: #fff; }
+    .cheque-page { margin: 0; box-shadow: none; }
+    /* Pre-printed stock: keep the space, drop the ink. */
+    .noprint { visibility: hidden; }
+}
+
+/* ---------- specimen mode (layout picker) ----------
+   A specimen is rendered from placeholder data so somebody choosing a layout
+   can hold it against the paper in the printer. The question it has to answer
+   is "what does this layout put on MY stock", and on pre-printed stock the
+   answer is "the elements below are already there - the printer only adds the
+   variable data".
+
+   `.noprint` alone cannot say that: it lives inside @@media print, so on screen
+   those elements render exactly as they do on blank stock, and the two stock
+   types look the same in a thumbnail. Fading them is the signal that survives
+   on screen and at thumbnail scale. One knob - change the opacity, or swap it
+   for a grayscale/dashed treatment, whatever reads best on your stock.
+
+   Scoped under `.specimen`, which only a specimen puts on the page root: a real
+   cheque and a payment preview match nothing here, so their output is
+   untouched (a preview SHOULD show the full face - you are proof-reading a
+   cheque then, not comparing paper). */
+.specimen .noprint { opacity: .28; }
+</style>
+</head>
+<body>
+@foreach (var page in Model.Pages)
+{
+    @* The ternary supplies its own leading space, so a real cheque still renders
+       exactly `class="cheque-page"` - byte-identical to before specimen mode. *@
+    <section class="cheque-page@(Model.IsSpecimen ? " specimen" : "")" style="@Model.OffsetStyle">
+
+        <div class="perforation perf-1"></div>
+        <div class="perforation perf-2"></div>
+        <div class="feed-margin"></div>
+
+        @for (var slot = 0; slot < page.Checks.Count; slot++)
+        {
+            var chk = page.Checks[slot];
+            <div class="cheque slot-@(slot + 1) @(Model.IsPrePrinted ? "" : "blank-stock")">
+
+                @if (Model.IsPreview)
+                {
+                    <div class="abs preview-watermark">@Model.PreviewLabel</div>
+                }
+
+                @if (Model.Issuer.HasIdentity)
+                {
+                    <div class="abs issuer @Model.PrePrintedClass">
+                        @if (!string.IsNullOrWhiteSpace(Model.Issuer.LogoUrl))
+                        {
+                            <img class="issuer-logo" src="@Model.Issuer.LogoUrl" alt="" />
+                        }
+                        <div class="issuer-name">@Model.Issuer.Name</div>
+                        @foreach (var line in Model.Issuer.AddressLines)
+                        {
+                            <div class="issuer-line">@line</div>
+                        }
+                    </div>
+                }
+
+                <div class="abs cheque-no @Model.PrePrintedClass">
+                    <span class="cheque-no-label">No.</span> @chk.CheckNumberText
+                </div>
+
+                @* ISO date: unambiguous however it is read, and the framework must not
+                   guess a national date order. *@
+                <div class="abs date-block">
+                    <div class="date-label @Model.PrePrintedClass">Date</div>
+                    <div class="date-value">@chk.IssueDateIso</div>
+                </div>
+
+                <div class="abs pay-label @Model.PrePrintedClass">Pay to the order of</div>
+                <div class="abs payee">@chk.PayeeName</div>
+
+                <div class="abs courtesy">
+                    <div class="courtesy-box @Model.PrePrintedClass"></div>
+                    <div class="courtesy-sign @Model.PrePrintedClass">$</div>
+                    <div class="courtesy-value">@chk.AmountText</div>
+                </div>
+
+                <div class="abs legal">@chk.AmountInWordsText</div>
+                <div class="abs legal-currency @Model.PrePrintedClass">@chk.CurrencyLabel</div>
+
+                <div class="abs bank @Model.PrePrintedClass">
+                    <div class="bank-name">@Model.Bank.Name</div>
+                    @if (!string.IsNullOrWhiteSpace(Model.Bank.RoutingLine))
+                    {
+                        <div>@Model.Bank.RoutingLine</div>
+                    }
+                </div>
+
+                <div class="abs memo-label @Model.PrePrintedClass">Memo</div>
+                <div class="abs memo">@chk.Memo</div>
+                @if (!string.IsNullOrWhiteSpace(chk.PaymentNumber) || !string.IsNullOrWhiteSpace(chk.Reference))
+                {
+                    <div class="abs reference">@chk.PaymentNumber @chk.Reference</div>
+                }
+
+                <div class="abs signature">
+                    <div class="signature-image">
+                        @if (!string.IsNullOrWhiteSpace(Model.Issuer.SignatureImageUrl))
+                        {
+                            <img src="@Model.Issuer.SignatureImageUrl" alt="" />
+                        }
+                    </div>
+                    <div class="signature-line @Model.PrePrintedClass"></div>
+                    <div class="signature-name">@Model.Issuer.SignatureName</div>
+                    <div class="signature-title">@Model.Issuer.SignatureTitle</div>
+                </div>
+
+                <div class="abs micr-band">
+                    @if (Model.ShowMicr)
+                    {
+                        <div class="micr-line">@chk.MicrGlyphs</div>
+                        <div class="micr-readable">@chk.MicrLine</div>
+                    }
+                </div>
+            </div>
+        }
+
+    </section>
+}
+</body>
+</html>

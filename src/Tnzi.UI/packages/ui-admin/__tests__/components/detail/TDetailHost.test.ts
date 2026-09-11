@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { ref, h } from 'vue'
 import TDetailHost from '../../../src/components/detail/TDetailHost.vue'
 
 const stubs = {
@@ -16,11 +16,23 @@ const stubs = {
 }
 
 function makeState(mode: 'modal' | 'drawer' | 'page', visible = true) {
+  // `useDetail` builds its open-state on ONE `useFormModal` instance and
+  // publishes `visible` / `action` / `data` as views onto it, so the fake shares
+  // the same refs instead of keeping a second, independent copy.
+  const form = {
+    visible: ref(visible),
+    mode: ref('edit'),
+    formData: ref({ id: 1, name: 'a' }),
+    open: () => {},
+    close: () => {},
+    confirm: async () => null,
+  }
   return {
-    mode: ref(mode), action: ref('edit'), visible: ref(visible),
-    data: ref({ id: 1, name: 'a' }), loading: ref(false), error: ref(null),
+    mode: ref(mode), action: form.mode, visible: form.visible,
+    data: form.formData, loading: ref(false), error: ref(null),
     activeSection: ref('basic'),
     open: async () => {}, close: () => {}, submit: async () => {}, setSection: () => {},
+    form,
   }
 }
 
@@ -64,5 +76,99 @@ describe('TDetailHost', () => {
     })
     expect(w.find('.t-page-header__main > .t-page-header__extra .meta').text()).toBe('a')
     expect(w.find('.t-page-header__left .meta').exists()).toBe(false)
+  })
+  /**
+   * The overlay identity + body-height cap, run against the REAL shells.
+   *
+   * `TModalShell` withholds naive's `title` prop the moment a `#header` slot
+   * exists (the prop would otherwise win and drop the slot with no warning), so
+   * the thing worth asserting is what naive ENDS UP painting - a stub would
+   * happily report a `#header` the real card never rendered. NModal teleports,
+   * hence `attachTo` + document queries.
+   */
+  describe('overlay identity and height (real shells)', () => {
+    let w: ReturnType<typeof mount> | null = null
+
+    afterEach(() => {
+      w?.unmount()
+      w = null
+      document.body.innerHTML = ''
+    })
+
+    function open(mode: 'modal' | 'drawer', props: Record<string, unknown> = {}, slots: Record<string, unknown> = {}) {
+      w = mount(TDetailHost, {
+        props: { state: makeState(mode) as any, title: 'Edit', ...props },
+        slots: { default: '<div class="body" />', ...(slots as any) },
+        attachTo: document.body,
+        global: { stubs: { TSvgIcon: true } },
+      })
+      return w
+    }
+
+    const headerMain = () =>
+      document.querySelector('.n-card-header__main, .n-drawer-header__main') as HTMLElement | null
+    const scrollStyle = () =>
+      (document.querySelector('.t-modal-shell__scroll') as HTMLElement | null)?.style.maxHeight
+
+    /* The guard on every OTHER overlay in the framework: none of them declares
+       an icon or a #title, and their header must keep the byte-for-byte plain
+       string naive rendered before. Supplying #header unconditionally would
+       re-route all ~40 of them through our own markup for no gain. */
+    it('leaves a plain-titled overlay exactly as naive rendered it', () => {
+      open('modal')
+      expect(headerMain()?.textContent).toBe('Edit')
+      expect(document.querySelector('.t-detail-host__header')).toBeNull()
+    })
+
+    it('composes the icon into the modal header, ahead of the title', () => {
+      open('modal', { icon: 'mdi:police-badge' })
+      const icon = document.querySelector('.t-detail-host__header-icon')
+      expect(icon?.getAttribute('icon')).toBe('mdi:police-badge')
+      expect(document.querySelector('.t-detail-host__header-title')?.textContent).toBe('Edit')
+    })
+
+    /* Same field, same rule, the other overlay - a capability that stops at one
+       of the two modes is the defect this whole change is about. */
+    it('composes the icon into the drawer header too', () => {
+      open('drawer', { icon: 'mdi:police-badge' })
+      expect(document.querySelector('.t-detail-host__header-icon')?.getAttribute('icon')).toBe(
+        'mdi:police-badge',
+      )
+    })
+
+    /* Mirrors TPageHeader: its #title slot REPLACES icon + title rather than
+       sitting beside them, so the rule must not change with the mode. */
+    it('lets #title own the whole identity, icon included', () => {
+      open('modal', { icon: 'mdi:police-badge' }, { title: () => h('span', { class: 'rich' }, 'Officer Reid') })
+      expect(document.querySelector('.rich')?.textContent).toBe('Officer Reid')
+      expect(document.querySelector('.t-detail-host__header-icon')).toBeNull()
+      expect(document.querySelector('.t-detail-host__header-title')).toBeNull()
+    })
+
+    it('hands #title the retained record, so a closing overlay keeps its name', () => {
+      open('modal', {}, { title: (p: any) => h('span', { class: 'rich' }, p.data?.name ?? '') })
+      expect(document.querySelector('.rich')?.textContent).toBe('a')
+    })
+
+    it('caps the modal body at TModalShell default, and at the value given', () => {
+      open('modal')
+      expect(scrollStyle()).toBe('65vh')
+      w?.unmount()
+      document.body.innerHTML = ''
+      open('modal', { contentMaxHeightVh: 76 })
+      expect(scrollStyle()).toBe('76vh')
+    })
+  })
+
+  /* Page mode routes the same two inputs down its own path (TPageHeader), and
+     must keep doing so - the overlay branches are additive, not a takeover. */
+  it('still sends icon and #title through the page-mode header', () => {
+    const w = mount(TDetailHost, {
+      props: { state: makeState('page') as any, title: 'Edit', icon: 'mdi:police-badge' },
+      slots: { default: '<div class="body" />' },
+      global: { stubs },
+    })
+    expect(w.find('.t-page-header__icon').exists()).toBe(true)
+    expect(w.find('.t-detail-host__header').exists()).toBe(false)
   })
 })

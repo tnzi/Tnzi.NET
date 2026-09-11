@@ -23,11 +23,32 @@ public interface IEventStore
     Task<IEnumerable<StoredEvent>> GetUnprocessedEventsAsync(int count = 100, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 标记事件为已处理
+    /// 标记事件为已处理（投递成功）
     /// </summary>
+    /// <remarks>
+    /// 实现 MUST 清除 <see cref="StoredEvent.LastError"/>：残留的错误信息会让一条
+    /// 「失败几次后终于投递成功」的记录与死信记录长得一模一样，两者的处置完全不同。
+    /// </remarks>
     /// <param name="eventId">事件ID</param>
     /// <param name="cancellationToken">取消令牌</param>
     Task MarkAsProcessedAsync(Guid eventId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 标记事件为死信（重试次数耗尽，不再投递）
+    /// </summary>
+    /// <remarks>
+    /// 死信与「投递成功」是两回事：前者需要人工介入，后者可以按保留期删掉。
+    /// 实现 MUST 保留 <paramref name="error"/>（<see cref="StoredEvent.IsDeadLetter"/> 据此判定），
+    /// 并 MUST 让这些记录不被 <see cref="DeleteExpiredEventsAsync"/> 删除 ——
+    /// 否则唯一的失败证据会随保留期一起消失。
+    /// 默认实现退回 <see cref="MarkAsProcessedAsync"/>，保持既有实现可编译；
+    /// 它只保证「不再重试」，不保证可辨认。
+    /// </remarks>
+    /// <param name="eventId">事件ID</param>
+    /// <param name="error">最后一次失败的错误信息</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task MarkAsDeadLetterAsync(Guid eventId, string error, CancellationToken cancellationToken = default)
+        => MarkAsProcessedAsync(eventId, cancellationToken);
 
     /// <summary>
     /// 标记事件为处理失败
@@ -111,6 +132,15 @@ public class StoredEvent
     /// 获取或设置 创建时间
     /// </summary>
     public DateTime CreationTime { get; set; }
+
+    /// <summary>
+    /// 获取 是否为死信（重试耗尽、不再投递）
+    /// </summary>
+    /// <remarks>
+    /// 判据是「已处理但仍带着错误信息」：投递成功会清掉 <see cref="LastError"/>，
+    /// 因此不需要为死信新增一列（新增列意味着每个消费应用都要迁移一次）。
+    /// </remarks>
+    public bool IsDeadLetter => IsProcessed && !string.IsNullOrEmpty(LastError);
 }
 
 /// <summary>

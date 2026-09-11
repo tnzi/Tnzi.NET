@@ -90,7 +90,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
         }
 
-        var fileName = $"{SequentialGuid.NewGuid()}{extension}";
+        // 存储键一律服务端生成；调用方给的名字只进 OriginalName（见 StorageKeyHelper）。
+        var fileName = StorageKeyHelper.NewKey(extension);
 
         // 长度必须在把流交给 provider **之前**取。流的生命周期归调用方，但 provider 读完
         // 之后这个流还能不能读，不在本服务的控制之内（见 IFileStorage.UploadAsync 的所有权约定）；
@@ -278,7 +279,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         }
 
         var extension = Path.GetExtension(fileName);
-        var newFileName = $"{SequentialGuid.NewGuid()}{extension}";
+        var newFileName = StorageKeyHelper.NewKey(extension);
         var contentType = FileTypeHelper.GetContentType(extension);
 
         // 与 SaveAsync 同理：长度在交给 provider 之前取。
@@ -394,7 +395,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<FileRecord>("Source file path is empty", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
         var extension = sourceFile.Extension;
-        var copyFileName = $"{SequentialGuid.NewGuid()}{extension}";
+        var copyFileName = StorageKeyHelper.NewKey(extension);
 
         // Prefer provider-native server-side copy (S3/R2/Azure) to avoid streaming large files
         // through the application; fall back to download + upload when unsupported (Local/InMemory).
@@ -635,6 +636,16 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return validation;
         var fileIdList = fileIds!.ToList();
 
+        // 一次打包的条目数有上限：几万个 id 的一次请求会把临时目录与对象存储一起打满，
+        // 而调用方只需要登录（见 ArchiveOptions）。
+        var maxEntries = Options.Archive.MaxEntries;
+        if (fileIdList.Count > maxEntries)
+        {
+            return Fail<FileRecord>(
+                $"Too many files to compress: {fileIdList.Count} (maximum {maxEntries}).",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var tempFilePath = Path.GetTempFileName();
         try
         {
@@ -675,12 +686,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 var zipSize = zipFileStream.Length;
 
                 zipFileStream.Position = 0;
-                var zipName = zipFileName ?? $"archive_{DateTime.UtcNow:yyyyMMddHHmmss}.zip";
-                var zipPath = await _storage.UploadAsync(zipName, zipFileStream, "application/zip");
+
+                // ★ 存储键由服务端生成，调用方给的 zipFileName 只做展示名。它来自请求体：
+                //   直接拿它当键等于让任何已登录用户选定对象名，在对象存储上（键即对象名、
+                //   PutObject 默认覆盖）这就是「知道别人文件的名字 → 替换掉它的字节」，
+                //   CanWriteAsync 整条判据链被绕过（见 StorageKeyHelper）。
+                var zipKey = StorageKeyHelper.NewKey(".zip");
+                var zipName = ResolveArchiveDisplayName(zipFileName);
+                var zipPath = await _storage.UploadAsync(zipKey, zipFileStream, "application/zip");
 
                 var zipRecord = new FileRecord
                 {
-                    FileName = zipName,
+                    FileName = zipKey,
                     OriginalName = zipName,
                     Extension = ".zip",
                     Size = zipSize,
@@ -717,15 +734,24 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<IEnumerable<FileRecord>>("Only ZIP files can be decompressed", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
         var extractedFiles = new List<FileRecord>();
+        var archiveOptions = Options.Archive;
+        var maxEntrySize = Options.MaxFileSize;
+        long extractedTotal = 0;
 
         using var zipStream = await _storage.DownloadAsync(GetSafePath(fileRecord.Path));
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Read))
         {
-            foreach (var entry in archive.Entries)
+            // 条目数上限先判：目录项（Name 为空）不算。
+            var entries = archive.Entries.Where(e => !string.IsNullOrEmpty(e.Name)).ToList();
+            if (entries.Count > archiveOptions.MaxEntries)
             {
-                if (string.IsNullOrEmpty(entry.Name))
-                    continue;
+                return Fail<IEnumerable<FileRecord>>(
+                    $"The archive has too many entries: {entries.Count} (maximum {archiveOptions.MaxEntries}).",
+                    400, ErrorCodes.VALIDATION_ERROR);
+            }
 
+            foreach (var entry in entries)
+            {
                 // 解包等于把 zip 里的每一条都写成一条独立的文件记录，所以它是一条真正的
                 // 写入路径，必须过和直传同一道闸门 —— 否则把 payload.exe 塞进一个 .zip
                 // 就绕开了扩展名白名单。★ 单条不合规只跳过它，不作废整包：一个压缩包里
@@ -738,39 +764,71 @@ public class FileStorageService : ApplicationService, IFileStorageService
                     continue;
                 }
 
+                // 头里声称的大小先拦一次（便宜）；真正的判据是下面复制时数出来的字节 —— 头可以撒谎。
+                if (entry.Length > maxEntrySize)
+                {
+                    LogWarning(
+                        "Skipped zip entry {EntryName} from {FileId}: declared size {Size} exceeds MaxFileSize {Limit}.",
+                        entry.Name, fileId, entry.Length, maxEntrySize);
+                    continue;
+                }
+
                 // 使用临时文件而非 MemoryStream，避免大条目占用大量内存
                 var tempFilePath = Path.GetTempFileName();
                 try
                 {
                     using (var tempStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.ReadWrite, System.IO.FileShare.None))
                     {
-                        using var entryStream = entry.Open();
-                        await entryStream.CopyToAsync(tempStream, cancellationToken);
-                        tempStream.Position = 0;
-
-                        var md5Hash = await HashHelper.GetMd5Async(tempStream);
-                        // 同上：大小在上传之前取。
-                        var entrySize = tempStream.Length;
-                        tempStream.Position = 0;
-
-                        var contentType = FileTypeHelper.GetContentType(Path.GetExtension(entry.Name));
-                        var extractedPath = await _storage.UploadAsync(entry.Name, tempStream, contentType);
-
-                        var extractedRecord = new FileRecord
+                        long entrySize;
+                        using (var entryStream = entry.Open())
                         {
-                            FileName = entry.Name,
+                            // 边复制边数：超过单文件上限即停，不把剩余的源读完（zip bomb 的代价就在「读完」）。
+                            entrySize = await StreamLimitHelper.CopyBoundedAsync(entryStream, tempStream, maxEntrySize, cancellationToken);
+                        }
+
+                        if (entrySize < 0)
+                        {
+                            LogWarning(
+                                "Skipped zip entry {EntryName} from {FileId}: actual size exceeds MaxFileSize {Limit}.",
+                                entry.Name, fileId, maxEntrySize);
+                            continue;
+                        }
+
+                        // 总体积越界：作废整次解包。已解出的对象删掉、一条记录都不落 ——
+                        // 半包成功比整包失败更难被人发现。
+                        extractedTotal += entrySize;
+                        if (extractedTotal > archiveOptions.MaxTotalExtractedBytes)
+                        {
+                            await DiscardExtractedAsync(extractedFiles);
+                            return Fail<IEnumerable<FileRecord>>(
+                                $"The archive expands to more than the allowed total of {archiveOptions.MaxTotalExtractedBytes} bytes.",
+                                400, ErrorCodes.VALIDATION_ERROR);
+                        }
+
+                        tempStream.Position = 0;
+                        var md5Hash = await HashHelper.GetMd5Async(tempStream);
+                        tempStream.Position = 0;
+
+                        var entryExtension = Path.GetExtension(entry.Name);
+                        var contentType = FileTypeHelper.GetContentType(entryExtension);
+
+                        // ★ 键由服务端生成：条目名是上传者写进压缩包里的，同 CompressAsync 的理由。
+                        //   条目名只进 OriginalName。
+                        var entryKey = StorageKeyHelper.NewKey(entryExtension);
+                        var extractedPath = await _storage.UploadAsync(entryKey, tempStream, contentType);
+
+                        extractedFiles.Add(new FileRecord
+                        {
+                            FileName = entryKey,
                             OriginalName = entry.Name,
-                            Extension = Path.GetExtension(entry.Name),
+                            Extension = entryExtension,
                             Size = entrySize,
                             Path = extractedPath,
                             Md5Hash = md5Hash,
                             Provider = _storage.ProviderName,
                             ContentType = contentType,
                             ReferenceCount = 0
-                        };
-
-                        await _repository.InsertAsync(extractedRecord, cancellationToken);
-                        extractedFiles.Add(extractedRecord);
+                        });
                     }
                 }
                 finally
@@ -780,6 +838,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 }
             }
         }
+
+        if (extractedFiles.Count > 0)
+            await _repository.InsertManyAsync(extractedFiles, cancellationToken);
 
         LogInformation("File decompressed: {FileId}, Extracted {Count} files", fileId, extractedFiles.Count);
         return Ok((IEnumerable<FileRecord>)extractedFiles, $"Decompressed {extractedFiles.Count} files");
@@ -1252,7 +1313,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
         {
             using var originalStream = await _storage.DownloadAsync(originalPath);
 
-            using var image = await Image.LoadAsync<Rgba32>(originalStream);
+            // 经解码闸门：先读文件头判尺寸再解码。压缩字节数与解码后的内存没有关系 ——
+            // 一个 200KB 的 PNG 可以声明 50000×50000，直接 Load 就是一次 OOM，
+            // 而上传大小限制对它毫无作用。上限见 Imaging:MaxDecodePixels。
+            using var image = await ImageDecodeGuard.LoadAsync(originalStream);
             var thumbnailSize = Options.ThumbnailSize;
             var thumbnail = image.GenerateSquareThumbnail(Math.Max(thumbnailSize.Width, thumbnailSize.Height));
 
@@ -1261,7 +1325,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             await thumbnail.SaveAsJpegAsync(thumbnailStream, new JpegEncoder { Quality = quality });
             thumbnailStream.Position = 0;
 
-            var thumbnailFileName = $"thumb_{fileName}";
+            var thumbnailFileName = StorageKeyHelper.ThumbnailKey(fileName);
             var thumbnailPath = await _storage.UploadAsync(thumbnailFileName, thumbnailStream, "image/jpeg");
 
             return thumbnailPath;
@@ -1359,6 +1423,42 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private static string GetSafePath(string? path)
     {
         return path ?? string.Empty;
+    }
+
+    /// <summary>
+    /// 解压中途作废：把已经交给 provider 的对象删掉。记录此时还没落库（整批在最后一次
+    /// <c>InsertManyAsync</c>），所以这里只需要收拾物理对象。删除失败只记日志：清理任务会按
+    /// 「无记录的孤儿对象」再兜一次。
+    /// </summary>
+    private async Task DiscardExtractedAsync(List<FileRecord> extracted)
+    {
+        foreach (var record in extracted)
+        {
+            try
+            {
+                await _storage.DeleteAsync(GetSafePath(record.Path));
+            }
+            catch (Exception ex)
+            {
+                LogWarning("Failed to discard extracted object {Path} after aborting decompression: {Error}", record.Path, ex.Message);
+            }
+        }
+
+        extracted.Clear();
+    }
+
+    /// <summary>
+    /// 压缩包的展示名：调用方没给就按时间戳造一个；给了就补齐 <c>.zip</c> 后缀 ——
+    /// 记录的 Extension 与 ContentType 都是 zip，展示名不该与之矛盾。它只用于下载时的文件名，
+    /// <b>不参与存储键</b>。
+    /// </summary>
+    private static string ResolveArchiveDisplayName(string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+            return $"archive_{DateTime.UtcNow:yyyyMMddHHmmss}.zip";
+
+        var name = requested.Trim();
+        return name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? name : $"{name}.zip";
     }
 
     private Result<T>? ValidateFileName<T>(string? fileName)

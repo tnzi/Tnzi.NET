@@ -45,6 +45,9 @@ public class FinanceBankingModule : TnziApplicationModule
     {
         // 账号 / EFT 文件的密文存储密钥。纯启动配置：轮换即废存量密文，故不作为运行时热设置。
         context.Services.AddTnziOptions<FinanceEncryptionOptions, FinanceEncryptionOptionsValidator>(context.Configuration);
+        // 票面呈现配置。配置节仍是 Finance、键路径不变，只是承载它的类型归银行域所有
+        // （核心的 FinanceOptions 已经背着 9 个只服务本子模块的设置项，不再往那里加）。
+        context.Services.AddTnziOptions<FinanceCheckOptions, FinanceCheckOptionsValidator>(context.Configuration);
         return base.PreConfigureServicesAsync(context);
     }
 

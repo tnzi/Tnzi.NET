@@ -68,13 +68,16 @@ internal static class ChromiumPageRunner
             var inputPath = Path.Combine(workDirectory, WorkFileBaseName + Path.GetExtension(sourceFileName));
             await File.WriteAllBytesAsync(inputPath, source, ct);
 
-            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutSource.CancelAfter(timeout);
-
             var gate = GetGate(options.MaxConcurrency);
             await gate.WaitAsync(ct);
             try
             {
+                // 计时从拿到闸门那一刻开始，不含排队：TimeoutSeconds 是「一次渲染」的预算。
+                // 若在排队前就启动，闸门满载时后面的请求会一帧都没渲染就以「渲染超时」失败，
+                // 而那句提示会让人去调大超时，实际该调的是 MaxConcurrency。
+                using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutSource.CancelAfter(timeout);
+
                 return await OpenAsync(executable, profileDirectory, inputPath, options, action, prepare, timeout, ct, timeoutSource.Token);
             }
             finally

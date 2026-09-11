@@ -12,9 +12,13 @@ export default defineConfig({
         'src/**/index.ts',
         'src/**/*.d.ts',
         'src/types/**',
+        // Enum and constant modules are declarations too: object literals with
+        // no branches or functions. They score 0 until some test happens to
+        // import them, which measures test file layout, not coverage of logic.
+        'src/enums/**',
+        'src/constants/**',
         // Generated from the OpenAPI spec by `tnzi generate`; the generator is
         // what would need testing, not its output.
-        'src/services/**/generated/**',
         '**/__tests__/**',
       ],
       // A RATCHET, not a target. Set just under measured (52.32 stmts / 52.31

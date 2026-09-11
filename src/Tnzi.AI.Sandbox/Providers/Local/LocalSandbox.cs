@@ -222,14 +222,20 @@ public class LocalSandbox : ISandbox
     }
 
     /// <summary>
-    /// Defense-in-depth: ensures the path is within the workspace directory
+    /// Defense-in-depth: ensures the path is within the workspace directory.
     /// </summary>
+    /// <remarks>
+    /// ★ 解析符号链接后再判定。<see cref="Path.GetFullPath(string)"/> 只做字面规范化，
+    /// 于是 agent 在工作区里 <c>ln -s /etc x</c> 之后，<c>x/passwd</c> 字面上待在界内，
+    /// 实际却落到宿主的 <c>/etc</c> 上 —— 而 <c>read_file</c> / <c>ls</c> 都是按"被围住"设计的。
+    /// </remarks>
     private void ValidatePathWithinWorkspace(string path)
     {
         Check.NotNullOrWhiteSpace(path);
-        var normalized = Path.GetFullPath(path);
-        if (!normalized.StartsWith(_normalizedWorkspacePath + Path.DirectorySeparatorChar, PathComparison)
-            && !string.Equals(normalized, _normalizedWorkspacePath, PathComparison))
+        var normalized = RealPathResolver.Resolve(path);
+        var workspace = RealPathResolver.Resolve(_normalizedWorkspacePath);
+        if (!normalized.StartsWith(workspace + Path.DirectorySeparatorChar, PathComparison)
+            && !string.Equals(normalized, workspace, PathComparison))
         {
             throw new SecurityException($"Path is outside sandbox workspace: {path}");
         }

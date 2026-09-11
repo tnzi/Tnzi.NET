@@ -4,11 +4,20 @@ namespace Tnzi.Feature.Services;
 /// Feature management service implementation.
 /// Provides CRUD operations for feature definitions and values.
 /// </summary>
+/// <remarks>
+/// Every value write is resolved against the registered <see cref="IFeatureValueProvider"/>s
+/// first (<see cref="ResolveScope"/>). A <c>FeatureValue</c> row is only meaningful if some
+/// provider reads it back at runtime; a row under an unregistered or inactive provider name,
+/// or with a key shape the provider never matches, is stored successfully and then ignored
+/// forever - the request answers 200 and the runtime keeps returning the definition default.
+/// Refusing such writes up front is the only place that failure mode can be caught.
+/// </remarks>
 public class FeatureService : ApplicationService, IFeatureService
 {
     private readonly IRepository<FeatureDefinition, Guid> _definitionRepository;
     private readonly IRepository<FeatureValue, Guid> _valueRepository;
     private readonly IFeatureManager _featureManager;
+    private readonly IReadOnlyList<IFeatureValueProvider> _providers;
 
     /// <summary>
     /// Initialize FeatureService
@@ -17,12 +26,17 @@ public class FeatureService : ApplicationService, IFeatureService
         IServiceProvider serviceProvider,
         IRepository<FeatureDefinition, Guid> definitionRepository,
         IRepository<FeatureValue, Guid> valueRepository,
-        IFeatureManager featureManager)
+        IFeatureManager featureManager,
+        IEnumerable<IFeatureValueProvider> providers)
         : base(serviceProvider)
     {
         _definitionRepository = Check.NotNull(definitionRepository);
         _valueRepository = Check.NotNull(valueRepository);
         _featureManager = Check.NotNull(featureManager);
+        Check.NotNull(providers);
+        // Same order the runtime evaluates them in (FeatureChecker), so inheritance shown to
+        // the admin follows the same chain.
+        _providers = providers.OrderByDescending(p => p.Priority).ToList().AsReadOnly();
     }
 
     // ==================== Feature Definitions ====================
@@ -190,26 +204,100 @@ public class FeatureService : ApplicationService, IFeatureService
         return Ok("Feature definition deleted successfully");
     }
 
+    // ==================== Feature Value Providers ====================
+
+    /// <inheritdoc />
+    public Task<Result<IEnumerable<FeatureValueProviderDto>>> GetValueProvidersAsync()
+    {
+        var dtos = _providers.Select(p => new FeatureValueProviderDto
+        {
+            Name = p.Name,
+            Priority = p.Priority,
+            RequiresKey = p.RequiresKey,
+            IsActive = p.IsActive,
+            InactiveReason = p.IsActive ? null : p.InactiveReason
+        }).ToList();
+
+        return Task.FromResult(Ok(dtos.AsEnumerable()));
+    }
+
+    /// <summary>
+    /// A resolved value scope: the registered provider (canonical casing) and the
+    /// normalized key (trimmed; null when blank).
+    /// </summary>
+    private sealed record ValueScope(IFeatureValueProvider Provider, string? Key);
+
+    /// <summary>
+    /// Resolve a (providerName, providerKey) pair against the registered providers.
+    /// Writes additionally require the provider to be active; reads are allowed on an
+    /// inactive provider so its leftover rows remain visible for cleanup.
+    /// </summary>
+    private Result<ValueScope> ResolveScope(string? providerName, string? providerKey, bool forWrite)
+    {
+        if (string.IsNullOrWhiteSpace(providerName))
+        {
+            return Fail<ValueScope>("Provider name is required", 400, ErrorCodes.FeatureValueProviderUnknown);
+        }
+
+        var name = providerName.Trim();
+        var provider = _providers.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (provider == null)
+        {
+            var registered = string.Join(", ", _providers.Select(p => p.Name));
+            return Fail<ValueScope>(
+                $"Unknown feature value provider '{name}'. Registered providers: {registered}",
+                400,
+                ErrorCodes.FeatureValueProviderUnknown);
+        }
+
+        if (forWrite && !provider.IsActive)
+        {
+            return Fail<ValueScope>(
+                $"Feature value provider '{provider.Name}' is inactive: {provider.InactiveReason}. A value written to it would never be evaluated",
+                400,
+                ErrorCodes.FeatureValueProviderInactive);
+        }
+
+        var key = string.IsNullOrWhiteSpace(providerKey) ? null : providerKey.Trim();
+        if (provider.RequiresKey && key == null)
+        {
+            return Fail<ValueScope>(
+                $"Feature value provider '{provider.Name}' is keyed and requires a provider key",
+                400,
+                ErrorCodes.FeatureValueProviderKeyRequired);
+        }
+
+        if (!provider.RequiresKey && key != null)
+        {
+            return Fail<ValueScope>(
+                $"Feature value provider '{provider.Name}' is keyless and does not accept a provider key",
+                400,
+                ErrorCodes.FeatureValueProviderKeyNotAllowed);
+        }
+
+        return Ok(new ValueScope(provider, key));
+    }
+
+    /// <summary>Re-type a failed result without losing message, status or error code.</summary>
+    private static Result<T> Forward<T>(Result failure)
+    {
+        return Result.Failure<T>(failure.Message ?? "Invalid request", failure.Code ?? 400, failure.ErrorCode);
+    }
+
     // ==================== Feature Values ====================
 
     /// <inheritdoc />
     public async Task<Result<IEnumerable<FeatureValueDto>>> GetValuesAsync(string providerName, string? providerKey)
     {
-        Check.NotNullOrWhiteSpace(providerName);
-
-        var query = _valueRepository
-            .Where(v => v.ProviderName == providerName);
-
-        if (providerKey != null)
+        var scopeResult = ResolveScope(providerName, providerKey, forWrite: false);
+        if (scopeResult.Failed)
         {
-            query = query.Where(v => v.ProviderKey == providerKey);
-        }
-        else
-        {
-            query = query.Where(v => v.ProviderKey == null);
+            return Forward<IEnumerable<FeatureValueDto>>(scopeResult);
         }
 
-        var values = await query
+        var scope = scopeResult.Data!;
+        var values = await _valueRepository
+            .Where(v => v.ProviderName == scope.Provider.Name && v.ProviderKey == scope.Key)
             .Include(v => v.FeatureDefinition)
             .AsNoTracking()
             .ToListAsync();
@@ -221,6 +309,22 @@ public class FeatureService : ApplicationService, IFeatureService
     public async Task<Result<FeatureValueDto>> SetValueAsync(SetFeatureValueRequest input)
     {
         Check.NotNull(input);
+
+        if (input.FeatureDefinitionId == Guid.Empty)
+        {
+            return Fail<FeatureValueDto>(
+                "Code-defined feature definitions have no database id and cannot carry values; create a database definition with the same name to override it",
+                400,
+                ErrorCodes.FeatureDefinitionNotOverridable);
+        }
+
+        var scopeResult = ResolveScope(input.ProviderName, input.ProviderKey, forWrite: true);
+        if (scopeResult.Failed)
+        {
+            return Forward<FeatureValueDto>(scopeResult);
+        }
+
+        var scope = scopeResult.Data!;
 
         // Validate feature definition exists
         var definition = await _definitionRepository.FindAsync(input.FeatureDefinitionId);
@@ -238,11 +342,14 @@ public class FeatureService : ApplicationService, IFeatureService
                 ErrorCodes.InvalidFeatureValueType);
         }
 
+        var providerName = scope.Provider.Name;
+        var providerKey = scope.Key;
+
         // Find existing value or create new one
         var existingValue = await _valueRepository
             .Where(v => v.FeatureDefinitionId == input.FeatureDefinitionId
-                        && v.ProviderName == input.ProviderName
-                        && v.ProviderKey == input.ProviderKey)
+                        && v.ProviderName == providerName
+                        && v.ProviderKey == providerKey)
             .FirstOrDefaultAsync();
 
         if (existingValue != null)
@@ -252,15 +359,15 @@ public class FeatureService : ApplicationService, IFeatureService
             await _valueRepository.UpdateAsync(existingValue);
 
             Logger.LogInformation("Feature value updated: {FeatureName} = {Value} for {ProviderName}/{ProviderKey}",
-                definition.Name, input.Value, input.ProviderName, input.ProviderKey);
+                definition.Name, input.Value, providerName, providerKey);
 
             if (EventBus != null)
             {
                 await EventBus.PublishAsync(new FeatureValueChangedEvent
                 {
                     FeatureName = definition.Name,
-                    ProviderName = input.ProviderName,
-                    ProviderKey = input.ProviderKey,
+                    ProviderName = providerName,
+                    ProviderKey = providerKey,
                     Value = input.Value,
                     PreviousValue = previousValue
                 });
@@ -274,8 +381,8 @@ public class FeatureService : ApplicationService, IFeatureService
         var entity = new FeatureValue
         {
             FeatureDefinitionId = input.FeatureDefinitionId,
-            ProviderName = input.ProviderName,
-            ProviderKey = input.ProviderKey,
+            ProviderName = providerName,
+            ProviderKey = providerKey,
             Value = input.Value
         };
 
@@ -284,15 +391,15 @@ public class FeatureService : ApplicationService, IFeatureService
         await _valueRepository.SaveChangesAsync();
 
         Logger.LogInformation("Feature value created: {FeatureName} = {Value} for {ProviderName}/{ProviderKey}",
-            definition.Name, input.Value, input.ProviderName, input.ProviderKey);
+            definition.Name, input.Value, providerName, providerKey);
 
         if (EventBus != null)
         {
             await EventBus.PublishAsync(new FeatureValueChangedEvent
             {
                 FeatureName = definition.Name,
-                ProviderName = input.ProviderName,
-                ProviderKey = input.ProviderKey,
+                ProviderName = providerName,
+                ProviderKey = providerKey,
                 Value = input.Value,
                 PreviousValue = null
             });
@@ -341,8 +448,17 @@ public class FeatureService : ApplicationService, IFeatureService
     public async Task<Result<BatchSetFeatureValuesResultDto>> BatchSetValuesAsync(BatchSetFeatureValuesRequest input)
     {
         Check.NotNull(input);
-        Check.NotNullOrWhiteSpace(input.ProviderName);
         Check.NotNullOrEmpty(input.Values);
+
+        var scopeResult = ResolveScope(input.ProviderName, input.ProviderKey, forWrite: true);
+        if (scopeResult.Failed)
+        {
+            return Forward<BatchSetFeatureValuesResultDto>(scopeResult);
+        }
+
+        var scope = scopeResult.Data!;
+        var providerName = scope.Provider.Name;
+        var providerKey = scope.Key;
 
         var result = new BatchSetFeatureValuesResultDto();
 
@@ -354,8 +470,8 @@ public class FeatureService : ApplicationService, IFeatureService
 
         // 批量加载该 provider 已有的值
         var existingValues = await _valueRepository
-            .Where(v => v.ProviderName == input.ProviderName
-                        && v.ProviderKey == input.ProviderKey
+            .Where(v => v.ProviderName == providerName
+                        && v.ProviderKey == providerKey
                         && definitionIds.Contains(v.FeatureDefinitionId))
             .ToListAsync();
 
@@ -363,9 +479,20 @@ public class FeatureService : ApplicationService, IFeatureService
 
         var toInsert = new List<FeatureValue>();
         var toUpdate = new List<FeatureValue>();
+        // 事件先攒着，持久化成功之后再发。默认 AspNetCore:EnableGlobalUnitOfWork=false 下没有环境事务，
+        // TransactionAwarePublish 的延迟发布不生效 —— 循环里边发边写，写库一失败订阅者已经收到「值变了」。
+        // SetValueAsync 一直是先写后发，两条路径必须同一顺序。
+        var pendingEvents = new List<FeatureValueChangedEvent>();
 
         foreach (var item in input.Values)
         {
+            if (item.FeatureDefinitionId == Guid.Empty)
+            {
+                result.Errors.Add("Code-defined feature definitions cannot carry values (no database id)");
+                result.FailedCount++;
+                continue;
+            }
+
             if (!definitions.TryGetValue(item.FeatureDefinitionId, out var definition))
             {
                 result.Errors.Add($"Feature definition '{item.FeatureDefinitionId}' not found");
@@ -386,40 +513,34 @@ public class FeatureService : ApplicationService, IFeatureService
                 existing.Value = item.Value;
                 toUpdate.Add(existing);
 
-                if (EventBus != null)
+                pendingEvents.Add(new FeatureValueChangedEvent
                 {
-                    await EventBus.PublishAsync(new FeatureValueChangedEvent
-                    {
-                        FeatureName = definition.Name,
-                        ProviderName = input.ProviderName,
-                        ProviderKey = input.ProviderKey,
-                        Value = item.Value,
-                        PreviousValue = previousValue
-                    });
-                }
+                    FeatureName = definition.Name,
+                    ProviderName = providerName,
+                    ProviderKey = providerKey,
+                    Value = item.Value,
+                    PreviousValue = previousValue
+                });
             }
             else
             {
                 var entity = new FeatureValue
                 {
                     FeatureDefinitionId = item.FeatureDefinitionId,
-                    ProviderName = input.ProviderName,
-                    ProviderKey = input.ProviderKey,
+                    ProviderName = providerName,
+                    ProviderKey = providerKey,
                     Value = item.Value
                 };
                 toInsert.Add(entity);
 
-                if (EventBus != null)
+                pendingEvents.Add(new FeatureValueChangedEvent
                 {
-                    await EventBus.PublishAsync(new FeatureValueChangedEvent
-                    {
-                        FeatureName = definition.Name,
-                        ProviderName = input.ProviderName,
-                        ProviderKey = input.ProviderKey,
-                        Value = item.Value,
-                        PreviousValue = null
-                    });
-                }
+                    FeatureName = definition.Name,
+                    ProviderName = providerName,
+                    ProviderKey = providerKey,
+                    Value = item.Value,
+                    PreviousValue = null
+                });
             }
 
             result.SucceededCount++;
@@ -436,8 +557,17 @@ public class FeatureService : ApplicationService, IFeatureService
             await _valueRepository.InsertManyAsync(toInsert);
         }
 
+        // 写库成功之后才通知订阅者
+        if (EventBus != null)
+        {
+            foreach (var changed in pendingEvents)
+            {
+                await EventBus.PublishAsync(changed);
+            }
+        }
+
         Logger.LogInformation("Batch set feature values: {Succeeded} succeeded, {Failed} failed for {ProviderName}/{ProviderKey}",
-            result.SucceededCount, result.FailedCount, input.ProviderName, input.ProviderKey);
+            result.SucceededCount, result.FailedCount, providerName, providerKey);
 
         return Ok(result);
     }
@@ -445,41 +575,46 @@ public class FeatureService : ApplicationService, IFeatureService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<FeatureValueWithDefinitionDto>>> GetAllValuesAsync(string providerName, string? providerKey)
     {
-        Check.NotNullOrWhiteSpace(providerName);
+        var scopeResult = ResolveScope(providerName, providerKey, forWrite: false);
+        if (scopeResult.Failed)
+        {
+            return Forward<IEnumerable<FeatureValueWithDefinitionDto>>(scopeResult);
+        }
 
-        // 加载所有已启用的功能定义
+        var scope = scopeResult.Data!;
+
+        // 加载所有已启用的功能定义（数据库行）
         var definitions = await _definitionRepository
             .AsQueryable()
             .AsNoTracking()
             .Where(d => d.IsEnabled)
-            .OrderBy(d => d.Group)
-            .ThenBy(d => d.Name)
             .ToListAsync();
+        var dbByName = definitions.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
 
-        // 加载该 provider 已设置的值
-        var valueQuery = _valueRepository
-            .Where(v => v.ProviderName == providerName);
+        // 代码声明的定义也要出现在值视图里 —— 否则管理员看到的清单与运行时评估的清单不是同一份。
+        // 它们没有数据库 id，故不可覆盖（CanOverride=false）。
+        var snapshot = await _featureManager.GetAllAsync();
 
-        if (providerKey != null)
-        {
-            valueQuery = valueQuery.Where(v => v.ProviderKey == providerKey);
-        }
-        else
-        {
-            valueQuery = valueQuery.Where(v => v.ProviderKey == null);
-        }
-
-        var existingValues = await valueQuery
+        // 该作用域自己显式设置的值
+        var scopeValues = await _valueRepository
+            .Where(v => v.ProviderName == scope.Provider.Name && v.ProviderKey == scope.Key)
             .AsNoTracking()
             .ToListAsync();
+        var explicitLookup = scopeValues.ToDictionary(v => v.FeatureDefinitionId);
 
-        var valueLookup = existingValues.ToDictionary(v => v.FeatureDefinitionId);
+        // 运行时链上排在该作用域之后的无键 provider（Global）：作用域没设值时由它们兜底。
+        // 与 FeatureChecker 的评估顺序一致，管理员看到的「生效值」才等于运行时答案。
+        var fallbackProviders = _providers
+            .Where(p => p.Priority < scope.Provider.Priority && !p.RequiresKey)
+            .ToList();
+        var fallbackLookup = await LoadFallbackValuesAsync(fallbackProviders);
 
-        // 合并定义和值，构建完整视图
-        var result = definitions.Select(d =>
+        var result = new List<FeatureValueWithDefinitionDto>();
+
+        foreach (var d in definitions)
         {
-            var hasValue = valueLookup.TryGetValue(d.Id, out var featureValue);
-            return new FeatureValueWithDefinitionDto
+            var hasValue = explicitLookup.TryGetValue(d.Id, out var featureValue);
+            var dto = new FeatureValueWithDefinitionDto
             {
                 Id = hasValue ? featureValue!.Id : Guid.Empty,
                 FeatureDefinitionId = d.Id,
@@ -489,13 +624,111 @@ public class FeatureService : ApplicationService, IFeatureService
                 Group = d.Group,
                 ValueType = d.ValueType,
                 DefaultValue = d.DefaultValue,
-                EffectiveValue = hasValue ? featureValue!.Value : (d.DefaultValue ?? string.Empty),
                 IsExplicitlySet = hasValue,
-                IsEnabled = d.IsEnabled
+                IsEnabled = d.IsEnabled,
+                Source = "Database",
+                CanOverride = true
             };
-        }).ToList();
 
-        return Ok(result.AsEnumerable());
+            if (hasValue)
+            {
+                dto.EffectiveValue = featureValue!.Value;
+                dto.EffectiveSource = FeatureValueSource.Explicit;
+                dto.EffectiveProvider = scope.Provider.Name;
+            }
+            else if (TryResolveFallback(fallbackProviders, fallbackLookup, d.Id, out var fallbackProvider, out var fallbackValue))
+            {
+                dto.EffectiveValue = fallbackValue;
+                dto.EffectiveSource = FeatureValueSource.Inherited;
+                dto.EffectiveProvider = fallbackProvider;
+            }
+            else
+            {
+                dto.EffectiveValue = d.DefaultValue ?? string.Empty;
+                dto.EffectiveSource = FeatureValueSource.Default;
+                dto.EffectiveProvider = null;
+            }
+
+            result.Add(dto);
+        }
+
+        foreach (var record in snapshot)
+        {
+            if (!record.IsEnabled || dbByName.ContainsKey(record.Name)) continue; // DB wins
+            result.Add(new FeatureValueWithDefinitionDto
+            {
+                Id = Guid.Empty,
+                FeatureDefinitionId = Guid.Empty,
+                FeatureName = record.Name,
+                DisplayName = record.DisplayName,
+                Description = record.Description,
+                Group = record.Group,
+                ValueType = record.ValueType,
+                DefaultValue = record.DefaultValue,
+                EffectiveValue = record.DefaultValue ?? string.Empty,
+                IsExplicitlySet = false,
+                EffectiveSource = FeatureValueSource.Default,
+                EffectiveProvider = null,
+                IsEnabled = record.IsEnabled,
+                Source = "Code",
+                CanOverride = false
+            });
+        }
+
+        var ordered = result.OrderBy(r => r.Group).ThenBy(r => r.FeatureName).ToList();
+        return Ok(ordered.AsEnumerable());
+    }
+
+    /// <summary>
+    /// Load the keyless rows of every fallback provider in one query, keyed by
+    /// (provider name, definition id).
+    /// </summary>
+    private async Task<Dictionary<(string Provider, Guid DefinitionId), string>> LoadFallbackValuesAsync(
+        IReadOnlyList<IFeatureValueProvider> fallbackProviders)
+    {
+        var lookup = new Dictionary<(string, Guid), string>();
+        if (fallbackProviders.Count == 0)
+        {
+            return lookup;
+        }
+
+        var names = fallbackProviders.Select(p => p.Name).ToList();
+        var rows = await _valueRepository
+            .Where(v => names.Contains(v.ProviderName) && v.ProviderKey == null)
+            .AsNoTracking()
+            .ToListAsync();
+
+        foreach (var row in rows)
+        {
+            lookup[(row.ProviderName, row.FeatureDefinitionId)] = row.Value;
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// Walk the fallback providers in evaluation order and return the first one holding a value.
+    /// </summary>
+    private static bool TryResolveFallback(
+        IReadOnlyList<IFeatureValueProvider> fallbackProviders,
+        Dictionary<(string Provider, Guid DefinitionId), string> fallbackLookup,
+        Guid definitionId,
+        out string? providerName,
+        out string value)
+    {
+        foreach (var provider in fallbackProviders)
+        {
+            if (fallbackLookup.TryGetValue((provider.Name, definitionId), out var found))
+            {
+                providerName = provider.Name;
+                value = found;
+                return true;
+            }
+        }
+
+        providerName = null;
+        value = string.Empty;
+        return false;
     }
 
     /// <summary>

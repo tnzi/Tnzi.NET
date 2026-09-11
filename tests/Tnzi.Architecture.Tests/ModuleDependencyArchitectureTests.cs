@@ -1,4 +1,4 @@
-﻿using Tnzi.Modules.Diagnostics;
+using Tnzi.Modules.Diagnostics;
 
 namespace Tnzi.Architecture.Tests;
 

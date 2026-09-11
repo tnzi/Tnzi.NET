@@ -11,3 +11,5 @@ global using Tnzi.AspNetCore;
 global using Tnzi.Modules;
 global using Tnzi.OpenTelemetry.Options;
 global using Tnzi.Options;
+global using OpenTelemetry.Instrumentation.EntityFrameworkCore;
+global using Tnzi.Utilities;

@@ -9,4 +9,5 @@ export * from './types';
 export * from './api';
 export * from './passkey';
 export * from './step-up';
+export * from './session-security';
 

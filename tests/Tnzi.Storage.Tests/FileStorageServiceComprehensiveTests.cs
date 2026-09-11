@@ -750,12 +750,5 @@ public class FileStorageServiceComprehensiveTests
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    private string ComputePasswordHash(string password)
-    {
-        using var sha256 = SHA256.Create();
-        var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
-    }
-
     #endregion
 }

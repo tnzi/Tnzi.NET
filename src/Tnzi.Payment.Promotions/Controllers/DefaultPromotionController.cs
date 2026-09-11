@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Promotions.Controllers;
+﻿namespace Tnzi.Payment.Promotions.Controllers;
 
 /// <summary>
 /// 促销控制器基类
@@ -30,7 +30,7 @@ public class DefaultPromotionController : ApiControllerBase
     /// 验证优惠券（含适用产品/计划范围、首单限定与持券校验）
     /// </summary>
     [HttpPost("validate-coupon")]
-    public virtual async Task<ApiResult<CouponValidationResultDto>> ValidateCoupon([FromBody] ValidateCouponDto request)
+    public virtual async Task<ApiResult<CouponValidationResponseDto>> ValidateCoupon([FromBody] ValidateCouponDto request)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
         var result = await _promotionService.ValidateCouponAsync(new CouponApplyContext
@@ -42,8 +42,37 @@ public class DefaultPromotionController : ApiControllerBase
             ProductType = request.ProductType,
             ScopeId = request.ProductId
         });
-        return result.ToApiResult();
+
+        return result.Map(Narrow).ToApiResult();
     }
+
+    /// <summary>
+    /// 收窄成付款人该看到的那几项。
+    /// </summary>
+    /// <remarks>
+    /// 服务层的结果上挂着完整的促销对象（<c>TotalUsageLimit</c> / <c>UsedCount</c> /
+    /// <c>IsPublic</c> / <c>StripeCouponId</c>）—— 运营口径与渠道侧标识，付款人一个都不需要，
+    /// 却能从一个只需登录就能调的端点全量读出来：已用次数配上总量就是这次活动的实时进度，
+    /// <c>IsPublic</c> 直接说明哪些码值得去猜。
+    /// </remarks>
+    private static CouponValidationResponseDto Narrow(CouponValidationResultDto result) => new()
+    {
+        IsValid = result.IsValid,
+        CouponCode = result.CouponCode,
+        DiscountAmount = result.DiscountAmount,
+        ErrorMessage = result.ErrorMessage,
+        Coupon = result.Promotion == null ? null : new CouponSummaryDto
+        {
+            Name = result.Promotion.Name,
+            Description = result.Promotion.Description,
+            DiscountType = result.Promotion.DiscountType,
+            DiscountValue = result.Promotion.DiscountValue,
+            Currency = result.Promotion.Currency,
+            MinimumOrderAmount = result.Promotion.MinimumOrderAmount,
+            MaxDiscountAmount = result.Promotion.MaxDiscountAmount,
+            EndTime = result.Promotion.EndTime
+        }
+    };
 
     /// <summary>
     /// 计算折扣

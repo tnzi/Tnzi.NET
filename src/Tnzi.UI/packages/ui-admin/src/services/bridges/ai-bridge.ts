@@ -168,7 +168,7 @@ import type {
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery, unwrapOk } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminAgentApi>[0]
@@ -474,8 +474,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       toCrudResult(
         unwrap<PagedList<AgentDto>>(await agentApi.getList(mapQuery(q) as unknown as AgentListQueryDto)),
       ),
-    create: async (data) => unwrap<AgentDto>(await agentApi.create(data)),
-    update: async (id, data) => unwrap<AgentDto>(await agentApi.update(String(id), data)),
+    create: async (data) => unwrapOk<AgentDto>(await agentApi.create(data)),
+    update: async (id, data) => unwrapOk<AgentDto>(await agentApi.update(String(id), data)),
     delete: async (ids) => {
       // `ensureOk`, not a bare await: HttpClient never rejects on a business
       // failure, it RESOLVES `{ succeeded: false }`. Without this a 409 (still
@@ -484,7 +484,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       for (const id of ids) ensureOk(await agentApi.delete(String(id)))
     },
     getById: async (id) => unwrap<AgentDto>(await agentApi.getById(String(id))),
-    clone: async (id, name) => unwrap<AgentDto>(await agentApi.clone(String(id), name)),
+    clone: async (id, name) => unwrapOk<AgentDto>(await agentApi.clone(String(id), name)),
     getVersions: async (id, query) =>
       unwrap<PagedList<AgentVersionDto>>(await agentApi.getVersions(String(id), query)),
     getVersion: async (id, version) =>
@@ -495,14 +495,14 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     getHealth: async () => unwrap<AgentHealthSummaryDto>(await agentApi.getHealth()),
     configureAbTest: async (id, data) =>
       unwrap<AgentDto>(await agentApi.configureAbTest(String(id), data)),
-    stopAbTest: async (id) => unwrap<AgentDto>(await agentApi.stopAbTest(String(id))),
+    stopAbTest: async (id) => unwrapOk<AgentDto>(await agentApi.stopAbTest(String(id))),
     getToolGroups: async () => unwrap<ToolGroupDto[]>(await agentApi.getToolGroups()),
     getMemory: async (id, query) =>
       unwrap<PagedList<AgentMemoryDto>>(await agentApi.getMemory(String(id), query)),
     createMemory: async (id, data) =>
-      unwrap<AgentMemoryDto>(await agentApi.createMemory(String(id), data)),
+      unwrapOk<AgentMemoryDto>(await agentApi.createMemory(String(id), data)),
     updateMemory: async (id, memoryId, data) =>
-      unwrap<AgentMemoryDto>(await agentApi.updateMemory(String(id), String(memoryId), data)),
+      unwrapOk<AgentMemoryDto>(await agentApi.updateMemory(String(id), String(memoryId), data)),
     deleteMemory: async (id, memoryId) => {
       ensureOk(await agentApi.deleteMemory(String(id), String(memoryId)))
     },
@@ -516,9 +516,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
           mapQuery(q) as unknown as ThreadListQueryDto,
         )),
       ),
-    create: async (data) => unwrap<AgentThreadDto>(await threadApi.create(data)),
+    create: async (data) => unwrapOk<AgentThreadDto>(await threadApi.create(data)),
     update: async (id, data) =>
-      unwrap<AgentThreadDto>(await threadApi.updateTitle(String(id), {
+      unwrapOk<AgentThreadDto>(await threadApi.updateTitle(String(id), {
         title: (data as { title?: string }).title ?? '',
       })),
     delete: async (ids) => {
@@ -557,16 +557,16 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         )),
       ),
     create: async (data: CreateWorkflowDefinitionDto) =>
-      unwrap<WorkflowDefinitionDto>(await workflowApi.create(data)),
+      unwrapOk<WorkflowDefinitionDto>(await workflowApi.create(data)),
     update: async (id: string, data: UpdateWorkflowDefinitionDto) =>
-      unwrap<WorkflowDefinitionDto>(await workflowApi.update(String(id), data)),
+      unwrapOk<WorkflowDefinitionDto>(await workflowApi.update(String(id), data)),
     delete: async (ids: string[]) => {
       ensureOk(await workflowApi.batchDelete(ids.map(String)))
     },
     getById: async (id: string) =>
       unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
     clone: async (id: string) =>
-      unwrap<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
+      unwrapOk<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
     // batchEnable is the current publish semantic - see docs/modules/ai.md Workflow section.
     // batchEnable returns affected-row count; we re-fetch the definition so the contract
     // (Promise<WorkflowDefinitionDto>) is honoured for callers that want the updated entity.
@@ -580,7 +580,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
     run: async (id: string, input: string, userId?: string) => {
       const body: RunWorkflowRequestDto = { input, userId: userId ?? null }
-      return unwrap<WorkflowExecutionResultDto>(await workflowApi.run(String(id), body))
+      return unwrapOk<WorkflowExecutionResultDto>(await workflowApi.run(String(id), body))
     },
     getRunStreamUrl: (id: string) => workflowApi.getRunStreamUrl(String(id)),
     validate: async (id: string) =>
@@ -588,9 +588,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     getStats: async () =>
       unwrap<WorkflowStatsDto>(await workflowApi.getStats()),
     batchEnable: async (ids: string[]) =>
-      unwrap<number>(await workflowApi.batchEnable(ids.map(String))),
+      unwrapOk<number>(await workflowApi.batchEnable(ids.map(String))),
     batchDisable: async (ids: string[]) =>
-      unwrap<number>(await workflowApi.batchDisable(ids.map(String))),
+      unwrapOk<number>(await workflowApi.batchDisable(ids.map(String))),
   }
 
   // ---- workflowRuns -------------------------------------------------------
@@ -613,7 +613,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     getStatus: async (executionId: string) =>
       unwrap<WorkflowExecutionStatusDto>(await workflowApi.getExecutionStatus(executionId)),
     resume: async (executionId: string) =>
-      unwrap<WorkflowExecutionResultDto>(await workflowApi.resumeExecution(executionId)),
+      unwrapOk<WorkflowExecutionResultDto>(await workflowApi.resumeExecution(executionId)),
     approveStep: async (executionId: string, stepId: string, comment?: string) => {
       const body: WorkflowStepApprovalDto | undefined = comment ? { feedback: comment } : undefined
       ensureOk(await workflowApi.approveStep(executionId, stepId, body))
@@ -637,9 +637,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         )),
       ),
     create: async (data: CreateSkillDto) =>
-      unwrap<SkillSummaryDto>(await skillApi.create(data)),
+      unwrapOk<SkillSummaryDto>(await skillApi.create(data)),
     update: async (id: string, data: UpdateSkillDto) =>
-      unwrap<SkillSummaryDto>(await skillApi.update(String(id), data)),
+      unwrapOk<SkillSummaryDto>(await skillApi.update(String(id), data)),
     delete: async (ids: string[]) => {
       ensureOk(await skillApi.batchDelete(ids.map(String)))
     },
@@ -665,7 +665,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       return Array.isArray(items) ? items : []
     },
     importSkills: async (data: SkillImportRequestDto) =>
-      unwrap<SkillImportResultDto>(await skillApi.import(data)),
+      unwrapOk<SkillImportResultDto>(await skillApi.import(data)),
   }
 
   // ---- skill categories ---------------------------------------------------
@@ -700,9 +700,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         ),
       ),
     create: async (data: CreateProviderDto): Promise<ProviderDto> =>
-      unwrap<ProviderDto>(await providerApi.create(data)),
+      unwrapOk<ProviderDto>(await providerApi.create(data)),
     update: async (id: string, data: UpdateProviderDto): Promise<ProviderDto> =>
-      unwrap<ProviderDto>(await providerApi.update(String(id), data)),
+      unwrapOk<ProviderDto>(await providerApi.update(String(id), data)),
     delete: async (ids: string[]): Promise<void> => {
       for (const id of ids) ensureOk(await providerApi.delete(String(id)))
     },
@@ -845,8 +845,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         },
       )
     },
-    create: async (data) => unwrap<KnowledgeBaseDto>(await kbApi.create(data)),
-    update: async (id, data) => unwrap<KnowledgeBaseDto>(await kbApi.update(String(id), data)),
+    create: async (data) => unwrapOk<KnowledgeBaseDto>(await kbApi.create(data)),
+    update: async (id, data) => unwrapOk<KnowledgeBaseDto>(await kbApi.update(String(id), data)),
     delete: async (ids) => {
       for (const id of ids) ensureOk(await kbApi.delete(String(id)))
     },
@@ -857,7 +857,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     getDocumentStatus: async (kbId, docId) =>
       unwrap<KnowledgeDocumentDto>(await kbApi.getDocumentStatus(String(kbId), String(docId))),
     uploadDocument: async (kbId, file) =>
-      unwrap<DocumentUploadResultDto>(await kbApi.uploadDocument(String(kbId), file)),
+      unwrapOk<DocumentUploadResultDto>(await kbApi.uploadDocument(String(kbId), file)),
     deleteDocument: async (kbId, docId) => {
       ensureOk(await kbApi.deleteDocument(String(kbId), String(docId)))
     },
@@ -886,9 +886,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       return toCrudResult(unwrap<PagedList<McpServerRegistrationDto>>(await mcpApi.getList(query)))
     },
     create: async (data: CreateMcpServerRegistrationDto): Promise<McpServerRow> =>
-      unwrap<McpServerRegistrationDto>(await mcpApi.create(data)),
+      unwrapOk<McpServerRegistrationDto>(await mcpApi.create(data)),
     update: async (id: string, data: UpdateMcpServerRegistrationDto): Promise<McpServerRow> =>
-      unwrap<McpServerRegistrationDto>(await mcpApi.update(String(id), data)),
+      unwrapOk<McpServerRegistrationDto>(await mcpApi.update(String(id), data)),
     delete: async (ids: string[]): Promise<void> => {
       for (const id of ids) ensureOk(await mcpApi.delete(String(id)))
     },
@@ -957,8 +957,8 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       }
       return toCrudResult(unwrap<PagedList<UserQuotaDto>>(await quotaApi.getList(query)))
     },
-    create: async (data) => unwrap<UserQuotaDto>(await quotaApi.setQuota(data)),
-    update: async (_id, data) => unwrap<UserQuotaDto>(await quotaApi.setQuota(data)),
+    create: async (data) => unwrapOk<UserQuotaDto>(await quotaApi.setQuota(data)),
+    update: async (_id, data) => unwrapOk<UserQuotaDto>(await quotaApi.setQuota(data)),
     delete: notImplemented('quota.delete') as (ids: string[]) => Promise<void>,
     getBudgetSummary: async (params) =>
       unwrap<BudgetSummaryDto>(await quotaApi.getBudgetSummary(params)),
@@ -974,7 +974,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       ),
     // Backend's "create" is create-and-run in one shot (POST /admin/ai/evaluations/run).
     create: async (data: CreateEvaluationRunDto): Promise<EvaluationRunDto> =>
-      unwrap<EvaluationRunDetailDto>(await evaluationApi.create(data)),
+      unwrapOk<EvaluationRunDetailDto>(await evaluationApi.create(data)),
     update: notImplemented('evaluations.update') as (
       id: string,
       data: Partial<EvaluationRunDto>,
@@ -994,7 +994,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         ),
       ),
     runBatch: async (data: BatchEvaluationDto): Promise<BatchEvaluationResultDto> =>
-      unwrap<BatchEvaluationResultDto>(await evaluationApi.runBatch(data)),
+      unwrapOk<BatchEvaluationResultDto>(await evaluationApi.runBatch(data)),
     getDetail: async (id: string): Promise<EvaluationRunDetailDto> =>
       unwrap<EvaluationRunDetailDto>(await evaluationApi.getById(id)),
     getTrend: async (agentId: string, lastNRuns?: number) =>

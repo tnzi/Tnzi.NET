@@ -75,6 +75,13 @@ public sealed class ToolPermissionContext
 
     /// <summary>是否为破坏性工具</summary>
     public bool IsDestructive { get; set; }
+
+    /// <summary>
+    /// 发起本次调用的用户；User 级规则靠它绑定到人。取不到调用者时为 null，
+    /// 此时任何 <see cref="ToolPermissionRule.UserId"/> 非空的规则都不匹配 ——
+    /// 不能因为不知道是谁就假定「就是那个人」。
+    /// </summary>
+    public Guid? UserId { get; set; }
 }
 
 /// <summary>
@@ -117,6 +124,19 @@ public interface IToolPermissionEvaluator
     /// Refresh cached rules from external sources (e.g. database). No-op by default.
     /// </summary>
     Task RefreshRulesAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// 用调用方已经读好的规则集替换缓存。
+    /// </summary>
+    /// <remarks>
+    /// 写入侧必须走这一条：<see cref="RefreshRulesAsync()"/> 的实现会另开作用域、另开 DbContext 重查，
+    /// 而宿主开着 <c>EnableGlobalUnitOfWork</c> 时本次 CRUD 的写入还在变更跟踪器里、
+    /// 即便 flush 也只是同一条连接上的未提交状态 —— 另一条连接看不见。
+    /// 结果就是刚建的规则在下一次 CRUD 或重启前完全不生效，而接口返回的是成功。
+    /// 默认退回按需重查，供不缓存的实现使用。
+    /// </remarks>
+    /// <param name="rules">调用方在自己的作用域内读到的完整规则集</param>
+    Task RefreshRulesAsync(IReadOnlyList<ToolPermissionRule> rules) => RefreshRulesAsync();
 }
 
 /// <summary>
@@ -195,6 +215,12 @@ public class ToolPermissionRule
 
     /// <summary>仅匹配破坏性工具</summary>
     public bool IsDestructiveOnly { get; set; }
+
+    /// <summary>
+    /// 绑定的用户（User 级规则）。为空表示规则不绑任何人、对所有调用者生效 ——
+    /// <see cref="Scope"/> 本身只参与冲突决胜，不构成用户过滤。
+    /// </summary>
+    public Guid? UserId { get; set; }
 
     /// <summary>原因说明</summary>
     public string? Reason { get; set; }

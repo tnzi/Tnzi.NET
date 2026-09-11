@@ -130,6 +130,51 @@ public static class FileTypeHelper
     }
 
     /// <summary>
+    /// 这个内容类型能不能<b>内联</b>交给浏览器渲染（不带 <c>Content-Disposition: attachment</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 白名单而不是黑名单：位图、视频、音频、PDF、纯文本。它们在浏览器里是「被展示的数据」，
+    /// 不是「被解析执行的文档」。凡是浏览器会当作<b>文档</b>打开的类型 —— <c>text/html</c>、
+    /// <c>application/xhtml+xml</c>、<c>image/svg+xml</c>（可内嵌脚本）、<c>application/xml</c>
+    /// （可挂 XSLT）、<c>text/css</c>、<c>application/javascript</c> —— 一律不在名单上：
+    /// <c>FileRecord.ContentType</c> 是按<b>上传者给的文件名</b>算出来的，一份 <c>payload.html</c>
+    /// 若以 <c>text/html</c> 内联发出，脚本就跑在 API 的源上。
+    /// </para>
+    /// <para>
+    /// 不认识的类型（含 <c>null</c> 与 <c>application/octet-stream</c>）同样答否：白名单的默认答案是「不内联」。
+    /// 参数部分（<c>; charset=…</c>）与大小写不影响判定。
+    /// </para>
+    /// <para>
+    /// ★ 与 <see cref="IsImage"/> 的口径刻意不同：那张表回答「这是不是一张图」（<c>.svg</c> 算），
+    /// 这里回答「能不能不加防护地内联」（<c>.svg</c> 不算）。两个问题各有各的调用方。
+    /// </para>
+    /// </remarks>
+    /// <param name="contentType">响应将要声明的 MIME 类型。</param>
+    public static bool IsInlineRenderable(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+            return false;
+
+        var mediaType = contentType.AsSpan().Trim();
+        var separator = mediaType.IndexOf(';');
+        if (separator >= 0)
+            mediaType = mediaType[..separator].TrimEnd();
+
+        if (mediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (mediaType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+            || mediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // 位图可以内联；SVG 是能带脚本的 XML 文档，不在此列。
+        return mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+               && !mediaType.Equals("image/svg+xml", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// 根据文件扩展名获取内容类型（MIME 类型）
     /// </summary>
     /// <param name="extension">文件扩展名（包含点号，如 .jpg）</param>

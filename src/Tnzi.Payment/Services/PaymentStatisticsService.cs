@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Services;
+﻿namespace Tnzi.Payment.Services;
 
 /// <summary>
 /// 支付统计服务实现：支付与退款两块由本模块自己算，订阅那一块向
@@ -21,6 +21,9 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
 
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IRepository<Refund, Guid> _refundRepository;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+
+    private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
     /// <summary>
     /// 订阅那一半统计的供给方。未加载续费包时为 null：总览里的活跃订阅数变成 <c>null</c>
@@ -38,11 +41,13 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
     public PaymentStatisticsService(
         IRepository<PaymentEntity, Guid> paymentRepository,
         IRepository<Refund, Guid> refundRepository,
+        IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider,
         IPaymentStatisticsContributor? subscriptionStatistics = null,
         IPromotionAnalyticsProvider? promotionAnalytics = null)
         : base(serviceProvider)
     {
+        _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
         _paymentRepository = Check.NotNull(paymentRepository);
         _refundRepository = Check.NotNull(refundRepository);
         _subscriptionStatistics = subscriptionStatistics;
@@ -219,8 +224,14 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             paymentQuery = paymentQuery.Where(p => p.Status == query.Status.Value);
         }
 
+        // 上界：导出把这一段时间窗内的支付全部读进内存再拼成一个字符串放进 JSON 响应体，
+        // 没有上界时一次「导出全年」就能放倒一个进程。
+        var maxRows = Math.Max(1, PaymentOptions.ReconciliationExportMaxRows);
+        var matchedRecords = await paymentQuery.CountAsync(cancellationToken);
+
         var payments = await paymentQuery
             .OrderBy(p => p.CreationTime)
+            .Take(maxRows)
             .ToListAsync(cancellationToken);
 
         // 批量加载关联退款（已成功的退款）
@@ -278,13 +289,24 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             CsvContent = csv.ToString(),
             FileName = $"reconciliation_{startTime:yyyyMMdd}_{endTime:yyyyMMdd}.csv",
             TotalRecords = entries.Count,
+            MatchedRecords = matchedRecords,
+            Truncated = matchedRecords > entries.Count,
             TotalRevenue = totalRevenue,
             TotalRefunds = totalRefunds,
             NetRevenue = totalRevenue - totalRefunds
         };
 
-        Logger.LogInformation("Reconciliation report exported: {TotalRecords} records, period {StartTime:yyyy-MM-dd} to {EndTime:yyyy-MM-dd}",
-            entries.Count, startTime, endTime);
+        if (result.Truncated)
+        {
+            // 截断要有声音：对账的用途正是「两边对得上对不上」，少的那部分会被读成差异
+            Logger.LogWarning(
+                "Reconciliation export truncated to {Exported} of {Matched} records "
+                + "(Payment:ReconciliationExportMaxRows={MaxRows}). Narrow the period or raise the limit.",
+                entries.Count, matchedRecords, maxRows);
+        }
+
+        Logger.LogInformation("Reconciliation report exported: {TotalRecords} of {MatchedRecords} records, period {StartTime:yyyy-MM-dd} to {EndTime:yyyy-MM-dd}",
+            entries.Count, matchedRecords, startTime, endTime);
 
         return Ok(result);
     }

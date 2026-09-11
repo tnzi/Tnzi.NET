@@ -327,18 +327,18 @@
          `#detail` slot - otherwise `view` stays in the form modal (back-compat). -->
     <TDrawerShell
       v-if="$slots.detail"
-      :show="props.state.formModal.visible.value && props.state.formModal.mode.value === 'view'"
+      :show="props.state.formModal.visible.value && renderedDetail.mode.value === 'view'"
       :width="detailWidth"
       :title="detailTitleText"
       @update:show="(v: boolean) => { if (!v) props.state.formModal.close() }"
     >
       <slot
         name="detail"
-        :data="castFormData(props.state.formModal.formData.value)"
-        :mode="props.state.formModal.mode.value"
+        :data="castFormData(renderedDetail.formData.value)"
+        :mode="renderedDetail.mode.value"
       />
       <template v-if="$slots.detailFooter" #footer>
-        <slot name="detailFooter" :data="castFormData(props.state.formModal.formData.value)" />
+        <slot name="detailFooter" :data="castFormData(renderedDetail.formData.value)" />
       </template>
     </TDrawerShell>
   </div>
@@ -356,6 +356,7 @@ import TCrudSearchDrawer from './TCrudSearchDrawer.vue'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import TPageHeader from '../layout/TPageHeader.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
+import { useRetainedFormState } from '../../headless/useFormModal'
 import type { UseFormModalReturn, FormModalMode } from '../../headless/useFormModal'
 import type { FormSchemaItem } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
@@ -517,6 +518,13 @@ function onSimpleClear(): void {
 const formModalState = computed(
   () => props.state.formModal as unknown as UseFormModalReturn<unknown>,
 )
+
+// The overlay chrome owned by THIS component (the view drawer + both titles)
+// renders the retained pair rather than the live refs, so closing does not
+// repaint the body from a null record while the leave transition is still
+// running. See `useRetainedFormState`; identical to the live refs while open.
+// (`TFormModal` retains its own - it owns the create/edit body.)
+const renderedDetail = useRetainedFormState(props.state.formModal)
 function castFormData(data: unknown): Partial<T> | null {
   return data as Partial<T> | null
 }
@@ -526,7 +534,7 @@ function castFormData(data: unknown): Partial<T> | null {
 // would NOT re-evaluate when a conditional slot appears, so use `$slots`
 // directly). Its title is derived from the viewed record via `detailTitle`.
 const detailTitleText = computed(() => {
-  const d = props.state.formModal.formData.value
+  const d = renderedDetail.formData.value
   return props.detailTitle && d ? props.detailTitle(d as T) : ''
 })
 
@@ -563,7 +571,7 @@ function onBatchDelete(): void {
 }
 
 const modalTitle = computed(() => {
-  const mode = props.state.formModal.mode.value
+  const mode = renderedDetail.mode.value
   return mode ? t(`admin.crud.${mode}Title`) : ''
 })
 

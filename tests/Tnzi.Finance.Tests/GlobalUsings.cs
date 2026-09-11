@@ -18,6 +18,7 @@ global using Tnzi.Finance.Banking.Options;
 global using Tnzi.Finance.Banking.Services;
 global using Tnzi.Finance.Banking.Services.Internal;
 global using Tnzi.Finance.Documents.Services;
+global using Tnzi.Finance.Documents.Services.Internal;
 global using Tnzi.Results;
 global using Tnzi.Exceptions;
 global using Microsoft.Extensions.Options;

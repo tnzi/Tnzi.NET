@@ -144,12 +144,13 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
     /// <summary>
     /// 传入同一个 <paramref name="grantContext"/> 给分享服务和读取服务，就能在测试里
     /// 复现真实请求里的那条链路：分享校验写进授予表 → 授权器据此放行。
+    /// 默认全放行的授权器让既有用例保持原语义；要看「谁能管理这条链接」时传真实的那个。
     /// </summary>
-    protected FileShareService CreateShareService(IFileAccessGrantContext? grantContext = null)
+    protected FileShareService CreateShareService(IFileAccessGrantContext? grantContext = null, IFileAccessAuthorizer? authorizer = null)
         => new(
             Repo<FileShare>(),
             Repo<FileRecord>(),
-            TestFileAccessAuthorizer.AllowAll(),
+            authorizer ?? TestFileAccessAuthorizer.AllowAll(),
             grantContext ?? new FileAccessGrantContext(),
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider);

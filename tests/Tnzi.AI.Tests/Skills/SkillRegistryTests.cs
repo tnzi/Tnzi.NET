@@ -54,8 +54,7 @@ public class SkillRegistryTests : IDisposable
     private static SkillRegistry CreateRegistry(FileSystemSkillStore fileStore, ISkillSearchService? searchService = null)
     {
         searchService ??= new SkillSearchService(NullLogger<SkillSearchService>.Instance);
-        var logger = Mock.Of<ILogger<SkillRegistry>>();
-        return new SkillRegistry(fileStore, searchService, logger);
+        return new SkillRegistry(fileStore, searchService);
     }
 
     // -------------------------------------------------------------------------

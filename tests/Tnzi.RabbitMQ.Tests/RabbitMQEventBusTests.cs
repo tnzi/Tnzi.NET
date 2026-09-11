@@ -133,11 +133,13 @@ public class RabbitMQEventBusTests : IDisposable
         // 验证 channel 创建
         _mockConnection.Verify(c => c.CreateChannelAsync(It.IsAny<CreateChannelOptions>(), It.IsAny<CancellationToken>()), Times.Once);
 
-        // 验证 publish 调用 (泛型接口方法)
+        // 验证 publish 调用 (泛型接口方法)。
+        // ★ mandatory 必须是 true：交换机上没有队列绑定这个路由键时，代理会把消息退回并留下
+        // 一条日志；用 false 时同样的情形是静默丢弃 —— 发布方拿到的一切都正常，消息却没了。
         _mockChannel.Verify(c => c.BasicPublishAsync<BasicProperties>(
             "Tnzi.Events",
             It.IsAny<string>(),
-            false,
+            true,
             It.IsAny<BasicProperties>(),
             It.IsAny<ReadOnlyMemory<byte>>(),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -320,20 +322,44 @@ public class RabbitMQEventBusTests : IDisposable
 
     #region Subscribe / Unsubscribe Tests
 
+    /// <summary>
+    /// <c>Subscribe</c> 必须真的开始消费。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这条测试原先叫 <c>Subscribe_LogsWarning</c>，断言的是「打一行警告然后什么都不做」——
+    /// 它把缺陷本身锁成了规格。框架里唯一的分布式订阅点（多实例配置变更广播）走的正是这个方法，
+    /// 于是那条链路从未工作过，而调用方每次都拿到成功返回。
+    /// 详细的订阅行为见 <see cref="AutomaticSubscriptionTests"/>。
+    /// </remarks>
     [Fact]
-    public void Subscribe_LogsWarning()
+    public void Subscribe_StartsConsuming()
     {
+        _mockChannel.Setup(c => c.QueueDeclareAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<bool>(),
+                It.IsAny<IDictionary<string, object?>>(), It.IsAny<bool>(), It.IsAny<bool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueueDeclareOk("q", 0, 0));
+        _mockChannel.Setup(c => c.QueueBindAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IDictionary<string, object?>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockChannel.Setup(c => c.BasicQosAsync(
+                It.IsAny<uint>(), It.IsAny<ushort>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockChannel.Setup(c => c.BasicConsumeAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(),
+                It.IsAny<IDictionary<string, object?>>(), It.IsAny<IAsyncBasicConsumer>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("consumer-tag");
+
         var bus = CreateEventBus();
         bus.Subscribe<TestEvent, TestEventHandler>();
 
-        _mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                null,
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        _mockChannel.Verify(c => c.BasicConsumeAsync(
+                $"Tnzi.Events.{typeof(TestEvent).FullName}",
+                false, It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(),
+                It.IsAny<IDictionary<string, object?>>(), It.IsAny<IAsyncBasicConsumer>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "只打一行警告就返回，等于对调用方谎称订阅成功");
     }
 
     [Fact]

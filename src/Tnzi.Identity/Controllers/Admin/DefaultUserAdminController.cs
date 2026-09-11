@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Controllers.Admin;
+﻿namespace Tnzi.Identity.Controllers.Admin;
 
 /// <summary>
 /// 用户管理控制器
@@ -193,7 +193,7 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "user.update")]
     public virtual async Task<ApiResult> ResetPassword(Guid id, [FromBody] ResetPasswordByAdminDto input)
     {
-        var result = await PasswordService.ResetPasswordByAdminAsync(id, input.NewPassword);
+        var result = await PasswordService.ResetPasswordByAdminAsync(id, input.NewPassword, input.RequireChangeOnNextLogin);
         return result.ToApiResult();
     }
 
@@ -303,11 +303,32 @@ public class DefaultUserAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 把某个用户的邮箱 / 手机号标记为已确认。
+    /// </summary>
+    /// <remarks>
+    /// ★ 单独一个端点，而不是 <c>PUT admin/users/{id}</c> 的副作用：改地址一律清确认位，
+    /// 「替这个地址担保」是另一件事，需要有人显式按下并留痕（见 <c>IUserService.ConfirmContactAsync</c>）。
+    /// </remarks>
+    /// <param name="userId">用户ID</param>
+    /// <param name="input">要确认哪几项（null 表示不动）</param>
+    /// <returns>操作结果</returns>
+    [HttpPost("{userId}/confirm-contact")]
+    [ApiAuthorize(PermissionName = "user.update")]
+    public virtual async Task<ApiResult> ConfirmContact(Guid userId, [FromBody] ConfirmContactDto input)
+    {
+        Check.NotNull(input);
+
+        var result = await UserService.ConfirmContactAsync(userId, input.ConfirmEmail, input.ConfirmPhoneNumber);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取用户统计
     /// </summary>
     /// <param name="organizationId">组织ID（可选）</param>
     /// <param name="roleId">角色ID（可选）</param>
     /// <returns>用户统计信息</returns>
+
     [HttpGet("statistics")]
     public virtual async Task<ApiResult<UserStatisticsDto>> GetStatistics([FromQuery] Guid? organizationId = null, [FromQuery] Guid? roleId = null)
     {

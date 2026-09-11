@@ -74,6 +74,9 @@ public abstract class HostingModule : TnziApplicationModule
             context.Services.AddEventHandler<UserRegisteredEvent, UserRegisteredEventHandler>();
             context.Services.AddEventHandler<PasswordResetRequestedEvent, PasswordResetRequestedEventHandler>();
             context.Services.AddEventHandler<TwoFactorCodeSentEvent, TwoFactorCodeSentEventHandler>();
+            // 少了这一行，「邀请用户」会返回 200、写一条成功日志、账号也建好了，
+            // 而被邀请人永远收不到链接 —— 全链路零报错。
+            context.Services.AddEventHandler<UserInvitedEvent, UserInvitedEventHandler>();
         }
 
         return base.ConfigureServicesAsync(context);

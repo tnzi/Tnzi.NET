@@ -179,6 +179,14 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 return WebhookProcessResult.Rejected("Invalid Feishu signature");
             }
         }
+        else
+        {
+            // 未配置 EncryptKey 无法验签 —— 拒绝，绝不放行（与 Discord/Slack 同形状）。
+            // ★ 此前这里没有 else 分支：漏配一个密钥，端点就从"验签的"变成"谁都能投递的"，
+            // 而外观与配置正确时完全一致。
+            _logger.LogWarning("Feishu EncryptKey is not configured; rejecting unverifiable webhook");
+            return WebhookProcessResult.Rejected("Feishu EncryptKey not configured");
+        }
 
         // URL 验证握手（url_verification）：校验 token（若配置）后原样回显 challenge。
         if (TryGetFeishuChallenge(rawBody, out var challenge, out var tokenMatches))

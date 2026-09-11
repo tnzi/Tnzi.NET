@@ -33,6 +33,10 @@ public class ChatModule : TnziApplicationModule
         // 让会话成员读得到会话里的文件。Storage 自己只认识"创建者 / storage.file.view",
         // 接收方两样都不是 —— 没有这条,同一张图在发的人那里能看、在收的人那里 404。
         // Storage 未加载时该注册无害:没有人会去解析它。
+        //
+        // ★ 反方向那一问（发送者本来读不读得到这份文件）由 IFileReadAccessProbe 回答，
+        //   契约在 Tnzi 核心、实现随 Tnzi.Storage 注册,ConversationService 可空持有它。
+        //   两者是一对：这里放行的依据是"会话里有这条引用",而那一问决定谁建得起引用。
         services.AddScoped<IFileReferenceAccessResolver, ChatFileReferenceAccessResolver>();
 
         services.AddEventHandler<ConversationMessageSentEvent, ChatSignalREventHandler>();

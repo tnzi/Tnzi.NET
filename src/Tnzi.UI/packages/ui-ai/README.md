@@ -43,6 +43,8 @@ app.mount('#app')
 const chat = useChatThreads({ http, chatApi, threadApi, onError: (m) => message.error(m) })
 ```
 
+`install()` 同时接管会话生命周期：`createTnziClient` 在 401 撑过刷新后清掉认证状态，`defineChatApp` 再把用户送回登录路由并把当前位置放进 redirect query（与 `@tnzi/ui-admin` 同一套行为）。传 `guard: false` 则两者都不做，由宿主自己接。
+
 ## 组件层接法：`TChatApp`
 
 `@tnzi/ui-ai/chat` 导出一个已经组合好侧栏 + 落地页 + 会话流 + 输入框 + 设置弹窗 + 命令面板的组件。
@@ -82,6 +84,7 @@ import '@tnzi/ui-ai/style.css'
 | `@tnzi/ui-ai/headless` | `useChatThreads`（整套对话循环）/ `useGlobalAiTheme` / `useChat` / `useStreamMarkdown` … |
 | `@tnzi/ui-ai/adapters` | 后端 DTO → 视图模型（`toChatMessage` / `toThreadItem` / `toMessageRole`） |
 | `@tnzi/ui-ai/workflow` | 工作流 DAG 可视化（`@vue-flow/core`，懒加载） |
+| `@tnzi/ui-ai/icons` | 本包（及其 @tnzi 依赖）会渲染的 Iconify 名字清单 + `bundleTnziIcons` / `selectTnziIcons`（生成；离线打包图标用） |
 | `@tnzi/ui-ai/embed` | 嵌入式小挂件模式 |
 | `@tnzi/ui-ai/theme`、`/theme/*` | 运行时主题覆盖层 |
 | `@tnzi/ui-ai/i18n` | 翻译引擎（`createAiI18n` / `useAiI18n` / `formatAiMessage`），与词典分开 |

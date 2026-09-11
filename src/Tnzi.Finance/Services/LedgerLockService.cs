@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 账本封账锁服务
@@ -35,7 +35,7 @@ public class LedgerLockService : ApplicationService, ILedgerLockService
         // 当期记账整片挡死。这是最容易手滑打错年份的输入，值得挡在前面。
         // 多给一天是给时区留的余量：UTC+13 的记账员眼里的"今天"在服务端已经是明天，
         // 按 UTC 当日严格判定会把一个完全正常的操作拒掉。消息如实说明这一天。
-        if (closingDate.HasValue && closingDate.Value > DateTime.UtcNow.Date.AddDays(1))
+        if (closingDate.HasValue && closingDate.Value > TimeProvider.GetUtcNow().UtcDateTime.Date.AddDays(1))
             return Fail<LedgerLockDto>("The closing date cannot be more than one day in the future.", 400);
 
         entity ??= new LedgerLock { Scope = LedgerLock.SingletonScope };

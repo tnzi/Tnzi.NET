@@ -76,7 +76,7 @@ export function isSystemProviderScope(scope: unknown): boolean {
 }
 
 /**
- * Map a provider name / type to an mdi icon. Matching is case-insensitive and
+ * Map a provider name / type to an Iconify icon. Matching is case-insensitive and
  * substring-based so e.g. "Azure OpenAI" resolves to the Azure glyph and an
  * "OpenAI Prod" name resolves to the OpenAI glyph. Falls back to a generic
  * robot glyph for unknown / custom provider plugins.
@@ -86,7 +86,7 @@ export function providerIcon(provider: string | null | undefined): string {
   if (key.includes('azure')) return 'mdi:microsoft-azure'
   if (key.includes('anthropic') || key.includes('claude')) return 'mdi:robot-happy-outline'
   if (key.includes('openai') || key.includes('gpt')) return 'mdi:robot-outline'
-  if (key.includes('ollama')) return 'mdi:llama'
+  if (key.includes('ollama')) return 'simple-icons:ollama'
   if (key.includes('google') || key.includes('gemini')) return 'mdi:google'
   if (key.includes('mistral')) return 'mdi:weather-windy'
   return 'mdi:robot-outline'

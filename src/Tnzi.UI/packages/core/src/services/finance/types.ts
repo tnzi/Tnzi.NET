@@ -23,6 +23,7 @@ import {
   BankNumberScheme,
   CheckStockType,
   CheckLayout,
+  CheckPosition,
   BankAccountType,
   BankTransactionSource,
   BankTransactionStatus,
@@ -1223,6 +1224,8 @@ export interface BankAccountDto {
   nextCheckNumber: number;
   checkStockType: CheckStockType;
   checkLayout: CheckLayout;
+  /** Selected layout template (null = the factory default for `checkLayout`). */
+  checkTemplateName?: string | null;
   offsetXMm: number;
   offsetYMm: number;
   feedProviderKey?: string | null;
@@ -1250,6 +1253,8 @@ export interface CreateBankAccountDto {
   nextCheckNumber?: number;
   checkStockType?: CheckStockType;
   checkLayout?: CheckLayout;
+  /** Selected layout template (blank = the factory default for `checkLayout`). */
+  checkTemplateName?: string | null;
   offsetXMm?: number;
   offsetYMm?: number;
   feedProviderKey?: string | null;
@@ -1271,6 +1276,8 @@ export interface UpdateBankAccountDto {
   currency?: string | null;
   checkStockType?: CheckStockType;
   checkLayout?: CheckLayout;
+  /** Selected layout template (blank = the factory default for `checkLayout`). */
+  checkTemplateName?: string | null;
   offsetXMm?: number;
   offsetYMm?: number;
   feedProviderKey?: string | null;
@@ -1535,6 +1542,37 @@ export interface PrintChecksDto {
   paymentEntryIds: string[];
   /** Issue date (null = the payment date). */
   issueDate?: string | null;
+  /**
+   * Layout template for THIS print only (blank = follow the bank account
+   * profile, which in turn falls back to the factory default for its layout).
+   * Values come from `checks.getTemplates()`.
+   */
+  templateName?: string | null;
+}
+
+/**
+ * A check layout: either one the framework ships or one created in the
+ * Template admin surface. Everything a picker needs to describe it.
+ */
+export interface CheckTemplateDto {
+  /** Template name - this is the value written to `checkTemplateName`. */
+  name: string;
+  /** Display name (English; the presentation layer may localise it). */
+  displayName: string;
+  description?: string | null;
+  /** Region code (`CA` / `US`; null = not region specific). */
+  region?: string | null;
+  /** Paper size (e.g. `Letter`). */
+  paperSize?: string | null;
+  checksPerPage: number;
+  /** Where the cheque sits (voucher layouts only). */
+  position?: CheckPosition | null;
+  supportedStockTypes: CheckStockType[];
+  /** False = created by this application in the Template admin surface. */
+  isBuiltIn: boolean;
+  isActive: boolean;
+  /** False = a shipped layout not yet seeded into the template store. */
+  isSeeded: boolean;
 }
 
 /** Register a hand-written check (explicit number, conflict = 409). */

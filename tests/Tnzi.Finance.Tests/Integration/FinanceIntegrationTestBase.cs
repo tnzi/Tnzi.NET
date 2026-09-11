@@ -48,6 +48,9 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         });
         // 全 0 的 32 字节测试密钥（AES-GCM 对任意 32 字节密钥成立）；确定性便于往返断言。
         services.Configure<FinanceEncryptionOptions>(o => o.EncryptionKey = Convert.ToBase64String(new byte[32]));
+        // 票面呈现配置。★ 刻意不改成非默认位数：这里跑的是「宿主没配过它」的真实现场，
+        // 支票号该怎么印由框架默认值回答；要验证配置真的生效的用例自己覆写。
+        services.Configure<FinanceCheckOptions>(_ => { });
         services.AddSingleton(TimeProvider.System);
 
         // 仓储（IRepository + IReadOnlyRepository）

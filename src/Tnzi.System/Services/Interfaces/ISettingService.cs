@@ -36,9 +36,16 @@ public interface ISettingService
     Task<Result> SetSettingAsync(string key, string value, string? description = null, string? group = null);
 
     /// <summary>
-    /// 获取所有配置（按分组）
+    /// 获取配置列表（管理端）。按<b>调用者的租户</b>收口：
+    /// <paramref name="scope"/> 为 null 时返回 Global 行 + 调用者本租户的 Tenant 行（宿主调用者只有 Global）；
+    /// <c>Tenant</c> 时租户内调用者固定看本租户（请求别的 <paramref name="scopeId"/> 返回 403），宿主可列全部或指定一个；
+    /// <c>User</c> 时租户内调用者必须给出 <paramref name="scopeId"/>（用户 id，否则 400），宿主可列全部。
     /// </summary>
-    Task<Result<IEnumerable<SettingDto>>> GetSettingsAsync(string? group = null);
+    /// <remarks>
+    /// <c>Setting</c> 不实现 <c>IMultiTenant</c>（租户归属在 <c>ScopeId</c>，Global 行没有租户），
+    /// 全局租户过滤器管不到它；不在这里收口，租户 A 的管理员会拿到租户 B 的 Tenant 行与所有用户的 User 行。
+    /// </remarks>
+    Task<Result<IEnumerable<SettingDto>>> GetSettingsAsync(string? group = null, SettingScope? scope = null, string? scopeId = null);
 
     /// <summary>
     /// 获取配置（根据ID）
@@ -100,9 +107,10 @@ public interface ISettingService
     }
 
     /// <summary>
-    /// 获取配置分组列表（分组名称 + 每组配置数量）
+    /// 获取配置分组列表（分组名称 + 每组配置数量）。作用域口径与 <see cref="GetSettingsAsync"/> 完全一致，
+    /// 计数必须与列表对得上。
     /// </summary>
-    Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(CancellationToken cancellationToken = default)
+    Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(SettingScope? scope = null, string? scopeId = null, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Failure<List<SettingGroupDto>>("Setting groups not implemented", 501));
     }

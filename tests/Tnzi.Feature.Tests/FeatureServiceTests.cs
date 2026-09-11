@@ -44,11 +44,25 @@ public class FeatureServiceTests
         _serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
             .Returns(loggerFactory);
 
+        // GetAllValuesAsync merges code-level definitions from the manager snapshot; the
+        // default is "none" so the DB-only expectations below hold.
+        _featureManagerMock.Setup(m => m.GetAllAsync())
+            .ReturnsAsync(new List<FeatureDefinitionRecord>());
+
+        // The same two providers FeatureModule registers: keyed Tenant (active here) and
+        // keyless Global. Values are only accepted for scopes a provider reads back.
+        var providers = new IFeatureValueProvider[]
+        {
+            new StubFeatureValueProvider("Tenant", 200, requiresKey: true),
+            new StubFeatureValueProvider("Global", 100, requiresKey: false),
+        };
+
         _service = new FeatureService(
             _serviceProviderMock.Object,
             _definitionRepositoryMock.Object,
             _valueRepositoryMock.Object,
-            _featureManagerMock.Object);
+            _featureManagerMock.Object,
+            providers);
     }
 
     private void SetupDefinitionQueryable(List<FeatureDefinition> definitions)
@@ -193,7 +207,7 @@ public class FeatureServiceTests
         var request = new SetFeatureValueRequest
         {
             FeatureDefinitionId = definitionId,
-            ProviderName = "Tenant",
+            ProviderName = "Global",
             Value = "100"
         };
 
@@ -231,7 +245,7 @@ public class FeatureServiceTests
         var request = new SetFeatureValueRequest
         {
             FeatureDefinitionId = definitionId,
-            ProviderName = "Tenant",
+            ProviderName = "Global",
             Value = "any-string-is-valid"
         };
 
@@ -425,7 +439,7 @@ public class FeatureServiceTests
         var request = new SetFeatureValueRequest
         {
             FeatureDefinitionId = Guid.NewGuid(),
-            ProviderName = "Tenant",
+            ProviderName = "Global",
             Value = "true"
         };
 
@@ -569,6 +583,73 @@ public class FeatureServiceTests
         result.Data.Errors.ShouldContain(e => e.Contains("not found"));
     }
 
+    /// <summary>
+    /// ★事件必须在持久化之后才出去。默认 <c>AspNetCore:EnableGlobalUnitOfWork=false</c> 下没有环境事务，
+    /// <c>TransactionAwarePublish</c> 的延迟发布不生效，先发再写 = 写库失败时订阅者已经收到「值变了」。
+    /// </summary>
+    [Fact]
+    public async Task BatchSetValuesAsync_DoesNotPublishEventsWhenPersistenceFails()
+    {
+        var defId = Guid.NewGuid();
+        SetupDefinitionQueryable([new() { Id = defId, Name = "Feature.Toggle", ValueType = FeatureValueType.Boolean, IsEnabled = true }]);
+        SetupValueQueryable([]);
+        _valueRepositoryMock
+            .Setup(r => r.InsertManyAsync(It.IsAny<IEnumerable<FeatureValue>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+
+        var request = new BatchSetFeatureValuesRequest
+        {
+            ProviderName = "Tenant",
+            ProviderKey = "tenant-1",
+            Values = [new() { FeatureDefinitionId = defId, Value = "true" }]
+        };
+
+        await Should.ThrowAsync<InvalidOperationException>(() => _service.BatchSetValuesAsync(request));
+
+        _eventBusMock.Verify(b => b.PublishAsync(It.IsAny<FeatureValueChangedEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BatchSetValuesAsync_PublishesOneEventPerWrittenValue_AfterPersisting()
+    {
+        var def1Id = Guid.NewGuid();
+        var def2Id = Guid.NewGuid();
+        SetupDefinitionQueryable(
+        [
+            new() { Id = def1Id, Name = "Feature.Toggle", ValueType = FeatureValueType.Boolean, IsEnabled = true },
+            new() { Id = def2Id, Name = "Feature.MaxUsers", ValueType = FeatureValueType.Integer, IsEnabled = true }
+        ]);
+        SetupValueQueryable([new() { Id = Guid.NewGuid(), FeatureDefinitionId = def1Id, ProviderName = "Tenant", ProviderKey = "tenant-1", Value = "false" }]);
+
+        var order = new List<string>();
+        _valueRepositoryMock
+            .Setup(r => r.UpdateManyAsync(It.IsAny<IEnumerable<FeatureValue>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("update")).Returns(Task.CompletedTask);
+        _valueRepositoryMock
+            .Setup(r => r.InsertManyAsync(It.IsAny<IEnumerable<FeatureValue>>(), It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("insert")).Returns(Task.CompletedTask);
+        _eventBusMock
+            .Setup(b => b.PublishAsync(It.IsAny<FeatureValueChangedEvent>(), It.IsAny<CancellationToken>()))
+            .Callback(() => order.Add("publish")).Returns(Task.CompletedTask);
+
+        var request = new BatchSetFeatureValuesRequest
+        {
+            ProviderName = "Tenant",
+            ProviderKey = "tenant-1",
+            Values =
+            [
+                new() { FeatureDefinitionId = def1Id, Value = "true" },
+                new() { FeatureDefinitionId = def2Id, Value = "50" }
+            ]
+        };
+
+        var result = await _service.BatchSetValuesAsync(request);
+
+        result.Succeeded.ShouldBeTrue();
+        // 一更新一插入两条事件，且全部排在两次持久化之后。
+        order.ShouldBe(new[] { "update", "insert", "publish", "publish" });
+    }
+
     [Fact]
     public async Task BatchSetValuesAsync_ExistingValues_Updates()
     {
@@ -706,7 +787,7 @@ public class FeatureServiceTests
         SetupValueQueryable(new List<FeatureValue>());
 
         // Act
-        var result = await _service.GetAllValuesAsync("Tenant", null);
+        var result = await _service.GetAllValuesAsync("Global", null);
 
         // Assert
         result.Succeeded.ShouldBeTrue();

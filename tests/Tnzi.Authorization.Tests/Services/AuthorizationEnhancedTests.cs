@@ -451,12 +451,20 @@ public class AuthorizationEnhancedTests
             new() { RoleId = sourceRoleId, FunctionId = func1Id, IsEnabled = true },
             new() { RoleId = sourceRoleId, FunctionId = func2Id, IsEnabled = true }
         };
+        // 克隆只复制指向生效功能的授权，所以功能目录里要有这两行。
+        var functions = new List<ModuleFunction>
+        {
+            new() { Id = func1Id, Code = "a.view", IsEnabled = true },
+            new() { Id = func2Id, Code = "b.view", IsEnabled = true }
+        };
 
         var roleFunctionMock = CreateMockRoleFunctionRepository(roleFunctions);
         roleFunctionMock.Setup(r => r.InsertManyAsync(It.IsAny<IEnumerable<RoleFunction>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = CreateService(roleFunctionRepository: roleFunctionMock);
+        var service = CreateService(
+            roleFunctionRepository: roleFunctionMock,
+            moduleFunctionRepository: CreateMockModuleFunctionRepository(functions));
 
         // Act
         var result = await service.CloneRoleFunctionsAsync(sourceRoleId, targetRoleId);
@@ -486,12 +494,19 @@ public class AuthorizationEnhancedTests
             // target role 已有其中一个
             new() { RoleId = targetRoleId, FunctionId = existingFuncId, IsEnabled = true }
         };
+        var functions = new List<ModuleFunction>
+        {
+            new() { Id = existingFuncId, Code = "a.view", IsEnabled = true },
+            new() { Id = newFuncId, Code = "b.view", IsEnabled = true }
+        };
 
         var roleFunctionMock = CreateMockRoleFunctionRepository(roleFunctions);
         roleFunctionMock.Setup(r => r.InsertManyAsync(It.IsAny<IEnumerable<RoleFunction>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var service = CreateService(roleFunctionRepository: roleFunctionMock);
+        var service = CreateService(
+            roleFunctionRepository: roleFunctionMock,
+            moduleFunctionRepository: CreateMockModuleFunctionRepository(functions));
 
         // Act
         var result = await service.CloneRoleFunctionsAsync(sourceRoleId, targetRoleId);
@@ -517,9 +532,13 @@ public class AuthorizationEnhancedTests
             new() { RoleId = sourceRoleId, FunctionId = funcId, IsEnabled = true },
             new() { RoleId = targetRoleId, FunctionId = funcId, IsEnabled = true }
         };
+        // 功能要真的生效，否则这条用例会因为「源角色没有可复制的生效授权」而平凡地得到 0。
+        var functions = new List<ModuleFunction> { new() { Id = funcId, Code = "a.view", IsEnabled = true } };
 
         var roleFunctionMock = CreateMockRoleFunctionRepository(roleFunctions);
-        var service = CreateService(roleFunctionRepository: roleFunctionMock);
+        var service = CreateService(
+            roleFunctionRepository: roleFunctionMock,
+            moduleFunctionRepository: CreateMockModuleFunctionRepository(functions));
 
         // Act
         var result = await service.CloneRoleFunctionsAsync(sourceRoleId, targetRoleId);

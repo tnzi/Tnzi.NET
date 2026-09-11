@@ -34,11 +34,25 @@ public class HealthChecksOptions
     public string ReadinessPath { get; set; } = "/health/ready";
 
     /// <summary>
-    /// 是否输出详细的 JSON 检查结果（逐项状态、耗时、描述与异常消息）。
-    /// 默认：true。注意：探针端点是匿名可访问的，详细输出会把各检查项的异常消息
-    /// 暴露给任何调用方；生产环境如不希望外泄内部错误细节，请显式设为 false。
+    /// 是否输出详细的 JSON 检查结果（逐项名称、状态、耗时与描述）。
+    /// 默认：true。
     /// </summary>
+    /// <remarks>
+    /// ★ 详细输出<b>不再包含异常消息与检查项数据</b>：那两项要另外打开
+    /// <see cref="ExposeErrorDetails"/>。此前它们随详细输出一起、默认对<b>匿名</b>
+    /// 探针端点输出，于是一次数据库连接失败会把连接串片段发给任何调用方，
+    /// 而文档写着「仅在非生产环境使用」—— 源码里没有任何环境判断来兑现这句话。
+    /// </remarks>
     public bool DetailedOutput { get; set; } = true;
+
+    /// <summary>
+    /// 是否在详细输出里包含<b>异常消息</b>与各检查项的 <c>data</c>。默认：false。
+    /// </summary>
+    /// <remarks>
+    /// 这些内容常带连接串片段、主机名、内部路径。探针端点默认匿名可访问，
+    /// 因此只在受信网络（内网监控、开发环境）里打开。
+    /// </remarks>
+    public bool ExposeErrorDetails { get; set; }
 
     /// <summary>
     /// 健康检查超时时间（秒）

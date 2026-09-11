@@ -2,7 +2,10 @@
  * useStreamMarkdown - Streaming markdown rendering composable
  *
  * Incrementally parses markdown chunks and produces reactive HTML output.
- * Uses a shared markdown-it singleton with sensible defaults (html, linkify, typographer).
+ * Uses a shared markdown-it instance with linkify + typographer. Raw HTML in the
+ * source is OFF unless the caller passes `allowHtml: true` (assistant output is
+ * untrusted; see the fence renderer for the one place author input reaches an
+ * attribute).
  */
 
 import { ref, readonly, type Ref, type DeepReadonly } from 'vue';
@@ -104,6 +107,16 @@ function createMarkdownIt(allowHtml = false): MarkdownItInstance {
     const lang = info.split(/\s+/)[0] ?? '';
     const code = token?.content ?? '';
 
+    // `lang` is the first token of the fence info string, i.e. author input.
+    // The shiki path only accepts it through the `langSet` allow-list, but the
+    // fallback path used to interpolate it raw into a class attribute: an info
+    // string of `js"onmouseover="alert(1)` (no whitespace, so the split keeps
+    // it whole) closed the quote and planted a handler on the <code> element
+    // of a page rendered from an assistant's or another user's message.
+    const langAttr = lang ? ` class="language-${md.utils.escapeHtml(lang)}"` : '';
+    const fallback = (): string =>
+      `<pre class="t-md-code__fallback"><code${langAttr}>${md.utils.escapeHtml(code)}</code></pre>`;
+
     let bodyHtml: string;
     if (highlighter && lang && langSet.has(lang)) {
       try {
@@ -112,12 +125,10 @@ function createMarkdownIt(allowHtml = false): MarkdownItInstance {
           themes: { light: 'github-light', dark: 'github-dark' },
         });
       } catch {
-        const langClass = lang ? ` class="language-${lang}"` : '';
-        bodyHtml = `<pre class="t-md-code__fallback"><code${langClass}>${md.utils.escapeHtml(code)}</code></pre>`;
+        bodyHtml = fallback();
       }
     } else {
-      const langClass = lang ? ` class="language-${lang}"` : '';
-      bodyHtml = `<pre class="t-md-code__fallback"><code${langClass}>${md.utils.escapeHtml(code)}</code></pre>`;
+      bodyHtml = fallback();
     }
 
     const dataCode = encodeURIComponent(code);

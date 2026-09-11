@@ -7,8 +7,9 @@
 
 import { reactive } from 'vue';
 import type { AuthState } from './types/auth';
-import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateUserDto } from '../services/identity/types';
+import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';
+import { isSessionEndedForSecurity } from '../services/identity/session-security';
 import { useLogger } from '../adapters/logger';
 import type { StateDeps } from './types/deps';
 
@@ -87,6 +88,9 @@ export class AuthStateManager {
   /** Persisted-storage keys derived from the configurable storage prefix. */
   private readonly _keys: { token: string; refresh: string; expiry: string };
 
+  /** True when the backend delivers the refresh token as an HttpOnly cookie. */
+  private readonly _cookieDelivery: boolean;
+
   constructor(private readonly deps: StateDeps) {
     const prefix = deps.storagePrefix ?? 'tnzi:auth';
     this._keys = {
@@ -94,7 +98,19 @@ export class AuthStateManager {
       refresh: `${prefix}:refresh`,
       expiry: `${prefix}:expiry`,
     };
+    this._cookieDelivery = deps.tokenDelivery === 'cookie';
     return reactive(this) as this;
+  }
+
+  /**
+   * Auth API bound to this manager's delivery mode.
+   *
+   * In cookie mode the auth calls must carry credentials, otherwise a
+   * cross-origin SPA neither stores the `Set-Cookie` from login nor sends it
+   * back on refresh - and the symptom is "login works, reload logs me out".
+   */
+  private _authApi() {
+    return useAuthApi(this.deps.httpClient, { withCredentials: this._cookieDelivery });
   }
 
   // ============================================
@@ -183,7 +199,7 @@ export class AuthStateManager {
     this.isRefreshing = true;
 
     try {
-      const api = useAuthApi(this.deps.httpClient);
+      const api = this._authApi();
       const result = await api.loginWithRefreshToken(credentials);
       if (!result.succeeded || !result.data) {
         throw new Error(result.message ?? 'Login failed');
@@ -221,8 +237,12 @@ export class AuthStateManager {
    */
   async logout(): Promise<void> {
     try {
-      if (this.accessToken && this.user?.id) {
-        const api = useAuthApi(this.deps.httpClient);
+      // Revoke on the server whenever we hold a session, profile or not. A
+      // profile fetch can fail while the token pair is perfectly alive, and in
+      // cookie mode the HttpOnly refresh cookie is a credential only the server
+      // can kill - skipping the call because `user` is null leaves it valid.
+      if (this.accessToken) {
+        const api = this._authApi();
         await api.logout().catch(() => {});
       }
     } finally {
@@ -253,7 +273,9 @@ export class AuthStateManager {
     // with the same stale access token, get another 401, and short-circuit
     // out without firing `onUnauthorized` - so the page would stay mounted
     // while every API call kept failing.
-    if (!this.refreshToken) {
+    // In cookie mode the refresh token is in an HttpOnly cookie the page cannot
+    // read - "we don't hold one" is the normal state there, not a failure.
+    if (!this._cookieDelivery && !this.refreshToken) {
       throw new Error('No refresh token available');
     }
 
@@ -275,13 +297,24 @@ export class AuthStateManager {
     this.error = null;
 
     try {
-      const api = useAuthApi(this.deps.httpClient);
-      const result = await api.refreshToken({ refreshToken: this.refreshToken! });
+      const api = this._authApi();
+      const result = await api.refreshToken(
+        this._cookieDelivery ? {} : { refreshToken: this._currentRefreshToken() });
       if (!result.succeeded || !result.data) {
-        throw new Error(result.message ?? 'Token refresh failed');
+        // Keep the server's error code on the thrown error: the caller (and the
+        // catch below) needs to tell "your session expired" apart from "we ended
+        // your session because the token appears to be compromised".
+        const failure = new Error(result.message ?? 'Token refresh failed');
+        (failure as { errorCode?: string }).errorCode = result.errorCode;
+        throw failure;
       }
       this.accessToken = result.data.accessToken;
-      this.refreshToken = result.data.refreshToken;
+      // Cookie mode: the body's refreshToken is empty by design (the browser got
+      // a new cookie instead). Assigning it would wipe the flag we use to know a
+      // session exists at all.
+      if (!this._cookieDelivery) {
+        this.refreshToken = result.data.refreshToken;
+      }
       this.tokenExpiry = new Date(Date.now() + result.data.expiresIn * 1000);
       this.persistTokens();
 
@@ -302,7 +335,13 @@ export class AuthStateManager {
       this.clearPersistedTokens();
       // Set AFTER clearAuth (which resets error) so the message survives for
       // the login page to display.
-      this.error = 'Session expired, please login again';
+      // ★ The security case gets its own message on purpose: this may be the
+      // only moment the legitimate user is told that their credentials are being
+      // used from somewhere else. Rendering "session expired" for it discards
+      // that signal entirely.
+      this.error = isSessionEndedForSecurity(error)
+        ? 'Your session was ended for security reasons. Please sign in again.'
+        : 'Session expired, please login again';
       try {
         await this.deps.onLogout?.();
       } catch {
@@ -329,7 +368,7 @@ export class AuthStateManager {
     }
   }
 
-  async updateProfile(data: UpdateUserDto): Promise<UserProfile> {
+  async updateProfile(data: UpdateProfileDto): Promise<UserProfile> {
     if (!this.isAuthenticated) {
       throw new Error('Not authenticated');
     }
@@ -432,6 +471,20 @@ export class AuthStateManager {
   // ============================================
 
   async restoreAuth(): Promise<void> {
+    // Cookie mode keeps nothing in web storage on purpose - the whole point is
+    // that no script (ours or an attacker's) can read the credential. So there is
+    // nothing to "restore": ask the server instead, and let the HttpOnly cookie
+    // answer whether a session still exists.
+    if (this._cookieDelivery) {
+      // A deployment that switched from bearer to cookie delivery leaves the old
+      // token pair in web storage forever - nothing in cookie mode ever reads
+      // or clears those keys. Scrub them: keeping credentials out of storage is
+      // the whole point of this mode.
+      this.clearPersistedTokens();
+      await this._restoreFromCookie();
+      return;
+    }
+
     const token = this.deps.storage.get<string>(this._keys.token);
     const refresh = this.deps.storage.get<string>(this._keys.refresh);
     const expiry = this.deps.storage.get<string>(this._keys.expiry);
@@ -484,6 +537,47 @@ export class AuthStateManager {
   // ============================================
 
   /**
+   * The refresh token to present, re-read from shared storage first.
+   *
+   * ★ `this.refreshToken` is per-tab memory, seeded once at `restoreAuth()`. When a
+   * second tab rotates the token, this tab's copy silently goes stale - and the
+   * backend now treats a rotated-away token as a replay and kills the WHOLE
+   * session, not just this tab. So the two-tab case would end with everything
+   * signed out and a "your session was ended for security reasons" message, for
+   * no reason at all.
+   *
+   * Reading storage at the moment of use collapses that window down to genuinely
+   * concurrent refreshes, which the backend's rotation overlap window covers.
+   * (Cookie mode has no such problem: the browser holds exactly one cookie.)
+   */
+  private _currentRefreshToken(): string {
+    const persisted = this.deps.storage.get<string>(this._keys.refresh);
+    if (persisted && persisted !== this.refreshToken) {
+      this.refreshToken = persisted;
+    }
+    return this.refreshToken!;
+  }
+
+  /**
+   * Cookie mode boot: exchange the HttpOnly refresh cookie for a fresh access
+   * token, then load the profile.
+   *
+   * A failure here is the ordinary "not signed in" state (no cookie, or it
+   * expired / was revoked), not an error worth surfacing - so it clears quietly
+   * and lets the route guards do their job.
+   */
+  private async _restoreFromCookie(): Promise<void> {
+    try {
+      await this.refreshAccessToken();
+      this.isAuthenticated = true;
+      await this.fetchUserProfile();
+      this.roles = this.user?.roles ?? [];
+    } catch {
+      this.clearAuth();
+    }
+  }
+
+  /**
    * Fetch permissions using the configured permissionsFetchFn.
    * Falls back to empty array if not configured.
    */
@@ -499,6 +593,11 @@ export class AuthStateManager {
   }
 
   private persistTokens(): void {
+    // Cookie mode: nothing auth-related goes to web storage. Writing the access
+    // token "just for convenience" would hand back exactly the artefact this mode
+    // exists to remove - a credential any script or local process can read.
+    if (this._cookieDelivery) return;
+
     if (this.accessToken) {
       this.deps.storage.set(this._keys.token, this.accessToken);
     }

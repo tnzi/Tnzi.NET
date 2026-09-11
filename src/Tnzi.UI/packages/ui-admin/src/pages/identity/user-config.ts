@@ -3,6 +3,19 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
+import { hasFlag, type Flags } from '@tnzi/core/utils'
+
+/**
+ * 待办位。与后端 `PendingUserActions` 一一对应（值是位，线上传的是成员名）。
+ * 低位阻断登录、高位是登录后必须先办完的义务，判定一律用按位与。
+ */
+const PendingUserActions = {
+  None: 0,
+  InvitationPending: 1 << 0,
+  ChangePassword: 1 << 8,
+  EnrollTotp: 1 << 9,
+  ConfirmEmail: 1 << 10,
+} as const
 
 /**
  * User search fields - align with backend `UserListQueryDto`:
@@ -23,6 +36,18 @@ export const userSearchFields: FormSchemaItem[] = [
     ],
   },
   {
+    // 「谁还没接受邀请」「谁欠着改密」都是这一条。刻意不做成独立的邀请列表页：
+    // 一张邀请就是一个欠着 InvitationPending 的账号，第二份列表只会和这份漂移。
+    // ★ 值是**位**不是状态码：后端按 (pendingActions & flag) != 0 匹配。
+    key: 'pendingAction',
+    labelKey: 'form.pendingAction', label: 'Pending Action',
+    type: 'select',
+    options: [
+      { label: 'Invitation pending', value: '1' },
+      { label: 'Must change password', value: '256' },
+    ],
+  },
+  {
     key: 'isEmailConfirmed',
     labelKey: 'form.isEmailConfirmed', label: 'Email Confirmed',
     type: 'select',
@@ -40,6 +65,12 @@ export interface UserRow {
   phoneNumber?: string
   organizationName?: string
   isLockedOut?: boolean
+  /**
+   * 待办标志集合。★ **线上是成员名字符串**（`"InvitationPending"`、多项时
+   * `"ChangePassword, EnrollTotp"`），不是数字 —— 后端给每个枚举挂了按名序列化。
+   * 判定一律走 `hasFlag`，`&` 对字符串会静默恒为 0。
+   */
+  pendingActions?: Flags<number>
   isEmailConfirmed?: boolean
   twoFactorEnabled?: boolean
   roles?: string[]
@@ -113,11 +144,27 @@ export const userColumns: ColumnDef<UserRow>[] = [
   {
     key: 'isLockedOut',
     title: 'columns.isLockedOut',
-    width: 100,
-    render: (row) =>
-      row.isLockedOut
-        ? h(TStatusBadge, { value: true, type: 'error', labelKey: 'admin.shared.status.locked' })
-        : h(TStatusBadge, { value: false, type: 'success', labelKey: 'admin.shared.status.active' }),
+    width: 110,
+    /**
+     * ★ 「等待接受邀请」要盖过「已锁定」来显示。被邀请的账号在库里两者都为真
+     * （锁定是为了让既有的活跃用户口径自动排除它），但对管理员来说这两件事完全不同：
+     * 一个是「新人还没来」，一个是「这个人被停用了」。只显示后者会让整批新员工
+     * 看起来像被封禁的账号。
+     * ★ 用按位与而不是等值：pendingActions 是标志集合，一个账号可以同时欠好几件事。
+     */
+    render: (row) => {
+      const owed = row.pendingActions
+      if (hasFlag(owed, PendingUserActions.InvitationPending, PendingUserActions)) {
+        return h(TStatusBadge, { value: true, type: 'warning', labelKey: 'admin.identity.users.status.invited' })
+      }
+      if (row.isLockedOut) {
+        return h(TStatusBadge, { value: true, type: 'error', labelKey: 'admin.shared.status.locked' })
+      }
+      if (hasFlag(owed, PendingUserActions.ChangePassword, PendingUserActions)) {
+        return h(TStatusBadge, { value: true, type: 'info', labelKey: 'admin.identity.users.status.mustChangePassword' })
+      }
+      return h(TStatusBadge, { value: false, type: 'success', labelKey: 'admin.shared.status.active' })
+    },
   },
   {
     key: 'isEmailConfirmed',

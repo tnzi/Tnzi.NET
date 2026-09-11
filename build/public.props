@@ -7,9 +7,13 @@
     <Company>Tnzi</Company>
     <Copyright>Copyright (c) 2014-2026 Tnzi. All rights reserved.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/tnzi/Tnzi.NET</PackageProjectUrl>
+    <!-- 「Project website」指官网，源码链接由下面的 RepositoryUrl 单独承担。 -->
+    <TnziSiteUrl>https://tnzi.cc</TnziSiteUrl>
+    <PackageProjectUrl>$(TnziSiteUrl)</PackageProjectUrl>
     <PackageReleaseNotes></PackageReleaseNotes>
     <PackageIcon>icon.png</PackageIcon>
+    <!-- README 在 pack 时按下面的 TnziGeneratePackageReadme 生成，每个包一份，只差包名、描述与文档页。 -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/tnzi/Tnzi.NET</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Tnzi</PackageTags>
@@ -38,4 +42,59 @@
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" Visible="false" PackagePath=""/>
   </ItemGroup>
+
+  <!--
+    每个 NuGet 包的 README（nuget.org 包页面上渲染的那份）。
+
+    50 多个包只差三样东西：包名、csproj 里的 <Description>、官网上的文档页；写 50 多份
+    README.md 进仓库，Description 一改就漂移。所以 README 在 pack 时从这一份模板生成，
+    Description 仍是唯一真值源。
+
+    文档页地址按包名推导（Tnzi → /docs/modules/core，Tnzi.AI.Channels → /docs/modules/ai-channels），
+    与官网 website/src/data/modules/*.ts 的 slug 规则一致；没有模块页的包（如 Tnzi.TestBase）
+    在自己的 csproj 里设 <TnziDocsUrl> 覆盖，否则会链到一个 404。
+
+    ★ 模板写成属性而不是外部 .md 文件：Description 里有单引号，经
+      $([System.IO.File]::ReadAllText(...).Replace('...', '$(Description)')) 这种带引号的
+      属性函数会在引号处断开；直接在属性值里引用 $(Description) 没有这个问题。
+    ★ WriteLinesToFile 把 Lines 当 item 列表、按分号切分，Description 里的分号会被切成
+      多行，故先经 [MSBuild]::Escape 把分号转义。
+  -->
+  <Target Name="TnziGeneratePackageReadme" BeforeTargets="_GetPackageFiles;GenerateNuspec" Condition="'$(IsPackable)' != 'false'">
+    <PropertyGroup>
+      <_TnziDocsSlug Condition="'$(PackageId)' == 'Tnzi'">core</_TnziDocsSlug>
+      <_TnziDocsSlug Condition="'$(_TnziDocsSlug)' == '' and $(PackageId.StartsWith('Tnzi.'))">$(PackageId.Substring(5).ToLowerInvariant().Replace('.', '-'))</_TnziDocsSlug>
+      <_TnziDocsUrl Condition="'$(TnziDocsUrl)' != ''">$(TnziDocsUrl)</_TnziDocsUrl>
+      <_TnziDocsUrl Condition="'$(_TnziDocsUrl)' == '' and '$(_TnziDocsSlug)' != ''">$(TnziSiteUrl)/docs/modules/$(_TnziDocsSlug)</_TnziDocsUrl>
+      <_TnziDocsUrl Condition="'$(_TnziDocsUrl)' == ''">$(TnziSiteUrl)/docs</_TnziDocsUrl>
+      <_TnziReadmePath>$(IntermediateOutputPath)README.md</_TnziReadmePath>
+      <_TnziReadmeText># $(PackageId)
+
+$(Description)
+
+Part of [Tnzi.NET](https://tnzi.cc), a modular application framework for .NET 10 built on ASP.NET Core and Entity Framework Core. Functionality is split into composable modules with a managed lifecycle, shared conventions for entities, services, controllers and permissions, and an optional AI layer (agents, tools, RAG, workflows) that plugs into the same module system.
+
+## Install
+
+```shell
+dotnet add package $(PackageId)
+```
+
+Most Tnzi.NET packages are framework modules: reference one from your startup module with `[DependsOn]`, or let `Tnzi.Hosting` pick it up automatically. The documentation page below covers configuration options, endpoints and permission codes.
+
+## Links
+
+- Documentation: $(_TnziDocsUrl)
+- Website: https://tnzi.cc
+- Getting started: https://tnzi.cc/docs/getting-started
+- All packages: https://www.nuget.org/packages?q=Tnzi
+- Source: https://github.com/tnzi/Tnzi.NET
+- Documentation server for AI coding assistants (MCP): https://mcp.tnzi.cc
+</_TnziReadmeText>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_TnziReadmePath)" Lines="$([MSBuild]::Escape($(_TnziReadmeText)))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <None Include="$(_TnziReadmePath)" Pack="true" Visible="false" PackagePath="" />
+    </ItemGroup>
+  </Target>
 </Project>

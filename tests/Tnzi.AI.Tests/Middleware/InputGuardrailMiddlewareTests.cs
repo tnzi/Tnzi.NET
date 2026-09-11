@@ -10,15 +10,6 @@ public class InputGuardrailMiddlewareTests
 
     #region Helper
 
-    private static InputGuardrailMiddleware CreateMiddleware(Mock<GuardrailRunner>? runner = null)
-    {
-        var actualRunner = runner?.Object ?? CreateGuardrailRunner();
-
-        return new InputGuardrailMiddleware(
-            actualRunner,
-            Mock.Of<ILogger<InputGuardrailMiddleware>>());
-    }
-
     private static GuardrailRunner CreateGuardrailRunner(
         IEnumerable<IInputGuardrail>? inputGuardrails = null,
         bool enabled = true)

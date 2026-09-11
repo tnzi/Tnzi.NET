@@ -11,12 +11,20 @@ public static class HttpContextExtensions
     /// </summary>
     /// <param name="request">HTTP 请求</param>
     /// <returns>如果指定的 HTTP 请求是 AJAX 请求, 则为 true；否则为 false</returns>
+    /// <remarks>
+    /// ★★★ <strong>只认请求头，刻意不认同名查询参数。</strong>
+    /// <c>[AjaxOnly]</c> 的全部价值在于<b>跨源的普通导航设不了自定义头</b> ——
+    /// 一个 <c>&lt;a href&gt;</c>、一次表单提交、一个 <c>&lt;img src&gt;</c> 都带不上
+    /// <c>X-Requested-With</c>，而浏览器会为带自定义头的跨源请求先发预检。
+    /// 把同名查询参数也算数，等于把这层保护交还给攻击者：
+    /// 一条 <c>?X-Requested-With=XMLHttpRequest</c> 的链接就绕过去了，
+    /// 而这个特性看起来仍然是生效的。
+    /// </remarks>
     public static bool IsAjaxRequest(this HttpRequest request)
     {
         Check.NotNull(request);
 
-        return string.Equals(request.Query["X-Requested-With"], "XMLHttpRequest", StringComparison.Ordinal)
-            || string.Equals(request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.Ordinal);
+        return string.Equals(request.Headers["X-Requested-With"], "XMLHttpRequest", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -78,16 +86,34 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
-    /// 获取客户端IP地址（支持反向代理场景）
+    /// 获取客户端IP地址（反向代理场景由受信代理声明负责翻译）
     /// </summary>
     /// <param name="request">HTTP 请求</param>
     /// <returns>
     /// 客户端IP地址；当 <see cref="AspNetCoreOptions.CollectClientIpAddress"/> 为 <c>false</c> 时恒为 <c>null</c>。
     /// </returns>
     /// <remarks>
+    /// <para>
     /// 这是全框架采集来源地址的唯一入口，因此隐私开关也判在这里：
     /// 关闭后请求日志、访问日志、审计上下文与限流一次性全部拿不到地址，
     /// 不需要每个消费者各自记得处理。见 <see cref="AspNetCoreOptions.CollectClientIpAddress"/>。
+    /// </para>
+    /// <para>
+    /// ★★★ <strong>刻意<em>不</em>读 <c>X-Forwarded-For</c> / <c>X-Real-IP</c>。</strong>
+    /// 那两个头是<b>调用方可以随便写的</b>：每次请求换一个值，限流分区键
+    /// <c>ip:{地址}:{路径}</c> 就每次落进新桶，于是配置里写着开着的限流对匿名端点一次都拦不住，
+    /// 白名单同理被打穿；而这个方法同时供访问日志、审计、登录日志与连接元数据取址，
+    /// 那些也就跟着可伪造。取最左一项尤其错得彻底 —— 代理链是从右往左可信的，
+    /// 最左那一项恒是调用方自己写下的。
+    /// </para>
+    /// <para>
+    /// 转发头的翻译交给 <c>UseForwardedHeaders</c>：它按
+    /// <see cref="AspNetCoreOptions.TrustedProxies"/> 声明的受信代理从右往左消费、
+    /// 消费过的项从头里移除，并把结果写进 <c>Connection.RemoteIpAddress</c>。
+    /// 于是「谁有资格改写地址」是一次部署声明，而不是每个请求自称的事。
+    /// 没声明受信代理时拿到的是代理自己的地址 —— <em>那是安全的失败方式</em>：
+    /// 限流把所有人算进一个桶（过严），而不是各自一个桶（形同虚设）。
+    /// </para>
     /// </remarks>
     public static string? GetClientIp(this HttpRequest request)
     {
@@ -98,32 +124,7 @@ public static class HttpContextExtensions
             return null;
         }
 
-        // 优先从 X-Forwarded-For 头获取（反向代理场景）
-        var ipAddress = request.Headers["X-Forwarded-For"].FirstOrDefault();
-        
-        // 如果 X-Forwarded-For 存在多个IP（如：client, proxy1, proxy2），取第一个
-        if (!string.IsNullOrEmpty(ipAddress))
-        {
-            var ips = ipAddress.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (ips.Length > 0)
-            {
-                ipAddress = ips[0];
-            }
-        }
-
-        // 如果 X-Forwarded-For 为空，尝试从 X-Real-IP 获取
-        if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = request.Headers["X-Real-IP"].FirstOrDefault();
-        }
-
-        // 最后从 Connection.RemoteIpAddress 获取
-        if (string.IsNullOrEmpty(ipAddress))
-        {
-            ipAddress = request.HttpContext.Connection.RemoteIpAddress?.ToString();
-        }
-
-        return ipAddress;
+        return request.HttpContext.Connection.RemoteIpAddress?.ToString();
     }
 
     /// <summary>
@@ -285,10 +286,10 @@ public static class HttpContextExtensions
             return id;
         }
 
-        // 其次从请求头获取
-        return context.Request.Headers["X-Request-Id"].FirstOrDefault()
-            ?? context.Request.Headers["X-Trace-Id"].FirstOrDefault()
-            ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+        // 其次从请求头获取；与追踪中间件同一道字形校验，不合规当作没给
+        return RequestIdentifier.Accept(context.Request.Headers["X-Request-Id"].FirstOrDefault())
+            ?? RequestIdentifier.Accept(context.Request.Headers["X-Trace-Id"].FirstOrDefault())
+            ?? RequestIdentifier.Accept(context.Request.Headers["X-Correlation-Id"].FirstOrDefault());
     }
 
     /// <summary>

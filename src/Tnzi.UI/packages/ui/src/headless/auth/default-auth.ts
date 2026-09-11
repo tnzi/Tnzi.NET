@@ -12,8 +12,9 @@
  */
 
 import { TwoFactorType } from '@tnzi/core/services/identity'
+import type { PendingActionResultDto } from '@tnzi/core/services/identity'
 import type { TnziClient } from '@tnzi/core/state'
-import type { LoginCallbackHelpers, LoginCallbacks } from './useLoginContext'
+import type { LoginCallbackHelpers, LoginCallbacks, PendingActionOutcome } from './useLoginContext'
 
 /**
  * The wired core runtime the framework drives the default auth flow from. This
@@ -80,7 +81,13 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
   // Remembers the in-flight 2FA challenge between the password step and the
   // code-verify step (the verify/resend payloads carry only the code + a
   // challengeId, not the method/type the backend needs).
-  let pendingTwoFactor: { tempToken: string; type: TwoFactorType } | null = null
+  // userName 一并记下：2FA 之后若还欠着待办，那个挑战的表单要显示「正在为谁改密」，
+  // 而到那一步时原始的登录输入早已不在作用域里。
+  let pendingTwoFactor: { tempToken: string; type: TwoFactorType; userName: string } | null = null
+  // The account a pending-action challenge was issued for. Discharging an action
+  // can itself be answered with a two-factor challenge, and that challenge needs
+  // the account name the shell shows; the completion payloads only carry tokens.
+  let pendingActionAccount = ''
 
   async function establishSession(data: {
     accessToken?: string | null
@@ -117,7 +124,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     const tempToken = details.tempToken ?? ''
     const types = (details.supportedTypes ?? []).map(twoFactorType)
     const first = types[0] ?? TwoFactorType.Totp
-    pendingTwoFactor = { tempToken, type: first }
+    pendingTwoFactor = { tempToken, type: first, userName: account }
     // All enabled methods → the challenge module renders a switcher when >1.
     const methods = [...new Set(types.map(twoFactorMethod))]
     // SMS / email require a code to be delivered; TOTP is read from the app.
@@ -135,6 +142,84 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       maskedAddress,
     })
     return true
+  }
+
+  /**
+   * Turn a 403 `IDENTITY_PENDING_ACTIONS_REQUIRED` envelope into a challenge the
+   * login shell can render, and report whether that happened.
+   *
+   * ★ Without this the backend's challenge surfaces as a plain "login failed"
+   * and the user is stuck holding a password that is actually correct. Same
+   * shape and same reason as `offerTwoFactorChallenge`: one reader, shared by
+   * every login flow, because a hand-copied second one stops understanding the
+   * envelope the day it grows a field.
+   */
+  function offerPendingActionChallenge(
+    res: { succeeded?: boolean; errorCode?: string | null; errorDetails?: unknown },
+    account: string,
+    helpers: LoginCallbackHelpers,
+  ): boolean {
+    if (res.succeeded || res.errorCode !== 'IDENTITY_PENDING_ACTIONS_REQUIRED') return false
+
+    const details = (res.errorDetails ?? {}) as { tempToken?: string; requiredActions?: unknown }
+    const actions = Array.isArray(details.requiredActions)
+      ? details.requiredActions.map((a) => String(a))
+      : []
+
+    // No temp token means the challenge cannot be discharged - fall through to
+    // the normal error path rather than parking the user on a form that will
+    // always be rejected.
+    if (!details.tempToken) return false
+
+    pendingActionAccount = account
+    helpers.setPendingActionRequired({
+      tempToken: details.tempToken,
+      userName: account,
+      requiredActions: actions,
+    })
+    return true
+  }
+
+  /**
+   * One reader for every pending-action response.
+   *
+   * Keeping it in one place matters for the same reason the challenge reader
+   * does: the interesting case is `completed: false`, where there are no tokens
+   * and the caller must NOT treat the absence of an access token as a failure.
+   * A hand-copied second reader gets that backwards and tells the user their
+   * correct code was rejected.
+   */
+  async function settlePendingAction(
+    call: () => Promise<{
+      succeeded?: boolean
+      message?: string | null
+      errorCode?: string | null
+      errorDetails?: unknown
+      data?: PendingActionResultDto | null
+    }>,
+    helpers?: LoginCallbackHelpers,
+  ): Promise<PendingActionOutcome> {
+    const res = await call()
+    // Discharging the last action issues a session, and issuing still runs the
+    // guard chain: an account with another second factor enabled gets a 403
+    // `2FA_REQUIRED` with a fresh temp token here. That is not a failure - the
+    // action is done (password changed, this pending token consumed) and a
+    // retry on the same page can only fail. Hand the challenge to the shell
+    // when we can; without helpers the message is all we have, as before.
+    if (helpers && (await offerTwoFactorChallenge(res, pendingActionAccount, helpers))) {
+      return { completed: false, remainingActions: [], challenged: true }
+    }
+    if (!res.succeeded || !res.data) {
+      throw new Error(res.message ?? 'Could not complete the required action')
+    }
+
+    const { completed, remainingActions, token } = res.data
+    if (completed) {
+      if (!token?.accessToken) throw new Error('Completing the action did not return an access token')
+      await establishSession(token)
+    }
+
+    return { completed, remainingActions: remainingActions ?? [] }
   }
 
   return {
@@ -166,6 +251,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
         throw new Error(res.message ?? 'Captcha verification is required')
       }
       if (await offerTwoFactorChallenge(res, userName, helpers)) return
+      if (offerPendingActionChallenge(res, userName, helpers)) return
       if (!res.succeeded || !res.data?.accessToken) {
         throw new Error(res.message ?? 'Login failed')
       }
@@ -213,6 +299,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       const f = codeChannelFields(account, type)
       const res = await authApi.codeLogin({ email: f.email, phoneNumber: f.phoneNumber, code, type: f.type })
       if (await offerTwoFactorChallenge(res, account, helpers)) return
+      if (offerPendingActionChallenge(res, account, helpers)) return
       const accessToken = res.data?.accessToken
       if (!res.succeeded || !accessToken) {
         throw new Error(res.message ?? 'Verification code login failed')
@@ -256,17 +343,45 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     // Submit the 2FA code from the challenge → verify-2fa → establish the
     // session. The wrapped `after()` (defineAdminApp) then loads permissions
     // and redirects, same as a normal password login.
-    verifyTwoFactor: async ({ challengeId, code, method }) => {
+    verifyTwoFactor: async ({ challengeId, code, method }, helpers) => {
       const tempToken = challengeId ?? pendingTwoFactor?.tempToken ?? ''
       // The user may have switched methods in the UI → honour the payload method.
       const type = typeFromMethod(method) ?? pendingTwoFactor?.type ?? TwoFactorType.Totp
       const res = await authApi.verifyTwoFactor({ tempToken, code, type })
+      // ★ This is the path that most needs it: the backend asks for obligations
+      // AFTER 2FA, so a forced password change surfaces exactly here. Without
+      // handling it the user is told "verification failed" while their code was
+      // in fact correct.
+      if (helpers && offerPendingActionChallenge(res, pendingTwoFactor?.userName ?? '', helpers)) {
+        pendingTwoFactor = null
+        return
+      }
       if (!res.succeeded || !res.data?.accessToken) {
         throw new Error(res.message ?? 'Verification failed')
       }
       pendingTwoFactor = null
       await establishSession(res.data)
     },
+    // Read what is owed, plus the material to discharge it (the TOTP key).
+    describePendingActions: async (tempToken) => {
+      const res = await authApi.describePendingActions(tempToken)
+      return res.succeeded ? (res.data ?? null) : null
+    },
+    // Discharge one action. When everything is settled the backend answers with
+    // tokens directly, so there is no second sign-in - and it still runs the
+    // guard chain, so an account disabled in the meantime is rejected here.
+    // When something else is still owed there are no tokens and the same temp
+    // token stays valid for the next step.
+    completePasswordChange: ({ tempToken, newPassword }, helpers) =>
+      settlePendingAction(() => authApi.completePendingPasswordChange({ tempToken, newPassword }), helpers),
+    completeTotpEnrollment: ({ tempToken, code }, helpers) =>
+      settlePendingAction(() => authApi.completePendingTotpEnrollment({ tempToken, code }), helpers),
+    sendPendingActionEmailCode: async (tempToken) => {
+      const res = await authApi.sendPendingActionEmailCode(tempToken)
+      if (!res.succeeded) throw new Error(res.message ?? 'Could not send the code')
+    },
+    completeEmailConfirmation: ({ tempToken, code }, helpers) =>
+      settlePendingAction(() => authApi.completePendingEmailConfirmation({ tempToken, code }), helpers),
     // (Re)deliver the code for SMS / email - also called when the user switches
     // TO an SMS/email method. TOTP has nothing to send. Returns the masked
     // destination so the challenge prompt can show "Code sent to j***@…".

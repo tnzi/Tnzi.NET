@@ -1,4 +1,4 @@
-
+﻿
 
 namespace Tnzi.Identity.Dtos;
 
@@ -52,6 +52,11 @@ public class UserSessionDto
     /// 会话硬过期时间（到期后不计入并发数、令牌校验/刷新拒绝）。null 表示不过期（遗留会话）。
     /// </summary>
     public DateTime? ExpiresAt { get; set; }
+
+    /// <summary>
+    /// 会话绝对过期时间：建立时定死的生命周期上限，续期不会推动它。null 表示不设上限。
+    /// </summary>
+    public DateTime? AbsoluteExpiresAt { get; set; }
 
     /// <summary>
     /// 是否已撤销

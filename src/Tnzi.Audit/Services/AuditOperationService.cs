@@ -255,7 +255,13 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     public async Task<Result<string>> ExportToCsvAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default)
     {
-        var operations = await GetFilteredOperationsAsync(query, cancellationToken);
+        var fetched = await GetFilteredOperationsAsync(query, cancellationToken);
+        if (!fetched.Succeeded)
+        {
+            return Fail<string>(fetched.Message ?? "Export refused", fetched.Code ?? 400, fetched.ErrorCode);
+        }
+
+        var operations = fetched.Data!;
 
         // 单元格转义统一走核心 CsvBuilder(含公式注入防护,Url/Message 等用户可控字段必须防护)
         var csv = new CsvBuilder();
@@ -277,8 +283,13 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     public async Task<Result<string>> ExportToJsonAsync(AuditOperationQueryDto query, CancellationToken cancellationToken = default)
     {
-        var operations = await GetFilteredOperationsAsync(query, cancellationToken);
-        var dtos = operations.MapToList<AuditOperationDto>();
+        var fetched = await GetFilteredOperationsAsync(query, cancellationToken);
+        if (!fetched.Succeeded)
+        {
+            return Fail<string>(fetched.Message ?? "Export refused", fetched.Code ?? 400, fetched.ErrorCode);
+        }
+
+        var dtos = fetched.Data!.MapToList<AuditOperationDto>();
 
         var jsonOptions = new JsonSerializerOptions
         {
@@ -287,19 +298,43 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         };
 
         var json = JsonSerializer.Serialize(dtos, jsonOptions);
-        LogInformation("Exported {Count} audit operations to JSON", operations.Count);
+        LogInformation("Exported {Count} audit operations to JSON", dtos.Count);
         return Ok<string>(json);
     }
 
     /// <summary>
-    /// Get filtered operations for export (reuses query logic, max 10000 rows for export)
+    /// 取导出用的过滤结果（与列表查询共用 <c>ApplyQueryFilters</c>）。
     /// </summary>
-    private async Task<List<AuditOperation>> GetFilteredOperationsAsync(AuditOperationQueryDto query, CancellationToken cancellationToken)
+    /// <remarks>
+    /// ★超过 <see cref="AuditOptions.ExportMaxRows"/> 时<b>拒绝</b>而不是截断：此前是静默 <c>Take(10000)</c>，
+    /// 产物是一份看起来完整的文件 —— 没有「已截断」标记、没有告警，日志那句「Exported N」只是重复截断后的数字。
+    /// 审计导出是证据类产物，「那段时间的全部记录」与「前 N 条」在合规上不是一回事。
+    /// 多取一行来判超限（<c>Take(max + 1)</c>），比先 COUNT 再取少一趟往返，也没有两次查询之间新写入
+    /// 把最旧的那批挤出上限的竞态；超限时再单独 COUNT 一次只为把总数写进提示。
+    /// </remarks>
+    private async Task<Result<List<AuditOperation>>> GetFilteredOperationsAsync(AuditOperationQueryDto query, CancellationToken cancellationToken)
     {
-        return await ApplyQueryFilters(_operationRepository.AsQueryable(), query)
+        var max = Math.Max(1, Options.ExportMaxRows);
+        var filtered = ApplyQueryFilters(_operationRepository.AsQueryable(), query);
+
+        var rows = await filtered
             .OrderByDescending(o => o.CreationTime)
-            .Take(10000) // Export safety limit
+            .Take(max + 1)
             .ToListAsync(cancellationToken);
+
+        if (rows.Count <= max)
+        {
+            return Ok(rows);
+        }
+
+        var total = await filtered.LongCountAsync(cancellationToken);
+        LogWarning("Audit export refused: the filter matches {Total} operations, above the Audit:ExportMaxRows limit of {Max}.", total, max);
+
+        return Fail<List<AuditOperation>>(
+            $"The export matches {total} audit operations, which exceeds the export limit of {max} rows (Audit:ExportMaxRows). "
+            + "Narrow the filter, for example the date range, and export again; exports are never truncated silently.",
+            400,
+            AuditErrorCodes.AuditExportTooLarge);
     }
 
     /// <summary>

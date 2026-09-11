@@ -773,8 +773,10 @@ async function loadModulesAndFunctions(): Promise<void> {
         try {
           // 退役的码要排除在分配矩阵之外。该端点同时服务权限管理页（那一页**要**看得见
           // 退役行并打标），所以过滤发生在消费侧而不是端点侧。
-          // 后端本来就会拒绝授予退役码（整批 404 "Functions not found"），
-          // 这里过滤是为了不呈现一个必然让整次保存失败的勾选框。
+          // 后端拒绝把退役 / 已禁用的码当作新授权提交（404，文案给出码）；与之配套，
+          // `function-ids` 读端点只返回生效功能的 id，`set` 只覆盖生效范围、保留休眠授权行，
+          // 所以 GET → 勾选 → PUT 的往返对角色身上既有的退役授权是一次空操作。
+          // 这里过滤只是为了不呈现一个点不动、也不该点的勾选框。
           const list = await authBridge.permissions.getByModule(m.id)
           next.set(m.id, list.filter((f) => !f.isRetired))
         } catch {

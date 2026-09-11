@@ -8,6 +8,12 @@ import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type { ReorderRequest } from '../../types/api';
 import type {
+  FileChunkAuditDto,
+  FileChunkAuditQueryDto,
+  FileVersionAuditDto,
+  FileVersionAuditQueryDto,
+} from './types';
+import type {
   FileRecordDto,
   FileQueryDto,
   FileStorageStatisticsDto,
@@ -482,5 +488,25 @@ export function useAdminFileFolderApi(client: HttpClient) {
       client.post<void>(`${ADMIN_FOLDER_BASE}/reorder`, data, {
         params: parentId ? { parentId } : undefined,
       }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Admin storage audit - read-only views over chunk rows and file versions,
+// served by Tnzi.Storage.Workspace. Chunks are owned by the upload lifecycle
+// (initiate / upload / complete / abort) and a version is restored through the
+// user-facing `useStorageApi().restoreVersion`, so neither has a write here.
+// ---------------------------------------------------------------------------
+
+const ADMIN_STORAGE_AUDIT_BASE = '/admin/storage/audit';
+
+export function useAdminStorageAuditApi(client: HttpClient) {
+  return {
+    /** Paged chunk rows, optionally narrowed to one upload session. */
+    getChunks: (query?: FileChunkAuditQueryDto) =>
+      client.get<PagedList<FileChunkAuditDto>>(`${ADMIN_STORAGE_AUDIT_BASE}/chunks`, { params: query }),
+    /** Paged version rows, optionally narrowed to one file and/or current-only. */
+    getVersions: (query?: FileVersionAuditQueryDto) =>
+      client.get<PagedList<FileVersionAuditDto>>(`${ADMIN_STORAGE_AUDIT_BASE}/versions`, { params: query }),
   };
 }

@@ -26,7 +26,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         _settingService = settingService;
         _identityOptions = identityOptions;
         _urlGenerator = urlGenerator;
-        _logger = logger;
+        _logger = Check.NotNull(logger);
     }
 
     public async Task HandleAsync(PasswordResetRequestedEvent @event, CancellationToken cancellationToken = default)

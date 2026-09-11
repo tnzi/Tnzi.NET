@@ -30,17 +30,27 @@ internal static class MicrLineComposer
     /// <summary>
     /// 拼装 MICR 行（返回带 Unicode OCR 符号的字符串）。
     /// </summary>
-    public static string Compose(BankNumberScheme scheme, long checkNumber, string? routingNumber, string? institutionNumber, string? transitNumber, string accountNumber)
+    /// <remarks>
+    /// <paramref name="serialNumber"/> 是<b>已经排好版的</b>串行号（支票号）。刻意收字符串而不是 <c>long</c>：
+    /// 它必须与票面上印的那个号<b>逐字相同</b>，而补零位数是配置项 ——
+    /// 收 <c>long</c> 就等于让这里再决定一次宽度，于是纸面与磁码行各有一份规则，
+    /// 迟早给出两个不同的号，且两处看起来都很正常。宽度由
+    /// <see cref="CheckNumberFormat"/> 一处决定，调用方格式化好了送进来。
+    /// CPA-006 §4.4.4：串行号字段是变长的，所以补几位是排版问题不是编码问题。
+    /// </remarks>
+    public static string Compose(BankNumberScheme scheme, string serialNumber, string? routingNumber, string? institutionNumber, string? transitNumber, string accountNumber)
     {
+        Check.NotNullOrWhiteSpace(serialNumber);
         Check.NotNullOrWhiteSpace(accountNumber);
         var account = accountNumber.Trim();
+        var serial = serialNumber.Trim();
 
         return scheme switch
         {
             BankNumberScheme.UsAba =>
-                $"{OnUs}{checkNumber}{OnUs} {Transit}{(routingNumber ?? string.Empty).Trim()}{Transit} {account}{OnUs}",
+                $"{OnUs}{serial}{OnUs} {Transit}{(routingNumber ?? string.Empty).Trim()}{Transit} {account}{OnUs}",
             BankNumberScheme.CaEft =>
-                $"{OnUs}{checkNumber}{OnUs} {Transit}{(transitNumber ?? string.Empty).Trim()}{Dash}{(institutionNumber ?? string.Empty).Trim()}{Transit} {account}{OnUs}",
+                $"{OnUs}{serial}{OnUs} {Transit}{(transitNumber ?? string.Empty).Trim()}{Dash}{(institutionNumber ?? string.Empty).Trim()}{Transit} {account}{OnUs}",
             _ => throw new BusinessException("Unknown bank number scheme for MICR encoding.")
         };
     }

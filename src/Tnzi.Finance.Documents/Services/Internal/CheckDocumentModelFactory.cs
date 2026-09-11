@@ -19,18 +19,36 @@ internal static class CheckDocumentModelFactory
     /// <summary>预印票纸下预印元素的 CSS class（屏幕可见、打印隐藏但保留占位）。</summary>
     private const string NoPrintClass = "noprint";
 
-    public static CheckDocumentModel Create(CheckRenderRequest request)
+    /// <summary>请求未指定时的不可流通标记文案。</summary>
+    private const string DefaultPreviewLabel = "PREVIEW - NOT NEGOTIABLE";
+
+    /// <param name="request">渲染请求（已含生效的版式 / 票纸 / 偏移 / 模板名）。</param>
+    /// <param name="resolution">
+    /// 已解析的模板与每页张数；null = 按请求自行解析一次（<see cref="BuiltInCheckTemplates.Resolve"/>）。
+    /// 渲染器已经解析过，把结果传进来是为了让"模板名"与"每页张数"在一次渲染里只被决定一次。
+    /// </param>
+    public static CheckDocumentModel Create(CheckRenderRequest request, CheckTemplateResolution? resolution = null)
     {
         Check.NotNull(request);
 
+        var effective = resolution ?? BuiltInCheckTemplates.Resolve(request.TemplateName, request.Layout);
         var isPrePrinted = request.StockType == CheckStockType.PrePrinted;
         // MICR 只在白纸票纸现打；预印票纸上已印，重复打会让磁码读头拒读。
         var showMicr = !isPrePrinted && !string.IsNullOrWhiteSpace(request.AccountNumberPlain);
+        var items = request.Checks.Select(item => CreateItem(request, item, showMicr)).ToList();
 
         return new CheckDocumentModel
         {
+            TemplateName = effective.TemplateName,
+            Layout = request.Layout.ToString(),
+            StockType = request.StockType.ToString(),
+            ChecksPerPage = effective.ChecksPerPage,
             IsPreview = request.IsPreview,
-            PreviewLabel = "PREVIEW - NOT NEGOTIABLE",
+            IsSpecimen = request.IsSpecimen,
+            // 请求可指定文案（样张标 SPECIMEN，不然会被读成某笔真实付款的预览）；默认保持原样。
+            PreviewLabel = string.IsNullOrWhiteSpace(request.PreviewLabel)
+                ? DefaultPreviewLabel
+                : request.PreviewLabel.Trim(),
             IsPrePrinted = isPrePrinted,
             PrePrintedClass = isPrePrinted ? NoPrintClass : string.Empty,
             ShowMicr = showMicr,
@@ -42,24 +60,52 @@ internal static class CheckDocumentModelFactory
                 AccountName = request.AccountName,
                 RoutingLine = BuildRoutingLine(request)
             },
-            Checks = request.Checks.Select(item => CreateItem(request, item, showMicr)).ToList()
+            Checks = items,
+            Pages = Paginate(items, effective.ChecksPerPage)
         };
+    }
+
+    /// <summary>按每页张数切页（最后一页可能不满）。</summary>
+    private static List<CheckDocumentPage> Paginate(List<CheckDocumentItem> items, int checksPerPage)
+    {
+        // 目录给不出正数时按每页一张，绝不产生 0 或负数的步长（那会切出空页或死循环）。
+        var perPage = checksPerPage < 1 ? 1 : checksPerPage;
+
+        var pages = new List<CheckDocumentPage>();
+        for (var i = 0; i < items.Count; i += perPage)
+        {
+            pages.Add(new CheckDocumentPage
+            {
+                Number = pages.Count + 1,
+                Checks = items.GetRange(i, Math.Min(perPage, items.Count - i))
+            });
+        }
+        return pages;
     }
 
     private static CheckDocumentItem CreateItem(CheckRenderRequest request, CheckRenderItem item, bool showMicr)
     {
+        // ★ 票面的号与磁码行的串行号**同一个字符串**：算两次就是给它们两次分道扬镳的机会，
+        // 而纸上写着一个号、读票机读出另一个，两边看起来都完全正常。
+        var checkNumberText = CheckNumberFormat.Format(item.CheckNumber, request.CheckNumberDigits);
+
         var micrLine = showMicr
-            ? MicrLineComposer.Compose(request.Scheme, item.CheckNumber, request.RoutingNumber,
+            ? MicrLineComposer.Compose(request.Scheme, checkNumberText, request.RoutingNumber,
                 request.InstitutionNumber, request.TransitNumber, request.AccountNumberPlain!)
             : null;
 
+        // 先剥掉大写串自带的币种词，两种法定金额行都从同一个"净"文本出发，
+        // 于是无论调用方传进来的串带不带币种词，币种字样都恰好出现一次。
+        var legalWords = StripTrailingCurrencyWord(item.AmountInWords, item.Currency);
+
         return new CheckDocumentItem
         {
-            CheckNumberText = item.CheckNumber.ToString(CultureInfo.InvariantCulture),
+            CheckNumberText = checkNumberText,
             PayeeName = item.PayeeName,
             PayeeAddressLines = item.PayeeAddressLines,
             AmountText = CourtesyAmountPrefix + item.Amount.ToString("N2", CultureInfo.InvariantCulture),
-            AmountInWordsText = FillLegalAmount(StripTrailingCurrencyWord(item.AmountInWords, item.Currency)),
+            AmountInWordsText = FillLegalAmount(legalWords),
+            AmountInWordsWithCurrencyText = FillLegalAmount(AppendCurrencyWord(legalWords, item.Currency)),
             Currency = item.Currency,
             CurrencyLabel = CurrencyLabel(item.Currency),
             IssueDateText = item.IssueDate.ToString("yyyy MM dd", CultureInfo.InvariantCulture),
@@ -68,7 +114,12 @@ internal static class CheckDocumentModelFactory
             PaymentNumber = item.PaymentNumber,
             Reference = item.Reference,
             MicrLine = micrLine,
-            MicrGlyphs = micrLine == null ? null : MicrLineComposer.ToFontGlyphs(micrLine)
+            MicrGlyphs = micrLine == null ? null : MicrLineComposer.ToFontGlyphs(micrLine),
+            // 纯搬运：条数与长度已在银行域按物理空间归一化过，这里再限制一次只会产生
+            // 两个都自称权威的上限。模板只负责把它们排出来。
+            StubLines = item.StubLines
+                .Select(line => new CheckDocumentStubLine { Label = line.Label, Value = line.Value })
+                .ToList()
         };
     }
 
@@ -95,6 +146,30 @@ internal static class CheckDocumentModelFactory
         if (words.Length > label.Length && words.EndsWith(label, StringComparison.OrdinalIgnoreCase))
             words = words[..^label.Length].TrimEnd();
         return words;
+    }
+
+    /// <summary>
+    /// 把币种词并进机打的大写金额（CPA-006 §5.4.1 第 9 条许可的另一种写法）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 给<b>大写金额与数字金额同处一行</b>的版式用（Figure C 开窗信封版）：那一行的右端
+    /// 就是数字金额框，没有位置再单独放一个 "DOLLARS" —— 硬放进去会压掉规范要求的
+    /// 0.64cm 净空，而屏幕预览看不出来，直接印成不合规的票寄出去。
+    /// <para>
+    /// ★ 币种词接在 <b><c>*</c> 填充之前</b>：接在后面等于在币种词与金额之间留出一段可加写的空白，
+    /// 那正是填充要防的事。
+    /// </para>
+    /// <para>
+    /// 用词复用 <see cref="CheckAmountInWords.CurrencySuffix"/>（USD/CAD → <c>Dollars</c>，
+    /// 其余为 ISO 代码），与大写金额自带的收尾词同源。刻意不用
+    /// <see cref="CurrencyLabel"/> 的全大写形态：那是给单独排版的预印元素用的，
+    /// 并进句子里读起来像喊叫。
+    /// </para>
+    /// </remarks>
+    private static string AppendCurrencyWord(string words, string? currency)
+    {
+        var word = CheckAmountInWords.CurrencySuffix(currency);
+        return words.Length == 0 ? word : $"{words} {word}";
     }
 
     /// <summary>法定金额行尾的币种字样（模板单独排版的预印 "DOLLARS"）。</summary>

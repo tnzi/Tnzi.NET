@@ -213,7 +213,7 @@ public class NotificationService : ApplicationService, INotificationService
             : $"Processed {messages.Count} messages successfully";
 
         LogInformation("Batch created and queued {Count} notifications. Errors: {ErrorCount}", messages.Count, errors.Count);
-        var notificationInfos = messages.MapToList<NotificationInfo>();
+        var notificationInfos = RecipientAddressMask.Apply(messages.MapToList<NotificationInfo>());
         return Ok((IEnumerable<NotificationInfo>)notificationInfos, successMessage);
     }
 
@@ -283,7 +283,8 @@ public class NotificationService : ApplicationService, INotificationService
         LogInformation("Notification created: {NotificationId}, Type: {Type}, Recipients: {Count}",
             notification.Id, notification.Type, notification.TotalRecipientCount);
 
-        return Ok(notification.MapTo<NotificationInfo>());
+        // 推送渠道的「地址」是设备令牌，对外一律掩码（见 RecipientAddressMask）。
+        return Ok(RecipientAddressMask.Apply(notification.MapTo<NotificationInfo>()));
     }
 
     public async Task<Result> SendAsync(Guid messageId, CancellationToken cancellationToken = default)
@@ -324,25 +325,45 @@ public class NotificationService : ApplicationService, INotificationService
         await _notificationRepository.UpdateAsync(notification, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        var dueNow = DateTime.UtcNow;
         var pendingRecipients = notification.Recipients
-            .Where(r => r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Failed)
+            .Where(r => r.Status == NotificationStatus.Pending
+                        || r.Status == NotificationStatus.Failed
+                        // 静默时段到期的那些：它们被延后而不是被丢弃，现在轮到它们了。
+                        || (r.Status == NotificationStatus.Scheduled
+                            && r.DeferredUntil != null
+                            && r.DeferredUntil <= dueNow))
             .ToList();
 
-        // 退订与偏好都在发送那一刻判定（见两个 Exclude* 方法）：定时与排队的消息可能
-        // 几天后才发出去，这两件事随时可能发生在这中间。
+        // 退订与偏好都在发送那一刻判定（见 RecipientEligibility）：定时与排队的消息可能
+        // 几天后才发出去，这些事随时可能发生在这中间。
         var candidateCount = pendingRecipients.Count;
-        pendingRecipients = await _eligibility.FilterAsync(notification, pendingRecipients, cancellationToken);
-        // 三道过滤把人全部拦光了（退订 / 关掉了这个渠道 / 到了每小时上限），
-        // 与「本来就没有待发收件人」不是一回事。
-        var everyoneFilteredOut = pendingRecipients.Count == 0 && candidateCount > 0;
+        var (sendable, deferredCount) = await _eligibility.FilterAsync(notification, pendingRecipients, cancellationToken);
+        pendingRecipients = sendable;
+        // 前三道过滤把人全部拦光了（退订 / 关掉了这个渠道 / 到了每小时上限），
+        // 与「本来就没有待发收件人」不是一回事，也与「都被挪到晚点了」不是一回事。
+        var everyoneFilteredOut = pendingRecipients.Count == 0 && candidateCount > deferredCount;
 
         if (pendingRecipients.Count == 0)
         {
-            // ★ 全员被拦时不能报 Sent —— 一封谁也没收到的消息在列表里显示"已发送"，
-            // 正是这轮修复要终结的那种会被当真的谎。原有的"本来就无待发收件人"语义不变。
-            notification.Status = everyoneFilteredOut ? NotificationStatus.Cancelled : NotificationStatus.Sent;
-            notification.SentTime = DateTime.UtcNow;
+            // ★★ 三种「现在没人可发」要分开答，因为它们的下文完全不同：
+            //   ① 有人被延后 → 这条消息还有下文，状态回到 Scheduled 等到期扫描接手，
+            //      **不能**盖 SentTime（那会让一条还没送到的消息显示成已发送）。
+            //   ② 全员被拦   → 到此为止，Cancelled。
+            //   ③ 本来就没有待发收件人 → 维持原有语义，Sent。
+            notification.Status = deferredCount > 0
+                ? NotificationStatus.Scheduled
+                : everyoneFilteredOut ? NotificationStatus.Cancelled : NotificationStatus.Sent;
+
+            if (deferredCount == 0)
+                notification.SentTime = DateTime.UtcNow;
+
             await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            if (deferredCount > 0)
+                return Ok($"{deferredCount} recipient(s) are inside their quiet hours; delivery was deferred, not dropped.");
+
             return everyoneFilteredOut
                 // 具体是哪一道拦下了谁，逐条写在收件人的 FailureReason 里。
                 ? Ok("No recipient was eligible; nothing was sent. See the delivery report for the reason per recipient.")
@@ -352,6 +373,12 @@ public class NotificationService : ApplicationService, INotificationService
         var successCount = 0;
         var failureCount = 0;
         string? lastError = null;
+
+        // ★★ 投递结果必须在循环**内**分片落库（理由见 SendProgress）：整批只在末尾保存一次时，
+        // 库里所有收件人在几十分钟的群发期间一直写着 Pending、消息的 LastModificationTime
+        // 一直停在进循环之前，于是恢复扫描会把这条正在飞的批次判成「卡住」接手过去，
+        // 把已经发出去的那些全部再发一遍。
+        var progress = new SendProgress(_notificationRepository, _unitOfWork, notification);
 
         foreach (var recipient in pendingRecipients)
         {
@@ -380,6 +407,8 @@ public class NotificationService : ApplicationService, INotificationService
             {
                 _sendSemaphore!.Release();
             }
+
+            await progress.RecordAsync(cancellationToken);
         }
 
         // 更新消息统计
@@ -387,7 +416,18 @@ public class NotificationService : ApplicationService, INotificationService
         notification.SuccessCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Sent);
         notification.FailureCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Failed);
 
-        if (notification.FailureCount == 0)
+        // ★★ 还有人排在静默时段之后时，这条消息**没有结束**：状态回到 Scheduled，
+        // 到期扫描会把剩下那些发完。写成 Sent 就是一条「已发送」而实际上还没送到的记录，
+        // 也会让恢复扫描永远看不见它。
+        var stillDeferred = notification.Recipients.Any(
+            r => r.Status == NotificationStatus.Scheduled && r.DeferredUntil != null);
+
+        if (stillDeferred)
+        {
+            notification.Status = NotificationStatus.Scheduled;
+            notification.FailureReason = notification.FailureCount > 0 ? lastError : notification.FailureReason;
+        }
+        else if (notification.FailureCount == 0)
         {
             notification.Status = NotificationStatus.Sent;
             notification.SentTime = DateTime.UtcNow;
@@ -539,13 +579,17 @@ public class NotificationService : ApplicationService, INotificationService
             .Where(r => r.Status == NotificationStatus.Failed)
             .ToList();
 
-        // 重发同样要过退订：上次失败之后对方可能已经退订，而这条路径绕开 SendAsync。
-        failedRecipients = await _eligibility.FilterAsync(notification, failedRecipients, cancellationToken);
+        // 重发同样要过四道过滤：上次失败之后对方可能已经退订，而这条路径绕开 SendAsync。
+        (failedRecipients, _) = await _eligibility.FilterAsync(notification, failedRecipients, cancellationToken);
 
         if (failedRecipients.Count == 0)
             return Ok(0, "No failed recipients to resend to");
 
         var successCount = 0;
+        // 与 SendAsync 同一条理由：整批只在末尾保存一次时，中途崩溃会把已经重发出去的
+        // 那些人退回 Failed，下一次「重发失败项」再发一遍。
+        var progress = new SendProgress(_notificationRepository, _unitOfWork, notification);
+
         foreach (var recipient in failedRecipients)
         {
             recipient.Status = NotificationStatus.Pending;
@@ -574,6 +618,8 @@ public class NotificationService : ApplicationService, INotificationService
             {
                 _sendSemaphore!.Release();
             }
+
+            await progress.RecordAsync(cancellationToken);
         }
 
         // 更新消息统计
@@ -608,11 +654,18 @@ public class NotificationService : ApplicationService, INotificationService
     /// ★ 网关给回的外部消息号超长即<b>丢弃</b>而不截断（理由见
     /// <see cref="NotificationFieldLimits"/>），但这不改变「已经发出去了」这件事 ——
     /// 只是回执再也对不上这一次投递，所以要留一条警告。
+    /// <para>
+    /// ★★ <b><c>FailureReason</c> 必须一并清掉。</b>重试与续发都会在同一行上重跑，
+    /// 上一次的失败说明留在那里，投递报告里就出现一条 <c>Status = Sent</c> 却带着
+    /// 「SMTP 550 拒收」的记录 —— 读的人无从判断这封到底送到没有，而这正是本模块
+    /// 一直在消灭的形态：记下来的结果与实际发生的事不符。
+    /// </para>
     /// </remarks>
     private void RecordSent(Recipient recipient, SendResult sendResult)
     {
         recipient.Status = NotificationStatus.Sent;
         recipient.SentTime = DateTime.UtcNow;
+        recipient.FailureReason = null;
         recipient.ExternalMessageId =
             NotificationFieldLimits.AcceptExternalMessageId(sendResult.ExternalMessageId, out var dropped);
 

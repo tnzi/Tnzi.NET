@@ -7,9 +7,9 @@ public class ConversationConfiguration : EntityTypeConfigurationBase<Conversatio
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
         if (multiTenancyEnabled) builder.HasIndex(c => c.TenantId);
 
-        builder.Property(c => c.Title).HasMaxLength(200);
+        builder.Property(c => c.Title).HasMaxLength(ChatFieldLimits.Title);
         builder.Property(c => c.AvatarFileId).HasMaxLength(256);
-        builder.Property(c => c.Notice).HasMaxLength(2000);
+        builder.Property(c => c.Notice).HasMaxLength(ChatFieldLimits.Notice);
         builder.Property(c => c.DirectKey).HasMaxLength(128);
         builder.Property(c => c.LastMessagePreview).HasMaxLength(200);
 

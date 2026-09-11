@@ -244,6 +244,36 @@ public class AgentResourceGrantWiringTests : IDisposable
     }
 
     // =====================================================================
+    // (c2) 逐工具授权（GrantType.Tool）同样要走到工厂。
+    //      与工具组是两条独立的授权维度：组给整组、逐工具给单个，二者都进
+    //      CreateAgentAsync。此前只有工具组那一半有断言，于是逐工具授权
+    //      即便一个都没传过去，这个测试类也照样全绿。
+    // =====================================================================
+
+    [Fact]
+    public async Task Resolve_PerToolGrants_ReachTheFactory()
+    {
+        var created = await _agentService.CreateAsync(new CreateAgentDto
+        {
+            Name = "per-tool-agent",
+            Provider = "OpenAI",
+            ToolGroups = ["fs"]
+        });
+        var agentId = created.Data!.Id;
+        _context.ChangeTracker.Clear();
+
+        await _grantService.ReconcileToolNamesAsync(agentId, ["read_file", "write_file"]);
+        _context.ChangeTracker.Clear();
+
+        var resolution = await _resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+
+        resolution.IsSuccess.ShouldBeTrue();
+        _capturedToolNames.ShouldBe(new[] { "read_file", "write_file" }, ignoreOrder: true);
+        // 组维度不受影响。
+        _capturedToolGroups.ShouldBe(new[] { "fs" });
+    }
+
+    // =====================================================================
     // (d) Reconcile through UpdateAsync changes resolution
     // =====================================================================
 

@@ -7,6 +7,10 @@ namespace Tnzi.Finance.Documents.Services.Internal;
 /// 打在预印票纸上与实际票面比对，据此调 <c>BankAccount.OffsetXMm/OffsetYMm</c>。
 /// 校准页是诊断产物而非业务单据，故不入模板库（不需要被管理端编辑），在代码里生成。
 /// 尺度与 <c>check-cpa006-ca</c> 模板保持一致：支票本体 88.9mm，MICR 净空带 15.9mm。
+/// ★ 两条红色分区线按<b>支票在页首</b>画。票在中/在下、或每页多张的版式，
+/// 毫米标尺照样可用（偏移是全票面平移，与支票落在哪一段无关），只是分区线不在票的位置上 ——
+/// 刻意不按模板挪：那要求把每份模板的分段坐标在代码里再抄一份，
+/// 而模板是用户可编辑的，抄的那份迟早与真正在渲染的那份对不上。
 /// 内联 CSS 用 <c>$$"""</c> 原始插值串（双花括号才是插值洞，CSS 的单花括号原样输出）。
 /// </remarks>
 internal static class CheckCalibrationSheet
@@ -76,7 +80,7 @@ internal static class CheckCalibrationSheet
               <div>Bank account: {Escape(request.AccountName)}</div>
               <div>Layout: {request.Layout} &middot; Stock: {request.StockType}</div>
               <div>Offset X: {request.OffsetXMm}mm &middot; Offset Y: {request.OffsetYMm}mm</div>
-              <div>Template: {Escape(request.TemplateName ?? CheckTemplates.DefaultName)}</div>
+              <div>Template: {Escape(BuiltInCheckTemplates.Resolve(request.TemplateName, request.Layout).TemplateName)}</div>
               <div>Cheque body ends at {ChequeHeightMm}mm, MICR clear band starts at {micrBandTopMm}mm.</div>
               <div>Print at 100% scale (disable "fit to page"), lay the sheet over the pre-printed
                   stock and adjust the bank account offsets by the measured difference.</div>

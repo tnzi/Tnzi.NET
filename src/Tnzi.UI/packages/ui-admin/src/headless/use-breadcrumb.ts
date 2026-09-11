@@ -28,13 +28,65 @@ export function breadcrumbRouteKey(route: {
 }
 
 /**
+ * How long a held leaf may stay a placeholder before the breadcrumb gives up
+ * and falls back to the route-derived title.
+ *
+ * The hold exists for the gap between "the page declared it owns the leaf" and
+ * "the record arrived". A request that fails, or a record the user has no
+ * access to, never closes that gap - and a placeholder pulsing forever reads as
+ * a broken page, which is worse than the slightly wrong static title it
+ * replaced. Generous on purpose: it is a failsafe, not a loading budget.
+ */
+export const BREADCRUMB_PENDING_TIMEOUT_MS = 8000
+
+/**
+ * Holds the leaf as "loading" until the page's first real value arrives.
+ *
+ * Contributed to the store rather than kept locally because the component that
+ * RENDERS the breadcrumb is the shell header, not the page - the two only meet
+ * through the store.
+ */
+function createPendingHold(store: ReturnType<typeof useAdminBreadcrumbStore>, key: string) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let settled = false
+  function stopTimer(): void {
+    if (timer === null) return
+    clearTimeout(timer)
+    timer = null
+  }
+  return {
+    /** No value yet - render a placeholder instead of the inherited list title. */
+    hold(): void {
+      if (settled || timer !== null) return
+      store.markPending(key)
+      timer = setTimeout(() => {
+        timer = null
+        store.resolvePending(key)
+      }, BREADCRUMB_PENDING_TIMEOUT_MS)
+    },
+    /** A real value arrived (the store clears the hold itself on write). */
+    settle(): void {
+      settled = true
+      stopTimer()
+    },
+    dispose(): void {
+      stopTimer()
+    },
+  }
+}
+
+/**
  * Shared plumbing: resolve the current route key + store once at call time
  * (mirrors `useTabTitle`), run the caller's `apply`, and auto-clear the entry
  * when the calling scope disposes. No-op (swallowed) when there is no router /
  * pinia - e.g. isolated unit tests that mount a page without a shell.
  */
 function useBreadcrumbContribution(
-  apply: (store: ReturnType<typeof useAdminBreadcrumbStore>, key: string) => void,
+  apply: (
+    store: ReturnType<typeof useAdminBreadcrumbStore>,
+    key: string,
+    hold: ReturnType<typeof createPendingHold>,
+  ) => void,
 ): void {
   // The `desktop` layout renders no breadcrumb: there is no single "current
   // page" for the header to describe, so location belongs to each window's own
@@ -50,8 +102,14 @@ function useBreadcrumbContribution(
   } catch {
     return
   }
-  apply(store, key)
-  if (getCurrentScope()) onScopeDispose(() => store.clear(key))
+  const hold = createPendingHold(store, key)
+  apply(store, key, hold)
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      hold.dispose()
+      store.clear(key)
+    })
+  }
 }
 
 /**
@@ -84,11 +142,19 @@ function useBreadcrumbContribution(
  * @param source ref / getter producing the trail; re-runs as the record loads.
  */
 export function useBreadcrumbTrail(source: MaybeRefOrGetter<BreadcrumbItem[] | null | undefined>): void {
-  useBreadcrumbContribution((store, key) => {
+  useBreadcrumbContribution((store, key, hold) => {
     watch(
       () => toValue(source),
       (items) => {
-        if (items && items.length) store.setTrail(key, items)
+        if (items && items.length) {
+          hold.settle()
+          store.setTrail(key, items)
+        } else {
+          // Empty is not "nothing to say" - it is "not yet". Holding the leaf
+          // keeps the breadcrumb from spending the load showing the list route's
+          // own title as if it were this record's name.
+          hold.hold()
+        }
       },
       { immediate: true, deep: true },
     )
@@ -109,11 +175,16 @@ export function useBreadcrumbTrail(source: MaybeRefOrGetter<BreadcrumbItem[] | n
  * @param source ref / getter producing the leaf label; falsy values are ignored.
  */
 export function useBreadcrumbLabel(source: MaybeRefOrGetter<string | null | undefined>): void {
-  useBreadcrumbContribution((store, key) => {
+  useBreadcrumbContribution((store, key, hold) => {
     watch(
       () => toValue(source),
       (label) => {
-        if (label) store.setLeafLabel(key, label)
+        if (label) {
+          hold.settle()
+          store.setLeafLabel(key, label)
+        } else {
+          hold.hold()
+        }
       },
       { immediate: true },
     )

@@ -51,6 +51,9 @@ export default defineConfig({
         i18n: resolve(import.meta.dirname, 'src/i18n/index.ts'),
         locales: resolve(import.meta.dirname, 'src/locales/index.ts'),
         utils: resolve(import.meta.dirname, 'src/utils/index.ts'),
+        // Generated icon manifest - see packages/ui/vite.config.ts for why it is
+        // a separate entry.
+        'icons/index': resolve(import.meta.dirname, 'src/icons/index.ts'),
         // Everything that touches @vue-flow/core. A dedicated entry keeps the
         // heavy dep reachable only through `@tnzi/ui-ai/workflow`.
         workflow: resolve(import.meta.dirname, 'src/workflow/index.ts'),

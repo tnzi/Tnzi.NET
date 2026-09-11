@@ -236,6 +236,57 @@ public class DockerSandboxProviderTests
         body.ShouldContain("/home/user/workspace:/workspace");
     }
 
+    [Fact]
+    public async Task CreateAsync_StartFails_RemovesTheContainerItJustCreated()
+    {
+        // ★ 容器名按 threadId 派生（tnzi-sandbox-{threadId}）而 Docker 的容器名全局唯一：
+        // 创建成功但启动失败时留下的死容器，会让这个 thread 之后每一次创建都撞 409 Conflict —— 
+        // 而它自己一次都没成功跑起来过。
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.InternalServerError, "boom");
+        handler.SetupResponse("/containers/abc123def456?force=true", HttpStatusCode.NoContent, "");
+
+        var provider = CreateProvider(handler);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(CreateSandboxOptions()));
+
+        handler.RequestLog.ShouldContain(r =>
+            r.Method == HttpMethod.Delete && r.Url.Contains("/containers/abc123def456"));
+    }
+
+    [Fact]
+    public async Task CreateAsync_CreateItselfFails_DoesNotAttemptARemoval()
+    {
+        // 对照组：容器根本没建出来时不该去删一个不存在的 id。
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.InternalServerError, "nope");
+
+        var provider = CreateProvider(handler);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(CreateSandboxOptions()));
+
+        handler.RequestLog.ShouldNotContain(r => r.Method == HttpMethod.Delete);
+    }
+
+    [Fact]
+    public async Task CreateAsync_StartFails_ReleasesTheConcurrencySlot()
+    {
+        // 槽位不释放的话，几次失败的创建就把 MaxContainers 耗光，之后连成功的创建也起不来。
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.InternalServerError, "boom");
+        handler.SetupResponse("/containers/abc123def456?force=true", HttpStatusCode.NoContent, "");
+
+        var provider = CreateProvider(handler, opts => opts.Docker.MaxContainers = 1);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(CreateSandboxOptions()));
+
+        // 第二次仍然拿得到槽位（否则会在 30 秒等待后抛"达到并发上限"）。
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(CreateSandboxOptions()));
+        handler.RequestLog.Count(r => r.Url.Contains("/containers/create")).ShouldBe(2);
+    }
+
     #region Helpers
 
     private static DockerSandboxProvider CreateProvider(MockDockerHandler? handler = null,

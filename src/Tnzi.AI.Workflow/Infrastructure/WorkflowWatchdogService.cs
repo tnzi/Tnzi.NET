@@ -39,21 +39,24 @@ public class WorkflowWatchdogService
         var runningCutoff = now - _options.RunningTimeout;
         var waitingCutoff = now - _options.WaitingTimeout;
 
-        // 查询超时的 Running 和等待状态执行实例
-        var timedOut = await _repository.ToListAsync(e =>
-            (e.Status == WorkflowExecutionStatus.Running && e.UpdatedTime < runningCutoff) ||
-            ((e.Status == WorkflowExecutionStatus.AwaitingApproval || e.Status == WorkflowExecutionStatus.AwaitingInput)
-             && e.UpdatedTime < waitingCutoff),
-            cancellationToken);
+        // 查询超时的 Running 和等待状态执行实例。
+        // ★ Take 必须在查询侧：此前是先 ToListAsync 拉回全部超时行、再在内存里 Take，
+        // 于是 MaxBatchSize 限制的是"处理多少条"而不是"拉回多少条" —— 积压一多，
+        // 每次扫描都要把整个积压读进内存，而这正是它本该防住的情形。
+        // 最旧的先处理（稳定顺序 + 逐次排空积压）。
+        var batch = await _repository.AsQueryable()
+            .Where(e =>
+                (e.Status == WorkflowExecutionStatus.Running && e.UpdatedTime < runningCutoff) ||
+                ((e.Status == WorkflowExecutionStatus.AwaitingApproval || e.Status == WorkflowExecutionStatus.AwaitingInput)
+                 && e.UpdatedTime < waitingCutoff))
+            .OrderBy(e => e.UpdatedTime)
+            .Take(_options.MaxBatchSize)
+            .ToListAsync(cancellationToken);
 
-        if (timedOut.Count == 0)
+        if (batch.Count == 0)
         {
             return 0;
         }
-
-        var batch = timedOut.Count <= _options.MaxBatchSize
-            ? timedOut
-            : timedOut.Take(_options.MaxBatchSize).ToList();
 
         var markedCount = 0;
         foreach (var execution in batch)
@@ -87,7 +90,7 @@ public class WorkflowWatchdogService
         _logger.LogInformation(
             "Workflow watchdog scan complete: {Count}/{Total} execution(s) marked as timed out.",
             markedCount,
-            timedOut.Count);
+            batch.Count);
 
         return markedCount;
     }

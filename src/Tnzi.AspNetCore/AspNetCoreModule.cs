@@ -326,15 +326,13 @@ public class AspNetCoreModule : TnziFrameworkModule
             }
 
             // 0. ForwardedHeaders 中间件（最外层，处理代理服务器转发的协议、主机和IP）
-            // 必须在异常处理之前，确保所有后续中间件都能获取正确的客户端 IP 和协议
+            // 必须在异常处理之前，确保所有后续中间件都能获取正确的客户端 IP 和协议。
+            // ★ 这是全框架**唯一**采信转发头的地方：它按 AspNetCore:TrustedProxies 声明的
+            //   受信代理从右往左消费，结果写进 Connection.RemoteIpAddress，
+            //   而 GetClientIp() 只读那个结果（见 HttpContextExtensions.GetClientIp）。
             if (aspNetCoreOptions.EnableForwardedHeaders)
             {
-                app.UseForwardedHeaders(new ForwardedHeadersOptions
-                {
-                    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
-                                     Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
-                                     Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost
-                });
+                app.UseForwardedHeaders(ForwardedHeadersOptionsBuilder.Build(aspNetCoreOptions));
 
                 // 处理 X-Forwarded-Prefix 并设置为 PathBase
                 app.Use((context, next) =>
@@ -508,7 +506,6 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 获取配置
         var aspNetCoreOptions = app.Services.GetService<IOptions<AspNetCoreOptions>>()?.Value ?? new AspNetCoreOptions();
         var apiPathPrefix = aspNetCoreOptions.ApiPathPrefix ?? "/api";
-        var pathBase = aspNetCoreOptions.PathBase ?? "";
 
         // 配置默认首页（欢迎页）。
         // 自带前端的宿主须关掉它：欢迎页是一个已匹配的端点，而静态文件中间件在
@@ -516,12 +513,14 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 见 AspNetCoreOptions.EnableWelcomePage。
         if (aspNetCoreOptions.EnableWelcomePage)
         {
-            // 收集欢迎页面模板变量
-            var templateVars = BuildWelcomePageTemplateVars(app.Services, pathBase, apiPathPrefix);
+            // 与请求无关的部分只算一次；路径相关的部分必须逐请求算，
+            // 见 BuildWelcomePageRequestVars。
+            var staticVars = BuildWelcomePageStaticVars(app.Services, apiPathPrefix);
 
-            app.MapGet("/", () =>
+            app.MapGet("/", (HttpContext httpContext) =>
             {
-                var html = GetWelcomePageHtml(templateVars);
+                var requestVars = BuildWelcomePageRequestVars(httpContext, apiPathPrefix);
+                var html = GetWelcomePageHtml(staticVars, requestVars);
                 return Microsoft.AspNetCore.Http.Results.Content(html, "text/html; charset=utf-8");
             });
         }
@@ -563,15 +562,11 @@ public class AspNetCoreModule : TnziFrameworkModule
     }
 
     /// <summary>
-    /// 构建欢迎页面的模板变量
+    /// 构建欢迎页面中与请求无关的模板变量（进程内只算一次）。
     /// </summary>
-    private static Dictionary<string, string> BuildWelcomePageTemplateVars(
-        IServiceProvider services, string pathBase, string apiPathPrefix)
+    private static Dictionary<string, string> BuildWelcomePageStaticVars(
+        IServiceProvider services, string apiPathPrefix)
     {
-        // 计算外部客户端的有效 API 路径
-        var effectiveApiPath = (pathBase.TrimEnd('/') + "/" + apiPathPrefix.TrimStart('/')).TrimEnd('/');
-        if (string.IsNullOrEmpty(effectiveApiPath)) effectiveApiPath = "/";
-
         // 获取已加载模块数量
         var tnziApp = services.GetService<ITnziApplication>();
         var moduleCount = tnziApp?.Modules.Count.ToString() ?? "-";
@@ -584,29 +579,76 @@ public class AspNetCoreModule : TnziFrameworkModule
         var version = typeof(AspNetCoreModule).Assembly.GetName().Version;
         var versionStr = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.1.0";
 
-        // Swagger JSON 路径（相对路径）
-        var swaggerPath = "swagger/v1/swagger.json";
-
         return new Dictionary<string, string>
         {
-            ["PATH_BASE"] = string.IsNullOrEmpty(pathBase) ? "(none)" : pathBase,
             ["API_PATH_PREFIX"] = string.IsNullOrEmpty(apiPathPrefix) ? "(none)" : apiPathPrefix,
-            ["EFFECTIVE_API_PATH"] = effectiveApiPath,
             ["MODULE_COUNT"] = moduleCount,
             ["DB_PROVIDER"] = dbProvider,
             ["VERSION"] = versionStr,
-            ["SWAGGER_PATH"] = swaggerPath,
         };
     }
 
     /// <summary>
-    /// 生成欢迎页面 HTML（从嵌入资源加载，Tnzi.NET 官网风格）
-    /// 使用缓存避免每次请求都读取嵌入资源
+    /// 构建欢迎页面中随请求而变的模板变量 —— 页面上的每个链接，以及它自报的路由信息。
+    ///
+    /// 链接必须是带 PathBase 的<b>绝对路径</b>：欢迎页挂在 "/" 上，宿主一旦位于子路径下，
+    /// 浏览器地址栏是 "https://host/api" 这样<b>没有尾斜杠</b>的形式，而相对地址
+    /// "swagger/" 按 RFC 3986 会丢掉最后一段、解析成 "https://host/swagger/" —— 落在应用
+    /// 之外，必然 404。
+    ///
+    /// PathBase 只能从 <paramref name="httpContext"/> 取，<b>不能</b>取配置里的
+    /// AspNetCore:PathBase：子路径有三个来源（配置的 UsePathBase、ANCM 的 IIS 子应用、
+    /// 反向代理的 X-Forwarded-Prefix），后两者在配置里是空的，而三者最终都汇聚到
+    /// Request.PathBase。同理，页面自报的 PathBase / Effective API Path 也必须是这个运行时
+    /// 真值：报配置值会让一个确实挂在 "/api" 之下的部署在页面上显示 "(none)"，把排障的人
+    /// 直接引开。
     /// </summary>
-    private static string GetWelcomePageHtml(Dictionary<string, string> templateVars)
+    private static Dictionary<string, string> BuildWelcomePageRequestVars(
+        HttpContext httpContext, string apiPathPrefix)
+    {
+        var pathBase = httpContext.Request.PathBase.Value?.TrimEnd('/') ?? string.Empty;
+
+        // 计算外部客户端的有效 API 路径
+        var effectiveApiPath = (pathBase + "/" + apiPathPrefix.TrimStart('/')).TrimEnd('/');
+        if (string.IsNullOrEmpty(effectiveApiPath)) effectiveApiPath = "/";
+
+        return new Dictionary<string, string>
+        {
+            ["PATH_BASE"] = string.IsNullOrEmpty(pathBase) ? "(none)" : pathBase,
+            ["EFFECTIVE_API_PATH"] = effectiveApiPath,
+            ["SWAGGER_UI_PATH"] = $"{pathBase}/swagger/",
+            ["SWAGGER_JSON_PATH"] = $"{pathBase}/swagger/v1/swagger.json",
+            ["HEALTH_PATH"] = $"{pathBase}/health",
+        };
+    }
+
+    /// <summary>
+    /// 生成欢迎页面 HTML（从嵌入资源加载，Tnzi.NET 官网风格）。
+    ///
+    /// 只有与请求无关的部分进缓存：<paramref name="requestVars"/> 里的 PathBase 可以随
+    /// 请求变化（反向代理的 X-Forwarded-Prefix 是调用方可控的头），把它算进缓存键会让一串
+    /// 变化的头反复击穿缓存、每次都重读嵌入资源。逐请求要做的只是几次字符串替换。
+    /// </summary>
+    private static string GetWelcomePageHtml(
+        Dictionary<string, string> staticVars, Dictionary<string, string> requestVars)
+    {
+        var html = GetWelcomePageTemplate(staticVars);
+
+        foreach (var (key, value) in requestVars)
+        {
+            html = html.Replace($"{{{{{key}}}}}", System.Net.WebUtility.HtmlEncode(value));
+        }
+
+        return html;
+    }
+
+    /// <summary>
+    /// 读取嵌入的欢迎页模板并替换掉与请求无关的占位符，结果按其取值缓存。
+    /// </summary>
+    private static string GetWelcomePageTemplate(Dictionary<string, string> staticVars)
     {
         // 生成缓存键
-        var cacheKey = string.Join("|", templateVars.Values);
+        var cacheKey = string.Join("|", staticVars.Values);
 
         // 如果缓存有效，直接返回
         if (_cachedWelcomePageHtml != null && _cachedWelcomePageCacheKey == cacheKey)
@@ -638,7 +680,7 @@ public class AspNetCoreModule : TnziFrameworkModule
             var html = reader.ReadToEnd();
 
             // 替换所有模板占位符（HTML 编码防止 XSS）
-            foreach (var (key, value) in templateVars)
+            foreach (var (key, value) in staticVars)
             {
                 html = html.Replace($"{{{{{key}}}}}", System.Net.WebUtility.HtmlEncode(value));
             }

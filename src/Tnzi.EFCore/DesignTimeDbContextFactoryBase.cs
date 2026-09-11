@@ -39,6 +39,16 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
             .AddEnvironmentVariables()
             .Build();
 
+        // ★★★ 多租户开关必须在建模之前就位。DbContext 从**可选**构造参数
+        // IOptions<MultiTenancyOptions> 取它，而下面的 CreateDbContextInstance 只反射
+        // (DbContextOptions, ICurrentUser) 与 (DbContextOptions) —— 那个参数永远传不进去，
+        // 于是设计期恒 false。而全框架一百二十多个实体配置按这个开关分支，分的往往是
+        // **索引的列集**：设计期恒 false 让多租户应用生成的迁移建出不含 TenantId 的唯一索引
+        // （跨租户不变量从未进过数据库），同时模型与快照永久不一致、再加多少条迁移都消不掉。
+        // 见 DesignTimeMultiTenancy。
+        DesignTimeMultiTenancy.Enabled =
+            configuration.GetSection("MultiTenancy").Get<MultiTenancyOptions>()?.Enabled ?? false;
+
         // Read from Database configuration
         var databaseOptions = configuration.GetSection("Database").Get<DatabaseOptions>();
 

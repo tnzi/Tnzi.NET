@@ -6,9 +6,6 @@ namespace Tnzi.Audit.Middleware;
 /// </summary>
 public class AuditMiddleware
 {
-    /// <summary>AuditOperation.RequestBody 列的长度上限（与 AuditOperationConfiguration 保持一致）。</summary>
-    private const int RequestBodyColumnMaxLength = 8192;
-
     private readonly RequestDelegate _next;
     private readonly ILogger<AuditMiddleware> _logger;
     private readonly IAuditSender _auditSender;
@@ -128,11 +125,9 @@ public class AuditMiddleware
             }
 
             // 按存储列宽二次截断：MaxRequestBodySize 允许配到 64KB，而 RequestBody 列是
-            // 8192（见 AuditOperationConfiguration）——不截断会让整批审计 INSERT 失败，
+            // 8192（见 AuditOperationColumns）——不截断会让整批审计 INSERT 失败，
             // 后台服务只记一条错误日志，本批审计全部丢失。
-            return body.Length <= RequestBodyColumnMaxLength
-                ? body
-                : body[..RequestBodyColumnMaxLength];
+            return AuditOperationColumns.Fit(body, AuditOperationColumns.RequestBodyMaxLength);
         }
         catch (Exception ex)
         {
@@ -182,7 +177,8 @@ public class AuditMiddleware
         // 查询端不再对新行做字符串猜测
         var (isWrite, permissionName) = AuditOperationClassifier.Classify(context, functionName);
 
-        // 获取请求参数（受配置控制）
+        // 获取请求参数（受配置控制）。★ 两处都要脱敏：表单字段按 SensitiveFields（它们就是请求体字段），
+        // 查询参数按 SensitiveQueryKeys —— 此前整个 Query 原样序列化，?token= / ?sig= 的原值随之入表。
         string? requestParameters = null;
         if (Options.EnableRequestParameters)
         {
@@ -190,12 +186,16 @@ public class AuditMiddleware
             {
                 if (context.Request.HasFormContentType && context.Request.Form.Count > 0)
                 {
-                    var formDict = context.Request.Form.ToDictionary(f => f.Key, f => f.Value.ToString());
+                    var formDict = context.Request.Form.ToDictionary(
+                        f => f.Key,
+                        f => Options.SensitiveFields.Contains(f.Key) ? RequestBodyRedactor.RedactedValue : f.Value.ToString());
                     requestParameters = JsonSerializer.Serialize(formDict);
                 }
                 else if (context.Request.Query.Count > 0)
                 {
-                    var queryDict = context.Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
+                    var queryDict = context.Request.Query.ToDictionary(
+                        q => q.Key,
+                        q => QueryStringRedactor.IsSensitive(q.Key, Options.SensitiveQueryKeys) ? QueryStringRedactor.RedactedValue : q.Value.ToString());
                     requestParameters = JsonSerializer.Serialize(queryDict);
                 }
             }
@@ -205,28 +205,43 @@ public class AuditMiddleware
             }
         }
 
+        // Url 列存 Path + QueryString。查询串里的凭据（access_token / sig / token / enrollmentToken /
+        // password）按 SensitiveQueryKeys 换成掩码再存：路径排除盖不住这些端点，它们的请求本身正是要审计的操作。
+        var queryString = QueryStringRedactor.Redact(
+            context.Request.Query, context.Request.QueryString.Value, Options.SensitiveQueryKeys);
+
+        // ★ 每个来自请求（或由请求派生）的字符串都按列宽裁一刀。整批审计用一条 InsertMany
+        // 落库，任何一行超列宽，SQL Server / PostgreSQL 会拒绝整条 INSERT，后台服务记一行
+        // 日志后整批丢弃 —— 一个匿名客户端发一个 600 字节的 User-Agent 就能连带抹掉同一时间窗
+        // 里其他所有人的审计记录。RequestBody 早已这样处理（见 CaptureRequestBodyAsync），
+        // 这里把同一条推理补到其余用户可控字段上。SQLite 不检查长度，测试全绿证明不了这件事。
         var auditOperation = new AuditOperation
         {
-            FunctionName = functionName,
-            PermissionName = permissionName,
+            FunctionName = AuditOperationColumns.Fit(functionName, AuditOperationColumns.FunctionNameMaxLength)!,
+            PermissionName = AuditOperationColumns.Fit(permissionName, AuditOperationColumns.PermissionNameMaxLength),
             IsWrite = isWrite,
             UserId = currentUser.Id,
-            UserName = currentUser.UserName,
+            UserName = AuditOperationColumns.Fit(currentUser.UserName, AuditOperationColumns.UserNameMaxLength),
             NickName = null, // ICurrentUser 不包含 NickName，避免错误赋值 UserName
             // 走 GetClientIp 而不是直接读 Connection：它支持反向代理，
             // 且是隐私开关 AspNetCoreOptions.CollectClientIpAddress 的唯一判定点——
             // 关闭采集的部署，审计操作日志同样不该留下地址。
-            Ip = context.Request.GetClientIp(),
-            OperatingSystem = operatingSystem,
-            Browser = browser,
-            UserAgent = userAgent,
+            Ip = AuditOperationColumns.Fit(context.Request.GetClientIp(), AuditOperationColumns.IpMaxLength),
+            OperatingSystem = AuditOperationColumns.Fit(operatingSystem, AuditOperationColumns.OperatingSystemMaxLength),
+            Browser = AuditOperationColumns.Fit(browser, AuditOperationColumns.BrowserMaxLength),
+            UserAgent = AuditOperationColumns.Fit(userAgent, AuditOperationColumns.UserAgentMaxLength),
             ResultType = exception == null && context.Response.StatusCode < 400
                 ? AuditResultType.Success
                 : AuditResultType.Failed,
-            Message = exception?.Message ?? (context.Response.StatusCode >= 400 ? "Request failed" : "Success"),
+            // Exception 列没有上限，完整消息仍在那里；Message 只是摘要。
+            Message = AuditOperationColumns.Fit(
+                exception?.Message ?? (context.Response.StatusCode >= 400 ? "Request failed" : "Success"),
+                AuditOperationColumns.MessageMaxLength),
             Elapsed = duration,
-            HttpMethod = context.Request.Method,
-            Url = context.Request.Path + context.Request.QueryString,
+            HttpMethod = AuditOperationColumns.Fit(context.Request.Method, AuditOperationColumns.HttpMethodMaxLength),
+            Url = AuditOperationColumns.Fit(
+                context.Request.Path + queryString,
+                AuditOperationColumns.UrlMaxLength),
             HttpStatusCode = context.Response.StatusCode,
             Exception = exception?.ToString(),
             RequestParameters = requestParameters,

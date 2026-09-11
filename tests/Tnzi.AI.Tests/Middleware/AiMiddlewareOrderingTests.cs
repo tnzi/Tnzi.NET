@@ -40,13 +40,13 @@ public class AiMiddlewareOrderingTests
     }
 
     /// <summary>
-    /// 验证 23 个中间件槽位全部定义
+    /// 验证 22 个中间件槽位全部定义
     /// </summary>
     [Fact]
-    public void OrderConstants_Has23Slots()
+    public void OrderConstants_Has22Slots()
     {
         var count = GetOrderFields().Count;
-        count.ShouldBe(23);
+        count.ShouldBe(22);
     }
 
     /// <summary>

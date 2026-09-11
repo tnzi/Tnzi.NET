@@ -14,6 +14,12 @@ public class BankCheckConfiguration : EntityTypeConfigurationBase<BankCheck, Gui
         builder.Property(e => e.VoidReason).HasMaxLength(256);
         builder.Property(e => e.Amount).HasMoneyPrecision();
 
+        // 打印设置快照：长度与精度对齐它们的来源列（BankAccount.CheckTemplateName / OffsetXMm / OffsetYMm），
+        // 否则同一个值在档案上存得下、抄进快照时被截断。
+        builder.Property(e => e.PrintTemplateName).HasMaxLength(200);
+        builder.Property(e => e.PrintOffsetXMm).HasMoneyPrecision();
+        builder.Property(e => e.PrintOffsetYMm).HasMoneyPrecision();
+
         // 同一银行账户内支票号唯一（占号留痕；显式号撞号由唯一索引兜底翻译 409）
         var notDeleted = IndexFilterFactory.GetIsDeletedFalse();
         if (multiTenancyEnabled)

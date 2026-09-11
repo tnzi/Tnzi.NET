@@ -121,6 +121,7 @@ public class PaymentSubscriptionsModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ConvertDueTrials>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ResumeDuePausedSubscriptions>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ExpireOverdueSubscriptions>();
+        context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ApplyDuePlanChanges>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.SendRenewalReminders>();
 
         // 订阅域自己的 6 个日志型事件处理器。

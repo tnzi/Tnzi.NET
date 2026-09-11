@@ -60,11 +60,51 @@ public class FeatureDefinitionDto
     public string Source { get; set; } = "Database";
 
     /// <summary>
-    /// True for code-defined definitions that ship with the application
-    /// binaries. Admin UI hides Edit/Delete for these rows; values can still
-    /// be overridden via the FeatureValue endpoints (DB always wins).
+    /// True for code-defined definitions that ship with the application binaries.
+    /// Admin UI hides Edit/Delete for these rows. They also cannot carry feature
+    /// values yet: <c>FeatureValue</c> references the definition by database id and a
+    /// code-defined definition has none (its <see cref="Id"/> is <c>Guid.Empty</c>), so the
+    /// value endpoints answer 400 <c>FEATURE_DEFINITION_NOT_OVERRIDABLE</c> for them.
+    /// To make a code-defined feature overridable, create a database definition with the
+    /// same name - the database row takes precedence in the merged snapshot.
     /// </summary>
     public bool IsReadOnly { get; set; }
+}
+
+// ==================== Feature Value Provider DTOs ====================
+
+/// <summary>
+/// A registered feature value provider (a "scope" values can be written to),
+/// as reported by <c>GET admin/feature-values/providers</c>.
+/// </summary>
+public class FeatureValueProviderDto
+{
+    /// <summary>
+    /// Canonical provider name - the exact string to send as <c>ProviderName</c>.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Evaluation priority; higher is consulted first at runtime.
+    /// </summary>
+    public int Priority { get; set; }
+
+    /// <summary>
+    /// Whether values under this provider are keyed (per tenant, per edition, ...).
+    /// Keyed providers require <c>ProviderKey</c>; keyless ones reject it.
+    /// </summary>
+    public bool RequiresKey { get; set; }
+
+    /// <summary>
+    /// Whether the provider can evaluate anything in this deployment. Writes to an inactive
+    /// provider are refused; its existing rows stay readable for cleanup.
+    /// </summary>
+    public bool IsActive { get; set; }
+
+    /// <summary>
+    /// Why the provider is inactive; null when active.
+    /// </summary>
+    public string? InactiveReason { get; set; }
 }
 
 /// <summary>
@@ -317,17 +357,41 @@ public class FeatureValueWithDefinitionDto
     public string? DefaultValue { get; set; }
 
     /// <summary>
-    /// Effective value (from provider or default)
+    /// The value the runtime resolves for this feature in the requested scope: the scope's
+    /// own value, else the value of a lower-priority keyless provider (Global), else the
+    /// definition default. This mirrors <c>IFeatureChecker</c>'s provider chain rather than
+    /// the requested row alone, so what the admin sees is what the runtime answers.
     /// </summary>
     public string EffectiveValue { get; set; } = string.Empty;
 
     /// <summary>
-    /// Whether the value is explicitly set (vs. using default)
+    /// Whether the requested scope holds its own value (as opposed to inheriting or defaulting)
     /// </summary>
     public bool IsExplicitlySet { get; set; }
+
+    /// <summary>
+    /// Where <see cref="EffectiveValue"/> comes from.
+    /// </summary>
+    public FeatureValueSource EffectiveSource { get; set; }
+
+    /// <summary>
+    /// Name of the provider whose value is effective; null when the default applies.
+    /// </summary>
+    public string? EffectiveProvider { get; set; }
 
     /// <summary>
     /// Whether the feature is enabled
     /// </summary>
     public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// "Database" or "Code" - same meaning as <see cref="FeatureDefinitionDto.Source"/>.
+    /// </summary>
+    public string Source { get; set; } = "Database";
+
+    /// <summary>
+    /// False for code-defined definitions, which have no database id for a
+    /// <c>FeatureValue</c> to reference; the UI must not offer to set a value on them.
+    /// </summary>
+    public bool CanOverride { get; set; } = true;
 }

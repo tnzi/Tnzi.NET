@@ -12,7 +12,6 @@ public class SkillRegistry : ISkillRegistry
 {
     private readonly FileSystemSkillStore _fileStore;
     private readonly ISkillSearchService _searchService;
-    private readonly ILogger<SkillRegistry> _logger;
     private readonly DatabaseSkillStore? _dbStore;
     private readonly ICurrentUser? _currentUser;
     private readonly ICurrentTenant? _currentTenant;
@@ -23,14 +22,12 @@ public class SkillRegistry : ISkillRegistry
     public SkillRegistry(
         FileSystemSkillStore fileStore,
         ISkillSearchService searchService,
-        ILogger<SkillRegistry> logger,
         DatabaseSkillStore? dbStore = null,
         ICurrentUser? currentUser = null,
         ICurrentTenant? currentTenant = null)
     {
         _fileStore = Check.NotNull(fileStore);
         _searchService = Check.NotNull(searchService);
-        _logger = Check.NotNull(logger);
         _dbStore = dbStore;
         _currentUser = currentUser;
         _currentTenant = currentTenant;

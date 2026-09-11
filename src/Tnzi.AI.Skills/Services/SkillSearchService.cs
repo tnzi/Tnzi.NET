@@ -28,6 +28,10 @@ public class SkillSearchService : ISkillSearchService
     // 嵌入缓存 key 前缀
     private const string EmbeddingCachePrefix = "skill_embedding:";
 
+    // 查询串嵌入缓存 key 前缀（按 SHA-256 摘要索引 —— 查询串是任意用户输入，
+    // 直接拼进 key 会让缓存键长度不可控）
+    private const string QueryEmbeddingCachePrefix = "skill_query_embedding:";
+
     public SkillSearchService(
         ILogger<SkillSearchService> logger,
         IEmbeddingService? embeddingService = null,
@@ -99,15 +103,14 @@ public class SkillSearchService : ISkillSearchService
                 "Keyword search returned {KeywordCount}/{MaxResults} results, starting semantic fallback for {UnmatchedCount} unmatched candidates",
                 keywordResults.Count, maxResults, unmatchedCandidates.Count);
 
-            // 生成查询嵌入
-            var queryEmbeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, ct: ct);
-            if (!queryEmbeddingResult.Succeeded || queryEmbeddingResult.Data == null)
+            // 生成查询嵌入（先查缓存 —— 候选嵌入一直有缓存，唯独查询串没有，
+            // 于是同一个搜索词每来一次就现算一次计费调用）
+            var queryVector = await GetQueryEmbeddingAsync(query, ct);
+            if (queryVector == null)
             {
                 _logger.LogDebug("Query embedding generation failed, returning keyword-only results");
                 return keywordResults;
             }
-
-            var queryVector = queryEmbeddingResult.Data!;
 
             // Get or generate embeddings for unmatched candidates (with caching)
             var candidateEmbeddings = await GetCandidateEmbeddingsAsync(unmatchedCandidates, ct);
@@ -186,6 +189,34 @@ public class SkillSearchService : ISkillSearchService
             }
         }
         return total;
+    }
+
+    /// <summary>
+    /// 取查询串的嵌入向量，命中缓存则不发生任何计费调用。
+    /// </summary>
+    /// <remarks>
+    /// 候选技能的嵌入本来就走缓存（按 slug），但查询串每次都现算 —— 而查询串正是
+    /// <b>调用方能自由重复</b>的那一半：搜索端点每收到一次关键词命中不足的请求就产生一次
+    /// 嵌入计费调用。按摘要缓存后，重复查询在 TTL 内只算一次。
+    /// </remarks>
+    private async Task<float[]?> GetQueryEmbeddingAsync(string query, CancellationToken ct)
+    {
+        var cacheKey = QueryEmbeddingCachePrefix +
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(query)));
+
+        if (_embeddingCache != null && _embeddingCache.TryGetValue(cacheKey, out float[]? cached) && cached is { Length: > 0 })
+        {
+            return cached;
+        }
+
+        var result = await _embeddingService!.GenerateEmbeddingAsync(query, ct: ct);
+        if (!result.Succeeded || result.Data == null)
+        {
+            return null;
+        }
+
+        _embeddingCache?.Set(cacheKey, result.Data, CacheTtl);
+        return result.Data;
     }
 
     /// <summary>

@@ -28,7 +28,8 @@ public static class GatewayMiddlewareExtensions
                 var handler = new GatewayWebSocketHandler(gateway, presence, logger,
                     gatewayOptions.MaxConnectionsPerUser,
                     gatewayOptions.HeartbeatIntervalSeconds,
-                    gatewayOptions.RequireAuthentication);
+                    gatewayOptions.RequireAuthentication,
+                    gatewayOptions.MaxInboundMessageBytes);
                 var userId = context.User?.Identity?.IsAuthenticated == true
                     ? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                     : null;

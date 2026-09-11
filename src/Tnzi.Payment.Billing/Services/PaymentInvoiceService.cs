@@ -1,6 +1,4 @@
-using Tnzi.Notification.Metadata;
-
-namespace Tnzi.Payment.Billing.Services;
+﻿namespace Tnzi.Payment.Billing.Services;
 
 /// <summary>
 /// 发票服务实现
@@ -231,8 +229,15 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
 
     public async Task<Result> SendAsync(Guid invoiceId, string? recipientEmail, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
+        // 501 而不是 500：这不是故障，是这台宿主没装通知模块 —— 500 会让监控与客户端
+        // 一直重试一件永远不会好的事。指名要加载哪个模块，别让部署疏漏被读成偶发错误。
         if (_notificationService == null)
-            return Fail("Notification module is not loaded. Cannot send invoice.", 500);
+        {
+            return Fail(
+                "Sending an invoice requires the notification module. "
+                + "Load Tnzi.Notification ([DependsOn(typeof(NotificationModule))]) "
+                + "or register your own INotificationService.", 501);
+        }
 
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(
             i => i.Id == invoiceId && (!ownerUserId.HasValue || i.UserId == ownerUserId.Value), cancellationToken);
@@ -360,7 +365,13 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
             invoice.PdfFilePath = await WriteLocalFallbackAsync(fileName, outputBytes, cancellationToken);
         }
 
-        invoice.PdfFileUrl = $"/api/invoices/{invoice.Id}/pdf";
+        // ★ 这里此前写的是本端点自己的路径（"/api/invoices/{id}/pdf"），而那个端点返回的正是这个字符串 ——
+        // 一条指向自己的链接，任何客户端顺着它走都只会拿到同一个字符串，产物永远下载不到。
+        // 真正可下载的地址只有 Storage 给得出来；本地回退没有 HTTP 可达的地址，
+        // 此时留空并由 /invoices/{id}/pdf 直接吐文件流（见 GetPdfContentAsync）。
+        invoice.PdfFileUrl = invoice.PdfFileId.HasValue && _fileStorage != null
+            ? (await _fileStorage.GetUrlAsync(invoice.PdfFileId.Value)) is { Succeeded: true } url ? url.Data : null
+            : null;
 
         await _invoiceRepository.UpdateAsync(invoice, cancellationToken);
 
@@ -461,6 +472,70 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
         return Ok<string>(invoice.PdfFileUrl);
     }
 
+    /// <summary>
+    /// 取发票产物的字节。产物不在就先生成一次。
+    /// </summary>
+    /// <remarks>
+    /// 这是唯一在两种落地方式下都能用的下载路径：Storage 存的读回它的流，
+    /// 本地回退读磁盘上那个文件。<c>GetPdfUrlAsync</c> 只在 Storage 给得出地址时有值，
+    /// 而未加载 Storage 的宿主（本地回退）本来就没有任何 HTTP 可达的地址。
+    /// </remarks>
+    public async Task<Result<InvoiceDocumentDto>> GetPdfContentAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
+    {
+        var invoice = await _invoiceRepository.FirstOrDefaultAsync(
+            i => i.Id == invoiceId && (!ownerUserId.HasValue || i.UserId == ownerUserId.Value), cancellationToken);
+        if (invoice == null)
+            return Fail<InvoiceDocumentDto>(ErrorCodes.InvoiceNotFound, 404);
+
+        if (invoice.PdfFileId == null && string.IsNullOrEmpty(invoice.PdfFilePath))
+        {
+            var generated = await GeneratePdfAsync(invoiceId, cancellationToken);
+            if (!generated.Succeeded)
+                return Fail<InvoiceDocumentDto>(generated.Message ?? ErrorCodes.InvoiceDocumentUnavailable, generated.Code ?? 400);
+
+            invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
+            if (invoice == null)
+                return Fail<InvoiceDocumentDto>(ErrorCodes.InvoiceNotFound, 404);
+        }
+
+        var extension = _pdfConverter != null ? ".pdf" : ".html";
+        var contentType = _pdfConverter?.ContentType ?? "text/html";
+
+        if (invoice.PdfFileId.HasValue && _fileStorage != null)
+        {
+            var stored = await _fileStorage.GetAsync(invoice.PdfFileId.Value);
+            if (stored is { Succeeded: true, Data: not null })
+            {
+                using var buffer = new MemoryStream();
+                await stored.Data.CopyToAsync(buffer, cancellationToken);
+                await stored.Data.DisposeAsync();
+
+                return Ok(new InvoiceDocumentDto
+                {
+                    Content = buffer.ToArray(),
+                    ContentType = contentType,
+                    FileName = $"{invoice.InvoiceNo}{extension}"
+                });
+            }
+
+            Logger.LogWarning("Invoice document is recorded in storage but could not be read. InvoiceNo: {InvoiceNo}, FileId: {FileId}, Error: {Error}",
+                invoice.InvoiceNo, invoice.PdfFileId, stored.Message);
+        }
+
+        if (!string.IsNullOrEmpty(invoice.PdfFilePath) && File.Exists(invoice.PdfFilePath))
+        {
+            return Ok(new InvoiceDocumentDto
+            {
+                Content = await File.ReadAllBytesAsync(invoice.PdfFilePath, cancellationToken),
+                ContentType = contentType,
+                FileName = $"{invoice.InvoiceNo}{extension}"
+            });
+        }
+
+        Logger.LogWarning("Invoice document is missing on disk and in storage. InvoiceNo: {InvoiceNo}", invoice.InvoiceNo);
+        return Fail<InvoiceDocumentDto>(ErrorCodes.InvoiceDocumentUnavailable, 404);
+    }
+
     public async Task<Result> MarkAsPaidAsync(Guid invoiceId, MarkInvoicePaidDto request, CancellationToken cancellationToken = default)
     {
         var invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
@@ -541,10 +616,19 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
         return Ok(pagedList);
     }
 
+    /// <summary>
+    /// 「我的发票」。
+    /// </summary>
+    /// <remarks>
+    /// 按 <c>UserId</c> 过滤而不是 <c>CreatorId</c>：自动开票发生在支付完成事件的处理器里
+    /// （webhook 匿名，或后台扣款的裸 scope），那里根本没有当前用户，于是 <c>CreatorId</c> 恒为 null ——
+    /// 按它过滤的结果是这个列表**永远是空的**，而接口 200、日志干净、发票一张不少地躺在库里。
+    /// 同服务其余四个用户面方法一直按 <c>UserId</c> 过滤，只有这一处不是。
+    /// </remarks>
     public async Task<Result<IPagedList<PaymentInvoiceDto>>> GetUserInvoicesAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var invoices = await _invoiceRepository.AsNoTracking()
-            .Where(i => i.CreatorId == userId)
+            .Where(i => i.UserId == userId)
             .OrderByDescending(i => i.InvoiceDate)
             .ProjectTo<Invoice, PaymentInvoiceDto>()
             .CreateAsync(1, 100, cancellationToken);

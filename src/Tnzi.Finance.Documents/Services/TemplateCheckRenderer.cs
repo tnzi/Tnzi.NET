@@ -56,11 +56,13 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
         if (request.Checks.Count == 0)
             return Result<byte[]>.Failure("No checks to render.", 400);
 
-        var templateName = string.IsNullOrWhiteSpace(request.TemplateName)
-            ? CheckTemplates.DefaultName
-            : request.TemplateName.Trim();
+        // 解析走与版式目录、与 CheckService 写快照时**同一处**声明：
+        // 模板名留空则按账户版式取出厂默认模板（这正是 CheckLayout 在本渲染路径上生效的地方），
+        // 每页张数由解析出来的那份模板声明，而不是由枚举猜。
+        var resolution = BuiltInCheckTemplates.Resolve(request.TemplateName, request.Layout);
+        var templateName = resolution.TemplateName;
 
-        var model = CheckDocumentModelFactory.Create(request);
+        var model = CheckDocumentModelFactory.Create(request, resolution);
 
         try
         {

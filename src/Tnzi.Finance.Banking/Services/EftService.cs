@@ -42,6 +42,11 @@ public class EftService : ApplicationService, IEftService
         _options = Check.NotNull(options).Value;
     }
 
+    /// <summary>待付队列的付款方式判据。<c>PaymentMethods.BankTransfer</c> 的小写形式 ——
+    /// EF 要在 SQL 里比较，拿不到 <c>StringComparison</c>，只能比小写；写字面量的话，
+    /// 常量改名后这个队列会静默变空，而装批那一侧（用常量）照常工作。</summary>
+    private static readonly string BankTransferMethodLower = PaymentMethods.BankTransfer.ToLowerInvariant();
+
     private static string CurrencyForFormat(EftFileFormat format) => format == EftFileFormat.Nacha ? "USD" : "CAD";
     private static BankNumberScheme SchemeForFormat(EftFileFormat format) => format == EftFileFormat.Nacha ? BankNumberScheme.UsAba : BankNumberScheme.CaEft;
 
@@ -50,7 +55,7 @@ public class EftService : ApplicationService, IEftService
         var payments = await _paymentRepository.AsNoTracking()
             .Where(p => p.Status == FinanceDocumentStatus.Posted
                 && p.Direction == PaymentDirection.Outbound
-                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == "banktransfer")
+                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == BankTransferMethodLower)
             .OrderBy(p => p.Number)
             .ToListAsync(cancellationToken);
         if (payments.Count == 0)
@@ -176,6 +181,11 @@ public class EftService : ApplicationService, IEftService
                 return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' is not a posted outbound payment.", 400);
             if (string.IsNullOrWhiteSpace(p.PaymentMethod) || !string.Equals(p.PaymentMethod, PaymentMethods.BankTransfer, StringComparison.OrdinalIgnoreCase))
                 return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' is not a bank transfer.", 400);
+            // 防御性：本实现的两种格式都只出 credit，金额字段没有符号位。核心的付款路径
+            // （草稿校验与过账校验）都要求金额为正，所以这条目前不可达 —— 但一旦某天可达，
+            // 静默翻正的后果是「账上收进一笔、银行付出同一笔」，两边金额相同、方向相反。
+            if (p.Amount <= 0)
+                return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' has a non-positive amount and cannot be sent as a credit.", 400);
             if (!string.Equals(p.Currency, currency, StringComparison.OrdinalIgnoreCase))
                 return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' currency {p.Currency} does not match the {input.Format} currency {currency}.", 400);
 
@@ -185,6 +195,10 @@ public class EftService : ApplicationService, IEftService
                 return Fail<EftBatchDto>($"Payee bank account for payment '{p.Number ?? p.Id.ToString()}' does not match the {input.Format} scheme.", 400);
             if (string.IsNullOrWhiteSpace(partyBank.AccountNumberEncrypted))
                 return Fail<EftBatchDto>($"Payee bank account for payment '{p.Number ?? p.Id.ToString()}' has no account number on file.", 400);
+            // 档案允许只登记名称/账号（路由留空合法），但这样的档案装不进 EFT 文件 ——
+            // 定宽写入器会把空路由补成全零。在装批时就点名是哪一笔，比生成时才报错有用得多。
+            if (!BankNumberHelper.HasTransferRouting(partyBank.Scheme, partyBank.RoutingNumber, partyBank.InstitutionNumber, partyBank.TransitNumber))
+                return Fail<EftBatchDto>($"Payee bank account for payment '{p.Number ?? p.Id.ToString()}' has no complete routing number on file.", 400);
 
             lines.Add(new EftBatchLine
             {

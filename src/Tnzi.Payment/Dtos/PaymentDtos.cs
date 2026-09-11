@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Dtos;
+﻿namespace Tnzi.Payment.Dtos;
 
 /// <summary>
 /// 创建支付 DTO
@@ -23,9 +23,15 @@ public class CreatePaymentDto
     public decimal Amount { get; set; }
 
     /// <summary>
-    /// 币种
+    /// 币种。留空表示由服务端按「渠道配置 &gt; 全局默认」回退决定。
     /// </summary>
-    public string Currency { get; set; } = "USD";
+    /// <remarks>
+    /// 刻意**没有**初始值：给它一个非空初始值会让服务端的回退链整条不可达
+    /// （<c>ResolveCurrency</c> 判的是「调用方有没有指定」，而带初始值时它恒为「指定了」），
+    /// 于是欧元商户配好 <c>Payment:DefaultCurrency</c> 之后，前端不带币种的每一笔订单
+    /// 仍会以那个初始值建单并送进渠道 —— 配置、日志与接口返回全都看不出异常。
+    /// </remarks>
+    public string? Currency { get; set; }
 
     /// <summary>
     /// 支付渠道代码
@@ -43,8 +49,14 @@ public class CreatePaymentDto
     public string? Description { get; set; }
 
     /// <summary>
-    /// 过期时间（分钟）
+    /// 过期时间（分钟）。留空表示按渠道类型取配置的默认值。
     /// </summary>
+    /// <remarks>
+    /// 服务层同样校验这个区间：DTO 上的 <c>[Range]</c> 只在经 MVC 模型绑定进来时生效，
+    /// 而本 DTO 也被子模块直接构造调用（续费补差、订阅首付）。
+    /// </remarks>
+    [Range(1, PaymentConstants.MaxPaymentExpireMinutes,
+        ErrorMessage = "ExpireMinutes must be between 1 and 525600.")]
     public int? ExpireMinutes { get; set; }
 
     /// <summary>
@@ -711,6 +723,22 @@ public class PaymentProviderCallbackResult
     public string TradeNo { get; set; } = string.Empty;
     public PaymentStatus Status { get; set; }
     public decimal PaidAmount { get; set; }
+
+    /// <summary>
+    /// 渠道回报的到账币种（ISO 4217，如 <c>USD</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 金额校验只比数值不比币种，等于把「收到 100 JPY」判成「收到 100 USD」——
+    /// 两者差着两个数量级，而支付会被记成完全成功。渠道那一侧本来就带着这个值
+    /// （Stripe 的 <c>currency</c> 用来把最小单位换算回金额，PayPal 的 <c>currency_code</c>
+    /// 此前被直接丢掉），所以这不是新信息，只是原先没有被带过来。
+    /// <para>
+    /// 留空表示渠道没报（自定义渠道 / 早期实现），服务层此时**跳过币种比对**而不是拒绝：
+    /// 拒绝会让每一笔经这类渠道的付款卡住，代价远大于它挡下的那一类错配。
+    /// </para>
+    /// </remarks>
+    public string? Currency { get; set; }
+
     public string? ExternalTradeNo { get; set; }
     public string? FailReason { get; set; }
 

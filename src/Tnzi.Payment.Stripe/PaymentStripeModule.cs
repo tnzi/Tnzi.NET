@@ -28,7 +28,7 @@ namespace Tnzi.Payment.Stripe;
 /// <list type="bullet">
 ///   <item>建单指名 <c>Stripe</c> —— <c>PaymentProviderFactory</c> 找不到注册，返回 null，
 ///     调用方一律 <c>PAYMENT_CHANNEL_NOT_SUPPORTED</c> / 400。这条路径本就存在，不新增机制；</item>
-///   <item>没指名渠道而 <c>Payment:DefaultChannelCode</c> 仍是默认值 <c>Stripe</c> ——
+///   <item>没指名渠道而 <c>Payment:DefaultChannelCode</c> 指向 <c>Stripe</c> ——
 ///     每一笔支付都会撞上同一个 400。这种「配置没错、只是少装了包」的失效不该按请求逐个去发现，
 ///     故父模块在启动期就把结论说清楚，见 <c>PaymentModule.OnApplicationInitializationAsync</c>；</item>
 ///   <item>促销同步 —— <c>PromotionService.SyncToStripeAsync</c> 返回 501 并指名要加载哪个包，

@@ -11,7 +11,7 @@ import { defineStore } from 'pinia';
 import { UserStateManager } from '@tnzi/core/state';
 import type { StateDeps, UserPreferences, UserTheme, RecentItem } from '@tnzi/core/state';
 import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
-import type { UserDto, UpdateUserDto } from '@tnzi/core/services/identity';
+import type { UserDto, UpdateProfileDto } from '@tnzi/core/services/identity';
 import { getStoreHttpClient, getStoreStorage } from '../factory';
 import { createThemeAdapter } from '../../adapters/theme';
 
@@ -67,7 +67,7 @@ export const useUserStore = defineStore('user', () => {
     return getManager().fetchCurrentUser();
   }
 
-  async function updateProfile(data: UpdateUserDto): Promise<UserDto> {
+  async function updateProfile(data: UpdateProfileDto): Promise<UserDto> {
     return getManager().updateProfile(data);
   }
 

@@ -71,6 +71,11 @@ public class KafkaOptionsValidator : OptionsValidatorBase<KafkaOptions>
                 errors.Add("Consumer.MaxReconnectBackoffSeconds must be greater than 0.");
             }
 
+            if (options.Consumer.ConsumeErrorBackoffMs < 0)
+            {
+                errors.Add("Consumer.ConsumeErrorBackoffMs must be greater than or equal to 0.");
+            }
+
             if (options.Consumer.InitialReconnectBackoffSeconds > options.Consumer.MaxReconnectBackoffSeconds)
             {
                 errors.Add("Consumer.InitialReconnectBackoffSeconds must be less than or equal to Consumer.MaxReconnectBackoffSeconds.");

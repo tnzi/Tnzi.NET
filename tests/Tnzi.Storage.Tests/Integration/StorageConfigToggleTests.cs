@@ -7,12 +7,6 @@ namespace Tnzi.Storage.Tests.Integration;
 /// </summary>
 public class StorageConfigToggleTests : StorageIntegrationTestBase
 {
-    private static string ComputeMd5(byte[] content)
-    {
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        return Convert.ToHexString(md5.ComputeHash(content)).ToLowerInvariant();
-    }
-
     // ---------------------------------------------------------------------
     // T7.1: EnableMd5Validation 关闭时禁用按 MD5 去重
     // ---------------------------------------------------------------------

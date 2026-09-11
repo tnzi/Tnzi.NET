@@ -39,8 +39,10 @@ public interface IDualControlService
     /// 发起一个待批准的动作。
     /// </summary>
     /// <remarks>
-    /// 同一动作 + 同一目标已有未决请求时直接返回那一条，不重复发起 ——
+    /// <b>同一发起人</b>对同一动作 + 同一目标、带<b>同一份参数</b>已有未决请求时直接返回那一条，不重复发起 ——
     /// 否则连点两下按钮会造出两张许可，而「两张许可」等于这个动作被批准了两次。
+    /// 去重键刻意含发起人与参数：别人的待批请求（连同参数原文）不该递给你，
+    /// 而改了参数再发起是一次新的请求，不能静默换成旧参数那张。
     /// </remarks>
     Task<Result<DualControlRequestDto>> RequestAsync(DualControlRequestInput input, CancellationToken cancellationToken = default);
 
@@ -64,7 +66,7 @@ public interface IDualControlService
     Task<Result> CancelAsync(Guid requestId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 取用一张许可：校验它已批准、未过期、未用过，且参数与当初批的那份一致。
+    /// 取用一张许可：校验它已批准、未过期、未用过、<b>取用者就是发起人</b>，且参数与当初批的那份一致。
     /// </summary>
     /// <param name="requestId">请求标识。</param>
     /// <param name="operation">动作标识，必须与发起时一致。</param>

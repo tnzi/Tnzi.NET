@@ -1,5 +1,3 @@
-using Tnzi.Chat.Services.Internal;
-
 namespace Tnzi.Chat.Services;
 
 public class ConversationService : ApplicationService, IConversationService
@@ -13,6 +11,13 @@ public class ConversationService : ApplicationService, IConversationService
     private readonly IOptionsSnapshot<ChatOptions> _options;
     private readonly IChatAccessService _access;
 
+    /// <summary>
+    /// 「这个人本来就读得到这份文件吗」。可空：契约在 <c>Tnzi</c> 核心，实现随
+    /// <c>Tnzi.Storage</c> 注册，没加载存储模块的应用解析不到它 —— 那时带文件的消息
+    /// <b>被拒绝</b>（501）而不是跳过校验。
+    /// </summary>
+    private readonly IFileReadAccessProbe? _fileAccess;
+
     public ConversationService(
         IServiceProvider serviceProvider,
         IRepository<Conversation, Guid> conversationRepository,
@@ -22,7 +27,8 @@ public class ConversationService : ApplicationService, IConversationService
         IChatContactService contactService,
         IPresenceService presence,
         IOptionsSnapshot<ChatOptions> options,
-        IChatAccessService access) : base(serviceProvider)
+        IChatAccessService access,
+        IFileReadAccessProbe? fileAccess = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
@@ -32,6 +38,7 @@ public class ConversationService : ApplicationService, IConversationService
         _presence = Check.NotNull(presence);
         _options = Check.NotNull(options);
         _access = Check.NotNull(access);
+        _fileAccess = fileAccess;
     }
 
     internal static string DirectKeyFor(Guid a, Guid b) =>
@@ -103,7 +110,16 @@ public class ConversationService : ApplicationService, IConversationService
 
         if (input.ContentType == MessageContentType.Text && string.IsNullOrWhiteSpace(input.Content))
             return Fail<ChatMessageDto>("Message content is required.", 400);
-        if (input.ContentType == MessageContentType.Image || input.ContentType == MessageContentType.File)
+
+        // ★ 越界的正文在 SQL Server / PostgreSQL 上是一次 DbUpdateException（给用户一个 500），
+        // 正确的答复是 400。同文件里 UpdateMemberSettingsAsync 早就为备注与别名做了这件事。
+        // 夹具跑的 SQLite 不强制列宽，所以这条缺失在测试里完全看不出来。
+        var tooLong = ChatFieldLimits.Exceeded(input.Content, ChatFieldLimits.MessageContent, "Message content");
+        if (tooLong != null)
+            return Fail<ChatMessageDto>(tooLong, 400);
+
+        var carriesFile = input.ContentType is MessageContentType.Image or MessageContentType.File;
+        if (carriesFile)
         {
             // Deployment-level feature gate; the frontend hides the attachment entry
             // when disabled, but the write path must be enforced here regardless.
@@ -111,6 +127,21 @@ public class ConversationService : ApplicationService, IConversationService
                 return Fail<ChatMessageDto>("File and image messages are disabled.", 403);
             if (string.IsNullOrWhiteSpace(input.FileId))
                 return Fail<ChatMessageDto>("File reference is required for media messages.", 400);
+
+            // ★★★ 引用一个文件 id = 把那份文件**发布**给这个会话的全部成员：一条
+            // FileReference 落库之后，ChatFileReferenceAccessResolver 只要看到「你是在册成员」
+            // 就放行。不问一句归属的话，攻击者与任意用户建一个直聊、发一条 FileId 指向对方
+            // 私密文件的消息，然后就能下载它 —— 被移出群的人也能在另一个会话里重新引用回来。
+            // EnableFileMessages 关掉也挡不住：那道开关只看内容类型，而 FileId 是无条件复制的。
+            var denial = await RejectFileReferenceAsync(input.FileId!);
+            if (denial != null)
+                return denial;
+        }
+        else if (!string.IsNullOrWhiteSpace(input.FileId))
+        {
+            // ★ 文本/系统消息不接受文件引用。它们绕过上面整段校验却照样把 FileId 复制进实体，
+            // 于是同一条越权引用换个 ContentType 就成立了。
+            return Fail<ChatMessageDto>("Only image and file messages may carry a file reference.", 400);
         }
 
         var conv = await _conversationRepository.AsQueryable(withTracking: true)
@@ -218,6 +249,48 @@ public class ConversationService : ApplicationService, IConversationService
         }
 
         return Ok(dto, "Message sent");
+    }
+
+    /// <summary>
+    /// 这个文件 id 能不能被当前用户贴进会话。<see langword="null"/> = 可以。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>判据是「这个人本来就读得到它吗」</b>，不是「他有没有上传过它」：转发一份别人
+    /// 发给我的文件是聊天里正常的动作，而它与「先下载再重新上传」等价。
+    /// </para>
+    /// <para>
+    /// ★★ 探针不认请求级凭据（URL 签名令牌 / 分享链接授予），见 <c>IFileReadAccessProbe</c>：
+    /// 一条限次数、会过期的分享链接不该被换成一条永久引用。
+    /// </para>
+    /// <para>
+    /// ★★ <b>存储模块缺席时拒绝，不是跳过。</b>`[FileField]` 的引用登记本来就是存储模块的
+    /// 机制，没有它这个字段落库之后没有任何人会去追踪它；而「跳过校验」与「校验通过」
+    /// 在接口上完全一致。501 而不是 503：这不是暂时性故障，重试永远不会好。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<ChatMessageDto>?> RejectFileReferenceAsync(string fileId)
+    {
+        // 不是 Guid 的值在 `[FileField]` 那一侧会被**静默忽略**（不产生引用行），
+        // 于是它既不受追踪也不受清理 —— 与其留一个安静的空操作，不如当场说不。
+        if (!Guid.TryParse(fileId, out var id) || id == Guid.Empty)
+            return Fail<ChatMessageDto>("The file reference is not a valid file id.", 400);
+
+        if (_fileAccess == null)
+        {
+            return Fail<ChatMessageDto>(
+                "File and image messages need the storage module. Load Tnzi.Storage, "
+                + "or turn Chat:EnableFileMessages off.", 501);
+        }
+
+        if (!await _fileAccess.CanReadAsync(id))
+        {
+            // 与「文件不存在」回答同一句话：分开回答会让这个端点变成一个
+            // 「这个文件 id 存不存在」的探针，而实体 ID 是顺序 GUID，可枚举性本来就高。
+            return Fail<ChatMessageDto>("That file cannot be attached to this conversation.", 403);
+        }
+
+        return null;
     }
 
     public async Task<Result<MessageThreadDto>> GetMessagesAsync(Guid conversationId, MessageThreadQueryDto query)
@@ -518,10 +591,10 @@ public class ConversationService : ApplicationService, IConversationService
 
         // Validate length before persist (config caps both at 100) so an over-length value
         // returns a clean 400 instead of surfacing as a DB error.
-        if (settings.Remark != null && settings.Remark.Length > 100)
-            return Fail("Remark too long (max 100).", 400);
-        if (settings.Alias != null && settings.Alias.Length > 100)
-            return Fail("Alias too long (max 100).", 400);
+        var remarkTooLong = ChatFieldLimits.Exceeded(settings.Remark, ChatFieldLimits.MemberNote, "Remark");
+        if (remarkTooLong != null) return Fail(remarkTooLong, 400);
+        var aliasTooLong = ChatFieldLimits.Exceeded(settings.Alias, ChatFieldLimits.MemberNote, "Alias");
+        if (aliasTooLong != null) return Fail(aliasTooLong, 400);
 
         if (settings.IsMuted.HasValue) member.IsMuted = settings.IsMuted.Value;
         if (settings.IsSticky.HasValue) member.IsSticky = settings.IsSticky.Value;

@@ -23,5 +23,10 @@ public class GatewayOptionsValidator : OptionsValidatorBase<GatewayOptions>
 
         if (options.StreamingThrottleMs < 100)
             errors.Add("StreamingThrottleMs must be at least 100ms");
+
+        // 下限 1 KiB：比这更小的上限连一条正常的 chat.send 都装不下，等于把端点关掉
+        // 却仍然报告"已启用"。
+        if (options.MaxInboundMessageBytes < 1024)
+            errors.Add("MaxInboundMessageBytes must be at least 1024 bytes");
     }
 }

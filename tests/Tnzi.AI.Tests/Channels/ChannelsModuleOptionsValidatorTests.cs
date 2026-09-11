@@ -241,8 +241,8 @@ public class ChannelsModuleOptionsValidatorTests
         const string tricky = @"abc""def\ghi";
 
         var json = BuildChallengeBody(tricky);
-        var adapter = CreateFeishuAdapterNoEncryptKey();
-        var result = await adapter.ProcessWebhookAsync(json, new Dictionary<string, string>());
+        var adapter = CreateFeishuAdapter();
+        var result = await adapter.ProcessWebhookAsync(json, SignedHeaders(json));
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
         result.ChallengeResponse.ShouldNotBeNull();
@@ -259,8 +259,8 @@ public class ChannelsModuleOptionsValidatorTests
         const string plain = "challenge_token_abc123";
 
         var json = BuildChallengeBody(plain);
-        var adapter = CreateFeishuAdapterNoEncryptKey();
-        var result = await adapter.ProcessWebhookAsync(json, new Dictionary<string, string>());
+        var adapter = CreateFeishuAdapter();
+        var result = await adapter.ProcessWebhookAsync(json, SignedHeaders(json));
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
 
@@ -285,7 +285,29 @@ public class ChannelsModuleOptionsValidatorTests
             challenge = challengeValue
         });
 
-    private static FeishuChannelAdapter CreateFeishuAdapterNoEncryptKey()
+    /// <summary>
+    /// 验签用的 EncryptKey。这两条用例验的是 challenge 回显的 JSON 序列化，与验签无关，
+    /// 但适配器在未配置密钥时一律拒绝（漏配密钥 = 关掉验签），所以必须配上并签名，
+    /// 否则它们会因为"无法验签"被拒，想验的那件事再也跑不到。
+    /// </summary>
+    private const string ChallengeEncryptKey = "challenge-encrypt-key";
+
+    private static Dictionary<string, string> SignedHeaders(string body)
+    {
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        const string nonce = "nonce-1";
+        var hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(ts + nonce + ChallengeEncryptKey + body));
+
+        return new Dictionary<string, string>
+        {
+            ["X-Lark-Request-Timestamp"] = ts,
+            ["X-Lark-Request-Nonce"] = nonce,
+            ["X-Lark-Signature"] = Convert.ToHexStringLower(hash)
+        };
+    }
+
+    private static FeishuChannelAdapter CreateFeishuAdapter()
     {
         var options = MsOptions.Create(new ChannelsModuleOptions
         {
@@ -294,7 +316,7 @@ public class ChannelsModuleOptionsValidatorTests
                 Enabled = true,
                 AppId = "cli_test_app",
                 AppSecret = "test-secret",
-                EncryptKey = null
+                EncryptKey = ChallengeEncryptKey
             }
         });
 

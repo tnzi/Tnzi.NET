@@ -18,9 +18,16 @@ public class AiUtilityOptions
     /// <summary>
     /// 默认最大输出 Token 数
     /// </summary>
+    /// <remarks>
+    /// ★ 这是**所有** utility 调用共享的预算，不能按最窄的那个调用点定。
+    /// 它曾是 100 —— 按标题生成定的 —— 而框架内四个消费者（RAG 问答、知识图谱抽取、
+    /// Agent 评估、建议生成）都不传覆盖，于是输出被静默截断：图谱抽取期望完整 JSON，
+    /// 截断后解析失败，产出零实体且不报任何错。
+    /// 窄的调用点自己传小值（见 <c>AiUtilityExtensions.GenerateTitleAsync</c>）。
+    /// </remarks>
     [RuntimeSetting(Label = "Utility Max Tokens", I18n = "admin.modules.system.settings.fields.utilityMaxTokens",
         Type = SettingFieldType.Int, Min = 1, Max = 100_000)]
-    public int MaxTokens { get; set; } = 100;
+    public int MaxTokens { get; set; } = 4096;
 
     /// <summary>
     /// 默认温度参数

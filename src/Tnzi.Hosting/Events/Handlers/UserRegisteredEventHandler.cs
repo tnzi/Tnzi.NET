@@ -26,7 +26,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         _settingService = settingService;
         _identityOptions = identityOptions;
         _registrationService = registrationService;
-        _logger = logger;
+        _logger = Check.NotNull(logger);
     }
 
     public async Task HandleAsync(UserRegisteredEvent @event, CancellationToken cancellationToken = default)
@@ -90,49 +90,55 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
     /// <summary>
     /// 生成邮箱确认链接
     /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>生成不出来时必须抛，不能返回空串。</strong>
+    /// 模板里判的是 <c>RequireEmailConfirmation &amp;&amp; !string.IsNullOrEmpty(ConfirmationUrl)</c>，
+    /// 所以一个空串会让欢迎邮件<b>安静地</b>换成「不需要确认」那一版：
+    /// 在 <c>RequireConfirmedEmail=true</c> 的部署里，这个用户从此登不进去、
+    /// 收不到确认链接，也不会有任何东西再试一次 —— 而日志里只有一条 Warning，
+    /// 邮件本身发送成功。
+    /// 抛出去则由事件总线的错误隔离 + 重试 + 死信兜底，这也是本文件顶部那条注释的原意。
+    /// <para>
+    /// ★ 重试不会造成重复发信：这一步<b>在发信之前</b>，失败时那封邮件根本没有发出去。
+    /// </para>
+    /// </remarks>
     private async Task<string> GenerateConfirmationUrlAsync(Guid userId, string apiBaseUrl, string frontendUrl)
     {
         if (_registrationService == null)
         {
-            _logger.LogWarning("RegistrationService is not available, cannot generate confirmation URL");
-            return string.Empty;
+            throw new TnziException(
+                "Email confirmation is required but IRegistrationService is not available; "
+                + "load Tnzi.Identity or turn off Identity:Registration:RequireConfirmedEmail.");
         }
 
-        try
+        // 不包 try/catch：异常照原样冒泡，事件总线负责隔离、重试与死信。
+        var tokenResult = await _registrationService.GenerateEmailConfirmationTokenAsync(userId);
+        if (!tokenResult.Succeeded || string.IsNullOrEmpty(tokenResult.Data))
         {
-            var tokenResult = await _registrationService.GenerateEmailConfirmationTokenAsync(userId);
-            if (!tokenResult.Succeeded || string.IsNullOrEmpty(tokenResult.Data))
-            {
-                _logger.LogWarning("Failed to generate email confirmation token for user {UserId}: {Error}",
-                    userId, tokenResult.Message);
-                return string.Empty;
-            }
-
-            // 确定 API 基础地址
-            var baseUrl = ResolveApiBaseUrl(apiBaseUrl, frontendUrl);
-            if (string.IsNullOrEmpty(baseUrl))
-            {
-                _logger.LogWarning("Cannot determine API base URL for email confirmation link");
-                return string.Empty;
-            }
-
-            // 构建确认链接
-            var confirmationUrl = $"{baseUrl}/auth/confirm-email?userId={userId}&token={tokenResult.Data}";
-
-            // 添加返回地址（如果有前端URL）
-            if (!string.IsNullOrEmpty(frontendUrl))
-            {
-                confirmationUrl += $"&returnUrl={Uri.EscapeDataString(frontendUrl.TrimEnd('/'))}";
-            }
-
-            _logger.LogDebug("Generated email confirmation URL for user {UserId}", userId);
-            return confirmationUrl;
+            throw new TnziException(
+                $"Failed to generate the email confirmation token for user {userId}: {tokenResult.Message}");
         }
-        catch (Exception ex)
+
+        // 确定 API 基础地址
+        var baseUrl = ResolveApiBaseUrl(apiBaseUrl, frontendUrl);
+        if (string.IsNullOrEmpty(baseUrl))
         {
-            _logger.LogWarning(ex, "Error generating email confirmation token for user {UserId}", userId);
-            return string.Empty;
+            throw new TnziException(
+                "Email confirmation is required but no API base URL is configured; "
+                + "set Application:ApiBaseUrl (or Application:FrontendUrl) so the confirmation link can be built.");
         }
+
+        // 构建确认链接
+        var confirmationUrl = $"{baseUrl}/auth/confirm-email?userId={userId}&token={tokenResult.Data}";
+
+        // 添加返回地址（如果有前端URL）
+        if (!string.IsNullOrEmpty(frontendUrl))
+        {
+            confirmationUrl += $"&returnUrl={Uri.EscapeDataString(frontendUrl.TrimEnd('/'))}";
+        }
+
+        _logger.LogDebug("Generated email confirmation URL for user {UserId}", userId);
+        return confirmationUrl;
     }
 
     /// <summary>

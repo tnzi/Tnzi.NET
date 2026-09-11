@@ -72,6 +72,12 @@ export interface LogSearchHitDto {
 }
 
 /**
+ * Why a log search stopped before reading everything - mirrors the backend
+ * `LogSearchTruncation` enum (PascalCase member names).
+ */
+export type LogSearchTruncation = 'None' | 'ResultLimit' | 'ByteBudget' | 'TimeBudget';
+
+/**
  * Aggregate result of a keyword search across log files.
  */
 export interface LogSearchResultDto {
@@ -85,8 +91,16 @@ export interface LogSearchResultDto {
   keyword: string;
   /** Matching lines, capped by the request's `maxResults` parameter. */
   hits: LogSearchHitDto[];
-  /** True when result was truncated to satisfy the cap. */
+  /** True when the scan stopped early for any reason (see `truncationReason`). */
   truncated: boolean;
+  /**
+   * Why the scan stopped early; `None` when `truncated` is false. A budget
+   * truncation means "there may be more hits in the window", unlike the result
+   * cap, so the UI must not present it as an honest miss.
+   */
+  truncationReason: LogSearchTruncation;
+  /** Bytes of log text the server read before answering. */
+  scannedBytes: number;
   /** Total milliseconds spent scanning files server-side. */
   elapsedMs: number;
 }

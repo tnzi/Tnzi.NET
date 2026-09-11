@@ -226,6 +226,12 @@ public class PartyBankAccountService : ApplicationService, IPartyBankAccountServ
             if (!_protector.IsConfigured)
                 return Result.Failure("Configure Finance:Encryption:EncryptionKey before storing bank details.", 400);
             var trimmed = input.AccountNumber.Trim();
+            // 长度上限来自 EFT 文件的定宽账号字段：超长的账号写进文件时会被截断成
+            // 另一个语法合法、可能属于别人的账号，而录入/装批/生成三步全程 200。
+            // 在这里拒绝，操作员还看得见自己刚敲的那串数字。
+            var lengthResult = BankNumberHelper.ValidateAccountNumberLength(entity.Scheme, trimmed);
+            if (!lengthResult.Succeeded)
+                return lengthResult;
             // AAD 绑定到该往来方，密文无法被搬到另一个往来方复用。
             entity.AccountNumberEncrypted = _protector.Protect(trimmed, FinanceProtectionAad.ForPartyBankAccount(entity.PartyType, entity.PartyId));
             entity.AccountNumberMasked = BankNumberHelper.Mask(trimmed);

@@ -18,3 +18,5 @@ global using Tnzi.Security.Authorization;
 global using Tnzi.TestBase;
 
 global using Xunit;
+global using Tnzi.Authorization.DataAuth.Extensions;
+global using Tnzi.Security.Claims;

@@ -690,15 +690,41 @@ export interface ValidateCouponDto {
 }
 
 /**
- * Coupon validation result
+ * What a payer may see about the promotion behind a coupon.
+ *
+ * Deliberately not the full `PromotionDto`: `totalUsageLimit` / `usedCount` /
+ * `isPublic` / `stripeCouponId` are operator and channel facts. Served from an
+ * endpoint any signed-in user can call, used count over total is the live
+ * progress of the campaign and `isPublic` says which codes are worth guessing.
  */
-export interface CouponValidationResultDto {
+export interface CouponSummaryDto {
+  name: string;
+  description?: string | null;
+  discountType: DiscountType;
+  discountValue: number;
+  currency?: string | null;
+  minimumOrderAmount?: number | null;
+  maxDiscountAmount?: number | null;
+  endTime?: string | null;
+}
+
+/**
+ * Coupon validation result as answered to the payer (`POST promotions/validate-coupon`).
+ */
+export interface CouponValidationResponseDto {
   isValid: boolean;
   couponCode?: string | null;
-  promotion?: PromotionDto | null;
+  /** Present when the code resolved to a promotion, valid or not. */
+  coupon?: CouponSummaryDto | null;
   discountAmount: number;
   errorMessage?: string | null;
 }
+
+/**
+ * @deprecated The validate-coupon endpoint no longer returns the full promotion;
+ * read `coupon` on `CouponValidationResponseDto` instead.
+ */
+export type CouponValidationResultDto = CouponValidationResponseDto;
 
 /**
  * Calculate discount request
@@ -1034,7 +1060,12 @@ export interface ReconciliationQueryDto {
 export interface ReconciliationExportResultDto {
   csvContent: string;
   fileName: string;
+  /** Rows that matched the query window, before the export cap. */
+  matchedRecords: number;
+  /** Rows actually written; equals `matchedRecords` unless `truncated`. */
   totalRecords: number;
+  /** True when the export stopped at the server-side cap; narrow the window and export again. */
+  truncated: boolean;
   totalRevenue: number;
   totalRefunds: number;
   netRevenue: number;

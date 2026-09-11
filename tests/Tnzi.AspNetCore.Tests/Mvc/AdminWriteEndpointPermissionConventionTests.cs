@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Tnzi.Security.Authorization;
+using Tnzi.TestBase;
 
 namespace Tnzi.AspNetCore.Tests.Mvc;
 
@@ -14,9 +15,15 @@ namespace Tnzi.AspNetCore.Tests.Mvc;
 /// 样本枚举，本测试扫描所有框架程序集，防止新增写端点漏标方法级操作码而行为测试
 /// （mock 服务层）依旧全绿。
 ///
-/// 程序集来源：测试输出目录里的全部 <c>Tnzi*.dll</c>。Tnzi.AspNetCore.Tests 经
-/// Tnzi.Hosting 的 ProjectReference 传递引用全部业务模块，其 DLL 都被复制到 bin，
-/// 故这一枚举覆盖所有 admin 控制器（且不依赖模块能否在最小测试配置下成功加载/配置）。
+/// 程序集来源：测试输出目录里的全部 <c>Tnzi*.dll</c>，也就是<b>本测试项目引用到的</b>那些
+/// （不依赖模块能否在最小测试配置下成功加载/配置）。
+///
+/// ★★ <b>这段注释此前是错的，而错法很贵。</b>它曾写着「经 Tnzi.Hosting 的 ProjectReference
+/// 传递引用全部业务模块」—— 但 Tnzi.Hosting 对那些模块一律用 <c>PrivateAssets="all"</c>，
+/// 引用<b>不向外流</b>。实测 2026-09-02：36 个带 admin 控制器的程序集里只有 27 个进了 bin，
+/// 9 个（08-29 拆出来的子模块为主）完全在扫描面之外 —— 它们新增写端点漏标操作码时，
+/// 这道「唯一的静态门禁」一声不响。九个引用已补进 csproj，覆盖面本身改由
+/// <see cref="Scan_CoversEveryAssemblyThatHasAnAdminController"/> 守着。
 ///
 /// 允许显式豁免清单（<see cref="Allowlist"/>）：修复某个存量违规的权限码是另一个决策，
 /// 不在本约定测试内顺手改业务控制器；扫出的存量违规列入豁免清单并在提交说明中完整列出。
@@ -46,6 +53,12 @@ public class AdminWriteEndpointPermissionConventionTests
         // ── (0) 服务层动态授权：配置中心跨多模块，写授权码依赖运行时 groupKey
         //    （{group}.settings.{slug}.update），无法用静态方法级特性表达，改由
         //    SettingsCenterService 按组强制（超管 bypass）。见控制器类注释。 ──
+        // ── 2026-09-02 扫描面从 27 个程序集扩到 36 个后新暴露的存量违规（1 项）──
+        //    清空全部性能采样，只由类级 system.performance.view 把守。它确实是写动作，
+        //    但补码是**另一个决策**且是单向的授权收紧：目前持有 .view 的人现在就能清，
+        //    加一个 .delete 会让他们当场失去这个能力直到被重新授予。按本门禁自己的约定
+        //    （存量违规列入豁免并在提交说明中列出）先记在这里，不在约定测试里顺手改业务控制器。
+        "Tnzi.Performance.Controllers.DefaultPerformanceAdminController.Clear:DELETE",
         "Tnzi.System.Controllers.Admin.DefaultSettingsCenterAdminController.SaveGroup:PUT",
         "Tnzi.System.Controllers.Admin.DefaultSettingsCenterAdminController.ResetGroup:DELETE",
         //    单据讨论删除：作者删自己那条无需任何权限码（谁都可能写错一句），删他人
@@ -182,6 +195,51 @@ public class AdminWriteEndpointPermissionConventionTests
             "[ApiAuthorize(PermissionName=...)] operation code (add the code, or allowlist with justification):" +
             Environment.NewLine +
             string.Join(Environment.NewLine, violations.Select(v => "  - " + v)));
+    }
+
+    /// <summary>
+    /// ★ 守着<b>扫描面本身</b>：每个在 <c>src/</c> 里带 admin 控制器的程序集都必须进得了 bin。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 上面那道门禁只对它<b>加载得到</b>的程序集有效，而加载得到什么完全由本测试项目的
+    /// csproj 引用决定 —— 少一行引用，那个模块的全部写端点就静默退出扫描面，
+    /// 门禁照样全绿。这正是 2026-09-02 实测出来的形态：9 个程序集在外面。
+    /// </para>
+    /// <para>
+    /// ★ <b>判据扫的是源码目录，不是已加载的程序集。</b>新模块连 csproj 引用都还没加时，
+    /// 它的 DLL 根本不在进程里 —— 拿已加载集合当分母，会把「漏加」读成「没有漏加」。
+    /// 同 <c>ModuleInventoryTests</c> 扫 <c>src/*Module.cs</c> 源码的理由。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Scan_CoversEveryAssemblyThatHasAnAdminController()
+    {
+        var repoRoot = RepoRoot.Locate();
+        var srcRoot = Path.Combine(repoRoot, "src");
+
+        // ★ 走 RepoScan 而不是 SearchOption.AllDirectories：Tnzi* 这个通配也命中 src/Tnzi.UI，
+        // 那是个 pnpm 工作区，裸递归会跟着 node_modules 的 junction 走进无穷路径，
+        // 测试宿主卡死且一条结果都打不出来。bin/obj 的剔除也一并交给它。
+        var expected = Directory
+            .GetDirectories(srcRoot, "Tnzi*")
+            .Select(dir => new DirectoryInfo(dir).Name)
+            .Where(name => RepoScan.EnumerateFiles($"src/{name}", "*AdminController.cs").Any())
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        var loaded = LoadFrameworkAssemblies()
+            .Select(a => a.GetName().Name!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = expected.Where(name => !loaded.Contains(name)).ToList();
+
+        Assert.True(missing.Count == 0,
+            $"{missing.Count} assembly/assemblies ship an admin controller but are outside this gate's scan surface. "
+            + "Their write endpoints can drop a method-level permission code and this test stays green. "
+            + "Add a ProjectReference in Tnzi.AspNetCore.Tests.csproj:"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, missing.Select(m => "  - " + m)));
     }
 
     /// <summary>

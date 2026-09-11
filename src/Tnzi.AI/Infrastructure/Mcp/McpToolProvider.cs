@@ -6,6 +6,10 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// 按 AllowedTools 过滤并按每服务器 ApprovalMode 做审批包装后返回。
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
+/// <remarks>
+/// 工具缓存按 <see cref="McpCacheKey"/>（租户键 + Server Name）分桶：两个租户可以注册同名 server
+/// 而工具清单各不相同，只按名字缓存会把先跑的租户的清单发给后来的租户。
+/// </remarks>
 public class McpToolProvider : IMcpToolProvider
 {
     private readonly IOptionsMonitor<AIOptions> _options;
@@ -134,8 +138,8 @@ public class McpToolProvider : IMcpToolProvider
                     }
                 }
 
-                // 记录该服务器提供的工具名称
-                _serverToolNames[server.Name] = serverTools;
+                // 记录该服务器提供的工具名称（按租户分桶，同名 server 的两个租户各存一份）
+                _serverToolNames[McpCacheKey.For(server)] = serverTools;
             }
             catch (Exception ex)
             {
@@ -149,13 +153,23 @@ public class McpToolProvider : IMcpToolProvider
     /// <summary>
     /// 失效指定服务器或全部服务器的工具缓存，下次 GetToolsAsync 调用将重新从 MCP 服务器拉取。
     /// </summary>
-    /// <param name="serverName">服务器名称；null 表示失效所有缓存</param>
+    /// <param name="serverName">
+    /// 服务器名称；null 表示失效所有缓存。按名字失效会清掉<b>所有租户</b>下叫这个名字的条目 ——
+    /// 调用方（注册表 CRUD / 401 恢复）只带得出名字，而本类是 Singleton 没有租户上下文；
+    /// 多失效一个只是重新拉一次工具清单，漏失效一个是继续用过期清单且毫无症状。
+    /// </param>
     public void InvalidateCache(string? serverName)
     {
         if (serverName != null)
         {
-            _toolCache.TryRemove(serverName, out _);
-            _serverToolNames.TryRemove(serverName, out _);
+            foreach (var key in _toolCache.Keys.Where(k => McpCacheKey.MatchesServerName(k, serverName)).ToList())
+            {
+                _toolCache.TryRemove(key, out _);
+            }
+            foreach (var key in _serverToolNames.Keys.Where(k => McpCacheKey.MatchesServerName(k, serverName)).ToList())
+            {
+                _serverToolNames.TryRemove(key, out _);
+            }
             _logger.LogDebug("Invalidated MCP tool cache for server '{ServerName}'", serverName);
         }
         else
@@ -167,10 +181,14 @@ public class McpToolProvider : IMcpToolProvider
     }
 
     /// <summary>
-    /// 获取指定服务器缓存的工具名称列表。
+    /// 获取指定服务器缓存的工具名称列表（诊断用）。
     /// </summary>
-    /// <param name="serverName">服务器名称</param>
-    /// <returns>工具名称列表（只读）；服务器不存在或尚未缓存时返回空列表</returns>
+    /// <param name="serverName">
+    /// 服务器名称。只解析<b>无租户维度</b>的条目（部署配置 <c>AI:Mcp:Servers</c> 来源）。
+    /// DB 注册表来源的条目按租户分桶，裸名字寻址不到它们 —— 这里返回空列表，
+    /// 而不是随便挑一个租户的清单答给调用方。
+    /// </param>
+    /// <returns>工具名称列表（只读）；服务器不存在、尚未缓存或带租户维度时返回空列表</returns>
     public IReadOnlyList<string> GetServerToolNames(string serverName)
     {
         Check.NotNullOrWhiteSpace(serverName);
@@ -213,16 +231,18 @@ public class McpToolProvider : IMcpToolProvider
         int cacheSeconds,
         CancellationToken ct)
     {
-        if (cacheSeconds > 0 && _toolCache.TryGetValue(server.Name, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
+        var cacheKey = McpCacheKey.For(server);
+
+        if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
         {
             return cached.Tools;
         }
 
-        var fetchLock = _toolLocks.GetOrAdd(server.Name, _ => new SemaphoreSlim(1, 1));
+        var fetchLock = _toolLocks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
         await fetchLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (cacheSeconds > 0 && _toolCache.TryGetValue(server.Name, out cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
+            if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
             {
                 return cached.Tools;
             }
@@ -232,7 +252,7 @@ public class McpToolProvider : IMcpToolProvider
 
             if (cacheSeconds > 0)
             {
-                _toolCache[server.Name] = new ToolCacheEntry(
+                _toolCache[cacheKey] = new ToolCacheEntry(
                     tools,
                     DateTimeOffset.UtcNow.AddSeconds(cacheSeconds));
             }

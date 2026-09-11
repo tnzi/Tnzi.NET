@@ -9,8 +9,20 @@ namespace Tnzi.Notification.Push;
 /// 于是 <c>FirebaseAdmin</c> 及其 5 个 <c>Google.*</c> 传递包不进入依赖闭包。
 /// </para>
 /// <para>
-/// <b>无实体无表</b>，故用 <see cref="TnziCustomModule"/> 且不声明表前缀；
-/// 无控制器、无权限码，加载与否不改变任何 HTTP 面。
+/// <b>自带一张表</b> <c>Notification_PushDevice</c>（设备令牌注册表），故用
+/// <see cref="TnziApplicationModule"/> 并<b>共享父模块的 <c>Notification_</c> 前缀</b>
+/// —— 与 <c>IdentityPresenceModule</c> 用 <c>Identity_</c> 同一先例。
+/// </para>
+/// <para>
+/// ★ <b>为什么注册表在这里而不在父模块。</b>不是每个应用都发推送。把这张表或它的契约
+/// 放进 <c>Tnzi.Notification</c>，只发邮件的应用会凭空多出一张永远为空的表和一个死端点
+/// —— 而那正是当初把推送拆出来的理由。父模块对设备注册<b>一无所知</b>：
+/// <c>IPushDeviceService</c> 的契约与实现都在本包，没加载本包时消费方的调用点
+/// 直接编译不过，不存在「安静地少发了一批人」的窗口。
+/// </para>
+/// <para>
+/// ★ <b>这张表可以一直是空的，那不是接线断了</b>：只用主题广播
+/// （<c>IPushSender.SendToTopicAsync</c>）的应用一个设备标识符都不存。
 /// </para>
 /// <para>
 /// <b>缺席时的行为</b>由父模块决定，见 <c>NotificationModule.PostConfigureServicesAsync</c>：
@@ -20,8 +32,11 @@ namespace Tnzi.Notification.Push;
 /// </para>
 /// </remarks>
 [DependsOn(typeof(NotificationModule))]
-public class NotificationPushModule : TnziCustomModule
+public class NotificationPushModule : TnziApplicationModule
 {
+    /// <summary>共享父模块的表前缀：<c>Notification_PushDevice</c>。拆的是程序集不是 schema。</summary>
+    public override string? TableNamePrefix => "Notification";
+
     /// <summary>Notification(40) 之后；实际次序由 <c>[DependsOn]</c> 拓扑排序保证，此值仅为同级 tiebreak。</summary>
     public override int LoadOrder => 41;
 
@@ -34,8 +49,16 @@ public class NotificationPushModule : TnziCustomModule
         {
             var options = sp.GetRequiredService<IOptions<NotificationOptions>>().Value;
             var logger = sp.GetRequiredService<ILogger<PushSender>>();
-            return new PushSender(options, logger);
+            // IPushDeviceService 用 GetService 而不是构造参数注入：PushSender 的构造签名
+            // 是 (options, logger) 的公开形状，消费方可能自己 new 它（测试里就有）。
+            // 拿不到时投递照常，只是死令牌不会被退役 —— 那是可降级的，投递本身不受影响。
+            return new PushSender(options, logger, sp.GetService<IPushDeviceService>());
         });
+
+        context.Services.AddScoped<IPushDeviceService, PushDeviceService>();
+
+        // 权限码随模块走：不加载本模块的宿主永远不会 seed 这两个码。
+        context.Services.AddTransient<IPermissionDefinitionProvider, NotificationPushPermissions>();
 
         return Task.CompletedTask;
     }

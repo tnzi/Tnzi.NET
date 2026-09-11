@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// <see cref="ILoginSessionCoordinator"/> 默认实现。
@@ -8,6 +8,7 @@ public class LoginSessionCoordinator : ApplicationService, ILoginSessionCoordina
     private readonly ISessionService? _sessionService;
     private readonly IOptionsMonitor<IdentityOptions> _identityOptionsMonitor;
     private readonly IUserAgentParserService? _userAgentParser;
+    private readonly ISessionRevocationService? _sessionRevocation;
 
     private IdentityOptions IdentityOptions => _identityOptionsMonitor.CurrentValue;
 
@@ -15,12 +16,57 @@ public class LoginSessionCoordinator : ApplicationService, ILoginSessionCoordina
         IServiceProvider serviceProvider,
         IOptionsMonitor<IdentityOptions> identityOptions,
         ISessionService? sessionService = null,
-        IUserAgentParserService? userAgentParser = null)
+        IUserAgentParserService? userAgentParser = null,
+        ISessionRevocationService? sessionRevocation = null)
         : base(serviceProvider)
     {
         _identityOptionsMonitor = Check.NotNull(identityOptions);
         _sessionService = sessionService;
         _userAgentParser = userAgentParser;
+        _sessionRevocation = sessionRevocation;
+    }
+
+    /// <summary>
+    /// 踢掉一条会话（多登录策略的 Replace 分支）。
+    /// </summary>
+    /// <remarks>
+    /// ★★ <b>必须走撤销出口，不能只调 <c>ISessionService.RevokeSessionAsync</c>。</b>
+    /// 后者只把会话行标成已撤销，绑定其上的<b>刷新令牌原样留在库里</b>；
+    /// 「被踢的设备进不来」于是完全押在 <c>EnforceSessionValidation</c> 这个逃生开关上 ——
+    /// 一旦有人把它关掉，被踢的设备可以拿旧刷新令牌换一枚全新的 access token，
+    /// <b>单设备登录与限并发一起变成装饰</b>，而管理端的会话列表看上去一切正常。
+    /// 这是本模块所有撤销点里最常被触发的一条，反而最容易被漏掉。
+    /// </remarks>
+    private async Task RevokeSessionAsync(Guid sessionId)
+    {
+        if (_sessionRevocation != null)
+        {
+            await _sessionRevocation.RevokeSessionAsync(sessionId, SessionRevocationReason.MultiLoginReplaced);
+            return;
+        }
+
+        LogWarning(
+            "ISessionRevocationService is not available; session {SessionId} is revoked but its refresh token is left behind.",
+            sessionId);
+        await _sessionService!.RevokeSessionAsync(sessionId);
+    }
+
+    /// <summary>
+    /// 踢掉该用户的其余全部会话（单设备策略）。理由同 <see cref="RevokeSessionAsync"/>。
+    /// </summary>
+    private async Task RevokeOtherSessionsAsync(Guid userId, Guid keepSessionId)
+    {
+        if (_sessionRevocation != null)
+        {
+            await _sessionRevocation.RevokeUserSessionsAsync(
+                userId, SessionRevocationReason.MultiLoginReplaced, excludeSessionId: keepSessionId);
+            return;
+        }
+
+        LogWarning(
+            "ISessionRevocationService is not available; other sessions of user {UserId} are revoked but their refresh tokens are left behind.",
+            userId);
+        await _sessionService!.RevokeAllSessionsAsync(userId, excludeSessionId: keepSessionId);
     }
 
     /// <inheritdoc />
@@ -71,8 +117,8 @@ public class LoginSessionCoordinator : ApplicationService, ILoginSessionCoordina
         {
             if (!multi.AllowMultiLogin)
             {
-                // 单设备：撤销该用户其余全部会话。
-                await _sessionService.RevokeAllSessionsAsync(userId, excludeSessionId: newSessionId);
+                // 单设备：撤销该用户其余全部会话（连同它们的刷新令牌）。
+                await RevokeOtherSessionsAsync(userId, newSessionId);
             }
             else if (multi.MaxConcurrentSessions > 0)
             {
@@ -84,7 +130,7 @@ public class LoginSessionCoordinator : ApplicationService, ILoginSessionCoordina
                 var surplus = others.Count + 1 - multi.MaxConcurrentSessions;
                 for (var i = 0; i < surplus && i < others.Count; i++)
                 {
-                    await _sessionService.RevokeSessionAsync(others[i].Id);
+                    await RevokeSessionAsync(others[i].Id);
                 }
             }
         }
@@ -104,8 +150,15 @@ public class LoginSessionCoordinator : ApplicationService, ILoginSessionCoordina
         }
 
         var now = DateTime.UtcNow;
+        // 闲置超时也要算进来：一条超过闲置窗口的会话在每请求校验里已经判死，
+        // 却还占着并发名额 —— 症状是「明明只登了一台设备，却说已达上限」。
+        var idleMinutes = IdentityOptions.AccountSecurity.SessionTimeoutMinutes;
+
         return result.Data
-            .Where(s => !s.IsRevoked && (s.ExpiresAt == null || s.ExpiresAt > now))
+            .Where(s => !s.IsRevoked
+                && (s.ExpiresAt == null || s.ExpiresAt > now)
+                && (s.AbsoluteExpiresAt == null || s.AbsoluteExpiresAt > now)
+                && (idleMinutes <= 0 || s.LastActivityTime.AddMinutes(idleMinutes) > now))
             .ToList();
     }
 

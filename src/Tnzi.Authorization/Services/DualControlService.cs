@@ -59,7 +59,10 @@ public class DualControlService : ApplicationService, IDualControlService
         }
 
         // 连点两下不该造出两张许可 —— 两张许可等于这个动作被批准了两次。
-        var existing = await FindPendingAsync(input.Operation, input.TargetId, cancellationToken);
+        // ★ 去重键 = 动作 + 目标 + 发起人 + 参数。少了发起人，B 发起同一动作会拿回 A 那张待批请求
+        // （连同 A 的参数原文），而 B 既批不了它也用不了它；少了参数，「保存成功」与
+        // 「你的参数被换成了旧的那份」在响应上分不出来。
+        var existing = await FindPendingAsync(input.Operation, input.TargetId, requesterId.Value, input.PayloadJson, cancellationToken);
         if (existing != null)
         {
             return Ok(existing.MapTo<DualControlRequestDto>());
@@ -167,6 +170,21 @@ public class DualControlService : ApplicationService, IDualControlService
         if (request.Status != DualControlStatus.Approved || request.IsConsumed)
         {
             return NotUsable();
+        }
+
+        // ★★★ 审批人批的是「这个人做这件事」，所以许可只能由发起人取用。
+        // 少了这一比，任何知道 requestId 的调用方都能把别人批下来的许可换成自己的执行，
+        // 而审计上看到的仍是一次合规的双人授权。与 CancelAsync 的「撤回只属于发起人」同一条判据。
+        var consumerId = CurrentUser?.Id;
+        if (consumerId is null || consumerId == Guid.Empty || request.RequesterId != consumerId.Value)
+        {
+            LogWarning(
+                "Dual-control consume rejected for request {RequestId}: caller {CallerId} is not the requester {RequesterId}.",
+                requestId,
+                consumerId,
+                request.RequesterId);
+
+            return Fail<DualControlRequestDto>("Only the requester can consume this approval", 403, ErrorCodes.FORBIDDEN);
         }
 
         if (request.ExpiresAt <= DateTime.UtcNow)
@@ -464,20 +482,35 @@ public class DualControlService : ApplicationService, IDualControlService
         return await checker.IsGrantedAsync(operation + suffix);
     }
 
+    /// <summary>
+    /// 同一发起人、同一动作、同一目标、同一参数的未决未过期请求。
+    /// </summary>
+    /// <remarks>
+    /// 参数比对用 <see cref="NormalizePayload"/> 在内存里做：候选集已经被前三个键收窄到
+    /// 「这个人对这条单据的未决请求」（通常 0 或 1 条），而 null 与空串要视为同一件事，
+    /// 这在 SQL 里写不干净。
+    /// </remarks>
     private async Task<DualControlRequest?> FindPendingAsync(
         string operation,
         string? targetId,
+        Guid requesterId,
+        string? payloadJson,
         CancellationToken cancellationToken)
     {
         var trimmed = operation.Trim();
         var now = DateTime.UtcNow;
 
-        return await _repository.FirstOrDefaultAsync(
-            r => r.Operation == trimmed
-                 && r.TargetId == targetId
-                 && r.Status == DualControlStatus.Pending
-                 && r.ExpiresAt > now,
-            cancellationToken);
+        var candidates = await _repository
+            .Where(r => r.Operation == trimmed
+                        && r.TargetId == targetId
+                        && r.RequesterId == requesterId
+                        && r.Status == DualControlStatus.Pending
+                        && r.ExpiresAt > now)
+            .ToListAsync(cancellationToken);
+
+        var normalized = NormalizePayload(payloadJson);
+        return candidates.FirstOrDefault(r =>
+            string.Equals(NormalizePayload(r.PayloadJson), normalized, StringComparison.Ordinal));
     }
 
     /// <summary>

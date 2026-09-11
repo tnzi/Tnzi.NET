@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Services;
+﻿namespace Tnzi.Payment.Services;
 
 /// <summary>
 /// 支付服务实现：建单（折扣 + 计税 + 渠道下单）、查询、关闭、同步与线下确认。
@@ -57,6 +57,14 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
         if (request.Amount <= 0)
             return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentInvalidAmount, 400);
+
+        // 有效期两端都要挡：负得足够多会让 AddMinutes 抛 ArgumentOutOfRangeException（一个畸形请求换来 500），
+        // 大得足够多会让订单永不过期 —— 清扫扫不到它，为它核销的优惠券也就永远不归还。
+        if (request.ExpireMinutes is { } minutes && (minutes < 1 || minutes > PaymentConstants.MaxPaymentExpireMinutes))
+            return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentInvalidExpireMinutes, 400);
+
+        if (!EnsureRedirectAllowed(request.ReturnUrl, nameof(request.ReturnUrl)))
+            return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentReturnUrlNotAllowed, 400);
 
         var channelCode = string.IsNullOrWhiteSpace(request.ChannelCode)
             ? PaymentOptions.DefaultChannelCode
@@ -377,6 +385,26 @@ public partial class PaymentService : ApplicationService, IPaymentService
         return !string.IsNullOrWhiteSpace(channelCurrency)
             ? channelCurrency
             : PaymentOptions.DefaultCurrency;
+    }
+
+    /// <summary>
+    /// 校验调用方给的回跳地址；不通过时记一条指名配置项的 Error 再返回 false。
+    /// </summary>
+    /// <remarks>
+    /// 日志是必须的：没配 <c>Payment:AllowedRedirectHosts</c> 与「用户提交了一个恶意地址」
+    /// 在客户端看起来完全一样，少了这条，一次部署疏漏会被读成「前端老是传错回跳地址」。
+    /// </remarks>
+    private bool EnsureRedirectAllowed(string? url, string fieldName)
+    {
+        if (PaymentRedirectPolicy.IsAllowed(url, PaymentOptions))
+            return true;
+
+        Logger.LogError(
+            "Rejected {Field} '{Url}': the host is not in Payment:AllowedRedirectHosts (currently {Hosts}). "
+            + "Add the payer-facing host there, otherwise every caller-supplied redirect is refused.",
+            fieldName, url, string.Join(", ", PaymentRedirectPolicy.AllowedHosts(PaymentOptions)));
+
+        return false;
     }
 
     private static bool IsOfflineChannel(string channelCode)

@@ -13,7 +13,7 @@ public class CheckComposerTests
     [Fact]
     public void Micr_UsAba_Composes()
     {
-        var line = MicrLineComposer.Compose(BankNumberScheme.UsAba, 1001, "021000021", null, null, "123456789");
+        var line = MicrLineComposer.Compose(BankNumberScheme.UsAba, "1001", "021000021", null, null, "123456789");
         line.ShouldBe($"{U}1001{U} {T}021000021{T} 123456789{U}");
 
         // 映射到 E-13B 字体码位后不再含 OCR 符号
@@ -27,8 +27,22 @@ public class CheckComposerTests
     [Fact]
     public void Micr_CaCpa006_Composes()
     {
-        var line = MicrLineComposer.Compose(BankNumberScheme.CaEft, 1001, null, "001", "12345", "987654321");
+        var line = MicrLineComposer.Compose(BankNumberScheme.CaEft, "1001", null, "001", "12345", "987654321");
         line.ShouldBe($"{U}1001{U} {T}12345{D}001{T} 987654321{U}");
+    }
+
+    /// <summary>
+    /// 串行号原样进磁码行：宽度是<b>调用方</b>决定的，拼装器不再自己格式化。
+    /// </summary>
+    /// <remarks>
+    /// CPA-006 §4.4.4 把串行号字段定为变长，所以补零是排版问题不是编码问题。
+    /// 拼装器若还收 <c>long</c>，它就得自己决定补几位 —— 于是票面与磁码行各有一份规则。
+    /// </remarks>
+    [Fact]
+    public void Micr_UsesTheSerialItWasGiven_Verbatim()
+    {
+        MicrLineComposer.Compose(BankNumberScheme.UsAba, "00002", "021000021", null, null, "123456789")
+            .ShouldBe($"{U}00002{U} {T}021000021{T} 123456789{U}");
     }
 
     [Theory]

@@ -162,6 +162,36 @@ function buildStaticCrumbs(): TAdminBreadcrumbItem[] {
     .map(toCrumb)
 }
 
+/**
+ * The glyph a NAVIGABLE contributed crumb would have had if the route tree had
+ * produced it.
+ *
+ * A contributed trail names its ancestors by path, not by route, so it carries
+ * no icons - and swapping the route-derived trail (icons) for the contributed
+ * one (none) the instant a record loads makes every label in the breadcrumb
+ * shift sideways as the glyphs disappear. Resolving the path back to its route
+ * closes the gap: the ancestors keep the same glyphs they had a frame earlier,
+ * and an explicit `icon` on the contribution still wins.
+ *
+ * The leaf has no `to` (it is where you already are), so it stays glyph-free,
+ * which is also what the route-derived walk produces for a detail route.
+ */
+function iconForPath(to: string | undefined): string | undefined {
+  if (!to) return undefined
+  try {
+    const resolved = router.resolve(to)
+    const target = resolved.matched[resolved.matched.length - 1]
+    if (!target) return undefined
+    return (
+      (target.meta?.icon as string | undefined) ??
+      (typeof target.name === 'string' ? DEFAULT_ROUTE_ICONS[target.name] : undefined)
+    )
+  } catch {
+    // Unresolvable path (a deep link into a route table this shell doesn't own).
+    return undefined
+  }
+}
+
 const items = computed<TAdminBreadcrumbItem[]>(() => {
   // 1) A full runtime trail contributed by the page (cross-entity drill that the
   //    flat route tree cannot express - e.g. Clients / <name> / File / <number>).
@@ -170,7 +200,7 @@ const items = computed<TAdminBreadcrumbItem[]>(() => {
     return trail.map((c) => ({
       label: resolveContributedLabel(c.label),
       to: c.to,
-      icon: c.icon,
+      icon: c.icon ?? iconForPath(c.to),
     }))
   }
   // 2) Otherwise the route-derived walk, with an optional leaf-label override
@@ -180,6 +210,17 @@ const items = computed<TAdminBreadcrumbItem[]>(() => {
   if (leaf && crumbs.length) {
     const last = crumbs[crumbs.length - 1]
     crumbs[crumbs.length - 1] = { ...last, label: resolveContributedLabel(leaf) }
+    return crumbs
+  }
+  // 3) The page has declared it owns the leaf but its record has not arrived.
+  //    Hold the leaf as a placeholder rather than rendering the route-derived
+  //    title, which a detail route inherits from its LIST - that is how
+  //    `Clients / Clients` used to flash before turning into the person's name.
+  //    `to` is dropped with it: a bar that navigates is a mis-click waiting to
+  //    happen. See `useAdminBreadcrumbStore.markPending`.
+  const held = crumbs[crumbs.length - 1]
+  if (held && breadcrumbStore?.isPending(currentKey.value)) {
+    crumbs[crumbs.length - 1] = { ...held, to: undefined, loading: true }
   }
   return crumbs
 })

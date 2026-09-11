@@ -1,5 +1,4 @@
 using PdfSharp.Fonts;
-using Tnzi.Finance.Documents.Services.Internal;
 
 namespace Tnzi.Finance.Tests;
 

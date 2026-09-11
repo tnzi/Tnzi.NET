@@ -89,6 +89,7 @@ import type { AdminUserCenterConfig } from './user-center-config'
 import { resolveHubConfigs } from './hub-config'
 import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deep-link-config'
 import type { AdminThemeConfig } from './theme-config'
+import type { AdminShellConfig } from './shell-config'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useRouteProgress } from '../headless/useRouteProgress'
 import { waitForClientToken } from '../headless/waitForClientToken'
@@ -544,6 +545,21 @@ export interface DefineAdminAppOptions {
   theme?: AdminThemeConfig
 
   /**
+   * Chrome (shell frame) configuration.
+   *
+   * `actions` contributes the host's own icon-only utility buttons to the
+   * chrome's action strip - beside the built-in Settings gear, not instead of
+   * it. This is the home for a small, high-traffic, app-level verb ("file the
+   * scans that came back", "open the on-call board") that deserves one click
+   * from anywhere but does not deserve a top-level nav row among the app's
+   * nouns. Each action gates its own visibility, so a permission-scoped one
+   * simply disappears for users who lack the grant.
+   *
+   * See {@link AdminChromeAction} for where they render in each layout mode.
+   */
+  shell?: AdminShellConfig
+
+  /**
    * App-wide deep-link switch for URL-synced UI state (`?detail=` overlay
    * open-states, `?section=` active sections). `false` disables both channels
    * everywhere - built-in pages included - so no UI state ever enters the URL;
@@ -992,6 +1008,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       chat: chatConfig,
       theme: options.theme,
       userCenter: options.userCenter,
+      shell: options.shell,
     })
 
     // Register host-app i18n overrides at the correct time - AFTER

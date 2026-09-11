@@ -138,22 +138,15 @@ describe('sidebar menu badges', () => {
   })
 })
 
-const tabsStub = {
-  name: 'Tabs',
-  props: ['value'],
-  template: '<div class="n-tabs-stub"><slot /></div>',
-}
-const tabPaneStub = {
-  name: 'TabPane',
-  props: ['name', 'tab'],
-  setup(props: { name: string; tab: unknown }) {
-    return () =>
-      h('div', { class: 'n-tabpane-stub', 'data-name': props.name }, [
-        typeof props.tab === 'function' ? (props.tab as () => unknown)() : String(props.tab),
-      ])
-  },
-}
-
+/**
+ * The tabs strip runs against REAL naive components.
+ *
+ * It used to be stubbed, and the stub invoked the `tab` prop itself - so it
+ * asserted what the prop was supposed to produce rather than what naive did
+ * with it. Naive was in fact dropping the label entirely and painting an empty
+ * comment node, and this test could not see it. `NMenu` stays stubbed because
+ * the side nav's counts live in render functions that only a stub can read.
+ */
 describe('detail section badges', () => {
   const sections = [
     { key: 'profile', label: 'Profile', icon: 'mdi:account' },
@@ -164,7 +157,7 @@ describe('detail section badges', () => {
     return mount(TDetailLayout, {
       props: { layout, sections, activeSection: 'profile', title: 'Staff' },
       slots: { default: '<div class="body" />' },
-      global: { stubs: { Menu: menuStub, Tabs: tabsStub, TabPane: tabPaneStub, SvgIcon: true, Popover: true } },
+      global: { stubs: { Menu: menuStub, SvgIcon: true, Popover: true } },
     })
   }
 

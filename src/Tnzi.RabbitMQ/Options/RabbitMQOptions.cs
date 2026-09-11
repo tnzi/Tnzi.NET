@@ -13,6 +13,16 @@ public class RabbitMQOptions
     public ConnectionOptions Connection { get; set; } = new();
 
     /// <summary>
+    /// 启动时按容器里已注册的 <c>IEventHandler&lt;T&gt;</c> 自动订阅对应的集成事件（默认: true）。
+    /// </summary>
+    /// <remarks>
+    /// 关掉它意味着这个进程只发布、不消费，除非应用自己调用 <c>SubscribeEventAsync</c>。
+    /// 纯生产者服务可以关；但要清楚：交换机上没有队列绑定时，发出去的消息会被代理丢弃
+    /// （本模块用 <c>mandatory: true</c> 发布，这种情况会记一条 Error）。
+    /// </remarks>
+    public bool AutoSubscribe { get; set; } = true;
+
+    /// <summary>
     /// 消费者预取数量（默认: 10）
     /// 控制消费者同时处理的消息数量上限
     /// </summary>

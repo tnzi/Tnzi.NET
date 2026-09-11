@@ -21,12 +21,17 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 获取所有配置（按分组）
+    /// 获取配置列表（按分组 / 作用域）。默认返回 Global 行 + 调用者本租户的 Tenant 行；
+    /// <c>scope=User</c> 时租户内调用者必须给出 <c>scopeId</c>（用户 id）。租户归属由身份决定，
+    /// 请求别的租户返回 403。
     /// </summary>
     [HttpGet]
-    public virtual async Task<ApiResult<IEnumerable<SettingDto>>> GetSettings([FromQuery] string? group = null)
+    public virtual async Task<ApiResult<IEnumerable<SettingDto>>> GetSettings(
+        [FromQuery] string? group = null,
+        [FromQuery] SettingScope? scope = null,
+        [FromQuery] string? scopeId = null)
     {
-        var result = await SettingService.GetSettingsAsync(group);
+        var result = await SettingService.GetSettingsAsync(group, scope, scopeId);
         return result.ToApiResult();
     }
 
@@ -123,9 +128,11 @@ public class DefaultSettingAdminController : ApiAdminControllerBase
     /// 获取配置分组列表（分组名称 + 每组配置数量）
     /// </summary>
     [HttpGet("groups")]
-    public virtual async Task<ApiResult<List<SettingGroupDto>>> GetSettingGroups()
+    public virtual async Task<ApiResult<List<SettingGroupDto>>> GetSettingGroups(
+        [FromQuery] SettingScope? scope = null,
+        [FromQuery] string? scopeId = null)
     {
-        var result = await SettingService.GetSettingGroupsAsync();
+        var result = await SettingService.GetSettingGroupsAsync(scope, scopeId);
         return result.ToApiResult();
     }
 

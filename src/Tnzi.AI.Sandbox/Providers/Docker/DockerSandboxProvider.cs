@@ -46,10 +46,12 @@ public class DockerSandboxProvider : ISandboxProvider
         var containerName = $"tnzi-sandbox-{options.ThreadId:N}";
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);
 
+        string? createdContainerId = null;
         try
         {
             // 创建容器
             var containerId = await CreateContainerAsync(httpClient, containerName, options, dockerOpts, ct);
+            createdContainerId = containerId;
 
             // 启动容器
             await StartContainerAsync(httpClient, containerId, ct);
@@ -83,8 +85,46 @@ public class DockerSandboxProvider : ISandboxProvider
         }
         catch
         {
+            // ★ 创建成功但启动失败时必须删掉容器。容器名按 threadId 派生
+            // （tnzi-sandbox-{threadId}），Docker 的容器名是全局唯一的：留一个死容器在那里，
+            // 这个 thread 之后每一次创建都撞 409 Conflict，而它自己一次都没成功跑起来过。
+            // 删除失败只记日志：那时原始异常才是要抛给调用方的那个。
+            if (createdContainerId is not null)
+            {
+                await TryRemoveContainerAsync(httpClient, createdContainerId, sandboxId);
+            }
+
             _containerSemaphore.Release();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 尽力删除一个已创建但未能投入使用的容器。
+    /// </summary>
+    /// <remarks>
+    /// 用 <c>force=true</c>：容器可能处于 created / 半启动状态，普通 remove 会被拒。
+    /// 刻意<b>不接</b>调用方的取消令牌：走到这里往往正是因为它已经取消了，拿它去发删除请求
+    /// 等于不删。
+    /// </remarks>
+    private async Task TryRemoveContainerAsync(HttpClient httpClient, string containerId, string sandboxId)
+    {
+        try
+        {
+            var response = await httpClient.DeleteAsync($"/containers/{containerId}?force=true", CancellationToken.None);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Docker sandbox {SandboxId}: failed to remove container {ContainerId} after a failed start: HTTP {StatusCode}. " +
+                    "The name is derived from the thread id, so this thread will hit 409 Conflict until the container is removed.",
+                    sandboxId, containerId, (int)response.StatusCode);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Docker sandbox {SandboxId}: error removing container {ContainerId} after a failed start.",
+                sandboxId, containerId);
         }
     }
 

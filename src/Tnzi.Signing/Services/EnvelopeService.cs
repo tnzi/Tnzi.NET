@@ -1,7 +1,7 @@
 ﻿namespace Tnzi.Signing.Services;
 
 /// <inheritdoc cref="IEnvelopeService" />
-public class EnvelopeService : ApplicationService, IEnvelopeService
+public partial class EnvelopeService : ApplicationService, IEnvelopeService
 {
     private readonly IRepository<Envelope, Guid> _requests;
     private readonly IRepository<Signer, Guid> _recipients;
@@ -14,6 +14,13 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
     private readonly ComposedDocumentRenderer _composer;
     private readonly IFileStorageService _files;
 
+    /// <summary>
+    /// 本次请求内的文件读取授予。签署令牌校验通过后把这份请求的文档 id 写进去，
+    /// 让 <c>Tnzi.Storage</c> 的读取判定在同一个请求里放行 —— 收件人是匿名的，
+    /// 少了这一步，密封读不到渲染稿、收件人也取不到自己正在签的文档。
+    /// </summary>
+    private readonly IFileAccessGrantContext _grants;
+
     public EnvelopeService(
         IServiceProvider serviceProvider,
         IRepository<Envelope, Guid> requests,
@@ -25,7 +32,8 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         SigningSealer sealer,
         SigningCertificateBuilder certificates,
         ComposedDocumentRenderer composer,
-        IFileStorageService files)
+        IFileStorageService files,
+        IFileAccessGrantContext grants)
         : base(serviceProvider)
     {
         _requests = Check.NotNull(requests);
@@ -38,6 +46,7 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         _certificates = Check.NotNull(certificates);
         _composer = Check.NotNull(composer);
         _files = Check.NotNull(files);
+        _grants = Check.NotNull(grants);
     }
 
     /// <inheritdoc />
@@ -274,111 +283,6 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
     }
 
     /// <inheritdoc />
-    public async Task<Result<SigningPacketDto>> GetByTokenAsync(string token, CancellationToken cancellationToken = default)
-    {
-        var (request, recipient, snapshot) = await ResolveTokenAsync(token, cancellationToken);
-        if (request == null || recipient == null || snapshot == null)
-            return Fail<SigningPacketDto>("This signing link is not valid.", 404);
-
-        // 首次打开记一次查看时间，这条时间会进完成证书。
-        if (recipient.ViewedAt == null && recipient.Status == SigningRecipientStatus.Sent)
-        {
-            recipient.ViewedAt = DateTime.UtcNow;
-            recipient.Status = SigningRecipientStatus.Viewed;
-            await _recipients.UpdateAsync(recipient, cancellationToken: cancellationToken);
-            await FlushAsync(cancellationToken);
-        }
-
-        return Ok(await BuildPacketAsync(request, recipient, snapshot, cancellationToken));
-    }
-
-    /// <inheritdoc />
-    public async Task<Result<SigningPacketDto>> SubmitAsync(string token, SubmitSigningDto input, CancellationToken cancellationToken = default)
-    {
-        Check.NotNull(input);
-
-        var (request, recipient, snapshot) = await ResolveTokenAsync(token, cancellationToken);
-        if (request == null || recipient == null || snapshot == null)
-            return Fail<SigningPacketDto>("This signing link is not valid.", 404);
-
-        var gate = CheckSignable(request, recipient);
-        if (gate != null) return Fail<SigningPacketDto>(gate.Message!, gate.Code ?? 409);
-
-        var recipients = await LoadRecipientsAsync(request.Id, cancellationToken);
-        if (request.IsSequential && !IsMyTurn(request, recipient, recipients))
-            return Fail<SigningPacketDto>("It is not this recipient's turn to sign yet.", 409);
-
-        // 只接受本角色负责的字段：一个收件人不该能改另一个人要签的内容。
-        var mine = snapshot.Fields
-            .Where(f => !f.IsSignatureLike
-                        && string.Equals(f.RecipientRole, recipient.Role, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        var submitted = input.Values ?? [];
-        var accepted = new Dictionary<string, string?>(StringComparer.Ordinal);
-        foreach (var field in mine)
-        {
-            if (submitted.TryGetValue(field.Key, out var v))
-                accepted[field.Key] = v;
-        }
-
-        var missing = mine
-            .Where(f => f.Required && string.IsNullOrWhiteSpace(accepted.GetValueOrDefault(f.Key)))
-            .Select(f => f.Label)
-            .ToList();
-        if (missing.Count > 0)
-            return Fail<SigningPacketDto>($"These required fields are missing: {string.Join(", ", missing)}.", 400);
-
-        // 该角色有签名字段却没交图 —— 拦下来，否则会密封出一份签名位空白的文档。
-        var needsSignature = snapshot.Fields.Any(
-            f => f.IsSignatureLike && string.Equals(f.RecipientRole, recipient.Role, StringComparison.OrdinalIgnoreCase));
-        if (needsSignature && string.IsNullOrWhiteSpace(input.SignatureImage))
-            return Fail<SigningPacketDto>("A signature is required.", 400);
-
-        await StoreValuesAsync(request.Id, accepted, recipient.Id, cancellationToken);
-
-        recipient.SignatureImage = input.SignatureImage;
-        recipient.ConsentText = input.ConsentText;
-        recipient.SignerIp = ScopedContext?.ClientIpAddress;
-        recipient.SignerUserAgent = ScopedContext?.UserAgent;
-        recipient.SignedAt = DateTime.UtcNow;
-        recipient.Status = SigningRecipientStatus.Signed;
-        await _recipients.UpdateAsync(recipient, cancellationToken: cancellationToken);
-        await FlushAsync(cancellationToken);
-
-        await AdvanceAsync(request, snapshot, cancellationToken);
-
-        var refreshed = await LoadRecipientsAsync(request.Id, cancellationToken);
-        var me = refreshed.First(r => r.Id == recipient.Id);
-        return Ok(await BuildPacketAsync(request, me, snapshot, cancellationToken));
-    }
-
-    /// <inheritdoc />
-    public async Task<Result<SigningPacketDto>> DeclineAsync(string token, string? reason, CancellationToken cancellationToken = default)
-    {
-        var (request, recipient, snapshot) = await ResolveTokenAsync(token, cancellationToken);
-        if (request == null || recipient == null || snapshot == null)
-            return Fail<SigningPacketDto>("This signing link is not valid.", 404);
-
-        var gate = CheckSignable(request, recipient);
-        if (gate != null) return Fail<SigningPacketDto>(gate.Message!, gate.Code ?? 409);
-
-        recipient.Status = SigningRecipientStatus.Declined;
-        recipient.DeclinedAt = DateTime.UtcNow;
-        recipient.DeclineReason = reason;
-        recipient.SignerIp = ScopedContext?.ClientIpAddress;
-        recipient.SignerUserAgent = ScopedContext?.UserAgent;
-        await _recipients.UpdateAsync(recipient, cancellationToken: cancellationToken);
-
-        // 一人拒签即整份作废：一份缺了一方签名的合同没有中间状态可言。
-        request.Status = EnvelopeStatus.Declined;
-        await _requests.UpdateAsync(request, cancellationToken: cancellationToken);
-        await FlushAsync(cancellationToken);
-
-        return Ok(await BuildPacketAsync(request, recipient, snapshot, cancellationToken));
-    }
-
-    /// <inheritdoc />
     public async Task<Result> VoidAsync(Guid requestId, CancellationToken cancellationToken = default)
     {
         var request = await _requests.GetAsync(requestId, cancellationToken);
@@ -554,6 +458,10 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         // 而不是"盖完章存完文件之后"。
         request.Status = EnvelopeStatus.Completed;
 
+        // 成品是在这个（匿名的）请求里刚存下的，CreatorId 为空：同一请求内接下来要读它的
+        // 任何一方（宿主归档 sink、响应里的文档）都得靠授予。
+        GrantDocumentAccess(request);
+
         // 完成证书在密封之后生成 —— 它要写进成品的哈希，所以顺序不能反。
         // ★ 生成失败**不回退**这次密封：文档已经签成、哈希已经算定，为一页审计记录
         //   把一份有效的签署结果撤回去是本末倒置。留 CompletionCertificateFileId 为空
@@ -563,6 +471,7 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         if (certificate.Succeeded)
         {
             request.CompletionCertificateFileId = certificate.Data;
+            _grants.Grant(certificate.Data);
         }
         else
         {
@@ -638,48 +547,6 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
         }
     }
 
-    /// <summary>令牌 → (请求, 收件人, 快照)。任何一环不成立都返回全 null。</summary>
-    private async Task<(Envelope?, Signer?, SigningSnapshot?)> ResolveTokenAsync(
-        string token, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(token)) return (null, null, null);
-
-        // 比对哈希，不拿秘密做等值查询。
-        var hash = OneTimeToken.Hash(token);
-        var recipient = await _recipients.FirstOrDefaultAsync(r => r.TokenHash == hash, cancellationToken);
-        if (recipient == null) return (null, null, null);
-
-        var request = await _requests.GetAsync(recipient.RequestId, cancellationToken);
-        if (request == null) return (null, null, null);
-
-        var snapshot = SigningSnapshot.FromJson(request.TemplateSnapshotJson);
-        // 快照解析不出 = 这份请求无法处理，绝不当作"没有字段"继续走。
-        return snapshot == null ? (null, null, null) : (request, recipient, snapshot);
-    }
-
-    /// <summary>还能不能签。</summary>
-    private static Result? CheckSignable(Envelope request, Signer recipient)
-    {
-        if (request.Status is EnvelopeStatus.Voided or EnvelopeStatus.Declined)
-            return Result.Failure("This request is no longer active.", 409);
-        if (request.Status == EnvelopeStatus.Completed)
-            return Result.Failure("This request has already been completed.", 409);
-        if (request.ExpiresAt <= DateTime.UtcNow)
-            return Result.Failure("This request has expired.", 410);
-        if (recipient.Status == SigningRecipientStatus.Signed)
-            return Result.Failure("This recipient has already signed.", 409);
-        if (recipient.Status == SigningRecipientStatus.Declined)
-            return Result.Failure("This recipient has already declined.", 409);
-        return null;
-    }
-
-    private static bool IsMyTurn(Envelope request, Signer recipient, IReadOnlyList<Signer> all)
-    {
-        if (!request.IsSequential) return true;
-        var next = all.FirstOrDefault(r => r.Status != SigningRecipientStatus.Signed);
-        return next == null || next.Id == recipient.Id;
-    }
-
     private async Task<List<Signer>> LoadRecipientsAsync(Guid requestId, CancellationToken cancellationToken)
     {
         var list = await _recipients.ToListAsync(r => r.RequestId == requestId, cancellationToken);
@@ -723,43 +590,5 @@ public class EnvelopeService : ApplicationService, IEnvelopeService
                 }, cancellationToken: cancellationToken);
             }
         }
-    }
-
-    private async Task<SigningPacketDto> BuildPacketAsync(
-        Envelope request,
-        Signer recipient,
-        SigningSnapshot snapshot,
-        CancellationToken cancellationToken)
-    {
-        var all = await LoadRecipientsAsync(request.Id, cancellationToken);
-        var values = await LoadValuesAsync(request.Id, cancellationToken);
-
-        var mine = snapshot.Fields
-            .Where(f => !f.IsSignatureLike
-                        && string.Equals(f.RecipientRole, recipient.Role, StringComparison.OrdinalIgnoreCase))
-            .Select(f => new RecipientFieldDto
-            {
-                Key = f.Key,
-                Label = f.Label,
-                Type = f.Type,
-                Required = f.Required,
-                Value = values.GetValueOrDefault(f.Key),
-            })
-            .ToList();
-
-        return new SigningPacketDto
-        {
-            Title = request.Title,
-            RecipientName = recipient.Name,
-            RecipientStatus = recipient.Status,
-            // 收件人看到的状态也要现算 —— 否则一个过期链接会显示"等待您签署"，
-            // 而点下去必然被 CheckSignable 拒掉。
-            RequestStatus = EnvelopeExpiry.Derive(request.Status, request.ExpiresAt, DateTime.UtcNow),
-            IsMyTurn = IsMyTurn(request, recipient, all),
-            Fields = mine,
-            // 完成后给密封成品，否则给渲染稿。
-            DocumentFileId = request.FinalPdfFileId ?? request.RenderedPdfFileId,
-            ExpiresAt = request.ExpiresAt,
-        };
     }
 }

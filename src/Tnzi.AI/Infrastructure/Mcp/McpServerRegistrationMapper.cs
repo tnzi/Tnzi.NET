@@ -43,7 +43,10 @@ internal static class McpServerRegistrationMapper
             Name = entity.Name,
             Description = entity.Description,
             Endpoint = entity.ServerUrl,
-            ConnectionType = McpConnectionType.Http
+            ConnectionType = McpConnectionType.Http,
+            // 租户维度取自该行自身而不是环境上下文：同名 server 在不同租户下是不同端点 + 不同凭据，
+            // 下游连接缓存与工具缓存靠它分桶（见 McpCacheKey）。单租户部署 TenantId 为 null，键退化为名字。
+            TenantKey = entity.TenantId?.ToString()
         };
 
         if (!string.IsNullOrEmpty(entity.AuthTokenEncrypted))

@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Promotions.Services;
+﻿namespace Tnzi.Payment.Promotions.Services;
 
 /// <summary>
 /// 促销服务实现
@@ -276,6 +276,15 @@ public class PromotionService : ApplicationService, IPromotionService
         var promotion = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotionId, cancellationToken);
         if (promotion == null)
             return Fail(ErrorCodes.PromotionNotFound, 404);
+
+        // 已经同步过就不再打一次：渠道侧的券是不可变的，重复同步只会新建一个内容相同的券，
+        // 而本地这一列只存得下一个 id —— 上一个从此没人引用，却一直挂在渠道的账上。
+        if (!string.IsNullOrWhiteSpace(promotion.StripeCouponId))
+        {
+            Logger.LogInformation("Promotion {PromotionCode} is already synced to {ChannelCode} as {CouponId}.",
+                promotion.PromotionCode, _couponSync.ChannelCode, promotion.StripeCouponId);
+            return Ok();
+        }
 
         var syncResult = await _couponSync.SyncCouponAsync(new PaymentChannelCouponDto
         {

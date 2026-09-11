@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Identity.Options;
 
 /// <summary>
@@ -18,6 +18,14 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
 
         if (jwt.RefreshTokenExpirationDays <= 0)
             errors.Add("Jwt.RefreshTokenExpirationDays must be greater than 0.");
+
+        // 宽限窗是一个安全折中：窗口有多长，一枚被盗令牌就有多长时间可以跟着用而不触发重放检测。
+        // 上限钉在 5 分钟，是为了让「把它调大以绕开误报」这条路走不远 ——
+        // 误报的正解是查为什么会并发刷新，不是把检测窗口拉到无意义。
+        if (jwt.RefreshTokenRotationOverlapSeconds < 0)
+            errors.Add("Jwt.RefreshTokenRotationOverlapSeconds cannot be negative (0 disables the overlap window).");
+        else if (jwt.RefreshTokenRotationOverlapSeconds > 300)
+            errors.Add("Jwt.RefreshTokenRotationOverlapSeconds must not exceed 300 (a longer window is a window in which a stolen refresh token goes undetected).");
 
         // 验证 OTP 配置
         var otp = options.Otp;

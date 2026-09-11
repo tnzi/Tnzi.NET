@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Subscriptions.Services;
+﻿namespace Tnzi.Payment.Subscriptions.Services;
 
 /// <summary>
 /// 订阅服务（partial）：计划变更（升降级）与按比例计费。
@@ -141,6 +141,142 @@ public partial class SubscriptionService
         return Ok();
     }
 
+    public async Task<Result<int>> ApplyDuePlanChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+
+        var dueChangeIds = await _changeRepository.AsNoTracking()
+            .Where(c => c.Status == SubscriptionChangeStatus.Pending && c.EffectiveDate <= now)
+            .OrderBy(c => c.EffectiveDate)
+            .Take(BillingScanPageSize)
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken);
+
+        if (dueChangeIds.Count == 0)
+            return Ok(0);
+
+        var applied = 0;
+        foreach (var changeId in dueChangeIds)
+        {
+            try
+            {
+                if (await ApplyDueChangeAsync(changeId, now, cancellationToken) != null)
+                    applied++;
+            }
+            catch (Exception ex)
+            {
+                // 一条结算失败不能拖垮同一轮里其它订阅的变更
+                Logger.LogError(ex, "Applying a due subscription plan change failed. ChangeId: {ChangeId}", changeId);
+            }
+        }
+
+        if (applied > 0)
+            Logger.LogInformation("Applied {Count} due subscription plan changes", applied);
+
+        return Ok(applied);
+    }
+
+    /// <summary>
+    /// 结算某条订阅上已到期的待生效变更，返回新生效的计划（没有到期变更时返回 null）。
+    /// 供续费扫描在扣款**之前**调用。
+    /// </summary>
+    private async Task<SubscriptionPlan?> ApplyDuePlanChangeForSubscriptionAsync(
+        Guid subscriptionId, DateTime now, CancellationToken cancellationToken)
+    {
+        var changeId = await _changeRepository.AsNoTracking()
+            .Where(c => c.SubscriptionId == subscriptionId
+                && c.Status == SubscriptionChangeStatus.Pending
+                && c.EffectiveDate <= now)
+            .OrderBy(c => c.EffectiveDate)
+            .Select(c => (Guid?)c.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return changeId.HasValue
+            ? await ApplyDueChangeAsync(changeId.Value, now, cancellationToken)
+            : null;
+    }
+
+    /// <summary>
+    /// 把一条到期的待生效变更真正应用到订阅上，返回新生效的计划；未能应用时返回 null。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>刻意不动 <c>NextBillingTime</c></b>。延后生效的变更恰好落在周期边界上，
+    /// 那一刻的计费时钟由续费本身推进（<c>ApplyPaymentCompletedAsync</c> 从当前
+    /// <c>NextBillingTime</c> 起算一个周期）。在这里顺手把它拨到「现在 + 一个周期」，
+    /// 等于先白送一个未收款的周期，续费成功后又在此基础上再加一个 ——
+    /// 一次降级换来两个周期的免费服务。这与立即生效升级的
+    /// <c>ApplyProrationChangeAsync</c> 不同：那一条发生在周期中间，必须自己重置周期起点。
+    /// </para>
+    /// <para>
+    /// ★ 抢占用 <b>CAS</b>（<c>WHERE Status = Pending</c> 原子改 <c>Applied</c>）而不是先读后写：
+    /// 续费扫描与本扫描可能落在两个实例上同时命中同一条变更，先读后写会让两边都判定
+    /// 「还没结算」，于是同一条变更发两次已生效事件。
+    /// </para>
+    /// </remarks>
+    private async Task<SubscriptionPlan?> ApplyDueChangeAsync(Guid changeId, DateTime now, CancellationToken cancellationToken)
+    {
+        var claimed = await _changeRepository.AsQueryable()
+            .Where(c => c.Id == changeId && c.Status == SubscriptionChangeStatus.Pending)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SubscriptionChangeStatus.Applied), cancellationToken);
+
+        if (claimed == 0)
+            return null;
+
+        var change = await _changeRepository.FirstOrDefaultAsync(c => c.Id == changeId, cancellationToken);
+        if (change == null)
+            return null;
+
+        var subscription = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == change.SubscriptionId, cancellationToken);
+        var newPlan = await _planRepository.FirstOrDefaultAsync(p => p.Id == change.ToPlanId, cancellationToken);
+
+        // 已终止的订阅不能被一条旧的待生效变更改写：那会给一个已取消的订阅换上新计划，
+        // 让它在列表与报表里重新看起来像一份活订阅。计划被删掉同理 —— 无处可换。
+        var terminated = subscription == null
+            || subscription.Status is SubscriptionStatus.Cancelled or SubscriptionStatus.Expired;
+
+        if (terminated || subscription == null || newPlan == null)
+        {
+            change.Status = SubscriptionChangeStatus.Cancelled;
+            await _changeRepository.UpdateAsync(change, cancellationToken);
+
+            Logger.LogInformation(
+                "Due subscription plan change dropped. ChangeId: {ChangeId}, SubscriptionId: {SubscriptionId}, Reason: {Reason}",
+                changeId, change.SubscriptionId, terminated ? "subscription is no longer active" : "target plan no longer exists");
+            return null;
+        }
+
+        subscription.PlanId = newPlan.Id;
+        // 不设 Plan 导航：仓储读出的计划是游离态，挂上去会被 EF 当新计划 INSERT（撞 PlanCode 唯一索引）
+        subscription.ProductCode = newPlan.ProductCode;
+        subscription.CycleType = newPlan.CycleType;
+        subscription.CycleValue = newPlan.CycleValue;
+        subscription.OriginalPrice = newPlan.Price;
+        subscription.Currency = newPlan.Currency;
+        await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new SubscriptionPlanChangeAppliedEvent
+            {
+                SubscriptionId = subscription.Id,
+                SubscriptionNo = subscription.SubscriptionNo,
+                UserId = subscription.UserId,
+                ChangeId = change.Id,
+                FromPlanId = change.FromPlanId,
+                ToPlanId = change.ToPlanId,
+                ChangeType = change.ChangeType,
+                AppliedTime = now
+            });
+        }
+
+        Logger.LogInformation(
+            "Applied due subscription plan change. SubscriptionNo: {SubscriptionNo}, ChangeType: {ChangeType}, ToPlan: {ToPlan}",
+            subscription.SubscriptionNo, change.ChangeType, newPlan.PlanName);
+
+        return newPlan;
+    }
+
     /// <summary>
     /// 计划变更上下文：变更与预览两条路径共用同一套前置校验，避免两处规则漂移
     /// </summary>
@@ -225,7 +361,12 @@ public partial class SubscriptionService
         // 周期总时长（按 ticks 计算，全程 decimal，避免 double 中间值精度损失）
         var periodStart = CalculatePeriodStart(periodEnd, currentPlan.CycleType, currentPlan.CycleValue);
         var totalTicks = (periodEnd - periodStart).Ticks;
-        if (totalTicks <= 0) return newPlan.Price;
+
+        // 周期长度算不出来（计划的周期值为 0 或负）→ 按「整个周期都还剩着」兜底，即两个计划的差额。
+        // 此前这里返回新计划**全价**，方向是反的：一次降级会向用户收取新计划的整整一期费用，
+        // 而正常路径上降级永远是负数（信用）。
+        if (totalTicks <= 0)
+            return CurrencyInfo.Round(newPlan.Price - currentPlan.Price, newPlan.Currency);
 
         // 剩余时长占比
         var remainingTicks = Math.Max(0L, (periodEnd - now).Ticks);

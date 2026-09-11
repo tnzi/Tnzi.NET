@@ -60,6 +60,35 @@ public partial class McpServerHost : IMcpServerHost
     private string? GetCallerHash() =>
         _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.CallerHashItemKey] as string;
 
+    /// <summary>
+    /// 为工具调用构造限流键，<b>按调用方分区</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 此前的键是 <c>agent:{agentId}</c> / <c>tool:{name}</c> —— 不带任何调用方维度，
+    /// 而它们与 HTTP 请求桶共用同一个 <c>McpServerSecurityMiddleware</c> 单例、同一个字典、
+    /// 同一个 <c>RateLimitPerMinute</c> 阈值。于是客户端 A 打满 agent X 的桶之后，
+    /// 客户端 B（哪怕来自另一个租户、拿着另一把 API Key）对同一个 agent 的调用一律 429：
+    /// 一个普通客户端就能拒绝掉所有人对某个 agent 的访问。
+    /// </para>
+    /// <para>
+    /// 分区口径与 <c>BuildClientKey</c> 保持一致（租户段 + 调用方摘要），这样两个桶按同一个
+    /// 身份切分。没有 HTTP 上下文时（stdio 传输）落到单一 <c>local</c> 分区 —— 那里本来就
+    /// 只有一个调用方。
+    /// </para>
+    /// </remarks>
+    private string BuildToolRateLimitKey(string bucket)
+    {
+        var caller = GetCallerHash();
+        if (caller is null)
+        {
+            return $"local:{bucket}";
+        }
+
+        var tenant = _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.TenantHeaderName] as string;
+        return $"{tenant ?? "shared"}:{caller}:{bucket}";
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<string> GetCustomToolNames() => [.. _customTools.Keys];
 
@@ -279,7 +308,7 @@ public partial class McpServerHost : IMcpServerHost
         Func<Task<string>> execute,
         CancellationToken ct)
     {
-        var rateLimitKey = agentId.HasValue ? $"agent:{agentId.Value}" : $"tool:{toolName}";
+        var rateLimitKey = BuildToolRateLimitKey(agentId.HasValue ? $"agent:{agentId.Value}" : $"tool:{toolName}");
         var sw = Stopwatch.StartNew();
         string? errorMessage = null;
         var isSuccess = false;

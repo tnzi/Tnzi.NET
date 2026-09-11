@@ -11,16 +11,14 @@ public class MessagePushService<THub> : IMessagePushService<THub>
 {
     private readonly IHubContext<THub> _hubContext;
     private readonly IConnectionManager _connectionManager;
-    private readonly ILogger<MessagePushService<THub>> _logger;
 
     /// <summary>
     /// 初始化一个<see cref="MessagePushService{THub}"/>类型的新实例
     /// </summary>
-    public MessagePushService(IHubContext<THub> hubContext, IConnectionManager connectionManager, ILogger<MessagePushService<THub>> logger)
+    public MessagePushService(IHubContext<THub> hubContext, IConnectionManager connectionManager)
     {
         _hubContext = Check.NotNull(hubContext);
         _connectionManager = Check.NotNull(connectionManager);
-        _logger = Check.NotNull(logger);
     }
 
     /// <summary>

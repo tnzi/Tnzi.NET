@@ -50,6 +50,21 @@ public class MemoryCacheService : ICache, IDisposable
         return Task.FromResult<T?>(default);
     }
 
+    /// <summary>
+    /// 单次查找即可回答「在不在」（默认接口实现要访问两次）。
+    /// </summary>
+    public Task<(bool Found, T? Value)> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
+    {
+        if (_memoryCache.TryGetValue(key, out T? value))
+        {
+            _monitor?.RecordCacheHit(key);
+            return Task.FromResult((true, value));
+        }
+
+        _monitor?.RecordCacheMiss(key);
+        return Task.FromResult((false, default(T)));
+    }
+
     public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
         var options = new MemoryCacheEntryOptions();

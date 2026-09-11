@@ -12,8 +12,17 @@
     @click="onActivate"
     @keydown="onKeydown"
   >
-    <!-- Selection checkbox: its own click must not open the card. -->
-    <div v-if="selectable" class="t-item-card__check" @click.stop>
+    <!-- Selection checkbox: activating it must not also open the card. Both keys
+         are stopped, never prevented: NCheckbox is a `role="checkbox"` div that
+         toggles on keyup, so cutting the keydown here leaves its own behaviour
+         (and its Space scroll-prevention) intact while the card stops hearing it. -->
+    <div
+      v-if="selectable"
+      class="t-item-card__check"
+      @click.stop
+      @keydown.enter.stop
+      @keydown.space.stop
+    >
       <NCheckbox :checked="checked" @update:checked="(v: boolean) => emit('update:checked', v)" />
     </div>
 
@@ -62,7 +71,17 @@
       </div>
     </slot>
 
-    <div v-if="$slots.actions" class="t-item-card__ops" @click.stop @keydown.enter.stop>
+    <!-- Row operations: stop BOTH activation keys, and stop only - never prevent.
+         A native button activates on Space at keyup and the browser already
+         suppresses the scroll, so stopping the keydown here is what keeps the
+         control working while the card behind it stays shut. -->
+    <div
+      v-if="$slots.actions"
+      class="t-item-card__ops"
+      @click.stop
+      @keydown.enter.stop
+      @keydown.space.stop
+    >
       <slot name="actions" />
     </div>
 
@@ -176,7 +195,7 @@ defineSlots<{
   meta?: () => unknown
   /** Replaces the right-aligned figure block. */
   trailing?: () => unknown
-  /** Row operations; clicks are stopped from opening the card. */
+  /** Row operations; clicks and Enter/Space are stopped from opening the card. */
   actions?: () => unknown
 }>()
 

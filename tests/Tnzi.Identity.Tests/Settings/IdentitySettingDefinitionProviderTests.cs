@@ -73,8 +73,9 @@ public class IdentitySettingDefinitionProviderTests
         registration.Order.ShouldBe(200);
         registration.Icon.ShouldBe("mdi:account-plus-outline");
         // SignIn: UseEmailAsUserName + Allow{UserName,Email,Sms}Login + AllowCodeLogin = 5；
-        // Registration: EnableQuickRegister{Email,Sms} + DefaultUserNameFromEmail + RequireConfirmed{Email,Phone} + SetPasswordTokenExpirationMinutes = 6 → 合计 11。
-        registration.Fields.Count.ShouldBe(11);
+        // Registration: EnableSelfRegistration + EnableQuickRegister{Email,Sms} + DefaultUserNameFromEmail
+        //             + RequireConfirmed{Email,Phone} + SetPasswordTokenExpirationMinutes = 7 → 合计 12。
+        registration.Fields.Count.ShouldBe(12);
     }
 
     [Fact]

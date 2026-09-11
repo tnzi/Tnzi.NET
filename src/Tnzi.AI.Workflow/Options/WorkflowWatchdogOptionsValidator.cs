@@ -21,6 +21,13 @@ public class WorkflowWatchdogOptionsValidator : OptionsValidatorBase<WorkflowWat
                 $"WaitingTimeout must be a positive duration, got {options.WaitingTimeout}.");
         }
 
+        // 下限 10 秒：比这更密的扫描只会把数据库当成轮询目标，而超时判定本身以分钟计。
+        if (options.UseBuiltInScheduler && options.ScanInterval < TimeSpan.FromSeconds(10))
+        {
+            AddError(errors, nameof(options.ScanInterval),
+                $"ScanInterval must be at least 10 seconds, got {options.ScanInterval}.");
+        }
+
         if (options.MaxBatchSize < 1)
         {
             AddError(errors, nameof(options.MaxBatchSize),

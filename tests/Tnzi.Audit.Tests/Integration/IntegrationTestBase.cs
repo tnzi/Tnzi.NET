@@ -42,8 +42,12 @@ public class AuditTestDbContext : TnziDbContext<AuditTestDbContext>
         // 记录级读取审计表：生产环境下建不建取决于 Audit:RecordAccess:Enabled，
         // 未启用时实体被排除出迁移（EnsureCreated 也不会建）。
         // 测试 DbContext 不经 AddDbContext 构建，拿不到应用服务提供程序，
-        // 自动发现那次必然判定为未启用并打上排除标记；这里在 base 之后把它撤销，
-        // 并显式补上模块表前缀（base 里的前缀约定只作用于它自己那一轮配置）。
+        // 自动发现那次必然判定为未启用并打上排除标记 —— 而且在打标记那一行就提前返回了，
+        // 列宽与 (UserId, Sequence) 唯一索引一条都没配。★ 没有那条唯一索引，哈希链的并发冲突
+        // 在测试库里根本不会发生，「冲突后重读链尾重试」这条路径就永远测不到。
+        // 所以这里用显式 enabled 构造把完整配置再跑一遍，再撤销排除标记并补上模块表前缀
+        //（base 里的前缀约定只作用于它自己那一轮配置）。
+        modelBuilder.ApplyConfiguration(new Tnzi.Audit.Entities.Configs.AuditRecordAccessConfiguration(enabled: true));
         modelBuilder.Entity<AuditRecordAccess>()
             .ToTable("Audit_RecordAccess", t => t.ExcludeFromMigrations(false));
 

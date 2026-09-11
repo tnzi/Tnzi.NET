@@ -241,10 +241,22 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
             _renewalCts.Dispose();
         }
 
-        // 使用 Lua 脚本确保原子性：只有当 value 匹配时才删除
-        await _db.ScriptEvaluateAsync(
-            ReleaseScript,
-            new RedisKey[] { _lockKey },
-            new RedisValue[] { _lockValue });
+        // 使用 Lua 脚本确保原子性：只有当 value 匹配时才删除。
+        // ★ 释放失败不得从 DisposeAsync 里抛出去：这几乎总是发生在 using 块结束时，
+        // 而那时业务代码往往正在处理另一个异常 —— 抛出去会顶掉原始异常（真正的失败原因），
+        // 换来的也不是可靠性：锁本来就带 TTL，Redis 不可达时它会自己到期。
+        try
+        {
+            await _db.ScriptEvaluateAsync(
+                ReleaseScript,
+                new RedisKey[] { _lockKey },
+                new RedisValue[] { _lockValue });
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "Failed to release distributed lock '{Key}'; it will expire on its own after the configured TTL.",
+                Key);
+        }
     }
 }

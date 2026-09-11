@@ -11,7 +11,6 @@ public class RagRetrieverTests
     private readonly Mock<IEmbeddingService> _embeddingServiceMock = new();
     private readonly Mock<IVectorStore> _vectorStoreMock = new();
     private readonly Mock<IReranker> _rerankerMock = new();
-    private readonly Mock<IRepository<KnowledgeDocument, Guid>> _docRepoMock = new();
     private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
 
     public RagRetrieverTests()
@@ -40,7 +39,6 @@ public class RagRetrieverTests
             _embeddingServiceMock.Object,
             _vectorStoreMock.Object,
             _rerankerMock.Object,
-            _docRepoMock.Object,
             _kbRepoMock.Object,
             Enumerable.Empty<ISearchPostProcessor>(),
             ragOptions);

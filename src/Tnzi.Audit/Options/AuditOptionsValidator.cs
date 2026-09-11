@@ -17,6 +17,11 @@ public class AuditOptionsValidator : OptionsValidatorBase<AuditOptions>
             AddError(errors, nameof(options.BatchSize), "BatchSize must be between 1 and 1000.");
         }
 
+        if (options.ExportMaxRows <= 0)
+        {
+            AddError(errors, nameof(options.ExportMaxRows), "ExportMaxRows must be greater than 0.");
+        }
+
         if (options.ChannelCapacity < 0)
         {
             AddError(errors, nameof(options.ChannelCapacity), "ChannelCapacity must be 0 (unbounded) or greater.");

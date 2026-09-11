@@ -33,6 +33,8 @@ export {
   getErrorCode,
   unwrapData,
   ensureOk,
+  unwrapOk,
+  unwrapUnchecked,
   unwrapResult,
   extractData,
   extractDataOrThrow,

@@ -24,15 +24,15 @@
 
     <div class="flex flex-col gap-2">
       <div v-if="showEmail && user.email" class="flex flex-col gap-0.5">
-        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">Email</n-text>
+        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">{{ t('common.email') }}</n-text>
         <n-text>{{ user.email }}</n-text>
       </div>
       <div v-if="showRole && user.role" class="flex flex-col gap-0.5">
-        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">Role</n-text>
+        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">{{ t('common.role') }}</n-text>
         <n-text>{{ user.role }}</n-text>
       </div>
       <div v-if="user.description" class="flex flex-col gap-0.5">
-        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">Description</n-text>
+        <n-text depth="3" class="text-3 uppercase tracking-[0.025em]">{{ t('common.description') }}</n-text>
         <n-text depth="2">{{ user.description }}</n-text>
       </div>
     </div>
@@ -59,6 +59,7 @@
 import { computed } from 'vue'
 import { NCard, NTag, NText, NButton, NSpace } from 'naive-ui'
 import TAvatar from '../display/TAvatar.vue'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 interface UserInfo {
   id: string | number
@@ -82,6 +83,8 @@ interface Props {
   showEmail?: boolean
   showRole?: boolean
 }
+
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,

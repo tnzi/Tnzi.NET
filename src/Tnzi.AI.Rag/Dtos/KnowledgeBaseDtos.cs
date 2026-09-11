@@ -15,6 +15,10 @@ public class KnowledgeBaseDto
     public int DocumentCount { get; set; }
     public int ChunkCount { get; set; }
     public bool IsEnabled { get; set; }
+
+    /// <summary>是否允许普通已登录用户经用户端 RAG 端点直接查询本库（默认关闭）。</summary>
+    public bool IsUserQueryable { get; set; }
+
     public DateTime CreationTime { get; set; }
 }
 
@@ -34,6 +38,9 @@ public class CreateKnowledgeBaseDto
     public string? EmbeddingModel { get; set; }
     public int? ChunkSize { get; set; }
     public int? ChunkOverlap { get; set; }
+
+    /// <summary>是否允许普通已登录用户直接查询本库；不传 = 否。</summary>
+    public bool? IsUserQueryable { get; set; }
 }
 
 /// <summary>
@@ -48,6 +55,9 @@ public class UpdateKnowledgeBaseDto
     public string? Description { get; set; }
 
     public bool? IsEnabled { get; set; }
+
+    /// <summary>是否允许普通已登录用户直接查询本库。</summary>
+    public bool? IsUserQueryable { get; set; }
 }
 
 /// <summary>

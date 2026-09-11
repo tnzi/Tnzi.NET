@@ -108,16 +108,24 @@ public class SubscriptionRelationalShapeTests
     }
 
     /// <summary>
-    /// 三张表的索引数量与列组合不变 —— 后台扫描全靠它们，掉一条就是全表扫。
+    /// 索引数量与列组合 —— 后台扫描全靠它们，掉一条就是全表扫。
     /// </summary>
+    /// <remarks>
+    /// 判重那一条从「(UserId, ProductCode, Status) 非唯一」换成了**两条具名的过滤唯一索引**
+    /// （产品码有值 / 为 null 各一条，都排掉 Cancelled 与 Expired）。
+    /// 两条落在同一组列上，因此各自具名 —— 不具名时 EF 按列组合去重，第二条会安静地覆盖第一条。
+    /// NULL 那一支只按 <c>UserId</c> 建（不带 ProductCode 列）：PostgreSQL / SQLite 认为
+    /// 唯一索引里的 NULL 互不相等，带上它这条约束就等于不存在，而在 SQL Server 上它又是生效的。
+    /// 普通的 <c>UserId</c> 索引因此与它同列共存，靠显式索引名区分。
+    /// </remarks>
     [Fact]
-    public void SubscriptionIndexesAreUnchanged()
+    public void SubscriptionIndexesAreAsDocumented()
     {
         using var db = ModelOnlyContext();
 
         var indexes = db.Model.FindEntityType(typeof(Subscription))!
             .GetIndexes()
-            .Select(i => string.Join(",", i.Properties.Select(p => p.Name)))
+            .Select(i => $"{string.Join(",", i.Properties.Select(p => p.Name))}{(i.IsUnique ? " [unique]" : string.Empty)}")
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToList();
 
@@ -129,9 +137,10 @@ public class SubscriptionRelationalShapeTests
             "Status,NextBillingTime",
             "Status,PausedUntil",
             "Status,TrialEndTime",
-            "SubscriptionNo",
+            "SubscriptionNo [unique]",
             "UserId",
-            "UserId,ProductCode,Status",
+            "UserId [unique]",
+            "UserId,ProductCode [unique]",
         ]);
     }
 

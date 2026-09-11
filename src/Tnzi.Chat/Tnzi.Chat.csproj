@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 列宽常量（ChatFieldLimits）由实体配置与写入校验共用，测试要能对着它断言。 -->
+    <InternalsVisibleTo Include="Tnzi.Chat.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />

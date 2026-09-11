@@ -6,13 +6,6 @@ namespace Tnzi.AI.Tools.BuiltIn;
 [AIToolGroup("text", "Text Tools", "Analyze and transform text content")]
 public class TextTools : IAIToolProvider
 {
-    private readonly ILogger<TextTools> _logger;
-
-    public TextTools(ILogger<TextTools> logger)
-    {
-        _logger = Check.NotNull(logger);
-    }
-
     /// <summary>
     /// Get text statistics
     /// </summary>

@@ -20,10 +20,23 @@ public class DefaultFeatureValueAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// List the registered value providers (scopes) - the only names <c>POST</c> accepts.
+    /// The admin UI builds its scope picker from this so an operator cannot write to a scope
+    /// nothing reads. Inactive providers are listed with the reason so existing rows stay
+    /// visible for cleanup.
+    /// </summary>
+    [HttpGet("providers")]
+    public virtual async Task<ApiResult<IEnumerable<FeatureValueProviderDto>>> GetProviders()
+    {
+        var result = await FeatureService.GetValueProvidersAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// Get feature values for a specific provider
     /// </summary>
-    /// <param name="providerName">Provider name (e.g., "Tenant", "Edition")</param>
-    /// <param name="providerKey">Provider key (optional)</param>
+    /// <param name="providerName">Provider name (e.g., "Global", "Tenant")</param>
+    /// <param name="providerKey">Provider key (required for keyed providers such as Tenant)</param>
     [HttpGet]
     public virtual async Task<ApiResult<IEnumerable<FeatureValueDto>>> GetValues(
         [FromQuery] string providerName,

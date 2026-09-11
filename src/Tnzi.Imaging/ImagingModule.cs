@@ -28,6 +28,11 @@ public class ImagingModule : TnziInfrastructureModule
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        // 解码像素上限：解码入口是静态扩展方法，闸门必须覆盖所有入口而不只是拿得到 DI 的那些，
+        // 因此在这里把配置值推给 ImageDecodeGuard（配置阶段读一次，运行期不再变）。
+        var imagingOptions = context.Configuration.GetSection("Imaging").Get<ImagingOptions>() ?? new ImagingOptions();
+        ImageDecodeGuard.MaxDecodePixels = imagingOptions.MaxDecodePixels;
+
         // 注册 ValidateCoder (使用 Options 配置)
         context.Services.AddSingleton(sp =>
         {

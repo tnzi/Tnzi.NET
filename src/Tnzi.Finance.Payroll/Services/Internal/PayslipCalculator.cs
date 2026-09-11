@@ -11,6 +11,13 @@ namespace Tnzi.Finance.Payroll.Services.Internal;
 /// </remarks>
 public sealed class PayslipCalculator
 {
+    /// <summary>一次扫多少个候选员工。</summary>
+    /// <remarks>
+    /// 闸门不是调优项：候选面是「全部在册员工」，没有上界，
+    /// 而 <c>MaxEmployeesPerRun</c> 判的是入选数、且判在加载之后。
+    /// </remarks>
+    private const int CandidatePageSize = 500;
+
     private readonly IRepository<Employee, Guid> _employeeRepo;
     private readonly IRepository<SalaryAssignment, Guid> _assignmentRepo;
     private readonly IRepository<SalaryStructure, Guid> _structureRepo;
@@ -81,46 +88,61 @@ public sealed class PayslipCalculator
         var payDate = run.PayDate.ToUtcDate();
 
         // 1. 圈选员工：在册 + 有覆盖期间的分配 + 未在期初前离职 + 结构过滤匹配
+        //
+        // ★ 分页扫描而不是一次性 ToList。候选面是「全部在册员工」，与批次大小无关 ——
+        // 周薪 800 人加月薪 200 人的公司跑一次月薪，候选 1000 而入选 200 ——
+        // 所以 MaxEmployeesPerRun 挡不住这次加载：它判断的是入选数，而判断发生在
+        // 全部候选**已经装进内存之后**。逐页扫描让内存只跟页大小走，
+        // 并且在入选数越界的那一刻就停下，不再往下扫。
         var employeeQuery = _employeeRepo.AsNoTracking().Where(e => e.IsActive);
         if (employeeFilter != null)
         {
             var filterIds = employeeFilter.ToList();
             employeeQuery = employeeQuery.Where(e => filterIds.Contains(e.Id));
         }
-
-        var employees = await employeeQuery.ToListAsync(cancellationToken);
-        if (employees.Count == 0)
-            return Result.Success(new List<Payslip>());
-
-        var employeeIds = employees.Select(e => e.Id).ToList();
-
-        var assignments = await _assignmentRepo.AsNoTracking()
-            .Where(a => employeeIds.Contains(a.EmployeeId) && a.EffectiveFrom <= periodEnd)
-            .ToListAsync(cancellationToken);
-
-        var resolvedAssignment = assignments
-            .GroupBy(a => a.EmployeeId)
-            .ToDictionary(g => g.Key, g => PayRunEligibility.PickEffective(g, periodEnd));
+        var pagedQuery = employeeQuery.OrderBy(e => e.Id);
 
         // 判据在 PayRunEligibility ——「谁进这个批次」必须与一次性输入的录入端同口径，
         // 两处各写一份的话，漂移的症状是输入被收下、跑批时那个人不在批次里。
         var eligible = new List<(Employee Employee, SalaryAssignment Assignment)>();
-        foreach (var employee in employees)
+        for (var skipped = 0; ; skipped += CandidatePageSize)
         {
-            resolvedAssignment.TryGetValue(employee.Id, out var assignment);
-            if (PayRunEligibility.Evaluate(run, employee, assignment) != PayRunEligibilityStatus.Eligible)
-                continue;
-            eligible.Add((employee, assignment!));
-        }
+            var page = await pagedQuery.Skip(skipped).Take(CandidatePageSize).ToListAsync(cancellationToken);
+            if (page.Count == 0)
+                break;
 
-        if (eligible.Count > _payrollOptions.MaxEmployeesPerRun)
-        {
-            return Result.Failure<List<Payslip>>(
-                $"The pay run selects {eligible.Count} employees, exceeding the configured limit of {_payrollOptions.MaxEmployeesPerRun}.", 400);
+            var pageIds = page.Select(e => e.Id).ToList();
+            var assignments = await _assignmentRepo.AsNoTracking()
+                .Where(a => pageIds.Contains(a.EmployeeId) && a.EffectiveFrom <= periodEnd)
+                .ToListAsync(cancellationToken);
+
+            var resolvedAssignment = assignments
+                .GroupBy(a => a.EmployeeId)
+                .ToDictionary(g => g.Key, g => PayRunEligibility.PickEffective(g, periodEnd));
+
+            foreach (var employee in page)
+            {
+                resolvedAssignment.TryGetValue(employee.Id, out var assignment);
+                if (PayRunEligibility.Evaluate(run, employee, assignment) != PayRunEligibilityStatus.Eligible)
+                    continue;
+
+                eligible.Add((employee, assignment!));
+                if (eligible.Count > _payrollOptions.MaxEmployeesPerRun)
+                {
+                    return Result.Failure<List<Payslip>>(
+                        $"The pay run selects more than {_payrollOptions.MaxEmployeesPerRun} employees, exceeding the configured limit. "
+                        + "Narrow the run or raise Payroll:MaxEmployeesPerRun.", 400);
+                }
+            }
+
+            if (page.Count < CandidatePageSize)
+                break;
         }
 
         if (eligible.Count == 0)
             return Result.Success(new List<Payslip>());
+
+        var employeeIds = eligible.Select(x => x.Employee.Id).ToList();
 
         // 2. 预取结构（含行）、组件、税级表、YTD
         var structureIds = eligible.Select(x => x.Assignment.StructureId).Distinct().ToList();
@@ -153,7 +175,14 @@ public sealed class PayslipCalculator
         foreach (var (employee, assignment) in eligible)
         {
             if (!structures.TryGetValue(assignment.StructureId, out var structure))
+            {
+                // ★ 结构查不到（多半是被软删了，而分配还指着它）此前是 continue ——
+                // 于是这个人**不出现在批次里**，而批次照常算完、照常过账、照常发薪：
+                // 他这个月的工资凭空消失，没有任何一处报错。本模块其余失败路径一律落
+                // CalculationError 让 PostAsync 拒绝整批，这一处没有理由例外。
+                payslips.Add(MissingStructurePayslip(run, employee, assignment, periodDays));
                 continue;
+            }
 
             var workedDays = workedDaysOverrides != null && workedDaysOverrides.TryGetValue(employee.Id, out var wd)
                 ? wd
@@ -167,6 +196,27 @@ public sealed class PayslipCalculator
 
         return Result.Success(payslips);
     }
+
+    /// <summary>
+    /// 分配指向的薪资结构已不存在时的占位工资单：金额全 0，只带一条错误。
+    /// </summary>
+    /// <remarks>
+    /// 带 <see cref="Payslip.CalculationError"/> 的批次不可过账，所以这张工资单的作用
+    /// 是把「这个人算不出来」摆到操作员面前，而不是让他从批次里消失。
+    /// </remarks>
+    private static Payslip MissingStructurePayslip(PayRun run, Employee employee, SalaryAssignment assignment, decimal periodDays)
+        => new()
+        {
+            PayRunId = run.Id,
+            EmployeeId = employee.Id,
+            EmployeeCode = employee.Code,
+            EmployeeName = employee.Name,
+            StructureId = assignment.StructureId,
+            BaseAmount = assignment.BaseAmount,
+            PeriodDays = periodDays,
+            WorkedDays = 0m,
+            CalculationError = $"Salary structure '{assignment.StructureId}' assigned to this employee no longer exists."
+        };
 
     private async Task<Payslip> ComputeOneAsync(
         PayRun run,
@@ -443,7 +493,10 @@ public sealed class PayslipCalculator
         var map = new Dictionary<(Guid, string), decimal>();
         foreach (var row in rows)
         {
-            var key = (row.EmployeeId, row.ComponentCode);
+            // 键与两处读取端（逐行 YTD 与 Ytd() 求值器）同口径归一：组件编码经服务层写入时
+            // 已是大写，但播种 / country pack / 直连 SQL 都写得进未归一的值，
+            // 而那时的症状是 YTD 静默取 0 —— 法定上限永不封顶，没有任何报错。
+            var key = (row.EmployeeId, row.ComponentCode.Trim().ToUpperInvariant());
             map[key] = map.GetValueOrDefault(key) + row.Total;
 
             // 按类型的聚合键与逐组件累计**同一次查询**得出：Ytd('#GROSS') 之类的上限基数

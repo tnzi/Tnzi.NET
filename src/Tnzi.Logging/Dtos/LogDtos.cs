@@ -103,9 +103,41 @@ public class LogSearchResultDto
     /// <summary>Matching lines (capped by the service's `maxResults` parameter).</summary>
     public List<LogSearchHitDto> Hits { get; set; } = new();
 
-    /// <summary>True when the result was truncated to satisfy the cap.</summary>
+    /// <summary>True when the scan stopped early for any reason (see <see cref="TruncationReason"/>).</summary>
     public bool Truncated { get; set; }
+
+    /// <summary>
+    /// Why the scan stopped early, or <see cref="LogSearchTruncation.None"/> when
+    /// the whole window was read. A budget-truncated search that reported only
+    /// "no hits" would be indistinguishable from a search that genuinely found
+    /// nothing, so the reason is part of the answer.
+    /// </summary>
+    public LogSearchTruncation TruncationReason { get; set; } = LogSearchTruncation.None;
+
+    /// <summary>Bytes actually read while scanning (makes the budget observable).</summary>
+    public long ScannedBytes { get; set; }
 
     /// <summary>Total milliseconds spent scanning files server-side.</summary>
     public long ElapsedMs { get; set; }
+}
+
+/// <summary>
+/// Why a log search returned before reading the whole window.
+/// </summary>
+public enum LogSearchTruncation
+{
+    /// <summary>The entire requested window was scanned.</summary>
+    None = 0,
+
+    /// <summary>The <c>maxResults</c> cap was reached; more matches may exist.</summary>
+    ResultLimit = 1,
+
+    /// <summary>The configured byte budget was exhausted (<c>Logging:Search:MaxScanBytes</c>).</summary>
+    ByteBudget = 2,
+
+    /// <summary>The configured time budget was exhausted (<c>Logging:Search:MaxScanSeconds</c>).</summary>
+    TimeBudget = 3,
+
+    /// <summary>The caller cancelled (client disconnected, request aborted).</summary>
+    Cancelled = 4,
 }

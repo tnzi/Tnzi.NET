@@ -34,7 +34,7 @@ import {
   type DualControlRequestDto,
 } from '@tnzi/core/services/authorization'
 import type { CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminDualControlApi>[0]
 
@@ -102,9 +102,9 @@ export function createDualControlBridge(deps: DualControlBridgeDeps = {}): DualC
     fetch: fetchRequests,
     getById: async (id: string) => unwrap<DualControlRequestDto>(await a.get(id)),
     approve: async (id: string, comment?: string) =>
-      unwrap<DualControlRequestDto>(await a.approve(id, decision(comment))),
+      unwrapOk<DualControlRequestDto>(await a.approve(id, decision(comment))),
     reject: async (id: string, reason?: string) =>
-      unwrap<DualControlRequestDto>(await a.reject(id, decision(reason))),
+      unwrapOk<DualControlRequestDto>(await a.reject(id, decision(reason))),
     cancel: async (id: string) => {
       ensureOk(await a.cancel(id))
     },

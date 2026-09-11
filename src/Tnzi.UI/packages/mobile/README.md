@@ -15,14 +15,12 @@ pnpm add @tnzi/mobile
 ```typescript
 // main.ts
 import { createApp } from "vue";
-import TnziMobile from "@tnzi/mobile";
+import { createTnziMobile } from "@tnzi/mobile";
 import "@tnzi/mobile/style.css";
 import App from "./App.vue";
 
 createApp(App)
-    .use(TnziMobile, {
-        locale: "zh-CN",
-    })
+    .use(createTnziMobile({ locale: "zh-CN" }))
     .mount("#app");
 ```
 
@@ -37,7 +35,7 @@ createApp(App)
 - 提供 Vue 插件（安装 Vant + 默认样式 + core 集成适配器）
 - 对外导出 `T*` 业务组件与常用 Vant 组件别名（`VButton`、`VCard` 等）
 - 提供移动端视口 Hook（`useMobileViewport`）
-- 按 `@tnzi/core/components` 契约实现移动端 `T*` 组件
+- 按 `@tnzi/core/types/shared-ui` 的 UI 契约类型实现移动端 `T*` 组件
 - 已实现导航语义组件：`TMenu`、`TNavBar`、`TTabBar`
 
 ## 本地开发

@@ -165,11 +165,15 @@ async function handleSubmit(): Promise<void> {
   }
   submitting.value = true
   try {
-    await callbacks.verifyTwoFactor({
-      challengeId: challenge.value?.challengeId,
-      code: code.value,
-      method: selectedMethod.value,
-    })
+    // ★ 传 helpers：2FA 通过之后后端可能紧接着要求改密，那个挑战只能经它交给 shell。
+    await callbacks.verifyTwoFactor(
+      {
+        challengeId: challenge.value?.challengeId,
+        code: code.value,
+        method: selectedMethod.value,
+      },
+      helpers,
+    )
     helpers.clearTwoFactor()
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Verification failed')

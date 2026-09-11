@@ -136,6 +136,55 @@ public class FeatureCheckerTests
     }
 
     [Fact]
+    public async Task GetValueAsync_TenantUnset_FallsThroughToGlobal_BeforeDefault()
+    {
+        // The single-tenant case: the tenant provider never resolves, the deployment-wide
+        // value must still beat the definition default.
+        SetupFeature("Feature.Test", "false");
+
+        var tenant = new Mock<IFeatureValueProvider>();
+        tenant.Setup(p => p.Name).Returns("Tenant");
+        tenant.Setup(p => p.Priority).Returns(200);
+        tenant.Setup(p => p.GetOrNullAsync("Feature.Test")).ReturnsAsync((string?)null);
+
+        var global = new Mock<IFeatureValueProvider>();
+        global.Setup(p => p.Name).Returns("Global");
+        global.Setup(p => p.Priority).Returns(100);
+        global.Setup(p => p.GetOrNullAsync("Feature.Test")).ReturnsAsync("true");
+
+        _providers.Add(global.Object);
+        _providers.Add(tenant.Object);
+        var checker = CreateChecker();
+
+        (await checker.IsEnabledAsync("Feature.Test")).ShouldBeTrue();
+        tenant.Verify(p => p.GetOrNullAsync("Feature.Test"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetValueAsync_TenantSet_ShadowsGlobal()
+    {
+        SetupFeature("Feature.Test", "false");
+
+        var tenant = new Mock<IFeatureValueProvider>();
+        tenant.Setup(p => p.Name).Returns("Tenant");
+        tenant.Setup(p => p.Priority).Returns(200);
+        tenant.Setup(p => p.GetOrNullAsync("Feature.Test")).ReturnsAsync("false");
+
+        var global = new Mock<IFeatureValueProvider>();
+        global.Setup(p => p.Name).Returns("Global");
+        global.Setup(p => p.Priority).Returns(100);
+        global.Setup(p => p.GetOrNullAsync("Feature.Test")).ReturnsAsync("true");
+
+        _providers.Add(global.Object);
+        _providers.Add(tenant.Object);
+        var checker = CreateChecker();
+
+        (await checker.IsEnabledAsync("Feature.Test")).ShouldBeFalse();
+        // Resolution stops at the first hit; the lower-priority provider is never consulted.
+        global.Verify(p => p.GetOrNullAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task IsAllEnabledAsync_AllEnabled_ReturnsTrue()
     {
         SetupFeature("Feature.A", "true");

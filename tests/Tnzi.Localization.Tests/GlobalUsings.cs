@@ -1,6 +1,8 @@
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Logging.Abstractions;
 global using Moq;
+global using Shouldly;
 global using System.Text.Json;
 global using Tnzi.Localization.Json;
 global using Tnzi.Localization.Services;

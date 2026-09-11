@@ -13,6 +13,10 @@ internal static class Cpa005FileBuilder
 {
     private const int Width = 1464;
     private const int SegmentWidth = 240;
+
+    /// <summary>Payee / Originator Account Number 字段宽度。
+    /// <see cref="BankNumberHelper.MaxAccountNumberLength"/> 直接引用它当录入上限（理由同 NACHA 侧）。</summary>
+    internal const int AccountNumberWidth = 12;
     private const string CreditTransactionType = "450"; // 直存/一般 credit
 
     public static string Build(EftComposeRequest request)
@@ -21,12 +25,19 @@ internal static class Cpa005FileBuilder
         if (request.Entries.Count == 0)
             throw new BusinessException("A CPA-005 batch requires at least one entry.");
 
+        // 出款方路由缺失 → 整份文件的 originating transit 会被补成九个零：一份语法合法、
+        // 指向不存在机构的报文。NACHA 侧对 ODFI 路由一直是 fail-fast 的（见 NachaFileBuilder），
+        // 这一侧没有理由更宽松。★ 档案本身允许留空路由（只登记名称/账号是合法的），
+        // 所以判据不能挪到 ValidateRouting 上，只能在「要出文件了」这一刻问。
+        if (!BankNumberHelper.HasTransferRouting(BankNumberScheme.CaEft, null, request.OriginatorInstitutionNumber, request.OriginatorTransitNumber))
+            throw new BusinessException("A CPA-005 file requires the originator's 3-digit institution number and 5-digit transit number.");
+
         var originatorId = EftFieldWriter.Text(request.OriginatorId, 10);
         var fcn = EftFieldWriter.Num(request.FileCreationNumber, 4);
         // CPA-005 电子路由号格式 = "0" + 机构号(3) + 分行号(5)（机构在前），与纸质支票 MICR 的
         // 分行-机构顺序（见 MicrLineComposer CA 分支）相反。定长错位会导致整个文件被接收行拒收。
         var originTransit = "0" + EftFieldWriter.Digits(request.OriginatorInstitutionNumber, 3) + EftFieldWriter.Digits(request.OriginatorTransitNumber, 5);
-        var originAccount = EftFieldWriter.Text(request.OriginatorAccountNumber, 12);
+        var originAccount = EftFieldWriter.AccountField(request.OriginatorAccountNumber, AccountNumberWidth, "the originating account");
         var shortName = EftFieldWriter.Text(request.OriginatorName, 15);
         var longName = EftFieldWriter.Text(request.OriginatorName, 30);
 
@@ -44,15 +55,20 @@ internal static class Cpa005FileBuilder
             var cents = EftFieldWriter.Cents(entry.Amount);
             totalCents += cents;
 
+            // 收款方路由缺失同样补成九个零 —— 那笔钱要么退回，要么由接收行按一个不是它的
+            // 路由处理。与 NACHA 侧「RDFI 必须正好 9 位」的检查对称。
+            if (!BankNumberHelper.HasTransferRouting(BankNumberScheme.CaEft, null, entry.InstitutionNumber, entry.TransitNumber))
+                throw new BusinessException($"Payee '{entry.PayeeName}' has an incomplete Canadian routing number (3-digit institution plus 5-digit transit) for CPA-005.");
+
             var payeeTransit = "0" + EftFieldWriter.Digits(entry.InstitutionNumber, 3) + EftFieldWriter.Digits(entry.TransitNumber, 5);
             var itemTrace = originTransit + fcn + EftFieldWriter.Num(seq, 9); // 9 + 4 + 9 = 22
 
             var segment =
                 CreditTransactionType +                                   // Transaction Type (3)
-                EftFieldWriter.Num(cents, 10) +                          // Amount (10)
+                EftFieldWriter.Amount(cents, 10, $"payee '{entry.PayeeName}'") + // Amount (10)
                 EftFieldWriter.Julian(request.EffectiveDate) +           // Date Funds Available (6)
                 payeeTransit +                                            // Payee Institution/Transit (9)
-                EftFieldWriter.Text(entry.AccountNumber, 12) +          // Payee Account Number (12)
+                EftFieldWriter.AccountField(entry.AccountNumber, AccountNumberWidth, $"payee '{entry.PayeeName}'") + // Payee Account Number (12)
                 itemTrace +                                               // Item Trace Number (22)
                 "000" +                                                   // Stored Transaction Type (3)
                 shortName +                                               // Originator Short Name (15)
@@ -102,7 +118,7 @@ internal static class Cpa005FileBuilder
             EftFieldWriter.Num(recordCount, 9) +
             originatorId +
             fcn +
-            EftFieldWriter.Num(totalCents, 14) +          // Total Value of Credit
+            EftFieldWriter.Amount(totalCents, 14, "the file total") + // Total Value of Credit
             EftFieldWriter.Num(creditCount, 8) +          // Total Number of Credit
             EftFieldWriter.Num(0, 14) +                    // Total Value of Debit
             EftFieldWriter.Num(0, 8) +                     // Total Number of Debit

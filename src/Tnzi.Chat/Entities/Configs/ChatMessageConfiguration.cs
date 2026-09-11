@@ -12,12 +12,12 @@ public class ChatMessageConfiguration : EntityTypeConfigurationBase<ChatMessage,
         // rather than the entity-derived "Chat_ChatMessage".
         builder.ToTable("Message");
 
-        builder.Property(m => m.Content).IsRequired().HasMaxLength(4000);
+        builder.Property(m => m.Content).IsRequired().HasMaxLength(ChatFieldLimits.MessageContent);
         builder.Property(m => m.FileId).HasMaxLength(256);
         builder.Property(m => m.FileName).HasMaxLength(512);
-        builder.Property(m => m.Title).HasMaxLength(200);
-        builder.Property(m => m.LinkUrl).HasMaxLength(2000);
-        builder.Property(m => m.Category).HasMaxLength(100);
+        builder.Property(m => m.Title).HasMaxLength(ChatFieldLimits.Title);
+        builder.Property(m => m.LinkUrl).HasMaxLength(ChatFieldLimits.LinkUrl);
+        builder.Property(m => m.Category).HasMaxLength(ChatFieldLimits.Category);
 
         builder.HasIndex(m => new { m.ConversationId, m.SentAt });
 

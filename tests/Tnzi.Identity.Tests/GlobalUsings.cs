@@ -26,6 +26,7 @@ global using Tnzi.Exceptions;
 global using Tnzi.Identity.Dtos;
 global using Tnzi.Identity.Entities;
 global using Tnzi.Identity.Metadata;
+global using Tnzi.Identity.Extensions;
 global using Tnzi.Identity.Events;
 global using Tnzi.Identity.Options;
 global using Tnzi.Identity.Services;

@@ -52,11 +52,31 @@ public class FeatureModule : TnziApplicationModule
         // Register FeatureUsageService (scoped, usage analytics)
         services.AddScoped<IFeatureUsageService, FeatureUsageService>();
 
-        // Register built-in value providers
-        // TenantFeatureValueProvider resolves feature values per tenant (priority 200)
-        // Applications can register custom IFeatureValueProvider implementations
-        // (e.g., EditionFeatureValueProvider for SaaS edition-based features)
+        // Usage records leave the request path through a bounded in-memory queue and are
+        // written in batches by a hosted service (same shape as the access log and the audit
+        // pipeline). One sender instance serves both ends of the channel.
+        services.AddSingleton<FeatureUsageSender>();
+        services.AddSingleton<IFeatureUsageSender>(sp => sp.GetRequiredService<FeatureUsageSender>());
+        services.AddSingleton<IFeatureUsageConsumer>(sp => sp.GetRequiredService<FeatureUsageSender>());
+        services.AddHostedService<FeatureUsageBackgroundService>();
+
+        // Resolved values are cached per scope (Feature:ValueCacheSeconds, 0 = off) and
+        // invalidated exactly by the value-changed / value-deleted events the admin API
+        // publishes after each successful write.
+        services.AddSingleton<FeatureValueCache>();
+        services.AddEventHandler<FeatureValueChangedEvent, FeatureValueCacheInvalidationHandler>();
+        services.AddEventHandler<FeatureValueDeletedEvent, FeatureValueCacheInvalidationHandler>();
+
+        // Register built-in value providers. The chain is evaluated by descending priority:
+        //   Tenant (200) -> Global (100) -> definition default.
+        // Global is what makes admin-written values take effect in a single-tenant deployment;
+        // without it the only reader was tenant-scoped and every value written with
+        // multi-tenancy off was accepted and then never evaluated.
+        // Applications can register further IFeatureValueProvider implementations
+        // (e.g. an edition provider for SaaS plans); the admin API only accepts values for
+        // providers that are registered here.
         services.AddScoped<IFeatureValueProvider, TenantFeatureValueProvider>();
+        services.AddScoped<IFeatureValueProvider, GlobalFeatureValueProvider>();
 
         return Task.CompletedTask;
     }

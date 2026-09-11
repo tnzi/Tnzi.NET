@@ -2,15 +2,21 @@
 namespace Tnzi.Audit.Tests.Services;
 
 /// <summary>
-/// AuditOperationService 单元测试
+/// AuditOperationService 单元测试（构造契约）。
 /// </summary>
+/// <remarks>
+/// ★ <c>GetUserOperationsAsync</c> 与 <c>GetFunctionStatisticsAsync</c> <b>没有被覆盖</b>：
+/// 它们要求对 <c>IRepository</c>（继承 <c>IQueryable</c>）的查询谓词求值，mock 做不到，
+/// 只能跑真实 provider 的集成测试。此前这两条以<b>空方法体的 <c>[Fact]</c></b> 存在 ——
+/// 无条件通过、计入测试数、什么都不断言，比没有测试更糟：它让覆盖看起来是有的。
+/// 现已删除；要补就补集成测试。
+/// </remarks>
 public class AuditOperationServiceTests
 {
     private readonly Mock<IRepository<AuditOperation, Guid>> _repositoryMock;
     private readonly Mock<IAuditStore> _auditStoreMock;
     private readonly Mock<IOptionsMonitor<AuditOptions>> _optionsMonitorMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
-    private readonly AuditOperationService _service;
 
     public AuditOperationServiceTests()
     {
@@ -19,52 +25,7 @@ public class AuditOperationServiceTests
         _optionsMonitorMock = new Mock<IOptionsMonitor<AuditOptions>>();
         _optionsMonitorMock.Setup(x => x.CurrentValue).Returns(new AuditOptions());
         _serviceProviderMock = new Mock<IServiceProvider>();
-        _service = new AuditOperationService(_repositoryMock.Object, _auditStoreMock.Object, _optionsMonitorMock.Object, _serviceProviderMock.Object);
     }
-
-    #region GetUserOperationsAsync Tests
-
-    [Fact]
-    public async Task GetUserOperationsAsync_Should_Return_User_Operations()
-    {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var operations = new List<AuditOperation>
-        {
-            new AuditOperation
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                FunctionName = "Action1",
-                ResultType = AuditResultType.Success,
-                CreationTime = DateTime.UtcNow.AddHours(-2)
-            },
-            new AuditOperation
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                FunctionName = "Action2",
-                ResultType = AuditResultType.Failed,
-                CreationTime = DateTime.UtcNow.AddHours(-1)
-            }
-        };
-
-        // Note: 由于 IRepository 继承自 IQueryable，我们需要跳过这个测试
-        // 或者使用集成测试
-    }
-
-    #endregion
-
-    #region CalculateStatistics Tests
-
-    [Fact]
-    public async Task GetFunctionStatisticsAsync_Should_Calculate_Correctly()
-    {
-        // Note: CalculateStatistics 是 private 方法，通过公共方法测试
-        // 此测试需要 IQueryable mock，跳过
-    }
-
-    #endregion
 
     #region Constructor Tests
 

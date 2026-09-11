@@ -20,6 +20,9 @@
             <NTag size="small" :type="item.isEnabled ? 'success' : 'default'" :bordered="false">
               {{ item.isEnabled ? t('badge.enabled') : t('badge.disabled') }}
             </NTag>
+            <NTag v-if="item.isUserQueryable" size="small" type="info" :bordered="false">
+              {{ t('badge.userQueryable') }}
+            </NTag>
           </div>
 
           <div class="ai-knowledge-card__stats">

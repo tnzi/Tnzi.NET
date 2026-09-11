@@ -50,6 +50,10 @@ public class RouterExecutionStrategy : IExecutionStrategy
             return BuildResult(routerResponse, [agent.Name], agent.Name, promptTokens, completionTokens);
         }
 
+        // 被路由到的 Agent 是模型自己选的，不是这次请求最初面向的那一个 ——
+        // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效
+        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
+
         var delegatedMessages = BuildDelegatedMessages(messages, agent.Name, targetAgent.Name, routerResponse.Text);
         var targetResponse = await targetAgent.ExecuteAsync(delegatedMessages, ct);
         promptTokens += targetResponse.Usage?.InputTokens ?? 0;
@@ -111,6 +115,9 @@ public class RouterExecutionStrategy : IExecutionStrategy
         }
 
         yield return new AgentStreamChunk { AgentName = targetAgent.Name };
+
+        // 同上：流式路径也要标记，否则同一条规则在流式与非流式下答案不一样
+        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
 
         var delegatedMessages = BuildDelegatedMessages(messages, agent.Name, targetAgent.Name, null);
         await foreach (var chunk in targetAgent.ExecuteStreamingAsync(delegatedMessages, ct).WithCancellation(ct))

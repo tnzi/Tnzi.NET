@@ -381,8 +381,17 @@ body *::-webkit-scrollbar-thumb:active {
    (scoped specificity beats naive's Card.color), so the dashboard widgets would
    stay fixed when a custom card color is set. Re-point them to the "Card / List"
    surface here - kept in the admin layer so @tnzi/ui stays unaware of the admin
-   token. (`:root` prefix lifts specificity above the ui-package scoped rule.) */
-:root .t-admin-content .t-widget-card {
+   token. (`:root` prefix lifts specificity above the ui-package scoped rule.)
+
+   `.t-surface-card` is load-bearing, not decoration: BOTH of TWidgetCard's
+   branches carry `t-widget-card`, and only the card branch carries the marker.
+   Without it this rule also reached `bare` widgets - which promise no chrome -
+   and outranked their own reset, so every bare widget sat on an opaque panel.
+   A bare widget holding two cards then read as one block, because the gutter
+   between them was painted this colour instead of the page canvas showing
+   through. The marker is the same structural signal `surfaces.css` keys the
+   nesting step off; anything that paints card chrome belongs behind it. */
+:root .t-admin-content .t-widget-card.t-surface-card {
   background: var(--tnzi-admin-card-bg, var(--tnzi-container-bg, #fff));
 }
 
@@ -803,6 +812,35 @@ body *::-webkit-scrollbar-thumb:active {
   line-height: 1;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* ── The detail-layout tab label ──
+ *
+ * `TDetailLayout`'s `tabs` strip renders one label per `DetailSection`, with
+ * that section's own `icon` ahead of the text and its `.t-nav-badge` after it
+ * - the same two fields the `side` NMenu paints, at the same size. A section
+ * with neither is a plain string and never reaches this class.
+ *
+ * Lives here for the same reason `.t-nav-badge` does, and it is not optional:
+ * `tabLabel()` builds these vnodes but naive's `Tab` RENDERS them, so Vue
+ * stamps its scope id (none) rather than TDetailLayout's. A scoped rule
+ * compiles, ships, and silently matches nothing - which is exactly what the
+ * former scoped `white-space: nowrap` did.
+ *
+ * `inline-flex` so the glyph centres on the label's line instead of sitting on
+ * its baseline. NO `gap` here on purpose: each adornment brings its own margin
+ * (the chip's `margin-left` above is shared by five surfaces), and a `gap`
+ * would silently double the chip's spacing on this one surface. */
+.t-detail-layout__tab-label {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Mirrors the chip's 6px on the leading side, so a tab carrying both reads as
+   one evenly spaced group. */
+.t-detail-layout__tab-icon {
+  margin-right: 6px;
 }
 
 /* ── The chat window is a WINDOW, not a modal ──

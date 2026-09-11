@@ -45,24 +45,35 @@ internal static class SourceScanner
         RegexOptions.Compiled);
 
     /// <summary>
-    /// 某个程序集的实体类名。
+    /// 某个程序集的实体类名：整个程序集目录下继承实体基类的公开非抽象类，<c>Configs/</c> 除外。
     /// </summary>
     /// <remarks>
-    /// <b>只扫 <c>Entities/</c> 顶层</b>：这是框架对实体的既定约定（<c>Entities/Configs/</c>
-    /// 放的是 EF 配置类，不是实体）。已知边界 —— 不在该目录下的实体不计入，例如
-    /// <c>Tnzi.EFCore/DocumentNumbering/DocumentSequence.cs</c>。索引此前把它错记在
-    /// <c>Finance</c> 名下，按本规则它不属于任何模块的 entities，这是刻意的：
-    /// 规则要能一句话说清，否则门禁自己就会变成下一个漂移源。
+    /// <para>
+    /// 规则一句话说得清，且不必假设实体一定放在 <c>Entities/</c> 下。★ 早先只扫
+    /// <c>Entities/</c> 顶层，代价是 <c>Tnzi.EFCore</c> 的两个实体
+    /// （<c>DocumentNumbering/DocumentSequence</c> 与 <c>Outbox/OutboxMessage</c>，两张真实的表）
+    /// 按规则「不属于任何模块」，于是索引里 EFCore 的 entities 是空数组 ——
+    /// 门禁绿着，而 <c>Tnzi.Mcp</c> 把「EFCore 有哪些实体」答成「没有」。
+    /// 那两个实体不在 <c>Entities/</c> 下是刻意的：它们各自与自己的服务同住一个功能目录，
+    /// 挪走会改命名空间。所以该改的是扫描规则，不是目录。
+    /// </para>
+    /// <para>
+    /// <c>Configs/</c> 必须排除：EF 配置类 <c>XxxConfiguration : EntityTypeConfigurationBase&lt;T, TKey&gt;</c>
+    /// 的基类名里含 <c>Entity</c>，会被实体基类正则命中。
+    /// </para>
     /// </remarks>
     public static SortedSet<string> ScanEntities(string repoRoot, string assembly)
     {
         var result = new SortedSet<string>(StringComparer.Ordinal);
-        var dir = Path.Combine(repoRoot, "src", assembly, "Entities");
-        if (!Directory.Exists(dir))
+        var root = Path.Combine(repoRoot, "src", assembly);
+        if (!Directory.Exists(root))
             return result;
 
-        foreach (var file in Directory.GetFiles(dir, "*.cs"))
+        foreach (var file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
         {
+            if (IsExcludedFromEntityScan(root, file))
+                continue;
+
             foreach (Match m in ClassWithBases.Matches(StripLineComments(File.ReadAllText(file))))
             {
                 if (m.Groups[1].Value.Contains("abstract", StringComparison.Ordinal))
@@ -73,6 +84,21 @@ internal static class SourceScanner
         }
 
         return result;
+    }
+
+    /// <summary>构建产物与 EF 配置目录不参与实体扫描。</summary>
+    private static bool IsExcludedFromEntityScan(string root, string file)
+    {
+        var relative = Path.GetRelativePath(root, file);
+        var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        for (var i = 0; i < segments.Length - 1; i++)
+        {
+            if (segments[i] is "bin" or "obj" or "Configs")
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>某个程序集 <c>Controllers/</c> 下（含子目录）的全部公开控制器类名。</summary>

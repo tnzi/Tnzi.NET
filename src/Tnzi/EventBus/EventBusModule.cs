@@ -181,13 +181,16 @@ public class EventBusModule : TnziInfrastructureModule
 
                 foreach (var type in types)
                 {
-                    // 查找实现的 IEventHandler<TEvent> 接口
-                    var eventHandlerInterface = type.GetInterfaces()
-                        .FirstOrDefault(i => i.IsGenericType &&
-                                           i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
-
-                    if (eventHandlerInterface != null)
+                    // 查找实现的全部 IEventHandler<TEvent> 接口：
+                    // 一个处理器类可以同时处理多种事件，只取第一个会让其余事件静默地无人订阅
+                    foreach (var eventHandlerInterface in type.GetInterfaces())
                     {
+                        if (!eventHandlerInterface.IsGenericType ||
+                            eventHandlerInterface.GetGenericTypeDefinition() != typeof(IEventHandler<>))
+                        {
+                            continue;
+                        }
+
                         var eventType = eventHandlerInterface.GetGenericArguments()[0];
                         handlerTypes.Add((type, eventType));
                     }

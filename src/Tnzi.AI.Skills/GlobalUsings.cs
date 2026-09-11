@@ -1,4 +1,3 @@
-global using Microsoft.AspNetCore.Authorization;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -12,6 +11,8 @@ global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using System.Collections.Concurrent;
 global using System.ComponentModel.DataAnnotations;
+global using System.Security.Cryptography;
+global using System.Text;
 global using System.Text.Json;
 global using System.Runtime.CompilerServices;
 global using System.Reflection;

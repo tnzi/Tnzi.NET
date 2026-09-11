@@ -381,7 +381,6 @@ public partial class AIModule
 
         AddAiMiddleware<SummarizationMiddleware>(services);
         AddAiMiddleware<FileUploadMiddleware>(services);
-        AddAiMiddleware<ViewImageMiddleware>(services);
         AddAiMiddleware<TodoMiddleware>(services);
         AddAiMiddleware<ClarificationMiddleware>(services);
     }

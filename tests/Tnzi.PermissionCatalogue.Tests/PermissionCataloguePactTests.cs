@@ -27,6 +27,7 @@ using Tnzi.Identity.Permissions;
 using Tnzi.Identity.Organization.Permissions;
 using Tnzi.Localization.Permissions;
 using Tnzi.Notification.Permissions;
+using Tnzi.Notification.Push.Permissions;
 using Tnzi.Payment.Permissions;
 using Tnzi.Payment.Billing.Permissions;
 using Tnzi.Payment.Subscriptions.Permissions;
@@ -80,6 +81,7 @@ public class PermissionCataloguePactTests
             ["Storage"] = new StoragePermissions(),
             ["Audit"] = new AuditPermissions(),
             ["Notification"] = new NotificationPermissions(),
+            ["Notification.Push"] = new NotificationPushPermissions(),
             ["Chat"] = new ChatPermissions(),
             ["Payment"] = new PaymentPermissions(),
             ["Payment.Billing"] = new PaymentBillingPermissions(),
@@ -168,7 +170,11 @@ public class PermissionCataloguePactTests
         // 2026-08-19：双人授权 2 码（authorization.dualControl.view / .approve）。
         // 粗码控制「能不能用这个审批面」，服务层再按 {Operation}.approve 决定「能批哪些动作」——
         // 后者由应用自己声明，不进本目录。
-        codes.Count.ShouldBe(302);
+        // 2026-09-02：推送设备注册表 2 码（notification.pushDevice view/delete）。
+        // 只有这两个：注册与刷新是用户端动作（客户端拿到令牌自己上报），admin 没有代人
+        // 注册设备的场景 —— 给了 create，写出来的行不对应任何一台真实设备，推送会一直
+        // 失败而没人知道为什么。复用核心声明的 notification 组，故组数不变。
+        codes.Count.ShouldBe(304);
         context.Groups.Count.ShouldBe(13);
     }
 

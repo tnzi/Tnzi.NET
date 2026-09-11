@@ -60,6 +60,14 @@ public class EfCoreEventStore : IEventStore
         return messages.Select(MapToStoredEvent);
     }
 
+    /// <summary>
+    /// 标记为投递成功。
+    /// </summary>
+    /// <remarks>
+    /// 一并清掉 <c>LastError</c>：它是「死信 vs 成功」的唯一判据（见
+    /// <see cref="StoredEvent.IsDeadLetter"/>），留着上一次瞬时失败的错误信息
+    /// 会让一条投递成功的记录被当成死信，也就同时让它逃过保留期清理。
+    /// </remarks>
     public async Task MarkAsProcessedAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var dbContext = GetDbContext();
@@ -69,7 +77,27 @@ public class EfCoreEventStore : IEventStore
             .Where(m => m.Id == eventId)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.IsProcessed, true)
-                .SetProperty(m => m.ProcessedTime, processedTime),
+                .SetProperty(m => m.ProcessedTime, processedTime)
+                .SetProperty(m => m.LastError, (string?)null),
+                cancellationToken);
+    }
+
+    /// <summary>
+    /// 标记为死信：不再投递，但保留错误信息，且不被保留期清理删除。
+    /// </summary>
+    public async Task MarkAsDeadLetterAsync(Guid eventId, string error, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(error);
+
+        var dbContext = GetDbContext();
+        var processedTime = _timeProvider.GetUtcNow().UtcDateTime;
+
+        await dbContext.Set<OutboxMessage>()
+            .Where(m => m.Id == eventId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.IsProcessed, true)
+                .SetProperty(m => m.ProcessedTime, processedTime)
+                .SetProperty(m => m.LastError, error),
                 cancellationToken);
     }
 
@@ -128,6 +156,13 @@ public class EfCoreEventStore : IEventStore
         return new PagedList<StoredEvent>(storedEvents, query.PageIndex, query.PageSize, totalCount);
     }
 
+    /// <summary>
+    /// 删除过期的**已成功投递**记录。
+    /// </summary>
+    /// <remarks>
+    /// 死信（已处理但仍带 <c>LastError</c>）刻意不删：那是一批从未送达的消息，
+    /// 记录本身就是唯一的失败证据，需要人工介入而不是到期清扫。
+    /// </remarks>
     public async Task<int> DeleteExpiredEventsAsync(int days = 90, CancellationToken cancellationToken = default)
     {
         var dbContext = GetDbContext();
@@ -135,7 +170,7 @@ public class EfCoreEventStore : IEventStore
 
         // 使用 ExecuteDeleteAsync 直接在数据库端批量删除，避免加载到内存
         var deleted = await dbContext.Set<OutboxMessage>()
-            .Where(m => m.IsProcessed && m.CreationTime < cutoff)
+            .Where(m => m.IsProcessed && m.LastError == null && m.CreationTime < cutoff)
             .ExecuteDeleteAsync(cancellationToken);
 
         if (deleted > 0)

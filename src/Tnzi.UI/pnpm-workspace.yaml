@@ -12,3 +12,4 @@ catalog:
   echarts: ^6.1.0
   '@vueuse/core': ^14.4.0
   '@iconify/vue': ^5.0.1
+  '@iconify/utils': ^3.1.4

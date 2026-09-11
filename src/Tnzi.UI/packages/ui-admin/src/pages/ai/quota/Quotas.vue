@@ -293,17 +293,19 @@ const usagePercent = computed(() => {
 
 // BudgetStatus enum → number. The backend serialises it as the PascalCase
 // member NAME (JsonStringEnumConverter: WithinBudget / WarningThreshold /
-// BudgetExceeded); a numeric ordinal is still accepted for backward
+// BudgetExceeded / Indeterminate); a numeric ordinal is still accepted for backward
 // compatibility. Normalising to a number keeps the `budget.statusValue.<n>`
 // i18n key + the tone comparison below working.
 const BUDGET_STATUS_VALUE: Record<string, number> = {
-  '0': 0, '1': 1, '2': 2,
-  WithinBudget: 0, WarningThreshold: 1, BudgetExceeded: 2,
+  '0': 0, '1': 1, '2': 2, '3': 3,
+  WithinBudget: 0, WarningThreshold: 1, BudgetExceeded: 2, Indeterminate: 3,
 }
 const budgetStatusValue = computed(() => BUDGET_STATUS_VALUE[String(budget.value.status ?? 0)] ?? 0)
 
+// 3 = Indeterminate: the spend could not be measured (cost tracking off or no
+// model rate), so the 0 USD is not a green "within budget" - paint it as a warning.
 const progressStatus = computed<'success' | 'warning' | 'error'>(() =>
-  budgetStatusValue.value === 2 ? 'error' : budgetStatusValue.value === 1 ? 'warning' : 'success',
+  budgetStatusValue.value === 2 ? 'error' : budgetStatusValue.value === 1 || budgetStatusValue.value === 3 ? 'warning' : 'success',
 )
 
 const statusTagType = computed<'success' | 'warning' | 'error'>(() => progressStatus.value)

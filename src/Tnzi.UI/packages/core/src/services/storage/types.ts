@@ -603,3 +603,44 @@ export interface BulkFileOperationDto {
   operation: 'delete' | 'move' | 'copy';
   targetFolderId?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Admin storage audit (Tnzi.Storage.Workspace `DefaultStorageAuditAdminController`)
+// ---------------------------------------------------------------------------
+
+/** One uploaded chunk row as the admin audit view reports it. */
+export interface FileChunkAuditDto {
+  id: string;
+  uploadSessionId: string;
+  chunkIndex: number;
+  chunkSize: number;
+  md5Hash?: string | null;
+  creationTime: string;
+}
+
+/** One file version row as the admin audit view reports it. */
+export interface FileVersionAuditDto {
+  id: string;
+  fileId: string;
+  version: number;
+  path: string;
+  size: number;
+  md5Hash?: string | null;
+  description?: string | null;
+  isCurrent: boolean;
+  creationTime: string;
+  creatorId?: string | null;
+}
+
+export interface FileChunkAuditQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  uploadSessionId?: string;
+}
+
+export interface FileVersionAuditQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  fileId?: string;
+  currentOnly?: boolean;
+}

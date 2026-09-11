@@ -56,7 +56,9 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
             EmbeddingProvider = input.EmbeddingProvider ?? "default",
             EmbeddingModel = input.EmbeddingModel,
             ChunkSize = input.ChunkSize ?? _options.DefaultChunkSize,
-            ChunkOverlap = input.ChunkOverlap ?? _options.DefaultChunkOverlap
+            ChunkOverlap = input.ChunkOverlap ?? _options.DefaultChunkOverlap,
+            // 不传即关闭：开放给用户直查必须是一次明确的动作。
+            IsUserQueryable = input.IsUserQueryable ?? false
         };
 
         await _kbRepository.InsertAsync(entity, ct);
@@ -79,6 +81,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         if (input.Name != null) entity.Name = input.Name;
         if (input.Description != null) entity.Description = input.Description;
         if (input.IsEnabled.HasValue) entity.IsEnabled = input.IsEnabled.Value;
+        if (input.IsUserQueryable.HasValue) entity.IsUserQueryable = input.IsUserQueryable.Value;
 
         await _kbRepository.UpdateAsync(entity, ct);
         return Ok(entity.MapTo<KnowledgeBaseDto>());

@@ -82,7 +82,7 @@ public class BuiltInToolsIntegrationTests
     [Fact]
     public void TextTools_CanBeInstantiated()
     {
-        var tools = new TextTools(NullLogger<TextTools>.Instance);
+        var tools = new TextTools();
         tools.ShouldNotBeNull();
     }
 
@@ -138,12 +138,6 @@ public class BuiltInToolsIntegrationTests
     public void DateTimeTools_NullLogger_Throws()
     {
         Should.Throw<ArgumentNullException>(() => new DateTimeTools(null!));
-    }
-
-    [Fact]
-    public void TextTools_NullLogger_Throws()
-    {
-        Should.Throw<ArgumentNullException>(() => new TextTools(null!));
     }
 
     [Fact]

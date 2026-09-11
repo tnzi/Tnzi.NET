@@ -77,7 +77,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
         // ★ 净化管线跑在**最前面**，早于下面写 v1 快照那一步：拒绝发生在写任何一行之前，
         //   否则一次被拒的上传会留下一条凭空多出来的「Initial version」并把当前版本标成非当前。
         //   判据用父记录声明的扩展名与内容类型 —— 那才是净化器要评判的「自称是什么」，
-        //   下面那个 .v{n} 后缀只是存储键的细节。
+        //   存储键只是个服务端生成的落地名。
         //
         //   这条路径此前完全不过净化：先正常传一张干净的 png，再对它 POST 一个新版本，
         //   字节就换成了没被扫过的内容，而记录上仍写着 .png / image/png。
@@ -139,7 +139,9 @@ public class FileVersionService : ApplicationService, IFileVersionService
         //   的 ResolveStoredSizeAsync 同一条兜底：大小是描述性字段，不该在文件已经存好之后
         //   把整次保存变成一次失败。
         long? knownSize = content.CanSeek ? content.Length : null;
-        var versionFileName = $"{fileRecord.FileName}.v{newVersion}";
+        // ★ 版本键也由服务端生成，**不**从 fileRecord.FileName 派生：2026-09-04 之前有三条写路径
+        //   把调用方给的名字写进了 FileName，派生等于把那份污染再传一代（见 StorageKeyHelper）。
+        var versionFileName = StorageKeyHelper.NewKey(fileRecord.Extension);
         var filePath = await _storage.UploadAsync(versionFileName, content, fileRecord.ContentType);
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 

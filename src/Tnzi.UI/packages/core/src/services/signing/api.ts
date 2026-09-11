@@ -99,6 +99,24 @@ export function useSigningRecipientApi(client: HttpClient) {
     getPacket: (token: string) =>
       client.get<SigningPacketDto>(`${RECIPIENT_BASE}/${encodeURIComponent(token)}`),
 
+    /**
+     * URL of the document this recipient is signing (the rendered draft; the
+     * sealed output once the request is completed), addressed by the token.
+     *
+     * ★ Do NOT build `/files/{documentFileId}/...` from the packet instead: the
+     * recipient is anonymous and the storage read path answers 404 to anyone
+     * who is not signed in. The token IS the recipient's credential, so the
+     * bytes are served from the signing route, where the token is verified.
+     *
+     * Inline by default (for a `<iframe>` / PDF viewer); `download: true` sets
+     * a Content-Disposition attachment with the document's file name.
+     */
+    getDocumentUrl: (token: string, options?: { download?: boolean }) =>
+      client.resolveUrl(
+        `${RECIPIENT_BASE}/${encodeURIComponent(token)}/document`,
+        options?.download ? { download: true } : undefined,
+      ),
+
     /** Submit this recipient's fields and signature. */
     submit: (token: string, data: SubmitSigningDto) =>
       client.post<SigningPacketDto>(`${RECIPIENT_BASE}/${encodeURIComponent(token)}`, data),

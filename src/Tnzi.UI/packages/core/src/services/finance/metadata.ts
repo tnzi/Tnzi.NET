@@ -134,12 +134,28 @@ export enum CheckStockType {
   Blank = 'Blank',
 }
 
-/** Check layout */
+/**
+ * Check layout.
+ *
+ * The authoritative expression of a layout is the TEMPLATE
+ * (`BankAccount.checkTemplateName`), not this enum: cheque top / middle /
+ * bottom, window envelope and three-per-page are each their own entry in the
+ * layout catalogue (`GET admin/finance/checks/templates`). This enum only
+ * picks the factory default template when no template has been chosen, which
+ * is why it gains no new members.
+ */
 export enum CheckLayout {
   /** Check + two stubs (voucher) */
   Voucher = 'Voucher',
   /** Three checks per page */
   ThreePerPage = 'ThreePerPage',
+}
+
+/** Where the cheque sits on the sheet (voucher layouts only; null for multi-up) */
+export enum CheckPosition {
+  Top = 'Top',
+  Middle = 'Middle',
+  Bottom = 'Bottom',
 }
 
 /** Party bank account type (drives the EFT transaction code) */

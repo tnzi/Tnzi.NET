@@ -38,7 +38,9 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         CurrentTenant = currentTenant;
         DataFilterManager = dataFilterManager;
         TimeProvider = timeProvider;
-        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        // 注入值优先；设计期（dotnet ef）没有容器，回退到工厂从 appsettings 读出的值。
+        // 与 TnziDbContext 走同一处解析：两份各自的三元表达式漂开时不会有任何东西报错。
+        _multiTenancyEnabled = DesignTimeMultiTenancy.Resolve(multiTenancyOptions?.Value.Enabled);
     }
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;

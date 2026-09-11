@@ -21,6 +21,13 @@ defineEmits<{
 
 const highlightedHtml = ref('');
 
+// Fallback when shiki is unavailable. Escaping `<` alone is not enough: a
+// snippet containing `&lt;` would render as a real `<`, and this string is
+// bound with v-html so `>` and `"` need the same treatment.
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 async function highlight(): Promise<void> {
   try {
     const { codeToHtml } = await import('shiki');
@@ -29,7 +36,7 @@ async function highlight(): Promise<void> {
       themes: { light: 'github-light', dark: 'github-dark' },
     });
   } catch {
-    highlightedHtml.value = `<pre><code>${props.code.replace(/</g, '&lt;')}</code></pre>`;
+    highlightedHtml.value = `<pre><code>${escapeHtml(props.code)}</code></pre>`;
   }
 }
 

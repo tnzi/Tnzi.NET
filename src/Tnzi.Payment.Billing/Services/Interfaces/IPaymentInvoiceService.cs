@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Billing.Services;
+﻿namespace Tnzi.Payment.Billing.Services;
 
 /// <summary>
 /// 发票服务接口
@@ -29,6 +29,16 @@ public interface IPaymentInvoiceService
     /// 获取PDF URL
     /// </summary>
     Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 取发票产物的字节（PDF 或 HTML）。产物不在就先生成一次。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="GetPdfUrlAsync"/> 分工明确：那一个只在 Storage 给得出 HTTP 可达地址时有值
+    /// （适合放进邮件正文），而这一个在两种落地方式下都能用 —— 未加载 Storage 的宿主把产物
+    /// 写在本地磁盘上，任何 URL 都指不到它。
+    /// </remarks>
+    Task<Result<InvoiceDocumentDto>> GetPdfContentAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 标记为已支付

@@ -115,6 +115,24 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     return codes.filter((c) => c.isActive).map((c) => ({ label: c.name, value: c.id }))
   })
 
+  /**
+   * Cheque layouts for the bank-account form.
+   *
+   * The label carries the geometry the operator actually chooses on ("3 per
+   * page", "cheque on the bottom") because the template NAME is a slug and two
+   * of the shipped layouts differ only in where the cheque band sits. Inactive
+   * templates are dropped: selecting one would make every print fail.
+   */
+  const checkTemplates = lazy<SelectOption>(async () => {
+    const templates = await bridge.checks.templates()
+    return templates
+      .filter((t) => t.isActive)
+      .map((t) => ({
+        label: t.checksPerPage > 1 ? `${t.displayName} (${t.checksPerPage}/page)` : t.displayName,
+        value: t.name,
+      }))
+  })
+
   const rates = lazy<TaxRateDto>(async () => bridge.taxes.rates())
 
   const agencies = lazy<SelectOption>(async () => {
@@ -127,6 +145,8 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     ensureLeafAccounts: leafAccounts.ensure,
     fundsAccountOptions: fundsAccounts.options,
     ensureFundsAccounts: fundsAccounts.ensure,
+    checkTemplateOptions: checkTemplates.options,
+    ensureCheckTemplates: checkTemplates.ensure,
     fundsAccountRoles,
     expenseAccountOptions: expenseAccounts.options,
     ensureExpenseAccounts: expenseAccounts.ensure,

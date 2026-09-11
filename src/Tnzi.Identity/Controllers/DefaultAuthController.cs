@@ -22,6 +22,7 @@ public partial class DefaultAuthController : ApiControllerBase
     protected readonly IPasswordPolicyService? PasswordPolicyService;
     protected readonly IPasskeyService? PasskeyService;
     protected readonly IStepUpService? StepUpService;
+    protected readonly IPendingActionService? PendingActionService;
 
     /// <summary>
     /// 初始化认证控制器
@@ -38,6 +39,7 @@ public partial class DefaultAuthController : ApiControllerBase
     /// <param name="passwordPolicyService">密码策略服务（可选）</param>
     /// <param name="passkeyService">Passkey 服务（可选；未注册时六个 passkey 端点统一返回未启用）</param>
     /// <param name="stepUpService">二次确认服务（可选；未注册时两个 step-up 端点统一返回不可用）</param>
+    /// <param name="pendingActionService">待办义务完成服务（可选）</param>
     public DefaultAuthController(
         ITwoFactorService twoFactorService,
         IAuthService authService,
@@ -50,7 +52,8 @@ public partial class DefaultAuthController : ApiControllerBase
         IIdentityPageService? identityPageService = null,
         IPasswordPolicyService? passwordPolicyService = null,
         IPasskeyService? passkeyService = null,
-        IStepUpService? stepUpService = null)
+        IStepUpService? stepUpService = null,
+        IPendingActionService? pendingActionService = null)
     {
         TwoFactorService = Check.NotNull(twoFactorService);
         AuthService = Check.NotNull(authService);
@@ -64,6 +67,7 @@ public partial class DefaultAuthController : ApiControllerBase
         PasswordPolicyService = passwordPolicyService;
         PasskeyService = passkeyService;
         StepUpService = stepUpService;
+        PendingActionService = pendingActionService;
     }
 
     /// <summary>
@@ -78,6 +82,106 @@ public partial class DefaultAuthController : ApiControllerBase
     public virtual ApiResult<AuthConfigDto> GetConfig()
     {
         var result = AuthService.GetAuthConfig();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 读登录时被要求办的事，以及办它们需要的材料。
+    /// </summary>
+    /// <remarks>
+    /// 登录答 403 <c>IDENTITY_PENDING_ACTIONS_REQUIRED</c> 时，前端拿挑战里的
+    /// <c>tempToken</c> 调这里，据此渲染对应的表单（绑验证器那一项会带上二维码）。
+    /// 匿名可达：走到这一步的人还没有令牌。
+    /// </remarks>
+    /// <param name="tempToken">待办挑战的临时令牌</param>
+    /// <returns>还欠哪些事 + 材料</returns>
+    [HttpGet("pending-actions/{tempToken}")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual async Task<ApiResult<PendingActionChallengeDto>> DescribePendingActions(string tempToken)
+    {
+        if (PendingActionService == null)
+        {
+            return ApiResult<PendingActionChallengeDto>.Error("Pending action service is not available", 500);
+        }
+
+        var result = await PendingActionService.DescribeAsync(tempToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 完成「必须先改密码」。全部办完则直接拿到登录令牌。
+    /// </summary>
+    /// <param name="input">临时令牌与新密码</param>
+    /// <returns>完成情况（含令牌）</returns>
+    [HttpPost("pending-actions/change-password")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual async Task<ApiResult<PendingActionResultDto>> CompletePasswordChange([FromBody] CompletePasswordChangeDto input)
+    {
+        if (PendingActionService == null)
+        {
+            return ApiResult<PendingActionResultDto>.Error("Pending action service is not available", 500);
+        }
+
+        var result = await PendingActionService.CompleteChangePasswordAsync(input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 完成「必须先绑定验证器」：提交验证器算出的一次性码。
+    /// </summary>
+    /// <param name="input">临时令牌与一次性码</param>
+    /// <returns>完成情况（含令牌）</returns>
+    [HttpPost("pending-actions/enroll-totp")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual async Task<ApiResult<PendingActionResultDto>> CompleteTotpEnrollment([FromBody] CompletePendingActionCodeDto input)
+    {
+        if (PendingActionService == null)
+        {
+            return ApiResult<PendingActionResultDto>.Error("Pending action service is not available", 500);
+        }
+
+        var result = await PendingActionService.CompleteEnrollTotpAsync(input);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 给「必须先确认邮箱」发一封验证码。地址取自账号本身，不接受调用方指定。
+    /// </summary>
+    /// <param name="tempToken">待办挑战的临时令牌</param>
+    /// <returns>操作结果</returns>
+    [HttpPost("pending-actions/{tempToken}/send-email-code")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual async Task<ApiResult> SendPendingActionEmailCode(string tempToken)
+    {
+        if (PendingActionService == null)
+        {
+            return ApiResult.Error("Pending action service is not available", 500);
+        }
+
+        var result = await PendingActionService.SendEmailConfirmationCodeAsync(tempToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 完成「必须先确认邮箱」：提交收到的验证码。
+    /// </summary>
+    /// <param name="input">临时令牌与验证码</param>
+    /// <returns>完成情况（含令牌）</returns>
+    [HttpPost("pending-actions/confirm-email")]
+    [AllowAnonymous]
+    [ApiExplorerSettings(GroupName = "auth")]
+    public virtual async Task<ApiResult<PendingActionResultDto>> CompleteEmailConfirmation([FromBody] CompletePendingActionCodeDto input)
+    {
+        if (PendingActionService == null)
+        {
+            return ApiResult<PendingActionResultDto>.Error("Pending action service is not available", 500);
+        }
+
+        var result = await PendingActionService.CompleteConfirmEmailAsync(input);
         return result.ToApiResult();
     }
 
@@ -119,7 +223,8 @@ public partial class DefaultAuthController : ApiControllerBase
     [ApiExplorerSettings(GroupName = "auth")]
     public virtual async Task<ApiResult<TokenResult>> RefreshToken([FromBody] RefreshTokenDto input)
     {
-        var result = await AuthService.RefreshTokenAsync(input.RefreshToken);
+        // cookie 模式下刷新令牌不在请求体里 —— 从 HttpOnly cookie 取。
+        var result = await AuthService.RefreshTokenAsync(ResolveRefreshToken(input?.RefreshToken) ?? string.Empty);
         return result.ToApiResult();
     }
 
@@ -252,143 +357,11 @@ public partial class DefaultAuthController : ApiControllerBase
         }
 
         var result = await AuthService.LogoutAsync(CurrentUser.Id.Value);
+        // 登出必须把 cookie 一起清掉，否则浏览器还留着一枚服务端已经作废的令牌，
+        // 下次打开页面会先发一次注定失败的刷新。
+        ClearRefreshTokenCookie();
         return result.ToApiResult();
     }
-
-    /// <summary>
-    /// 发起OAuth第三方登录（跳转到第三方登录页面）
-    /// </summary>
-    /// <param name="provider">OAuth提供者名称（不区分大小写，支持 Google、Microsoft、Facebook、Twitter、GitHub）</param>
-    /// <param name="returnUrl">登录成功后的回调地址（可选，前端页面URL）</param>
-    /// <returns>重定向到第三方登录页面</returns>
-    [HttpGet("oauth/{provider:regex((?i)google|microsoft|facebook|twitter|github)}/login")]
-    [AllowAnonymous]
-    [ApiExplorerSettings(GroupName = "auth")]
-    public virtual async Task<IActionResult> OAuthLogin(string provider, [FromQuery] string? returnUrl = null)
-    {
-        // 验证 Provider 是否已配置
-        var schemeProvider = HttpContext.RequestServices.GetRequiredService<IAuthenticationSchemeProvider>();
-        var schemes = await schemeProvider.GetAllSchemesAsync();
-
-        // 规范化 provider 名称（首字母大写，以匹配注册的 scheme 名称）
-        var schemeName = NormalizeProviderName(provider);
-        var scheme = schemes.FirstOrDefault(s => s.Name.Equals(schemeName, StringComparison.OrdinalIgnoreCase));
-
-        if (scheme == null)
-        {
-            return new BadRequestObjectResult(BadRequest<string>($"OAuth provider '{provider}' is not configured"));
-        }
-
-        // 构建回调处理端点的 URL（OAuth 中间件完成后重定向到这里）
-        var callbackHandlerUrl = Url.Action(nameof(OAuthCallbackHandler), new { provider = provider.ToLowerInvariant() });
-
-        // 配置认证属性
-        var properties = new AuthenticationProperties
-        {
-            RedirectUri = callbackHandlerUrl,
-            Items =
-            {
-                ["LoginProvider"] = scheme.Name
-            }
-        };
-
-        // 保存 returnUrl（如果有）
-        if (!string.IsNullOrEmpty(returnUrl))
-        {
-            properties.Items["returnUrl"] = returnUrl;
-        }
-
-        // 发起 Challenge，重定向到第三方登录页面
-        return Challenge(properties, scheme.Name);
-    }
-
-    /// <summary>
-    /// OAuth回调处理端点（OAuth 中间件完成认证后重定向到这里）
-    /// 注意：这个端点与 OAuth 中间件的 CallbackPath 不同
-    /// CallbackPath 是中间件拦截的路径（如 /auth/oauth/google-callback）
-    /// 这个端点是中间件完成后重定向到的路径（如 /auth/oauth/google/callback）
-    /// </summary>
-    /// <param name="provider">OAuth提供者名称</param>
-    /// <returns>OAuth回调结果HTML页面</returns>
-    [HttpGet("oauth/{provider:regex((?i)google|microsoft|facebook|twitter|github)}/callback")]
-    [AllowAnonymous]
-    [ApiExplorerSettings(GroupName = "auth")]
-    public virtual async Task<IActionResult> OAuthCallbackHandler(string provider)
-    {
-        if (OAuthService == null)
-        {
-            return Content(GenerateOAuthErrorHtml("OAuth service is not available"), "text/html; charset=utf-8");
-        }
-
-        try
-        {
-            // 从 Identity.External scheme 获取认证结果
-            var authenticateResult = await HttpContext.AuthenticateAsync("Identity.External");
-
-            if (!authenticateResult.Succeeded || authenticateResult.Principal == null)
-            {
-                var errorMessage = authenticateResult.Failure?.Message ?? "OAuth authentication failed";
-                return Content(GenerateOAuthErrorHtml(errorMessage), "text/html; charset=utf-8");
-            }
-
-            // 获取 returnUrl
-            var returnUrl = authenticateResult.Properties?.Items.ContainsKey("returnUrl") == true
-                ? authenticateResult.Properties.Items["returnUrl"]
-                : null;
-
-            // 添加IP地址和UserAgent到Claims
-            var claims = authenticateResult.Principal.Claims.ToList();
-            // 走 GetClientIp：支持反向代理，且受 AspNetCoreOptions.CollectClientIpAddress 约束
-            // （该 claim 会流向登录日志，声明不采集地址的部署这里应当是空）。
-            claims.Add(new Claim("ip_address", HttpContext.Request.GetClientIp() ?? ""));
-            claims.Add(new Claim("user_agent", HttpContext.Request.Headers["User-Agent"].ToString()));
-
-            var claimsPrincipal = new ClaimsPrincipal(
-                new ClaimsIdentity(claims, authenticateResult.Principal.Identity?.AuthenticationType));
-
-            // 处理OAuth回调
-            var result = await OAuthService.HandleOAuthCallbackAsync(provider.ToLowerInvariant(), claimsPrincipal);
-
-            if (!result.Succeeded)
-            {
-                return Content(GenerateOAuthErrorHtml(result.Message ?? "OAuth callback failed"), "text/html; charset=utf-8");
-            }
-
-            // 清除 Identity.External cookie
-            await HttpContext.SignOutAsync("Identity.External");
-
-            // 生成回调HTML
-            var html = GenerateOAuthCallbackHtml(result.Data!, returnUrl);
-            return Content(html, "text/html; charset=utf-8");
-        }
-        catch (Exception ex)
-        {
-            return Content(GenerateOAuthErrorHtml($"OAuth callback error: {ex.Message}"), "text/html; charset=utf-8");
-        }
-    }
-
-    /// <summary>
-    /// 规范化 OAuth 提供者名称（首字母大写）
-    /// </summary>
-    private static string NormalizeProviderName(string provider)
-    {
-        if (string.IsNullOrEmpty(provider)) return provider;
-        return char.ToUpperInvariant(provider[0]) + provider[1..].ToLowerInvariant();
-    }
-
-    /// <summary>
-    /// 生成OAuth回调HTML页面（通过postMessage传递结果给父窗口）
-    /// </summary>
-    protected virtual string GenerateOAuthCallbackHtml(OAuthCallbackResultDto result, string? returnUrl = null)
-        => IdentityPageService?.GenerateOAuthCallbackHtml(result, returnUrl)
-           ?? throw new InvalidOperationException("IIdentityPageService is not registered. Register it in your module's ConfigureServicesAsync.");
-
-    /// <summary>
-    /// 生成OAuth错误HTML页面
-    /// </summary>
-    protected virtual string GenerateOAuthErrorHtml(string errorMessage)
-        => IdentityPageService?.GenerateOAuthErrorHtml(errorMessage)
-           ?? throw new InvalidOperationException("IIdentityPageService is not registered. Register it in your module's ConfigureServicesAsync.");
 
     /// <summary>
     /// 获取验证码
@@ -587,6 +560,14 @@ public partial class DefaultAuthController : ApiControllerBase
     [ApiExplorerSettings(GroupName = "auth")]
     public virtual async Task<IActionResult> ConfirmEmail([FromQuery] Guid userId, [FromQuery] string token, [FromQuery] string? returnUrl = null)
     {
+        // ★ 同一个校验器。这条路径没有令牌可泄，但它是一个匿名可达、会 302 到任意地址的端点 ——
+        // 挂着受信任域名的钓鱼跳板正是这么来的。不合法就当作没给，回落到自带的结果页。
+        if (!ReturnUrlValidator.IsAllowed(returnUrl, AllowedReturnOrigins))
+        {
+            Logger.LogWarning("Dropped a disallowed returnUrl on email confirmation.");
+            returnUrl = null;
+        }
+
         var result = await RegistrationService.ConfirmEmailAsync(userId, token);
 
         if (result.Succeeded)

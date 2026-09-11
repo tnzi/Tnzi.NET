@@ -2,7 +2,6 @@ using Microsoft.Extensions.Options;
 using Tnzi.Data;
 using Tnzi.Modules.Diagnostics;
 using Tnzi.MultiTenancy;
-using Tnzi.Security.Claims;
 
 namespace Tnzi.Authorization.DataAuth.Tests;
 

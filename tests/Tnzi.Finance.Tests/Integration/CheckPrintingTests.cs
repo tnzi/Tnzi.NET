@@ -289,11 +289,8 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
             sp.GetRequiredService<IRepository<BankCheck, Guid>>(),
             sp.GetRequiredService<IRepository<BankAccount, Guid>>(),
             sp.GetRequiredService<IRepository<PaymentEntry, Guid>>(),
-            sp.GetRequiredService<IReadOnlyRepository<Vendor, Guid>>(),
             sp.GetRequiredService<CheckNumberAllocator>(),
-            sp.GetRequiredService<IFinanceDataProtector>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsSnapshot<FinanceOptions>>(),
-            sp.GetRequiredService<CheckIssuerResolver>(),
             sp.GetRequiredService<CheckBatchComposer>(),
             // 渲染器现为可选注入，移到构造末位；注入失败渲染器以验证 UoW 回滚回收号
             new FailingCheckRenderer());
@@ -322,11 +319,8 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
             sp.GetRequiredService<IRepository<BankCheck, Guid>>(),
             sp.GetRequiredService<IRepository<BankAccount, Guid>>(),
             sp.GetRequiredService<IRepository<PaymentEntry, Guid>>(),
-            sp.GetRequiredService<IReadOnlyRepository<Vendor, Guid>>(),
             sp.GetRequiredService<CheckNumberAllocator>(),
-            sp.GetRequiredService<IFinanceDataProtector>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsSnapshot<FinanceOptions>>(),
-            sp.GetRequiredService<CheckIssuerResolver>(),
             sp.GetRequiredService<CheckBatchComposer>());
 
         var print = await service.PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { Guid.NewGuid() } });

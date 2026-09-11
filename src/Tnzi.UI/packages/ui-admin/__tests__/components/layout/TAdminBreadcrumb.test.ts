@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TAdminBreadcrumb from '../../../src/components/layout/TAdminBreadcrumb.vue'
@@ -83,6 +85,27 @@ describe('TAdminBreadcrumb', () => {
       },
     })
     expect(wrapper.find('.nbi').text()).toBe('Accueil')
+  })
+
+  // Guarded as source text on purpose: this is a layout invariant, and the test
+  // environment has no layout engine to observe it with.
+  //
+  // naive stacks its crumbs as inline `<li>`s, which align on their BASELINES,
+  // and an inline-flex box reports its first flex item's baseline as its own. A
+  // crumb that starts with an icon therefore sits ~1.75px lower than one that
+  // starts with text, and the whole row moves to accommodate it - so the labels
+  // jumped up the moment a detail page swapped the route-derived trail (icons)
+  // for its own (none). Measured in Chrome: 27.25px row / text at y=4.75 with
+  // one icon present, 25.5px / y=3 without. Laying the crumbs out as flex items
+  // takes baselines out of it.
+  it('lays the crumb list out as flex items so a glyph cannot shift the row', () => {
+    const source = readFileSync(
+      path.resolve(__dirname, '../../../src/components/layout/TAdminBreadcrumb.vue'),
+      'utf8',
+    )
+    const rule = source.slice(source.indexOf('.t-admin-breadcrumb :deep(> ul)'))
+    expect(rule).toContain('display: flex')
+    expect(rule.slice(0, rule.indexOf('}'))).toContain('align-items: center')
   })
 
   it('renders nothing when items are empty', () => {

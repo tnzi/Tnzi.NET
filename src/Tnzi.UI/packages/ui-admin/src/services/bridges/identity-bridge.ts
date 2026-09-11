@@ -9,6 +9,7 @@
  */
 import {
   useAdminUserApi,
+  useAdminInvitationApi,
   useAdminRoleApi,
   useAdminTenantApi,
   useAdminLoginLogApi,
@@ -21,7 +22,10 @@ import {
   type PasskeyCredentialDto,
   type AuthConfigDto,
   type UserListItemDto,
+  type CreateInvitationDto,
+  type InvitationDto,
   type CreateUserDto,
+  type UpdateProfileDto,
   type UpdateUserDto,
   type UserListQueryDto,
   type RoleDto,
@@ -62,7 +66,7 @@ import {
 import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery, unwrapOk } from '../_mappers'
 
 // HttpClient type derived from the factory signature so we don't need a separate import.
 type HttpClient = Parameters<typeof useAdminUserApi>[0]
@@ -79,6 +83,7 @@ export interface IdentityBridgeDeps {
   sessionApi?: ReturnType<typeof useAdminSessionApi>
   profileApi?: ReturnType<typeof useProfileApi>
   authApi?: ReturnType<typeof useAuthApi>
+  invitationApi?: ReturnType<typeof useAdminInvitationApi>
 }
 
 // Re-export core's OrganizationDto for bridge consumers.
@@ -97,6 +102,27 @@ export interface SessionDto {
 }
 
 export interface IdentityBridge {
+  /**
+   * Invitation-based onboarding: open an account with its roles preset, hand the
+   * person a one-time link, let them set their own password.
+   *
+   * ★ There is no `list` here on purpose. An invitation *is* a user account in the
+   * `Pending` state, so "who has not accepted yet" is `users.fetch` with an
+   * `invitationState` filter - a second list would only drift from the first.
+   */
+  invitations: {
+    /**
+     * Open an account and issue the link.
+     *
+     * The returned `acceptUrl` is readable only on this response; show it to the
+     * admin (copy button) or rely on the app's `UserInvitedEvent` handler to mail it.
+     */
+    create(data: CreateInvitationDto): Promise<InvitationDto>
+    /** Resend. The previous link stops working immediately. */
+    resend(userId: string, lifetimeHours?: number): Promise<InvitationDto>
+    /** Revoke: deletes the not-yet-accepted account, which invalidates its link. */
+    revoke(userId: string): Promise<void>
+  }
   users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> & {
     /**
      * Full record for ONE user (`GET /admin/users/{id}`). The list projection
@@ -234,7 +260,7 @@ export interface IdentityBridge {
     /** Basic profile (username/email/phone/roles/lastLoginTime/…). */
     getProfile(): Promise<UserDto>
     /** Update name / avatar / displayName fields. */
-    updateProfile(data: UpdateUserDto): Promise<UserDto>
+    updateProfile(data: UpdateProfileDto): Promise<UserDto>
     /** Extended detail (nickname/gender/birthday/bio/address). */
     getDetail(): Promise<UserDetailDto>
     updateDetail(data: CreateUserDetailDto): Promise<UserDetailDto>
@@ -243,7 +269,12 @@ export interface IdentityBridge {
     /** Active sessions for the current user. */
     getSessions(): Promise<UserSessionDto[]>
     revokeSession(sessionId: string): Promise<void>
-    revokeAllSessions(): Promise<void>
+    /**
+     * Sign out other devices. Keeps the calling session unless
+     * `includeCurrent` is set - a "sign out everywhere" that also signs you out
+     * of the tab you clicked it in is a button people learn not to press.
+     */
+    revokeAllSessions(includeCurrent?: boolean): Promise<void>
     /** 2FA + linked OAuth accounts. */
     getTwoFactorStatus(): Promise<TwoFactorStatusDto>
     getLinkedAccounts(): Promise<UserLoginDto[]>
@@ -372,6 +403,24 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const missing = <T>(label: string): Promise<T> =>
     Promise.reject(new Error(`identity-bridge: ${label} requires an HttpClient or explicit api mock`))
 
+  const invitationApi =
+    deps.invitationApi ?? (deps.client ? useAdminInvitationApi(deps.client) : null)
+
+  const invitations: IdentityBridge['invitations'] = {
+    create: async (data) =>
+      invitationApi
+        ? (unwrapOk(await invitationApi.create(data)) as InvitationDto)
+        : missing<InvitationDto>('invitations.create'),
+    resend: async (userId, lifetimeHours) =>
+      invitationApi
+        ? (unwrapOk(await invitationApi.resend(userId, lifetimeHours)) as InvitationDto)
+        : missing<InvitationDto>('invitations.resend'),
+    revoke: async (userId) => {
+      if (!invitationApi) return missing<void>('invitations.revoke')
+      ensureOk(await invitationApi.revoke(userId))
+    },
+  }
+
   const users: IdentityBridge['users'] = {
     fetch: async (q) =>
       toCrudResult(
@@ -382,8 +431,8 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         ),
       ),
     getById: async (id) => unwrap(await userApi.getById(id)) as UserDto,
-    create: async (data) => unwrap(await userApi.create(data)) as UserListItemDto,
-    update: async (id, data) => unwrap(await userApi.update(id, data)) as UserListItemDto,
+    create: async (data) => unwrapOk(await userApi.create(data)) as UserListItemDto,
+    update: async (id, data) => unwrapOk(await userApi.update(id, data)) as UserListItemDto,
     delete: async (ids) => {
       ensureOk(await userApi.deleteMany(ids))
     },
@@ -446,8 +495,8 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           await roleApi.getPagedList(mapQuery(q) as unknown as RoleListQueryDto),
         ),
       ),
-    create: async (data) => unwrap(await roleApi.create(data)) as RoleDto,
-    update: async (id, data) => unwrap(await roleApi.update(id, data)) as RoleDto,
+    create: async (data) => unwrapOk(await roleApi.create(data)) as RoleDto,
+    update: async (id, data) => unwrapOk(await roleApi.update(id, data)) as RoleDto,
     delete: async (ids) => {
       ensureOk(await roleApi.deleteMany(ids))
     },
@@ -467,8 +516,8 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           await tenantApi.getPagedList(mapQuery(q) as unknown as TenantQueryDto),
         ),
       ),
-    create: async (data) => unwrap(await tenantApi.create(data)) as TenantDto,
-    update: async (id, data) => unwrap(await tenantApi.update(id, data)) as TenantDto,
+    create: async (data) => unwrapOk(await tenantApi.create(data)) as TenantDto,
+    update: async (id, data) => unwrapOk(await tenantApi.update(id, data)) as TenantDto,
     delete: async (ids) => {
       // Tenant admin API has no batch delete - loop sequentially.
       for (const id of ids) {
@@ -493,9 +542,9 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         getTree: async () =>
           unwrap(await organizationApi.getTree()) as OrganizationTreeNodeDto[],
         getById: async (id) => unwrap(await organizationApi.getById(id)) as OrganizationDto,
-        create: async (data) => unwrap(await organizationApi.create(data)) as OrganizationDto,
+        create: async (data) => unwrapOk(await organizationApi.create(data)) as OrganizationDto,
         update: async (id, data) =>
-          unwrap(await organizationApi.update(id, data)) as OrganizationDto,
+          unwrapOk(await organizationApi.update(id, data)) as OrganizationDto,
         delete: async (id) => {
           ensureOk(await organizationApi.delete(id))
         },
@@ -570,10 +619,10 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const me: IdentityBridge['me'] = profileApi
     ? {
         getProfile: async () => unwrap(await profileApi.get()) as UserDto,
-        updateProfile: async (data) => unwrap(await profileApi.update(data)) as UserDto,
+        updateProfile: async (data) => unwrapOk(await profileApi.update(data)) as UserDto,
         getDetail: async () => unwrap(await profileApi.getDetail()) as UserDetailDto,
         updateDetail: async (data) =>
-          unwrap(await profileApi.updateDetail(data)) as UserDetailDto,
+          unwrapOk(await profileApi.updateDetail(data)) as UserDetailDto,
         changePassword: async (data) => {
           ensureOk(await profileApi.changePassword(data))
         },
@@ -581,8 +630,8 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         revokeSession: async (sessionId) => {
           ensureOk(await profileApi.revokeSession(sessionId))
         },
-        revokeAllSessions: async () => {
-          ensureOk(await profileApi.revokeAllSessions())
+        revokeAllSessions: async (includeCurrent?: boolean) => {
+          ensureOk(await profileApi.revokeAllSessions(includeCurrent ?? false))
         },
         getTwoFactorStatus: async () =>
           unwrap(await profileApi.getTwoFactorStatus()) as TwoFactorStatusDto,
@@ -614,7 +663,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           ensureOk(await profileApi.confirmChangePhone(data))
         },
         enableTwoFactor: async (data) =>
-          unwrap(await profileApi.enableTwoFactor(data)) as string,
+          unwrapOk(await profileApi.enableTwoFactor(data)) as string,
         disableTwoFactor: async () => {
           ensureOk(await profileApi.disableTwoFactor())
         },
@@ -665,7 +714,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         changePassword: () => missing('me.changePassword'),
         getSessions: () => missing('me.getSessions'),
         revokeSession: () => missing('me.revokeSession'),
-        revokeAllSessions: () => missing('me.revokeAllSessions'),
+        revokeAllSessions: (_includeCurrent?: boolean) => missing('me.revokeAllSessions'),
         getTwoFactorStatus: () => missing('me.getTwoFactorStatus'),
         getLinkedAccounts: () => missing('me.getLinkedAccounts'),
         unlinkAccount: () => missing('me.unlinkAccount'),
@@ -707,6 +756,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
 
   return {
     users,
+    invitations,
     roles,
     tenants,
     organizations,

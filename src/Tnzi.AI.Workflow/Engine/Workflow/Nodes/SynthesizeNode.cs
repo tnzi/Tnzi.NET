@@ -10,14 +10,12 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 public class SynthesizeNode : IWorkflowNode
 {
     private readonly IWorkflowNodeServiceContext _nodeContext;
-    private readonly ILogger<SynthesizeNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Synthesize;
 
-    public SynthesizeNode(IWorkflowNodeServiceContext nodeContext, ILogger<SynthesizeNode> logger)
+    public SynthesizeNode(IWorkflowNodeServiceContext nodeContext)
     {
         _nodeContext = Check.NotNull(nodeContext);
-        _logger = Check.NotNull(logger);
     }
 
     public async Task<WorkflowNodeResult> ExecuteAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default)

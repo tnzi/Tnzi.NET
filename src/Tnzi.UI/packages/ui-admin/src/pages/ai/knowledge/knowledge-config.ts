@@ -9,15 +9,16 @@ import type { FormSchemaItem } from '../../_shared/form-schema'
  *
  * KB shape derives from `@tnzi/core/services/ai` `KnowledgeBaseDto`:
  *   { id, name, description, embeddingProvider, embeddingModel, chunkSize,
- *     chunkOverlap, documentCount, chunkCount, isEnabled, creationTime }
+ *     chunkOverlap, documentCount, chunkCount, isEnabled, isUserQueryable,
+ *     creationTime }
  *
  * Two distinct write shapes (see core `rag.ts`):
  *   - CREATE (`KnowledgeBaseCreateParams`): name + description +
  *     embeddingProvider/embeddingModel + chunkSize/chunkOverlap. The chunking
  *     config is immutable after creation (re-chunking needs a reindex), so it
  *     only appears in the create form.
- *   - UPDATE (`KnowledgeBaseUpdateParams`): only name / description / isEnabled
- *     are mutable. The edit form therefore disables the embedding + chunk
+ *   - UPDATE (`KnowledgeBaseUpdateParams`): only name / description / isEnabled /
+ *     isUserQueryable are mutable. The edit form therefore disables the embedding + chunk
  *     fields and surfaces the enable toggle.
  *
  * The page passes the relevant schema depending on `mode` (create vs edit).
@@ -55,6 +56,9 @@ export const knowledgeCreateFormSchema: FormSchemaItem[] = [
     type: 'number',
     placeholder: '200',
   },
+  // Off by default: the user-facing RAG endpoints refuse a knowledge base that
+  // was never opened, so a new base is agent-only until an admin flips this.
+  { key: 'isUserQueryable', labelKey: 'form.isUserQueryable', label: 'Open to user queries', type: 'switch' },
 ]
 
 /** Edit form - only the mutable subset (KnowledgeBaseUpdateParams). */
@@ -62,6 +66,7 @@ export const knowledgeEditFormSchema: FormSchemaItem[] = [
   { key: 'name', labelKey: 'form.name', label: 'Name', type: 'text', required: true },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
+  { key: 'isUserQueryable', labelKey: 'form.isUserQueryable', label: 'Open to user queries', type: 'switch' },
 ]
 
 // The keyword search lives in the page-header bar (drives `query.searchText`,

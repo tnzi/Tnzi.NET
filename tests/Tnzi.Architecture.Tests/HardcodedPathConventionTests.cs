@@ -46,20 +46,13 @@ public class HardcodedPathConventionTests
         var repoRoot = RepoRoot.Locate();
         var violations = new List<string>();
 
+        // ★ 走 RepoScan 而不是 SearchOption.AllDirectories：扫描根之一是 src/，
+        // 底下的 src/Tnzi.UI 是 pnpm 工作区，裸递归会跟着 junction 走进无穷路径。
+        // bin/obj 的剔除也一并交给它（原先那两行只过滤结果，挡不住枚举本身走不完）。
         foreach (var scanDir in new[] { "src", "tests" })
         {
-            var root = Path.Combine(repoRoot, scanDir);
-            if (!Directory.Exists(root)) continue;
-
-            foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+            foreach (var file in RepoScan.EnumerateFiles(scanDir, "*.cs"))
             {
-                // 构建产物不是源码
-                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
-                    file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-                {
-                    continue;
-                }
-
                 var text = File.ReadAllText(file);
                 if (!DriveLetterInFileCall.IsMatch(text)) continue;
 

@@ -112,8 +112,7 @@ public static class TnziEFCoreExtensions
             var dbContext = sp.GetRequiredService(dbContextType) as DbContext
                 ?? throw new InvalidOperationException($"Type {dbContextType.Name} is not a DbContext");
             var databaseProvider = sp.GetRequiredService<IDatabaseProvider>();
-            var logger = sp.GetRequiredService<ILogger<DapperService>>();
-            return new DapperService(dbContext, databaseProvider, logger);
+            return new DapperService(dbContext, databaseProvider);
         });
 
         // 注册 Dapper Executor 工厂（TryAdd 确保只注册一次）

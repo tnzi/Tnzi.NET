@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Entities;
+﻿namespace Tnzi.Identity.Entities;
 
 /// <summary>
 /// Tnzi 用户实体 (扩展自 ASP.NET Core Identity)
@@ -49,6 +49,17 @@ public class User : IdentityUser<Guid>, IEntity<Guid>, ISoftDelete, IHasCreation
     /// 获取或设置 首选 2FA 方式(登录时默认展示;null 表示未指定,由系统按优先级选择)
     /// </summary>
     public TwoFactorType? PreferredTwoFactorType { get; set; }
+
+    /// <summary>
+    /// 获取或设置 这个账号还欠着的事（未接受邀请 / 必须改密 / …）。
+    /// </summary>
+    /// <remarks>
+    /// 低位是阻断位（<see cref="Services.PendingActionsLoginGuard"/> 读它，命中即拒绝登录），
+    /// 高位是义务位（<c>IssueTokenAsync</c> 读它，命中即发挑战）。
+    /// <c>default</c> 是 <see cref="PendingUserActions.None"/>，所以存量账号不受影响。
+    /// ★ 清位用 <c>&amp;= ~Flag</c> 而不是赋 <c>None</c>，理由见 <see cref="PendingUserActions"/>。
+    /// </remarks>
+    public PendingUserActions PendingActions { get; set; }
 
     // 实现接口属性
     public bool IsDeleted { get; set; }

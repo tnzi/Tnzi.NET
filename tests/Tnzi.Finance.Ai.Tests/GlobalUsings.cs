@@ -18,3 +18,7 @@ global using Tnzi.Finance.Banking.Services;
 global using Tnzi.Results;
 global using Tnzi.Storage;
 global using Tnzi.Storage.Services;
+global using UglyToad.PdfPig.Core;
+global using UglyToad.PdfPig.Content;
+global using UglyToad.PdfPig.Fonts.Standard14Fonts;
+global using UglyToad.PdfPig.Writer;

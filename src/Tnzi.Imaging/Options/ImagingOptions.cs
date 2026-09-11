@@ -14,6 +14,17 @@ public class ImagingOptions
     /// 滑动验证码配置
     /// </summary>
     public SlidingCaptchaOptions SlidingCaptcha { get; set; } = new();
+
+    /// <summary>
+    /// 单张图片解码后的像素上限（宽 × 高，默认 4000 万，0 表示不限制）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这是<b>闸门不是调优项</b>（同 <c>Tnzi.Documents</c> 的 <c>MaxPagePixels</c>）：
+    /// 压缩字节数与解码后的内存没有关系，一个 200KB 的 PNG 可以声明 50000×50000、
+    /// 解码要 10 TB —— 没有它，任何一个接受图片的入口都是拒绝服务入口。
+    /// 设成 0 等于把那个入口重新打开，只应在完全可信的内部管道里这么做。
+    /// </remarks>
+    public long MaxDecodePixels { get; set; } = ImageDecodeGuard.DefaultMaxDecodePixels;
 }
 
 /// <summary>

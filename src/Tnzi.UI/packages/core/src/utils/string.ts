@@ -9,6 +9,10 @@
  */
 export function truncate(str: string, maxLength: number, ellipsis = '...'): string {
   if (str.length <= maxLength) return str;
+  // When the ellipsis alone does not fit, `maxLength - ellipsis.length` goes
+  // negative and `slice(0, -1)` keeps almost the whole string, so the result
+  // came out longer than maxLength. Return as much of the ellipsis as fits.
+  if (maxLength <= ellipsis.length) return ellipsis.slice(0, Math.max(0, maxLength));
   return str.slice(0, maxLength - ellipsis.length) + ellipsis;
 }
 

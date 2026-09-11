@@ -19,6 +19,7 @@ global using Tnzi.Chat.Options;
 global using Tnzi.Options;
 global using Tnzi.Settings;
 global using Tnzi.Chat.Services;
+global using Tnzi.Chat.Services.Internal;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;

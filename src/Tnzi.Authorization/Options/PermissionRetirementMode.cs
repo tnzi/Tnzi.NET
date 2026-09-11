@@ -19,9 +19,11 @@ public enum PermissionRetirementMode
     Disable = 0,
 
     /// <summary>
-    /// 删除数据行及其 <c>RoleFunction</c> 授权（历史行为）。
+    /// 删除数据行及其 <c>RoleFunction</c> 授权与 <c>UserFunction</c> 用户直授（allow / deny 两种行）。
     /// ⚠ 不可逆：软删过滤器会让重新声明时插入一条新 id 的行，旧授权永远接不回来。
     /// 只有在确知「这个权限确实从产品里移除了」且希望清库时才选它。
+    /// 用户直授必须显式删：<c>ModuleFunction</c> 是软删，<c>UserFunction.FunctionId</c> 上的级联外键
+    /// 永远不会触发，不删则 allow / deny 行继续指向墓碑，重新声明后永久不可见也无法清理。
     /// </summary>
     Delete = 1,
 

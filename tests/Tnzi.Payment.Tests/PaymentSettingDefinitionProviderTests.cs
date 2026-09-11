@@ -39,8 +39,9 @@ public class PaymentSettingDefinitionProviderTests
     {
         // 5 个退款/通知字段 + 后台任务运营字段（AutoCloseExpireMinutes / OfflineExpireDays /
         // BackgroundTaskIntervalMinutes / RefundReconcileLookbackDays）+ 渠道与回跳字段
-        // （DefaultChannelCode / DefaultReturnUrl）。全部经父 IOptionsMonitor<PaymentOptions> 热消费。
-        Assert.Equal(11, _group.Fields.Count);
+        // （DefaultChannelCode / DefaultReturnUrl）+ 对账导出上限（ReconciliationExportMaxRows）。
+        // 全部经父 IOptionsMonitor<PaymentOptions> 热消费。
+        Assert.Equal(12, _group.Fields.Count);
     }
 
     [Fact]
@@ -56,6 +57,7 @@ public class PaymentSettingDefinitionProviderTests
         Assert.Contains(fields, f => f.Key == "Payment:MaxRefundAmountPerDay");
         Assert.Contains(fields, f => f.Key == "Payment:AutoCloseExpireMinutes");
         Assert.Contains(fields, f => f.Key == "Payment:OfflineExpireDays");
+        Assert.Contains(fields, f => f.Key == "Payment:ReconciliationExportMaxRows");
         Assert.Contains(fields, f => f.Key == "Payment:BackgroundTaskIntervalMinutes");
         Assert.Contains(fields, f => f.Key == "Payment:RefundReconcileLookbackDays");
     }

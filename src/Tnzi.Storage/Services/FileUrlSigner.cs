@@ -22,8 +22,16 @@ public class FileUrlSigner : IFileUrlSigner
 
     private readonly byte[] _key;
 
+    /// <remarks>
+    /// <c>IOptions</c> 而不是 <c>IOptionsMonitor</c> 是<b>刻意</b>的：本类只读
+    /// <see cref="StorageOptions.UrlSigningKey"/>，而那是部署机密、刻意不做成
+    /// <c>[RuntimeSetting]</c>（不该经管理端下发或回显），因此没有"admin 改了不生效"这回事。
+    /// 换成 Monitor 还会引入真问题：密钥在构造时解析一次，中途换密钥等于让所有在途令牌失效，
+    /// 而这是个单例。<c>[ReadsOnlyColdSettings]</c> 把这个判断交给审计核验，
+    /// 哪天 <c>UrlSigningKey</c> 被标成热设置，启动期会重新告警。
+    /// </remarks>
     public FileUrlSigner(
-        IOptions<StorageOptions> options,
+        [ReadsOnlyColdSettings(nameof(StorageOptions.UrlSigningKey))] IOptions<StorageOptions> options,
         IConfiguration configuration,
         ILogger<FileUrlSigner> logger)
     {

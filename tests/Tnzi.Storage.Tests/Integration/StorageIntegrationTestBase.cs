@@ -1,7 +1,6 @@
 using Tnzi.EFCore;
 using Tnzi.Storage.Entities.Configs;
 using Tnzi.Storage.Helpers;
-using Tnzi.TestBase;
 
 namespace Tnzi.Storage.Tests.Integration;
 

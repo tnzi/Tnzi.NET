@@ -1,3 +1,5 @@
+﻿﻿using System.Collections.Concurrent;
+
 namespace Tnzi.Payment.Stripe.Providers;
 
 /// <summary>
@@ -10,10 +12,18 @@ namespace Tnzi.Payment.Stripe.Providers;
 /// </remarks>
 internal static class StripeClientFactory
 {
-    /// <summary>按配置构造一个 Stripe 客户端。</summary>
+    /// <summary>
+    /// 按密钥缓存的客户端。<c>StripeClient</c> 是线程安全的、设计上就该长期复用 ——
+    /// 它内部持有连接池；而 <c>StripeProvider</c> 是 Scoped，缓存在实例字段上等于每个请求
+    /// 重建一次，连接池随之作废，高峰期表现为端口耗尽而不是任何一条错误日志。
+    /// 按密钥分桶而不是只存一份：密钥轮换后自然拿到新客户端，旧的那个随桶一起被丢掉。
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, StripeClient> Clients = new(StringComparer.Ordinal);
+
+    /// <summary>按配置取一个 Stripe 客户端（同一密钥全进程共用一个）。</summary>
     internal static StripeClient Create(StripeOptions options)
     {
         Check.NotNull(options);
-        return new StripeClient(options.SecretKey);
+        return Clients.GetOrAdd(options.SecretKey ?? string.Empty, static key => new StripeClient(key));
     }
 }

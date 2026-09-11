@@ -3,7 +3,6 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 using Tnzi.EFCore;
 using Tnzi.MultiTenancy;
 using Tnzi.Storage.Entities.Configs;
-using Tnzi.TestBase;
 
 namespace Tnzi.Storage.Tests.Integration;
 

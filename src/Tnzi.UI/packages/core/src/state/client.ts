@@ -64,6 +64,16 @@ export interface CreateTnziClientOptions {
    * special-casing on this side.
    */
   permissionsFetchFn?: (() => Promise<string[]>) | null;
+  /**
+   * How the backend delivers the refresh token; must match the server's
+   * `Identity:TokenDelivery:Mode`.
+   *
+   * `'cookie'` moves the refresh token into an `HttpOnly` cookie and keeps the
+   * access token in memory only - nothing auth-related is written to
+   * `localStorage`, so neither an XSS payload nor a process running as the user
+   * can read it. Defaults to `'bearer'` (the historical behaviour).
+   */
+  tokenDelivery?: 'bearer' | 'cookie';
 }
 
 /**
@@ -125,6 +135,7 @@ export function createTnziClient(options: CreateTnziClientOptions = {}): TnziCli
     httpClient: http,
     storage,
     storagePrefix: options.storagePrefix,
+    tokenDelivery: options.tokenDelivery,
     permissionsFetchFn:
       options.permissionsFetchFn === null
         ? undefined
@@ -132,7 +143,11 @@ export function createTnziClient(options: CreateTnziClientOptions = {}): TnziCli
   });
   authRef = auth;
 
-  return { http, auth, authApi: useAuthApi(http) };
+  return {
+    http,
+    auth,
+    authApi: useAuthApi(http, { withCredentials: options.tokenDelivery === 'cookie' }),
+  };
 }
 
 /**

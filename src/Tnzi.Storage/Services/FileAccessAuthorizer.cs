@@ -7,7 +7,7 @@
 ///   1. `FileRecord.IsPublic` 为 true(头像 / 站点素材这类有意公开的资源)
 ///   2. `Storage:AllowAnonymousRead` 为 true(部署级开关,默认关闭)
 ///   3. 请求带着**对这个文件有效且未过期的签名令牌**(见 <see cref="IFileUrlSigner"/>)
-///   4. 本次请求已被别的凭据授权(<see cref="IFileAccessGrantContext"/>,目前是分享令牌)
+///   4. 本次请求已被别的凭据授权(<see cref="IFileAccessGrantContext"/>:分享令牌、电子签署令牌)
 ///   5. 调用者是创建者
 ///   6. 调用者持有 `storage.file.view`(管理端)
 ///   7. 任一 <see cref="IFileReferenceAccessResolver"/> 按引用它的业务记录放行

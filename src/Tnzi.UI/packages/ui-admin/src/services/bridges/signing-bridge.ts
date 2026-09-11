@@ -34,7 +34,7 @@ import {
   type UpdateEnvelopeTemplateDto,
 } from '@tnzi/core/services/signing'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminSigningApi>[0]
 
@@ -123,12 +123,12 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
     create: async (data: CreateEnvelopeDto) => {
       // The create endpoint returns the full detail; the list row is a subset of
       // it, so handing it straight back keeps the page from re-fetching.
-      const created = unwrap<EnvelopeDto>(await a.createRequest(data))
+      const created = unwrapOk<EnvelopeDto>(await a.createRequest(data))
       return created as unknown as EnvelopeListDto
     },
     update: unsupported('requests.update', 'send / void'),
     delete: unsupported('requests.delete', 'void (a dispatched request is evidence)'),
-    send: async (id: string) => unwrap<IssuedSigningLink[]>(await a.sendRequest(id)) ?? [],
+    send: async (id: string) => unwrapOk<IssuedSigningLink[]>(await a.sendRequest(id)) ?? [],
     void: async (id: string) => {
       ensureOk(await a.voidRequest(id))
     },
@@ -151,11 +151,11 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
     fetch: fetchTemplates,
     getById: async (id: string) => unwrap<EnvelopeTemplateDto>(await a.getTemplate(id)),
     create: async (data: CreateEnvelopeTemplateDto) => {
-      const created = unwrap<EnvelopeTemplateDto>(await a.createTemplate(data))
+      const created = unwrapOk<EnvelopeTemplateDto>(await a.createTemplate(data))
       return created as EnvelopeTemplateListDto
     },
     update: async (id: string, data: UpdateEnvelopeTemplateDto) => {
-      const updated = unwrap<EnvelopeTemplateDto>(await a.updateTemplate(id, data))
+      const updated = unwrapOk<EnvelopeTemplateDto>(await a.updateTemplate(id, data))
       return updated as EnvelopeTemplateListDto
     },
     delete: async (ids: string[]) => {

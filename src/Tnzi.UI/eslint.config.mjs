@@ -25,6 +25,9 @@ export default tseslint.config(
       '**/coverage/**',
       '**/*.d.ts',
       'packages/core/src/services/**/_generated*',
+      // Generated icon manifests (`pnpm icons:generate`). Hand-editing them is the
+      // one thing that must not happen, so there is nothing here for lint to fix.
+      'packages/*/src/icons/index.ts',
     ],
   },
 

@@ -28,8 +28,25 @@ public class LocalSandboxTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _sandbox.DisposeAsync();
-        if (Directory.Exists(_workDir))
-            Directory.Delete(_workDir, recursive: true);
+
+        // 超时的命令会被整树强杀，但 Windows 上刚被杀掉的 shell 还可能握着工作区句柄一会儿。
+        // 立刻 Delete 会在拆卸阶段抛 IOException，把一条已经通过的用例判红（09-04 在满负载机器上实发）。
+        // 目录在 %TEMP% 下，给操作系统两秒钟再放弃；两秒后仍锁着才是值得看见的问题。
+        for (var attempt = 0; attempt < 10 && Directory.Exists(_workDir); attempt++)
+        {
+            try
+            {
+                Directory.Delete(_workDir, recursive: true);
+            }
+            catch (IOException) when (attempt < 9)
+            {
+                await Task.Delay(200);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 9)
+            {
+                await Task.Delay(200);
+            }
+        }
     }
 
     [Fact]

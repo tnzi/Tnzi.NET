@@ -113,16 +113,53 @@ public class WebhookSignatureTests
     }
 
     [Fact]
-    public async Task Slack_UrlVerificationChallenge_Echoed()
+    public async Task Slack_UrlVerificationChallenge_Echoed_OnlyAfterTheSignatureChecks()
     {
+        const string secret = "slack-signing-secret";
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateSlack(bus, secret);
+
+        var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "abc123" });
+        var (sig, ts) = SlackSign(secret, body);
+        var headers = new Dictionary<string, string>
+        {
+            ["X-Slack-Signature"] = sig,
+            ["X-Slack-Request-Timestamp"] = ts
+        };
+
+        var result = await adapter.ProcessWebhookAsync(body, headers);
+
+        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
+        result.ChallengeResponse.ShouldBe("abc123");
+    }
+
+    [Fact]
+    public async Task Slack_UnsignedUrlVerificationChallenge_Rejected()
+    {
+        // Slack 对 url_verification 请求同样签名，所以"先回显 challenge 再验签"不是规范要求，
+        // 而是一个免验证的回显器：任何人都能拿它确认端点在线并让它回声任意字符串。
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateSlack(bus, "slack-signing-secret");
 
         var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "abc123" });
         var result = await adapter.ProcessWebhookAsync(body, new Dictionary<string, string>());
 
-        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
-        result.ChallengeResponse.ShouldBe("abc123");
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        result.ChallengeResponse.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Slack_NoSigningSecretConfigured_Rejected_NotDispatched()
+    {
+        // ★ 此前验签块没有 else 分支：漏配一个密钥，端点就从"验签的"变成"谁都能投递的"，
+        // 而日志、返回码、监控全部正常。Discord 一直是拒绝的，Slack/Feishu 不是。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateSlack(bus, signingSecret: null);
+
+        var result = await adapter.ProcessWebhookAsync(MessageEventJson(), new Dictionary<string, string>());
+
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
     }
 
     // ---------------- DingTalk ----------------
@@ -276,15 +313,28 @@ public class WebhookSignatureTests
         (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
     }
 
+    /// <summary>为一条飞书 body 造一组通过验签的请求头。</summary>
+    private static Dictionary<string, string> FeishuHeaders(string key, string body)
+    {
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+        const string nonce = "nonce-1";
+        return new Dictionary<string, string>
+        {
+            ["X-Lark-Request-Timestamp"] = ts,
+            ["X-Lark-Request-Nonce"] = nonce,
+            ["X-Lark-Signature"] = FeishuSign(key, ts, nonce, body)
+        };
+    }
+
     [Fact]
     public async Task Feishu_UrlVerificationChallenge_Echoed()
     {
-        // No EncryptKey → no signature required; challenge echoed.
+        const string key = "feishu-encrypt-key";
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
-        var adapter = CreateFeishu(bus, encryptKey: null);
+        var adapter = CreateFeishu(bus, encryptKey: key);
 
         var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "lark-challenge", token = "vtok" });
-        var result = await adapter.ProcessWebhookAsync(body, new Dictionary<string, string>());
+        var result = await adapter.ProcessWebhookAsync(body, FeishuHeaders(key, body));
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
         result.ChallengeResponse!.ShouldContain("lark-challenge");
@@ -293,13 +343,30 @@ public class WebhookSignatureTests
     [Fact]
     public async Task Feishu_ChallengeWithWrongToken_Rejected()
     {
+        // 刻意配上 EncryptKey 并签名：否则这条会因为"无法验签"而被拒，
+        // 它想验的"token 不对要拒"就再也没被跑到过。
+        const string key = "feishu-encrypt-key";
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
-        var adapter = CreateFeishu(bus, encryptKey: null, verificationToken: "expected-token");
+        var adapter = CreateFeishu(bus, encryptKey: key, verificationToken: "expected-token");
 
         var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "c", token = "wrong-token" });
-        var result = await adapter.ProcessWebhookAsync(body, new Dictionary<string, string>());
+        var result = await adapter.ProcessWebhookAsync(body, FeishuHeaders(key, body));
 
         result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+    }
+
+    [Fact]
+    public async Task Feishu_NoEncryptKeyConfigured_Rejected_NotDispatched()
+    {
+        // ★ 与 Slack 同一处缺陷：验签块没有 else 分支，漏配密钥就等于关掉验签，
+        // 而外观与配置正确时完全一致。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateFeishu(bus, encryptKey: null);
+
+        var result = await adapter.ProcessWebhookAsync(FeishuEventJson(), new Dictionary<string, string>());
+
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
     }
 
     // ---------------- Discord (Ed25519) ----------------

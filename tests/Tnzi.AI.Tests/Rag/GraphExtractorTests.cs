@@ -106,8 +106,11 @@ public class GraphExtractorTests
     }
 
     [Fact]
-    public async Task ExtractAsync_MalformedJson_ReturnsEmptyResult()
+    public async Task ExtractAsync_MalformedJson_ReportsUnparsable_NotJustEmpty()
     {
+        // ★ 解析失败与"文本里确实没有实体"此前给出同一个结果（GraphExtractionResult.Empty）：
+        // 两者都是空集合，但前者意味着这段文本的图谱从未被抽出来过，而调用方读到的是
+        // "抽完了，没东西"。最常见的成因是输出被 MaxTokens 截断在半路。
         _aiUtilityMock.Setup(u => u.ExecuteAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("this is not valid json {{{");
@@ -115,10 +118,43 @@ public class GraphExtractorTests
         var extractor = CreateExtractor();
         var result = await extractor.ExtractAsync("some text", Guid.NewGuid());
 
-        result.ShouldBe(GraphExtractionResult.Empty);
+        result.ResponseUnparsable.ShouldBeTrue();
+        result.Nodes.ShouldBeEmpty();
+        result.Edges.ShouldBeEmpty();
         _nodeRepoMock.Verify(r => r.InsertManyAsync(
             It.IsAny<IEnumerable<KnowledgeGraphNode>>(),
             It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_TruncatedJson_ReportsUnparsable()
+    {
+        // 被 MaxTokens 砍断的响应长这样：合法的开头，没有结尾。
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("{\"entities\": [{\"name\": \"Acme\", \"type\": \"Org\"");
+
+        var result = await CreateExtractor().ExtractAsync("some text", Guid.NewGuid());
+
+        result.ResponseUnparsable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ExtractAsync_PassesAnExplicitMaxTokens_NotTheGlobalDefault()
+    {
+        // IAiUtility 的全局默认上限是给标题生成这类极短输出定的。抽取产出的是一整份 JSON，
+        // 被截断就整份解析失败 —— 所以这里绝不能依赖默认值。
+        AiUtilityCallOptions? captured = null;
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback((string _, string _, AiUtilityCallOptions? o, CancellationToken _) => captured = o)
+            .ReturnsAsync("""{"entities": [], "relationships": []}""");
+
+        await CreateExtractor().ExtractAsync("some text", Guid.NewGuid());
+
+        captured.ShouldNotBeNull();
+        captured.MaxTokens.ShouldNotBeNull();
+        captured.MaxTokens!.Value.ShouldBeGreaterThan(1000);
     }
 
     [Fact]
@@ -132,6 +168,9 @@ public class GraphExtractorTests
 
         var extractor = CreateExtractor();
         var result = await extractor.ExtractAsync("some text", Guid.NewGuid());
+
+        // 对照组：真的没有实体时，ResponseUnparsable 必须是 false。
+        result.ResponseUnparsable.ShouldBeFalse();
 
         result.ShouldBe(GraphExtractionResult.Empty);
     }

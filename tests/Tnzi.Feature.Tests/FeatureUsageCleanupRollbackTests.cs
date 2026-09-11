@@ -50,6 +50,13 @@ public class FeatureUsageCleanupRollbackTests : IntegratedTestBase<FeatureUsageT
         services.AddScoped<IRepository<FeatureUsageRecord, long>,
             EFCoreRepository<FeatureUsageTestDbContext, FeatureUsageRecord, long>>();
         services.AddScoped<IFeatureUsageService, FeatureUsageService>();
+
+        // RecordUsageAsync 只入队不写库；这里被试的是清理，所以队列与选项只要能被解析即可。
+        services.AddSingleton<IFeatureUsageSender>(
+            new FeatureUsageSender(Microsoft.Extensions.Logging.Abstractions.NullLogger<FeatureUsageSender>.Instance));
+        var options = new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.Feature.Options.FeatureOptions>>();
+        options.Setup(o => o.CurrentValue).Returns(new Tnzi.Feature.Options.FeatureOptions());
+        services.AddSingleton(options.Object);
     }
 
     [Fact]

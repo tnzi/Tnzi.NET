@@ -31,6 +31,22 @@ public interface IEnvelopeService
     Task<Result<SigningPacketDto>> GetByTokenAsync(string token, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 按令牌取回收件人正在签（或已签成）的那份 PDF 的字节：完成前是渲染稿，完成后是密封成品。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 收件人是匿名的，而 <c>Tnzi.Storage</c> 的读取判定对匿名一律 404 —— 所以
+    /// <see cref="SigningPacketDto.DocumentFileId"/> 对他而言只是一个打不开的 id。
+    /// 这条路径把令牌校验的结论写进请求级授予（<c>IFileAccessGrantContext</c>），
+    /// 与分享链接同一形状：令牌本身就是凭据，授予只在这一次请求内、只给读。
+    /// </para>
+    /// <para>
+    /// 令牌解析得出即可读，不看状态：已签成、已过期、已作废的收件人都仍然是这份文档的当事人。
+    /// </para>
+    /// </remarks>
+    Task<Result<SigningDocumentContent>> GetDocumentByTokenAsync(string token, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 按令牌提交本人负责的字段与签名。全部收件人签完时自动密封并归档。
     /// </summary>
     Task<Result<SigningPacketDto>> SubmitAsync(string token, SubmitSigningDto input, CancellationToken cancellationToken = default);
@@ -54,6 +70,12 @@ public interface IEnvelopeService
     Task<Result<IPagedList<EnvelopeListDto>>> GetPagedAsync(
         EnvelopeQueryDto query, CancellationToken cancellationToken = default);
 }
+
+/// <summary>收件人按令牌取回的文档字节。流归调用方释放。</summary>
+/// <param name="Content">PDF 字节流</param>
+/// <param name="ContentType">内容类型（正常情况下是 <c>application/pdf</c>）</param>
+/// <param name="FileName">下载时的展示名</param>
+public sealed record SigningDocumentContent(Stream Content, string ContentType, string FileName);
 
 /// <summary>一条刚签发出来的签署链接凭据。</summary>
 /// <param name="RecipientId">收件人</param>

@@ -32,6 +32,20 @@
     <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <!-- 这九个程序集各自带 admin 控制器，但都不在其它引用的传递闭包里
+         （Tnzi.Hosting 对它们用 PrivateAssets="all"，引用不流出）。少了这几行，
+         AdminWriteEndpointPermissionConventionTests 就扫不到它们的写端点 ——
+         而它是「新增写端点漏标操作码」的唯一静态门禁。覆盖面由该测试的
+         Scan_CoversEveryAssemblyThatHasAnAdminController 守着，删一行即红。 -->
+    <ProjectReference Include="..\..\src\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification.Push\Tnzi.Notification.Push.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Performance\Tnzi.Performance.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Storage.Workspace\Tnzi.Storage.Workspace.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.AI\Tnzi.AI.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />

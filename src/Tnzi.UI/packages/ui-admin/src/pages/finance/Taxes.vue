@@ -99,6 +99,9 @@ const agencySchema: FormSchemaItem[] = [
 
 const agencyCrud = useCrudPage<AgencyRow>({
   pageId: 'finance.taxes.agencies',
+  // Three shells share this route (tabs are displayDirective:'show'); each
+  // needs its own deep-link key or a sibling's reconcile closes this editor.
+  detailUrl: 'agency',
   permission: 'finance.tax',
   columns: agencyColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -130,6 +133,7 @@ const rateSchema: FormSchemaItem[] = [
 
 const rateCrud = useCrudPage<RateRow>({
   pageId: 'finance.taxes.rates',
+  detailUrl: 'rate',
   permission: 'finance.tax',
   columns: rateColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -180,6 +184,7 @@ function toCodePayload(d: Record<string, unknown>): UpsertTaxCodeDto {
 
 const codeCrud = useCrudPage<CodeRow>({
   pageId: 'finance.taxes.codes',
+  detailUrl: 'code',
   permission: 'finance.tax',
   columns: codeColumns,
   rowKey: (r) => String(r.id ?? ''),

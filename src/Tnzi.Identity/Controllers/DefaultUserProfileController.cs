@@ -19,6 +19,7 @@ public class DefaultUserProfileController : ApiControllerBase
     protected readonly ILoginLogService? LoginLogService;
     protected readonly IUserDetailService? UserDetailService;
     protected readonly IOAuthService? OAuthService;
+    protected readonly ISessionRevocationService? SessionRevocation;
 
     /// <summary>
     /// 初始化用户个人资料控制器
@@ -31,7 +32,8 @@ public class DefaultUserProfileController : ApiControllerBase
         ITwoFactorService? twoFactorService = null,
         ILoginLogService? loginLogService = null,
         IUserDetailService? userDetailService = null,
-        IOAuthService? oAuthService = null)
+        IOAuthService? oAuthService = null,
+        ISessionRevocationService? sessionRevocation = null)
     {
         UserService = Check.NotNull(userService);
         PasswordService = Check.NotNull(passwordService);
@@ -41,6 +43,7 @@ public class DefaultUserProfileController : ApiControllerBase
         LoginLogService = loginLogService;
         UserDetailService = userDetailService;
         OAuthService = oAuthService;
+        SessionRevocation = sessionRevocation;
     }
 
     /// <summary>
@@ -147,15 +150,29 @@ public class DefaultUserProfileController : ApiControllerBase
             return NotFound("Session not found");
         }
 
+        if (SessionRevocation != null)
+        {
+            await SessionRevocation.RevokeSessionAsync(sessionId, SessionRevocationReason.UserRequested);
+            return Ok();
+        }
+
         var result = await SessionService.RevokeSessionAsync(sessionId);
         return result.ToApiResult();
     }
 
     /// <summary>
-    /// 撤销当前用户的所有会话
+    /// 登出其它设备：撤销当前用户的所有会话（默认保留发起本次请求的这一条）。
     /// </summary>
+    /// <param name="includeCurrent">
+    /// 是否连当前会话一起撤销（即"登出所有设备，包括这一台"）。默认 <c>false</c>。
+    /// </param>
+    /// <remarks>
+    /// ★ 默认保留当前会话，是因为 ASVS 7.4.3 要求的是「终止所有<b>其它</b>活动会话」。
+    /// 此前这个端点只能全撤（含自己），而一个点下去就把自己也登出的按钮，
+    /// 用户不会去点 —— 于是这条自救路径事实上等于不存在。
+    /// </remarks>
     [HttpDelete("sessions")]
-    public virtual async Task<ApiResult> RevokeAllMySessions()
+    public virtual async Task<ApiResult> RevokeAllMySessions([FromQuery] bool includeCurrent = false)
     {
         if (CurrentUser?.Id == null)
         {
@@ -167,8 +184,24 @@ public class DefaultUserProfileController : ApiControllerBase
             return Error("Session service is not available", 503);
         }
 
-        var result = await SessionService.RevokeAllSessionsAsync(CurrentUser.Id.Value);
+        var exclude = includeCurrent ? null : ParseCurrentSessionId();
+
+        if (SessionRevocation != null)
+        {
+            await SessionRevocation.RevokeUserSessionsAsync(
+                CurrentUser.Id.Value, SessionRevocationReason.UserRequested, exclude);
+            return Ok();
+        }
+
+        var result = await SessionService.RevokeAllSessionsAsync(CurrentUser.Id.Value, exclude);
         return result.ToApiResult();
+    }
+
+    /// <summary>从当前主体的 session_id claim 解析会话ID；取不到返回 null。</summary>
+    private Guid? ParseCurrentSessionId()
+    {
+        var raw = CurrentUser?.FindClaim(IdentityConstants.ClaimTypeNames.SessionId);
+        return !string.IsNullOrEmpty(raw) && Guid.TryParse(raw, out var sid) && sid != Guid.Empty ? sid : null;
     }
 
     #endregion
@@ -263,6 +296,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 禁用双因素认证
     /// </summary>
     [HttpPost("two-factor/disable")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult> DisableTwoFactor()
     {
         if (CurrentUser?.Id == null)
@@ -283,6 +317,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 暂停双因素认证（总开关关闭，保留已配置的方式 / TOTP key / 首选，可随时恢复）
     /// </summary>
     [HttpPost("two-factor/suspend")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult> SuspendTwoFactor()
     {
         if (CurrentUser?.Id == null)
@@ -363,6 +398,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 禁用 TOTP
     /// </summary>
     [HttpPost("two-factor/totp/disable")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult> DisableTotp()
     {
         if (CurrentUser?.Id == null)
@@ -383,6 +419,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 禁用某一种 2FA 方式（其它方式保持不变）
     /// </summary>
     [HttpPost("two-factor/method/disable")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult> DisableTwoFactorMethod([FromBody] TwoFactorMethodRequestDto input)
     {
         if (CurrentUser?.Id == null)
@@ -499,6 +536,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 停用当前用户的账户
     /// </summary>
     [HttpPost("deactivate")]
+    [RequireStepUp(StepUpScopes.AccountDestroy)]
     public virtual async Task<ApiResult> DeactivateAccount([FromBody] DeactivateAccountDto? input = null)
     {
         if (CurrentUser?.Id == null)
@@ -514,6 +552,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 删除当前用户的账户（软删除，GDPR 合规）
     /// </summary>
     [HttpDelete("account")]
+    [RequireStepUp(StepUpScopes.AccountDestroy)]
     public virtual async Task<ApiResult> DeleteAccount()
     {
         if (CurrentUser?.Id == null)
@@ -569,6 +608,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 确认修改邮箱
     /// </summary>
     [HttpPost("change-email/confirm")]
+    [RequireStepUp(StepUpScopes.ContactChange)]
     public virtual async Task<ApiResult> ConfirmChangeEmail([FromBody] ChangeEmailDto input)
     {
         if (CurrentUser?.Id == null)
@@ -619,6 +659,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 确认修改手机号
     /// </summary>
     [HttpPost("change-phone/confirm")]
+    [RequireStepUp(StepUpScopes.ContactChange)]
     public virtual async Task<ApiResult> ConfirmChangePhone([FromBody] ChangePhoneNumberDto input)
     {
         if (CurrentUser?.Id == null)

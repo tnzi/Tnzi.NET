@@ -1,4 +1,4 @@
-
+﻿
 
 namespace Tnzi.Identity.Services;
 
@@ -39,7 +39,7 @@ public interface ITokenService
 /// <summary>
 /// 令牌结果
 /// </summary>
-public class TokenResult
+public class TokenResult : IRefreshTokenCarrier
 {
     /// <summary>
     /// 访问令牌
@@ -81,4 +81,13 @@ public class TokenResult
     /// 用户ID（用于重发确认邮件等操作，仅当 RequireEmailConfirmation=true 时有值）
     /// </summary>
     public Guid? UserId { get; set; }
+
+    /// <inheritdoc />
+    string? IRefreshTokenCarrier.ReadRefreshToken() => RefreshToken;
+
+    /// <inheritdoc />
+    int? IRefreshTokenCarrier.ReadRefreshTokenLifetimeSeconds() => RefreshTokenExpiresIn;
+
+    /// <inheritdoc />
+    void IRefreshTokenCarrier.ClearRefreshToken() => RefreshToken = string.Empty;
 }

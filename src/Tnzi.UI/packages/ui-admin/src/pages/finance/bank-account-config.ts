@@ -88,6 +88,12 @@ const LAYOUT_OPTIONS = [
  * greys the input rather than letting the user type a number and eat a 400.
  * The starting check number is captured at create; afterwards it is read-only
  * in the list and changed through the row action.
+ *
+ * `checkTemplateName` is the authoritative layout choice; `checkLayout` only
+ * selects the factory default template when no template is picked. The options
+ * come from the backend layout catalogue, which is empty when the rendering
+ * module is not deployed - the field then degrades to free entry (`tag`)
+ * rather than becoming an empty, uneditable dropdown.
  */
 export const bankAccountFormSchema: FormSchemaItem[] = [
   { key: 'accountId', labelKey: 'form.account', label: 'Funds Account', type: 'finance-account', required: true, visible: isCreate },
@@ -102,6 +108,7 @@ export const bankAccountFormSchema: FormSchemaItem[] = [
   { key: 'nextCheckNumber', labelKey: 'form.nextCheckNumber', label: 'Starting Check Number', type: 'number', min: 1, visible: isCreate },
   { key: 'checkStockType', labelKey: 'form.checkStockType', label: 'Check Stock', type: 'select', options: STOCK_OPTIONS },
   { key: 'checkLayout', labelKey: 'form.checkLayout', label: 'Check Layout', type: 'select', options: LAYOUT_OPTIONS },
+  { key: 'checkTemplateName', labelKey: 'form.checkTemplateName', label: 'Layout Template', type: 'finance-check-template', placeholderKey: 'form.checkTemplateNamePlaceholder' },
   { key: 'offsetXMm', labelKey: 'form.offsetXMm', label: 'Print Offset X (mm)', type: 'number' },
   { key: 'offsetYMm', labelKey: 'form.offsetYMm', label: 'Print Offset Y (mm)', type: 'number' },
   { key: 'feedProviderKey', labelKey: 'form.feedProviderKey', label: 'Feed Provider Key', type: 'text' },

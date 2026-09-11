@@ -4,6 +4,7 @@
  */
 
 import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination';
+import type { Flags } from '../../utils/flags';
 import { Gender, OAuthProvider, TwoFactorType, PasswordStrengthLevel, AbnormalLoginType, AbnormalLoginAction, LoginStatus } from './metadata';
 
 export { Gender, OAuthProvider, TwoFactorType, PasswordStrengthLevel, AbnormalLoginType, AbnormalLoginAction, LoginStatus };
@@ -23,6 +24,14 @@ export interface UserListItemDto {
   organizationId?: string | null;
   organizationName?: string | null;
   isLockedOut: boolean;
+  /**
+   * What this account still owes: an unaccepted invitation, a forced password change, ...
+   *
+   * Kept separate from `isLockedOut` on purpose: an invited account is locked out too,
+   * but "a new hire has not arrived yet" and "this person was disabled" are different
+   * facts, and an admin list that merges them into one status is unusable.
+   */
+  pendingActions: Flags<PendingUserActions>;
   isEmailConfirmed: boolean;
   isPhoneNumberConfirmed: boolean;
   twoFactorEnabled: boolean;
@@ -106,8 +115,12 @@ export interface UpdateUserDto {
  * Keep privileged fields out of this type; add self-service fields here.
  */
 export interface UpdateProfileDto {
-  email?: string | null;
-  phoneNumber?: string | null;
+  // NOTE: `email` / `phoneNumber` are deliberately absent. They used to be here,
+  // which let this endpoint change contact details with no verification at all -
+  // right next to the change-email / change-phone flow that sends a code to the
+  // NEW address. Worse, writing them directly left `emailConfirmed` /
+  // `phoneNumberConfirmed` untouched, so an account ended up "verified" on an
+  // address it had never proven. Use `changeEmail` / `changePhone` instead.
   firstName?: string | null;
   lastName?: string | null;
   nickname?: string | null;
@@ -118,6 +131,15 @@ export interface UpdateProfileDto {
   bio?: string | null;
   address?: string | null;
   website?: string | null;
+}
+
+/**
+ * Admin request to mark a user's contact details as confirmed.
+ * `null` on a field leaves that flag untouched.
+ */
+export interface ConfirmContactDto {
+  confirmEmail?: boolean | null;
+  confirmPhoneNumber?: boolean | null;
 }
 
 /**
@@ -173,6 +195,8 @@ export interface UserListQueryDto extends SortedPagedQueryDto {
   roleId?: string;
   isLockedOut?: boolean;
   isEmailConfirmed?: boolean;
+  /** Filter by outstanding action: matches if **any** of the given bits is owed. */
+  pendingAction?: Flags<PendingUserActions>;
 }
 
 /**
@@ -376,6 +400,13 @@ export interface UserSessionDto {
   userAgent?: string | null;
   creationTime: Date | string;
   lastActivityTime: Date | string;
+  /** Sliding hard expiry; pushed forward on every token refresh. */
+  expiresAt?: Date | string | null;
+  /**
+   * Absolute ceiling on the session's lifetime, fixed when it was created -
+   * renewals never push it. Null means the deployment set no absolute cap.
+   */
+  absoluteExpiresAt?: Date | string | null;
   isRevoked: boolean;
   revokedAt?: Date | string | null;
 }
@@ -518,8 +549,19 @@ export interface AuthConfigDto {
   enableCodeLogin: boolean;
   codeLoginViaSms: boolean;
   codeLoginViaEmail: boolean;
-  // Registration (quick register: account + code)
+  // Registration
+  /** Any registration path is open (self-registration OR either quick-register channel). */
   enableRegistration: boolean;
+  /**
+   * Classic self-registration (username + password) is open
+   * (`Identity:Registration:EnableSelfRegistration`, default false).
+   *
+   * NOTE: this flag is new. Before it existed, `POST auth/register` had no switch
+   * at all, so `enableRegistration` could report false while the endpoint happily
+   * created accounts. Gate the password sign-up form on THIS flag, not on
+   * `enableRegistration` (which is the union across all three paths).
+   */
+  registerViaPassword: boolean;
   registerViaSms: boolean;
   registerViaEmail: boolean;
   // Password recovery
@@ -589,7 +631,15 @@ export interface RegisterDto {
  * Refresh token request
  */
 export interface RefreshTokenDto {
-  refreshToken: string;
+  /**
+   * The refresh token.
+   *
+   * Optional because the backend can be configured to deliver the refresh token
+   * as an `HttpOnly` cookie (`Identity:TokenDelivery:Mode = Cookie`); in that mode
+   * the browser carries it and the body carries nothing - the client literally
+   * cannot read the value it is refreshing with, which is the point.
+   */
+  refreshToken?: string;
 }
 
 /**
@@ -862,6 +912,23 @@ export interface OAuthCallbackResultDto {
   requiresRegistration: boolean;
   userInfo?: OAuthUserInfoDto | null;
   errorMessage?: string | null;
+  /**
+   * Business error code, for branching on a failed callback.
+   *
+   * Third-party sign-in now goes through the same token exit as every other
+   * sign-in method, and that exit carries challenges as FAILURE envelopes:
+   * `2FA_REQUIRED` and `IDENTITY_PENDING_ACTIONS_REQUIRED` both arrive here with
+   * the temp token in {@link errorDetails}. A callback handler that only looks at
+   * `success` will show "login failed" to a user who simply needs to enter their
+   * second factor.
+   *
+   * Also carries `IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED`: the provider's email
+   * was not asserted as verified, so it was NOT auto-linked to the existing local
+   * account. Tell the user to sign in normally and link from their profile.
+   */
+  errorCode?: string | null;
+  /** Envelope details for the code above (challenge temp token, supported methods, …). */
+  errorDetails?: unknown;
 }
 
 /**
@@ -1141,4 +1208,163 @@ export interface StepUpCodeDto {
 export interface StepUpPasskeyDto extends PasskeyCompleteDto {
   /** Must match the scope declared on the endpoint you are about to call. */
   scope: string;
+}
+
+
+/**
+ * What an account still owes before it can be used. Mirrors the backend `PendingUserActions`.
+ *
+ * The bit position carries meaning. Low bits **block sign-in outright** (the login guard
+ * rejects them). High bits are **obligations**: credentials already checked out, but the
+ * person must complete something before getting a token, the same shape as a 2FA challenge.
+ *
+ * ★★ **Do not test it with `&`.** The value arrives as the member NAME
+ * (`"InvitationPending"`, or `"ChangePassword, EnrollTotp"` for several) because the
+ * backend serialises every enum by name. A bitwise AND against a string coerces to
+ * `NaN`, and `NaN & anything` is `0`, so the test answers "no" for every input
+ * without throwing or warning. That defect was live in this framework's own admin
+ * user list: invited accounts rendered as "Locked" because the invitation badge
+ * could never match.
+ *
+ * Use `hasFlag` from `@tnzi/core/utils`:
+ * `hasFlag(user.pendingActions, PendingUserActions.InvitationPending, PendingUserActions)`
+ */
+export enum PendingUserActions {
+  /** Owes nothing. */
+  None = 0,
+
+  // Blocking: the guard rejects the sign-in outright.
+  /** Invited, waiting for the person to accept. No sign-in path will let it through. */
+  InvitationPending = 1 << 0,
+
+  // Obligations: signed in, but must finish this first.
+  /** Must change the password before continuing (admin-issued temporary password, or expiry). */
+  ChangePassword = 1 << 8,
+  /** Must enrol an authenticator app first. */
+  EnrollTotp = 1 << 9,
+  /** Must confirm the email address first. */
+  ConfirmEmail = 1 << 10,
+}
+
+/**
+ * Complete the password change the sign-in demanded, and get tokens back.
+ *
+ * Carries no user identifier on purpose: which account to change is decided by the
+ * token. Accepting a user id here would mean an anonymous endpoint takes "on whose
+ * behalf" as a parameter.
+ */
+export interface CompletePasswordChangeDto {
+  /** The temp token handed out with the pending-action challenge. Single use, 10 minutes. */
+  tempToken: string;
+  newPassword: string;
+}
+
+/**
+ * The payload carried by a 403 `IDENTITY_PENDING_ACTIONS_REQUIRED` response.
+ *
+ * Same shape as the 2FA challenge: the front end stays inside the sign-in flow and
+ * renders the matching step, rather than bouncing the user back to the login page.
+ */
+export interface PendingActionsChallengeDto {
+  tempToken: string;
+  /** Names of the outstanding obligations, e.g. `["ChangePassword"]`. */
+  requiredActions: string[];
+}
+
+/** Complete an action that needs a code (enrol an authenticator, confirm an email). */
+export interface CompletePendingActionCodeDto {
+  tempToken: string;
+  code: string;
+}
+
+/**
+ * What is still owed and the material needed to discharge it.
+ *
+ * `totpSetup` is present when enrolment is owed - without it the front end knows
+ * the user must enrol an authenticator but has no QR code to show.
+ */
+export interface PendingActionChallengeDto {
+  requiredActions: string[];
+  userName: string;
+  totpSetup?: TotpSetupDto | null;
+  maskedEmail?: string | null;
+}
+
+/**
+ * Result of discharging one action.
+ *
+ * `completed: false` means other actions are still owed and the temp token is
+ * **still usable** for the next one.
+ */
+export interface PendingActionResultDto {
+  completed: boolean;
+  remainingActions: string[];
+  token?: TokenResultDto | null;
+}
+
+/**
+ * Create an invitation: open the account, preset its roles, issue a one-time link.
+ *
+ * `userName` is chosen by the admin, not by the invitee - internal systems usually
+ * have naming rules (staff number, corporate email), and the invitation email tells
+ * the person what their username is.
+ */
+export interface CreateInvitationDto {
+  userName: string;
+  email?: string | null;
+  phoneNumber?: string | null;
+  roleIds?: string[] | null;
+  organizationId?: string | null;
+  /** Admin-supplied form values, passed through to the app's acceptance handler verbatim. */
+  profile?: Record<string, unknown> | null;
+  /** Link lifetime in hours. Defaults to the server's `Identity:Invitation:LinkLifetimeHours` (7 days). */
+  lifetimeHours?: number | null;
+}
+
+/**
+ * A freshly issued invitation.
+ *
+ * `acceptUrl` is readable **only on this response** - the server stores nothing but
+ * the token's hash. It is also the way to deliver the link yourself instead of
+ * letting the app's `UserInvitedEvent` handler mail it.
+ */
+export interface InvitationDto {
+  userId: string;
+  userName: string;
+  acceptUrl: string;
+  expiresAt: Date | string;
+}
+
+/**
+ * What the invitee sees when opening the link. Anonymous, so deliberately sparse:
+ * contact addresses come back masked, because a leaked link must not leak an
+ * employee's email address.
+ */
+export interface InvitationPreviewDto {
+  userName: string;
+  maskedEmail?: string | null;
+  maskedPhoneNumber?: string | null;
+  expiresAt: Date | string;
+  profile?: Record<string, unknown> | null;
+}
+
+/** Accept an invitation. */
+export interface AcceptInvitationDto {
+  token: string;
+  /** Whether a password is required is the consuming app's decision, not the framework's. */
+  password?: string | null;
+  /** App-defined form payload, passed through untouched. */
+  payload?: Record<string, unknown> | null;
+}
+
+/**
+ * Result of accepting.
+ *
+ * `completed: false` means the account is **still not active** and the token was not
+ * consumed - the same link can be reopened to finish `remainingSteps`.
+ */
+export interface AcceptInvitationResultDto {
+  completed: boolean;
+  remainingSteps?: string[] | null;
+  token?: TokenResultDto | null;
 }

@@ -52,7 +52,7 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             .ProjectTo<Message, NotificationInfo>()
             .CreateAsync(request, cancellationToken);
 
-        return Ok(paged);
+        return Ok(RecipientAddressMask.Apply(paged));
     }
 
     public async Task<Result<NotificationInfo>> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -69,7 +69,7 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             return Fail<NotificationInfo>($"Notification {id} not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var notificationInfo = notification.MapTo<NotificationInfo>();
-        return Ok(notificationInfo);
+        return Ok(RecipientAddressMask.Apply(notificationInfo));
     }
 
     public async Task<Result<NotificationStatisticsDto>> GetStatisticsAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
@@ -193,7 +193,7 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             .Include(n => n.Attachments)
             .ToListAsync(cancellationToken);
 
-        var notificationInfos = notifications.MapToList<NotificationInfo>();
+        var notificationInfos = RecipientAddressMask.Apply(notifications.MapToList<NotificationInfo>());
 
         return Ok((IEnumerable<NotificationInfo>)notificationInfos);
     }
@@ -230,7 +230,7 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             .ProjectTo<Message, NotificationInfo>()
             .CreateAsync(request, cancellationToken);
 
-        return Ok(paged);
+        return Ok(RecipientAddressMask.Apply(paged));
     }
 
     public async Task<Result<int>> BatchDeleteAsync(List<Guid> ids, CancellationToken cancellationToken = default)
@@ -320,6 +320,6 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
             ? (double)report.SentCount / report.TotalRecipients
             : 0;
 
-        return Ok(report);
+        return Ok(RecipientAddressMask.Apply(report));
     }
 }

@@ -78,6 +78,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
             WorkflowNodeName = request.WorkflowNodeName,
             ShellCommand = request.ShellCommand,
             IsDestructive = request.IsDestructive,
+            UserId = request.UserId,
             Arguments = request.Arguments ?? new Dictionary<string, object?>()
         };
 

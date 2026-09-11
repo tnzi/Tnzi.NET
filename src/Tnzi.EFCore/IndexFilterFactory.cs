@@ -130,6 +130,16 @@ public static class IndexFilterFactory
     /// <summary>
     /// 构建 "{列} = {true 字面量}" 的布尔判真表达式（按 provider 的标识符引用规则与布尔字面量）。
     /// </summary>
+    /// <remarks>
+    /// 公开是为了让 <see cref="IndexFilter"/> 组合出「布尔列为真」而不必复制这份字面量表
+    /// —— 两份布尔字面量表迟早会对不上，而对不上的那一天没有任何东西会报错。
+    /// </remarks>
+    public static string GetColumnTrue(string columnName, DatabaseProvider provider)
+    {
+        Check.NotNullOrWhiteSpace(columnName);
+        return BuildIsTrueExpression(columnName, provider);
+    }
+
     private static string BuildIsTrueExpression(string columnName, DatabaseProvider provider)
     {
         var column = QuoteIdentifier(columnName, provider);

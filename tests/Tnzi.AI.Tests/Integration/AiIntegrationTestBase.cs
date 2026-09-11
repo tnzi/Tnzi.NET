@@ -31,6 +31,7 @@ public class AiIntegrationDbContext : TnziDbContext<AiIntegrationDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.EvaluationRunConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.ToolPermissionRuleEntityConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

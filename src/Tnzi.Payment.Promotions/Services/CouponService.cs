@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Promotions.Services;
+﻿namespace Tnzi.Payment.Promotions.Services;
 
 /// <summary>
 /// 优惠券服务实现：同时回答父模块的支付流程与本模块自己的券包 / 发券两个面。
@@ -15,6 +15,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
     private readonly IRepository<UserCoupon, Guid> _userCouponRepository;
     private readonly IRepository<Promotion, Guid> _promotionRepository;
     private readonly IPromotionService _promotionService;
+    private readonly IOptionsMonitor<PromotionOptions> _promotionOptions;
 
     /// <summary>
     /// 用量统计的空占位：单券场景没有批量统计，剩余次数按促销自身上限展示即可
@@ -27,9 +28,11 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         IRepository<UserCoupon, Guid> userCouponRepository,
         IRepository<Promotion, Guid> promotionRepository,
         IPromotionService promotionService,
+        IOptionsMonitor<PromotionOptions> promotionOptions,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
+        _promotionOptions = Check.NotNull(promotionOptions);
         _couponUsageRepository = Check.NotNull(couponUsageRepository);
         _redemptionCodeRepository = Check.NotNull(redemptionCodeRepository);
         _userCouponRepository = Check.NotNull(userCouponRepository);
@@ -113,14 +116,40 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             if (incremented == 0)
                 return Fail<CouponUsageDto>(ErrorCodes.CouponUsageLimitReached, 400);
 
-            // 消耗一张用户持券（非公开促销必然有持券，公开促销可有可无）
-            var userCoupon = await _userCouponRepository
-                .Where(u => u.UserId == context.UserId
-                    && u.PromotionId == promotionId
-                    && u.Status == UserCouponStatus.Available)
-                .OrderBy(u => u.ExpireTime == null)
-                .ThenBy(u => u.ExpireTime)
-                .FirstOrDefaultAsync(ct);
+            // ★ 上面那条语句**总是**更新促销这一行，因此从这里开始本事务持有它的行锁。
+            //   同一张促销上的其它核销要么已经提交（下面读得到），要么还堵在自己那条语句上
+            //   （还没写任何东西）—— 于是接下来这两个「按人」的判定读到的数是准的。
+            //   放在递增之前读则是另一回事：那时看到的是各自进来时的快照，
+            //   三笔并发各自读到「还没用过」，全部放行。
+            //   代价是失败时要把刚才那一次递增补回去（见 ReleaseTotalUsageAsync）。
+
+            // 每用户使用次数：与事务外那次校验同一个判据，区别只在这一次是在锁后读的
+            var perUserLimit = valid.Promotion.PerUserUsageLimit ?? _promotionOptions.CurrentValue.MaxCouponUsagePerUser;
+            if (perUserLimit > 0)
+            {
+                var userUsageCount = await _couponUsageRepository.CountAsync(
+                    c => c.CouponId == promotionId && c.UserId == context.UserId, ct);
+
+                if (userUsageCount >= perUserLimit)
+                {
+                    await ReleaseTotalUsageAsync(promotionId, ct);
+                    return Fail<CouponUsageDto>(ErrorCodes.CouponUsageLimitReached, 400);
+                }
+            }
+
+            // 消耗一张用户持券：**条件更新**抢占，而不是先读后写。
+            // 先读后写时，同一张券会被并发的三笔核销同时读到并各自写一次「已用」——
+            // 一张券换来三份折扣，而三条核销记录上写的都是同一个 UserCouponId。
+            var claimedCouponId = await ClaimUserCouponAsync(context.UserId, promotionId, ct);
+
+            // 非公开促销必须凭持券使用（事务外那次校验也是这么判的）。抢不到就是没抢到 ——
+            // 此前这里**不失败**，照样写一条 UserCouponId 为 null 的核销记录，
+            // 于是券被别人抢走的那个人照样拿到了折扣，而账面上没有任何一张券为此消耗。
+            if (claimedCouponId == null && !valid.Promotion.IsPublic)
+            {
+                await ReleaseTotalUsageAsync(promotionId, ct);
+                return Fail<CouponUsageDto>(ErrorCodes.CouponNotHeld, 400);
+            }
 
             var couponUsage = new CouponUsage
             {
@@ -131,17 +160,16 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
                 OrderId = context.OrderId,
                 BusinessOrderNo = context.BusinessOrderNo,
                 DiscountAmount = discountAmount,
-                UserCouponId = userCoupon?.Id
+                UserCouponId = claimedCouponId
             };
 
             await _couponUsageRepository.InsertAsync(couponUsage, ct);
 
-            if (userCoupon != null)
+            if (claimedCouponId != null)
             {
-                userCoupon.Status = UserCouponStatus.Used;
-                userCoupon.UsedTime = DateTime.UtcNow;
-                userCoupon.CouponUsageId = couponUsage.Id;
-                await _userCouponRepository.UpdateAsync(userCoupon, ct);
+                await _userCouponRepository.AsQueryable()
+                    .Where(u => u.Id == claimedCouponId.Value)
+                    .ExecuteUpdateAsync(u => u.SetProperty(x => x.CouponUsageId, couponUsage.Id), ct);
             }
 
             Logger.LogInformation("Coupon applied. UserId: {UserId}, Coupon: {Code}, OrderNo: {OrderNo}, Discount: {Discount}",
@@ -320,17 +348,6 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             if (redemptionCode.ValidUntil.HasValue && redemptionCode.ValidUntil.Value < now)
                 return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeExpired, 400);
 
-            // 每用户领取上限按"已领取的持券"计数。
-            // 此前按核销记录计数，而兑换从不产生核销记录，导致该限制永远不触发。
-            if (redemptionCode.PerUserLimit.HasValue)
-            {
-                var userRedemptionCount = await _userCouponRepository.CountAsync(
-                    u => u.RedemptionCodeId == redemptionCode.Id && u.UserId == userId, ct);
-
-                if (userRedemptionCount >= redemptionCode.PerUserLimit.Value)
-                    return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeUserLimitReached, 400);
-            }
-
             var promotion = await _promotionRepository.FirstOrDefaultAsync(
                 p => p.Id == redemptionCode.PromotionId, ct);
 
@@ -348,6 +365,28 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
 
             if (claimed == 0)
                 return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeLimitReached, 400);
+
+            // ★ 每用户领取上限**放在总量 CAS 之后**读。上面那条语句总是更新兑换码这一行，
+            //   本事务从这里开始持有它的行锁：同一个码的其它兑换要么已经提交（下面数得到），
+            //   要么还堵在自己那条语句上（还没插入任何持券）—— 于是这个计数是准的。
+            //   放在前面读则是各自进来时的快照，一个人并发提交 N 次会拿到 N 张券。
+            //   计数按「已领取的持券」而不是核销记录：兑换从不产生核销记录，
+            //   按后者数这条限制永远不触发。
+            if (redemptionCode.PerUserLimit.HasValue)
+            {
+                var userRedemptionCount = await _userCouponRepository.CountAsync(
+                    u => u.RedemptionCodeId == redemptionCode.Id && u.UserId == userId, ct);
+
+                if (userRedemptionCount >= redemptionCode.PerUserLimit.Value)
+                {
+                    // 递增已经落下了，返回失败不会回滚它 —— 不补回去，这个码的名额会莫名其妙地少
+                    await _redemptionCodeRepository.AsQueryable()
+                        .Where(r => r.Id == redemptionCode.Id && r.RedeemedQuantity > 0)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.RedeemedQuantity, x => x.RedeemedQuantity - 1), ct);
+
+                    return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeUserLimitReached, 400);
+                }
+            }
 
             // 兑换的产物：一张真正落到用户名下的券
             var userCoupon = new UserCoupon
@@ -388,6 +427,13 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             return Fail<UserCouponDto>(ErrorCodes.PromotionNotFound, 404);
 
         var now = DateTime.UtcNow;
+
+        // 已停用或已结束的促销发不出券：那张券生下来就是死的，用户看得见却永远用不了。
+        // ★ 尚未开始的**照发**：预热期先把券发出去是正常运营动作，
+        //   到期后能不能用由核销时的校验说了算，这里拦下它只会挡住一件合法的事。
+        if (!promotion.IsActive || (promotion.EndTime.HasValue && promotion.EndTime.Value < now))
+            return Fail<UserCouponDto>(ErrorCodes.CouponExpired, 400);
+
         var userCoupon = new UserCoupon
         {
             UserId = userId,
@@ -499,4 +545,61 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         if (right == null) return left;
         return left < right ? left : right;
     }
+
+    /// <summary>
+    /// 抢占一张该用户在该促销下可用的券，返回被抢到的券 Id；一张都没抢到时返回 null。
+    /// </summary>
+    /// <remarks>
+    /// <b>条件更新而不是先读后写</b>：先读后写时，同一张券会被并发的多笔核销同时读到，
+    /// 各自写一次「已用」—— 一张券换来多份折扣，而每条核销记录上写的都是同一个券 Id，
+    /// 事后连「多用了几次」都数不出来。这里改成一次
+    /// <c>WHERE Id = x AND Status = Available</c> 的更新，只有一个事务的 affected 会是 1。
+    /// <para>
+    /// 先挑一张再按 Id 抢，而不是直接对「该用户该促销下任意一张可用券」做更新：
+    /// 后者在多张券时会把它们全部标成已用。挑选按到期时间升序（先用快过期的），
+    /// 挑到的那张被别人抢走时返回 null，由调用方按促销是否公开决定拒绝还是放行。
+    /// </para>
+    /// </remarks>
+    private async Task<Guid?> ClaimUserCouponAsync(Guid userId, Guid promotionId, CancellationToken cancellationToken)
+    {
+        var candidateIds = await _userCouponRepository.AsNoTracking()
+            .Where(u => u.UserId == userId
+                && u.PromotionId == promotionId
+                && u.Status == UserCouponStatus.Available)
+            .OrderBy(u => u.ExpireTime == null)
+            .ThenBy(u => u.ExpireTime)
+            .Select(u => u.Id)
+            .ToListAsync(cancellationToken);
+
+        var usedTime = DateTime.UtcNow;
+
+        foreach (var candidateId in candidateIds)
+        {
+            var claimed = await _userCouponRepository.AsQueryable()
+                .Where(u => u.Id == candidateId && u.Status == UserCouponStatus.Available)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(x => x.Status, UserCouponStatus.Used)
+                    .SetProperty(x => x.UsedTime, usedTime), cancellationToken);
+
+            if (claimed > 0)
+                return candidateId;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 把刚才那一次总用量递增补回去。
+    /// </summary>
+    /// <remarks>
+    /// <c>ExecuteInUnitOfWorkAsync</c> 只在**抛异常**时回滚，返回失败 Result 照样提交，
+    /// 所以「递增之后才发现要拒绝」必须显式补偿 —— 否则每一次被拒的核销都白烧掉一个名额，
+    /// 而促销的剩余次数会莫名其妙地少下去，谁也说不清少在哪。
+    /// 条件里带 <c>UsedCount &gt; 0</c> 只是防御：本方法只在刚递增过之后调用。
+    /// </remarks>
+    private Task ReleaseTotalUsageAsync(Guid promotionId, CancellationToken cancellationToken)
+        => _promotionRepository.AsQueryable()
+            .Where(p => p.Id == promotionId && p.UsedCount > 0)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.UsedCount, x => x.UsedCount - 1), cancellationToken);
+
 }

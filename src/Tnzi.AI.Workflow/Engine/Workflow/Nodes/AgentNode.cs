@@ -11,14 +11,12 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 public class AgentNode : IWorkflowNode
 {
     private readonly IWorkflowNodeServiceContext _nodeContext;
-    private readonly ILogger<AgentNode> _logger;
 
     public string NodeType => WorkflowNodeTypes.Agent;
 
-    public AgentNode(IWorkflowNodeServiceContext nodeContext, ILogger<AgentNode> logger)
+    public AgentNode(IWorkflowNodeServiceContext nodeContext)
     {
         _nodeContext = Check.NotNull(nodeContext);
-        _logger = Check.NotNull(logger);
     }
 
     public async Task<WorkflowNodeResult> ExecuteAsync(WorkflowNodeContext context, CancellationToken cancellationToken = default)

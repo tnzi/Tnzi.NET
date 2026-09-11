@@ -34,4 +34,32 @@ public static class ErrorCodes
     /// Invalid feature value type.
     /// </summary>
     public const string InvalidFeatureValueType = "FEATURE_INVALID_VALUE_TYPE";
+
+    /// <summary>
+    /// The provider named in a value request is not registered as an <c>IFeatureValueProvider</c>,
+    /// so nothing would ever read the value.
+    /// </summary>
+    public const string FeatureValueProviderUnknown = "FEATURE_VALUE_PROVIDER_UNKNOWN";
+
+    /// <summary>
+    /// The provider is registered but cannot evaluate anything in this deployment
+    /// (e.g. the tenant provider with multi-tenancy disabled).
+    /// </summary>
+    public const string FeatureValueProviderInactive = "FEATURE_VALUE_PROVIDER_INACTIVE";
+
+    /// <summary>
+    /// The provider is keyed (per tenant, per edition, ...) and no provider key was given.
+    /// </summary>
+    public const string FeatureValueProviderKeyRequired = "FEATURE_VALUE_PROVIDER_KEY_REQUIRED";
+
+    /// <summary>
+    /// The provider is keyless (deployment-wide) and a provider key was given.
+    /// </summary>
+    public const string FeatureValueProviderKeyNotAllowed = "FEATURE_VALUE_PROVIDER_KEY_NOT_ALLOWED";
+
+    /// <summary>
+    /// The feature definition comes from code (<c>IFeatureDefinitionProvider</c>) and has no
+    /// database row, so no value can be attached to it yet.
+    /// </summary>
+    public const string FeatureDefinitionNotOverridable = "FEATURE_DEFINITION_NOT_OVERRIDABLE";
 }

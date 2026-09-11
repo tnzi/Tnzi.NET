@@ -50,7 +50,15 @@ internal static class CheckAmountInWords
         return $"{words} and {cents:00}/100 {suffix}".Trim();
     }
 
-    private static string CurrencySuffix(string? currency)
+    /// <summary>
+    /// 法定金额行结尾的币种词（USD/CAD → <c>Dollars</c>，其余为 ISO 代码）。
+    /// </summary>
+    /// <remarks>
+    /// ★ internal 而非 private，是为了让渲染侧拼「币种词并进机打大写金额」的那一行时
+    /// <b>复用同一份规则</b>（CPA-006 §5.4.1 第 9 条许可的那种写法）。
+    /// 各写一份的漂移症状是票面上出现两种币种字样，而两处都"看起来对"。
+    /// </remarks>
+    internal static string CurrencySuffix(string? currency)
     {
         var code = string.IsNullOrWhiteSpace(currency) ? "USD" : currency.Trim().ToUpperInvariant();
         return code is "USD" or "CAD" ? "Dollars" : code;

@@ -21,7 +21,7 @@ import {
   NButton,
   NCheckbox,
   NTabs,
-  NTabPane,
+  NTab,
   NDivider,
   type FormInst,
   type FormRules,
@@ -180,8 +180,11 @@ function fillDemo(account: DemoAccount): void {
           justify-content="space-evenly"
           class="t-admin-login__tabs"
         >
-          <NTabPane name="pwd" :tab="t('admin.login.pwd', 'Password')" />
-          <NTabPane name="code" :tab="t('admin.login.code', 'SMS code')" />
+          <!-- `NTab`, not `NTabPane`: the form below is shared by both methods,
+               so these declare tabs only. A self-closing `NTabPane` also renders
+               a BLANK label under naive-ui 2.45.1 - see TDetailLayout for why. -->
+          <NTab name="pwd" :tab="t('admin.login.pwd', 'Password')" />
+          <NTab name="code" :tab="t('admin.login.code', 'SMS code')" />
         </NTabs>
 
         <NForm

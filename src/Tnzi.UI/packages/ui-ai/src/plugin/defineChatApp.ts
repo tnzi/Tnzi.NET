@@ -164,6 +164,19 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
 
     if (options.guard === false) return;
 
+    // Session expiry. `createTnziClient` already clears the auth state when a
+    // 401 survives the refresh attempt, but nothing moved the user off the
+    // page - the next click just failed again. Mirror `@tnzi/ui-admin`: go to
+    // the login route with the current location in the redirect query so a
+    // re-login lands back where they were. Optional call keeps an older core
+    // dist without the listener API working.
+    options.runtime.http.addUnauthorizedListener?.(() => {
+      const current = router.currentRoute.value;
+      if (current.name === loginName) return;
+      void router.replace({ name: loginName, query: { [redirectQuery]: current.fullPath } });
+    });
+
+
     const { auth } = options.runtime;
     // `@tnzi/core`'s guard, not a local one. It already handles the parts worth
     // getting right - restore memoised across concurrent navigations, the

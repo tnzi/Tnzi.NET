@@ -50,6 +50,11 @@ export function uniqueBy<T, K>(arr: T[], keyFn: (item: T) => K): T[] {
  * Chunk array
  */
 export function chunk<T>(arr: T[], size: number): T[][] {
+  // `i += 0` never advances: a size of 0 (or NaN / negative) used to hang the
+  // caller's tab with no error. Fail fast instead.
+  if (!(size > 0)) {
+    throw new RangeError(`chunk size must be a positive number, got ${size}`);
+  }
   const result: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
     result.push(arr.slice(i, i + size));

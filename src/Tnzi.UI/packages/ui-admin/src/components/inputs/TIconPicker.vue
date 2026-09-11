@@ -40,7 +40,7 @@ const DEFAULT_ICONS: string[] = [
   // Navigation / layout
   'mdi:home',
   'mdi:menu',
-  'mdi:dashboard',
+  'mdi:view-dashboard',
   'mdi:view-list',
   'mdi:view-grid',
   'mdi:apps',

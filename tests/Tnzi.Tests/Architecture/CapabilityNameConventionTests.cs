@@ -34,7 +34,7 @@ public class CapabilityNameConventionTests
         var scanned = 0;
         var offenders = new List<string>();
 
-        foreach (var file in EnumerateFrameworkSources(repoRoot))
+        foreach (var file in RepoScan.EnumerateFiles("src", "*.cs"))
         {
             scanned++;
             var content = File.ReadAllText(file);
@@ -72,34 +72,5 @@ public class CapabilityNameConventionTests
         Assert.Matches(InlineCapabilityLiteral, offendingViaExtension);
         Assert.DoesNotMatch(InlineCapabilityLiteral, clean);
         Assert.DoesNotMatch(InlineCapabilityLiteral, cleanViaExtension);
-    }
-
-    /// <summary>
-    /// Enumerate framework C# sources, per project directory.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately not <c>AllDirectories</c> over <c>src/</c>: <c>src/Tnzi.UI</c> contains the
-    /// frontend monorepo's <c>node_modules</c>, and recursing into it crashes the test host.
-    /// </remarks>
-    private static IEnumerable<string> EnumerateFrameworkSources(string repoRoot)
-    {
-        var srcRoot = Path.Combine(repoRoot, "src");
-
-        foreach (var projectDirectory in Directory.EnumerateDirectories(srcRoot))
-        {
-            if (string.Equals(Path.GetFileName(projectDirectory), "Tnzi.UI", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories))
-            {
-                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                    || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                yield return file;
-            }
-        }
     }
 }

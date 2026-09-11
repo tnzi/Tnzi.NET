@@ -76,6 +76,9 @@ const toIso = (v: unknown): string => (typeof v === 'number' ? tsToIsoDate(v) : 
 const componentColumns = buildComponentColumns(t)
 const componentCrud = useCrudPage<ComponentRow>({
   pageId: 'payroll.setup.components',
+  // Four shells share this route (tabs are displayDirective:'show'); each
+  // needs its own deep-link key or a sibling's reconcile closes this editor.
+  detailUrl: 'component',
   permission: 'payroll.config',
   columns: componentColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -90,6 +93,7 @@ const componentActions: RowAction<ComponentRow>[] = [editAction(componentCrud), 
 const structureColumns = buildStructureColumns(t)
 const structureCrud = useCrudPage<StructureRow>({
   pageId: 'payroll.setup.structures',
+  detailUrl: 'structure',
   permission: 'payroll.config',
   columns: structureColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -128,6 +132,7 @@ const structureActions: RowAction<StructureRow>[] = [
 const bracketColumns = buildBracketColumns(t)
 const bracketCrud = useCrudPage<BracketRow>({
   pageId: 'payroll.setup.brackets',
+  detailUrl: 'bracket',
   permission: 'payroll.config',
   columns: bracketColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -168,6 +173,7 @@ const bracketActions: RowAction<BracketRow>[] = [
 const packColumns = buildPackColumns(t)
 const packsCrud = useCrudPage<PackRow>({
   pageId: 'payroll.setup.packs',
+  detailUrl: 'pack',
   columns: packColumns,
   rowKey: (r) => String(r.code ?? ''),
   fetchData: (q) => bridge.countryPacks.fetch(q),

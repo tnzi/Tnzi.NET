@@ -38,4 +38,16 @@ public class UnconfiguredPushSender : IPushSender
         _logger.LogError("Push delivery to {DeviceToken} refused: {Guidance}", deviceToken, Guidance);
         return Task.FromResult(SendResult.CreateFailure(Guidance));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 显式实现而不是沿用 <see cref="IPushSender.SendToTopicAsync"/> 的默认失败：那条默认体报的是
+    /// 「这个实现不支持主题投递」，会把部署方引向「换一个支持主题的实现」；而这里真正的原因是
+    /// <b>包没加载</b>，要说的是加载哪个包。两句话都失败，但只有一句能让人把它修好。
+    /// </remarks>
+    public Task<SendResult> SendToTopicAsync(string topic, string title, string body, CancellationToken cancellationToken = default)
+    {
+        _logger.LogError("Push delivery to topic {Topic} refused: {Guidance}", topic, Guidance);
+        return Task.FromResult(SendResult.CreateFailure(Guidance));
+    }
 }

@@ -3,6 +3,7 @@
 *REMOVED*Tnzi.Application.ApplicationService.LogInformation(string! message, params object![]! args) -> void
 *REMOVED*Tnzi.Application.ApplicationService.LogWarning(string! message, params object![]! args) -> void
 *REMOVED*Tnzi.Application.ApplicationService.ServiceProvider.get -> System.IServiceProvider?
+*REMOVED*static Tnzi.EventBus.EventHandlerInvoker.GetMetadata(System.Type! handlerType) -> Tnzi.EventBus.HandlerMetadata!
 *REMOVED*static Tnzi.Utilities.Check.NotNull<T>(T value, string? paramName = null) -> T
 Tnzi.Application.ApplicationService.FlushAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Tnzi.Application.ApplicationService.LogError(string! message, params object?[]! args) -> void
@@ -149,6 +150,9 @@ Tnzi.Security.Authorization.PermissionGroupDefinition.Permissions.get -> System.
 Tnzi.Security.Authorization.PermissionGroupDefinition.Permissions.set -> void
 Tnzi.Security.Claims.IUserDisplayNameProvider
 Tnzi.Security.Claims.IUserDisplayNameProvider.GetDisplayNamesAsync(System.Collections.Generic.IReadOnlyCollection<System.Guid>! userIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<System.Guid, string!>!>!
+Tnzi.Settings.ReadsOnlyColdSettingsAttribute
+Tnzi.Settings.ReadsOnlyColdSettingsAttribute.PropertyPaths.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Settings.ReadsOnlyColdSettingsAttribute.ReadsOnlyColdSettingsAttribute(params string![]! propertyPaths) -> void
 Tnzi.Settings.RuntimeSettingAttribute.Pattern.get -> string?
 Tnzi.Settings.RuntimeSettingAttribute.Pattern.init -> void
 Tnzi.Settings.RuntimeSettingAttribute.Subsection.get -> string?
@@ -186,6 +190,8 @@ Tnzi.Storage.FileReferenceDescriptor.FileId.get -> System.Guid
 Tnzi.Storage.FileReferenceDescriptor.FileId.init -> void
 Tnzi.Storage.FileReferenceDescriptor.FileReferenceDescriptor() -> void
 Tnzi.Storage.FileReferenceDescriptor.FileReferenceDescriptor(System.Guid FileId, string! EntityType, System.Guid EntityId, string! FieldName) -> void
+Tnzi.Storage.IFileReadAccessProbe
+Tnzi.Storage.IFileReadAccessProbe.CanReadAsync(System.Guid fileId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Tnzi.Storage.IFileReferenceAccessResolver
 Tnzi.Storage.IFileReferenceAccessResolver.CanHandle(string! entityType) -> bool
 Tnzi.Storage.IFileReferenceAccessResolver.CanReadAsync(Tnzi.Storage.FileReferenceDescriptor reference, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
@@ -384,6 +390,8 @@ Tnzi.Geometry.NormalizedRect.Deconstruct(out double X, out double Y, out double 
 Tnzi.Geometry.NormalizedRect.Equals(Tnzi.Geometry.NormalizedRect other) -> bool
 Tnzi.Imaging.EditedImage.Deconstruct(out byte[]! Content, out Tnzi.Imaging.ImageOutputFormat Format, out int Width, out int Height) -> void
 Tnzi.Imaging.EditedImage.Equals(Tnzi.Imaging.EditedImage other) -> bool
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_REFRESH_TOKEN_REUSED = "IDENTITY_REFRESH_TOKEN_REUSED" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_SESSION_BINDING_MISMATCH = "IDENTITY_SESSION_BINDING_MISMATCH" -> string!
 const Tnzi.Exceptions.ErrorCodes.IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED" -> string!
 ~override Tnzi.Imaging.QrCodeScanResult.Equals(object obj) -> bool
 ~override Tnzi.Imaging.QrCodeScanResult.ToString() -> string
@@ -533,3 +541,60 @@ Tnzi.Data.ReorderRequestDto.Ids.set -> void
 Tnzi.Data.ReorderRequestDto.ReorderRequestDto() -> void
 Tnzi.AI.Services.IAiUtility.IsAvailable.get -> bool
 Tnzi.AI.Services.OpenAiCompatibleAiUtility.IsAvailable.get -> bool
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_ACTIVATION_PENDING = "IDENTITY_ACTIVATION_PENDING" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_INVITATION_INVALID = "IDENTITY_INVITATION_INVALID" -> string!
+Tnzi.Security.Authorization.IFunctionAuthorizationService.GetSuperAdminRoleNames() -> System.Collections.Generic.IReadOnlyList<string!>!
+Tnzi.Security.RequestBodyRedactor
+Tnzi.Security.RequestBodyRedactor.RequestBodyRedactor() -> void
+Tnzi.Security.RequestBodyRedactor.Redact(string! json, System.Collections.Generic.IReadOnlySet<string!>! sensitiveFields) -> string!
+static Tnzi.Security.RequestBodyRedactor.DefaultSensitiveFields.get -> System.Collections.Generic.IReadOnlySet<string!>!
+const Tnzi.Security.RequestBodyRedactor.RedactedValue = "***REDACTED***" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED = "IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_PENDING_ACTIONS_REQUIRED = "IDENTITY_PENDING_ACTIONS_REQUIRED" -> string!
+Tnzi.EventBus.IDistributedEventSubscriber
+Tnzi.EventBus.IDistributedEventSubscriber.SubscribeEventAsync(System.Type! eventType, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EventBus.DistributedEventSubscriptionInitializer
+Tnzi.EventBus.DistributedEventSubscriptionInitializer.DistributedEventSubscriptionInitializer(Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.EventBus.IDistributedEventSubscriber! subscriber, Microsoft.Extensions.Logging.ILogger<Tnzi.EventBus.DistributedEventSubscriptionInitializer!>! logger, string! transportName, bool enabled = true) -> void
+static Tnzi.EventBus.DistributedEventSubscriptionInitializer.DiscoverHandledIntegrationEventTypes(Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> System.Collections.Generic.IReadOnlyList<System.Type!>!
+static Tnzi.EventBus.EventHandlerInvoker.GetMetadata(System.Type! handlerType, System.Type! eventType) -> Tnzi.EventBus.HandlerMetadata!
+Tnzi.EventBus.DistributedEventSubscriptionInitializer.StartAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+Tnzi.EventBus.DistributedEventSubscriptionInitializer.StopAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task!
+Tnzi.EventBus.IDistributedEventBusHealthProbe
+Tnzi.EventBus.IDistributedEventBusHealthProbe.TransportName.get -> string!
+Tnzi.EventBus.IDistributedEventBusHealthProbe.CheckAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.EventBus.DistributedEventBusHealth!>!
+Tnzi.EventBus.DistributedEventBusHealth
+Tnzi.EventBus.DistributedEventBusHealth.DistributedEventBusHealth(bool isConnected, string? detail = null) -> void
+Tnzi.EventBus.DistributedEventBusHealth.IsConnected.get -> bool
+Tnzi.EventBus.DistributedEventBusHealth.Detail.get -> string?
+static Tnzi.Caching.CacheKeys.SignalR.AnonymousMessageRateCount(string! partitionKey) -> string!
+static Tnzi.Caching.CacheKeys.SignalR.AnonymousBan(string! partitionKey) -> string!
+static Tnzi.Caching.CacheKeys.SignalR.AnonymousConnectionCount(string! partitionKey) -> string!
+Tnzi.EventBus.IEventStore.MarkAsDeadLetterAsync(System.Guid eventId, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EventBus.StoredEvent.IsDeadLetter.get -> bool
+Tnzi.Caching.ICache.TryGetAsync<T>(string! key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(bool Found, T? Value)>!
+Tnzi.Caching.MemoryCacheService.TryGetAsync<T>(string! key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(bool Found, T? Value)>!
+*REMOVED*Tnzi.Caching.CachingOptions.ExpirationStrategy.get -> string!
+*REMOVED*Tnzi.Caching.CachingOptions.ExpirationStrategy.set -> void
+*REMOVED*Tnzi.Caching.CachingOptions.PatternExpirations.get -> System.Collections.Generic.Dictionary<string!, int>?
+*REMOVED*Tnzi.Caching.CachingOptions.PatternExpirations.set -> void
+*REMOVED*Tnzi.Caching.CompositeExpirationStrategy
+*REMOVED*Tnzi.Caching.CompositeExpirationStrategy.CompositeExpirationStrategy(params Tnzi.Caching.ICacheExpirationStrategy![]! strategies) -> void
+*REMOVED*Tnzi.Caching.CompositeExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
+*REMOVED*Tnzi.Caching.FixedExpirationStrategy
+*REMOVED*Tnzi.Caching.FixedExpirationStrategy.FixedExpirationStrategy(int expirationSeconds) -> void
+*REMOVED*Tnzi.Caching.FixedExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
+*REMOVED*Tnzi.Caching.ICacheExpirationStrategy
+*REMOVED*Tnzi.Caching.ICacheExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
+*REMOVED*Tnzi.Caching.PatternBasedExpirationStrategy
+*REMOVED*Tnzi.Caching.PatternBasedExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
+*REMOVED*Tnzi.Caching.PatternBasedExpirationStrategy.PatternBasedExpirationStrategy(System.Collections.Generic.Dictionary<string!, int>! patternExpirations) -> void
+*REMOVED*Tnzi.Caching.SlidingExpirationStrategy
+*REMOVED*Tnzi.Caching.SlidingExpirationStrategy.GetExpirationSeconds(string! key, int defaultExpiration) -> int?
+*REMOVED*Tnzi.Caching.SlidingExpirationStrategy.SlidingExpirationStrategy(int slidingExpirationSeconds) -> void
+override Tnzi.Caching.CachingModule.OnApplicationInitializationAsync(Tnzi.Modules.ApplicationInitializationContext! context) -> System.Threading.Tasks.Task!
+Tnzi.Security.QueryStringRedactor
+const Tnzi.Security.QueryStringRedactor.RedactedValue = "***" -> string!
+static Tnzi.Security.QueryStringRedactor.DefaultSensitiveKeys.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static Tnzi.Security.QueryStringRedactor.IsSensitive(string! key, System.Collections.Generic.IReadOnlyCollection<string!>! sensitiveKeys) -> bool
+static Tnzi.Security.QueryStringRedactor.Redact(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, Microsoft.Extensions.Primitives.StringValues>>! query, string? rawQueryString, System.Collections.Generic.IReadOnlyCollection<string!>! sensitiveKeys) -> string?
+static Tnzi.Modules.Diagnostics.ModuleDependencyAuditor.AuditAssemblyReferences(System.Collections.Generic.IReadOnlyList<Tnzi.Modules.IModuleDescriptor!>! modules, System.Func<System.Type!, bool>? moduleFilter = null, System.Collections.Generic.IReadOnlyCollection<System.Type!>? assumedLoaded = null) -> System.Collections.Generic.IReadOnlyList<Tnzi.Modules.Diagnostics.DependencyViolation!>!

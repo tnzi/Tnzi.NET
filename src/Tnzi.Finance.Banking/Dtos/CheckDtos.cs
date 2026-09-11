@@ -67,6 +67,15 @@ public class PrintChecksDto
 
     /// <summary>签发日期（null 用付款单日期）</summary>
     public DateTime? IssueDate { get; set; }
+
+    /// <summary>
+    /// 本次使用的版式模板名（<b>单次覆盖</b>；留空 = 跟随银行账户档案，档案也未设则用出厂默认模板）
+    /// </summary>
+    /// <remarks>
+    /// 让"这一批用凭证式、那一批用每页三张"不必去改银行档案。取值来自
+    /// <c>GET admin/finance/checks/templates</c> 的版式目录。
+    /// </remarks>
+    public string? TemplateName { get; set; }
 }
 
 /// <summary>
@@ -118,6 +127,10 @@ public class PreviewChecksDto
 
     /// <summary>签发日期（null 用付款单日期）</summary>
     public DateTime? IssueDate { get; set; }
+
+    /// <summary>本次使用的版式模板名（单次覆盖；留空 = 跟随银行账户档案）</summary>
+    /// <remarks>与 <see cref="PrintChecksDto.TemplateName"/> 同口径，保证"所见即将打"。</remarks>
+    public string? TemplateName { get; set; }
 }
 
 /// <summary>
@@ -135,6 +148,9 @@ public class AdHocCheckPreviewDto
 
     /// <summary>签发日期（null 用今天）。</summary>
     public DateTime? IssueDate { get; set; }
+
+    /// <summary>本次使用的版式模板名（单次覆盖；留空 = 跟随银行账户档案）。</summary>
+    public string? TemplateName { get; set; }
 
     /// <summary>逐张支票明细（一个收款人一张）。</summary>
     public List<AdHocCheckItemDto> Items { get; set; } = null!;
@@ -156,6 +172,18 @@ public class AdHocCheckItemDto
     public string? Currency { get; set; }
 
     public string? Memo { get; set; }
+
+    /// <summary>
+    /// 存根附加行（消费应用自己域里的「标签 : 值」，如案卷号 / 客户 / 事由）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这条路径上<b>还没有付款单</b>，无键可查，故不经 <c>ICheckStubLineProvider</c>
+    /// 而由请求直接携带 —— 与本 DTO 上收款人、金额、摘要的来源一致。
+    /// 上层应当让这里的行与随后 <c>PrintChecksDto</c> 落库时提供者给出的行同源，
+    /// 否则"预览 == 开票"在存根上不成立。
+    /// 条数与长度超限时按 <c>CheckStubLineLimits</c> 归一化（不拒绝）。
+    /// </remarks>
+    public List<CheckStubLine>? StubLines { get; set; }
 }
 
 /// <summary>
@@ -189,4 +217,49 @@ public class CheckQueryDto : PagedQueryDto
 
     /// <summary>关键字（收款人/作废原因模糊匹配）</summary>
     public string? Keyword { get; set; }
+}
+
+/// <summary>
+/// 支票版式目录项（出厂内置版式，或模板库里用户自建的一条模板）
+/// </summary>
+/// <remarks>
+/// 由 <see cref="Services.ICheckTemplateCatalog"/> 汇总，管理端据此画版式选择器 ——
+/// 名称是选中后要写进 <c>BankAccount.CheckTemplateName</c> 的值，其余字段供人判断
+/// "这套版式是给谁用的、印在什么纸上、一页几张"。
+/// </remarks>
+public class CheckTemplateDto
+{
+    /// <summary>模板名（模板库内 Module=<c>Tnzi.Finance</c> / Category=<c>Check</c> 下唯一）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>展示名（英文；面向用户，呈现端可自行本地化）</summary>
+    public string DisplayName { get; set; } = string.Empty;
+
+    /// <summary>说明</summary>
+    public string? Description { get; set; }
+
+    /// <summary>适用区域（如 <c>CA</c> / <c>US</c>；null = 不限区域）</summary>
+    /// <remarks>刻意用字符串而非枚举：框架不预设自己认识哪些国家的票据规范。</remarks>
+    public string? Region { get; set; }
+
+    /// <summary>纸张（如 <c>Letter</c>）</summary>
+    public string? PaperSize { get; set; }
+
+    /// <summary>每页支票张数</summary>
+    public int ChecksPerPage { get; set; } = 1;
+
+    /// <summary>支票在页面上的位置（凭证式版式才有；每页多张为 null）</summary>
+    public CheckPosition? Position { get; set; }
+
+    /// <summary>支持的票纸类型（预印 / 白纸；白纸版式会现打 MICR 磁码行）</summary>
+    public List<CheckStockType> SupportedStockTypes { get; set; } = new();
+
+    /// <summary>是否为框架出厂版式（false = 消费应用在模板管理端自建的模板）</summary>
+    public bool IsBuiltIn { get; set; }
+
+    /// <summary>模板是否启用（库内行的 <c>IsActive</c>；尚未播种的出厂版式为 true）</summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>模板库里是否已有对应的行（false = 出厂版式尚未播种，下次启动会补上）</summary>
+    public bool IsSeeded { get; set; }
 }

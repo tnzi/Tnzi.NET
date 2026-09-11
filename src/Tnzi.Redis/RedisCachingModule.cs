@@ -35,13 +35,24 @@ public class RedisCachingModule : TnziInfrastructureModule
         // 在 ConfigureServicesAsync 阶段，IOptions 可能还未构建完成
         // 使用临时方式检查配置类型，但实际配置获取在工厂函数中进行
         var tempCachingOptions = configuration.GetSection("Caching").Get<CachingOptions>();
+        var tempRedisOptions = configuration.GetSection("Redis").Get<RedisOptions>() ?? new RedisOptions();
 
-        // 检查是否应该使用 Redis
-        // 如果 Caching.Type 不是 "Redis"，则不注册 Redis 服务
-        if (tempCachingOptions != null &&
-            !string.Equals(tempCachingOptions.Type, "Redis", StringComparison.OrdinalIgnoreCase))
+        // Redis 是不是这个应用的缓存实现
+        var redisIsTheCache = tempCachingOptions == null
+            || string.Equals(tempCachingOptions.Type, "Redis", StringComparison.OrdinalIgnoreCase);
+
+        // ★ 分布式锁不该被「缓存类型」这个分支挡住：只想要 IDistributedLock（多实例互斥、
+        // 定时任务防重入）而缓存继续用内存，是完全正当的组合，而此前 Caching.Type != Redis
+        // 时本方法直接返回 —— 锁根本没被注册，显式加载了本模块的应用注入它只会解析失败。
+        var configuredConnectionString = tempRedisOptions.ConnectionString
+            ?? tempCachingOptions?.RedisConnectionString
+            ?? configuration.GetConnectionString("Redis");
+
+        if (!redisIsTheCache && string.IsNullOrWhiteSpace(configuredConnectionString))
         {
-            // 如果配置类型不是 Redis，不注册 Redis 服务
+            // 既不做缓存、也没有连接串可用：什么都不注册（与此前行为一致）。
+            // 刻意不注册一个「解析时才炸」的 IDistributedLock —— 那会把可选注入的
+            // 「优雅降级到 null」变成运行期异常，对消费方是一次回归。
             return Task.CompletedTask;
         }
 
@@ -93,6 +104,21 @@ public class RedisCachingModule : TnziInfrastructureModule
             }
         });
 
+        // 分布式锁：只要连接可用就注册，与缓存实现是谁无关
+        services.AddSingleton<IDistributedLock>(provider =>
+        {
+            var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
+            var lockOptions = provider.GetService<IOptions<RedisOptions>>()?.Value?.Lock;
+            var loggerFactory = provider.GetService<ILoggerFactory>();
+            return new RedisDistributedLock(connectionMultiplexer, lockOptions, loggerFactory);
+        });
+
+        if (!redisIsTheCache)
+        {
+            // 只要锁，不接管缓存
+            return Task.CompletedTask;
+        }
+
         // 注册分布式缓存（Microsoft.Extensions.Caching.StackExchangeRedis）
         // 使用 ConnectionMultiplexerFactory 回调共享已注册的 IConnectionMultiplexer，
         // 避免 AddStackExchangeRedisCache 内部再创建第二个连接
@@ -109,13 +135,21 @@ public class RedisCachingModule : TnziInfrastructureModule
             return new PostConfigureRedisCache(multiplexer);
         });
 
-        // 注册 Redis 缓存同步服务
-        services.AddSingleton<ICacheSyncService>(provider =>
+        // 缓存失效广播：默认不注册。
+        // ★ RedisCacheService 本身就是共享缓存，所有实例读同一份数据，没有本地副本需要失效 ——
+        // 而它此前在 7 条写路径上逐次 Task.Run 发布通知（RemoveByPatternAsync 还是逐键发），
+        // 订阅侧 SubscribeCacheInvalidationAsync 在全仓零调用方：纯开销。
+        // 消费方若在 Redis 之上自建了本地 L1，打开 Redis:PublishCacheInvalidation 并自行订阅。
+        // 不注册时 RedisCacheService 的可选依赖为 null，那 7 处发布自然成为空操作。
+        if (tempRedisOptions.PublishCacheInvalidation)
         {
-            var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
-            var logger = provider.GetRequiredService<ILogger<RedisCacheSyncService>>();
-            return new RedisCacheSyncService(connectionMultiplexer, logger);
-        });
+            services.AddSingleton<ICacheSyncService>(provider =>
+            {
+                var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
+                var logger = provider.GetRequiredService<ILogger<RedisCacheSyncService>>();
+                return new RedisCacheSyncService(connectionMultiplexer, logger);
+            });
+        }
 
         // 注册 Redis 缓存服务（替换默认的内存缓存实现）
         // 使用 RemoveAll 确保替换 CachingModule 注册的默认实现
@@ -135,14 +169,52 @@ public class RedisCachingModule : TnziInfrastructureModule
             return new RedisCacheService(connectionMultiplexer, logger, instanceName, cacheSyncService);
         });
 
-        // 注册分布式锁
-        services.AddSingleton<IDistributedLock>(provider =>
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 启动自证：配了 Redis 缓存，解析出来的 <c>ICache</c> 就得真的是 Redis 实现。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这类失效<b>没有任何症状</b>：接口照常工作、日志照常干净，只是每个实例各存各的 —— 
+    /// 典型表现是「验证码在 A 实例生成、B 实例校验失败」这种查不出所以然的间歇故障。
+    /// </para>
+    /// <para>
+    /// ★ 本检查只覆盖<b>本模块已被加载</b>的情形。真正常见的那一半 —— <c>Caching:Type=Redis</c>
+    /// 但压根没 <c>[DependsOn(RedisCachingModule)]</c> —— 由核心的 <c>CachingModule</c> 在它自己的
+    /// <c>OnApplicationInitializationAsync</c> 里拦：<c>ICache</c> 仍是核心内存实现就抛
+    /// <c>ConfigurationException</c> 并指名要加载本包（2026-09-04 起，此前是静默退回）。参见 docs/modules/redis.md。
+    /// </para>
+    /// <para>
+    /// 只对「回退到核心内存实现」报错，不对自定义实现报错：在 Redis 之上包一层
+    /// （L1 + L2 混合缓存、带指标的装饰器）是正当做法，不该被这条检查拦住。
+    /// </para>
+    /// </remarks>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var cachingOptions = context.ServiceProvider.GetService<IOptions<CachingOptions>>()?.Value;
+        if (cachingOptions != null
+            && !string.Equals(cachingOptions.Type, "Redis", StringComparison.OrdinalIgnoreCase))
         {
-            var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
-            var lockOptions = provider.GetService<IOptions<RedisOptions>>()?.Value?.Lock;
-            var loggerFactory = provider.GetService<ILoggerFactory>();
-            return new RedisDistributedLock(connectionMultiplexer, lockOptions, loggerFactory);
-        });
+            return Task.CompletedTask;
+        }
+
+        var cache = context.ServiceProvider.GetService<ICache>();
+        if (cache is RedisCacheService or null)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (cache is MemoryCacheService)
+        {
+            context.ServiceProvider.GetService<ILogger<RedisCachingModule>>()?.LogError(
+                "Caching:Type is Redis and the Redis module is loaded, but ICache resolves to {ActualType}: " +
+                "cache entries stay in each instance's own memory. Another module registered ICache after " +
+                "RedisCachingModule (LoadOrder 10) and won. Nothing will fail visibly - the symptom is data " +
+                "written on one instance not being visible on another.",
+                cache.GetType().Name);
+        }
 
         return Task.CompletedTask;
     }

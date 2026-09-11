@@ -77,4 +77,14 @@ public interface IFeatureService
     {
         return Task.FromResult(Result.Failure<IEnumerable<FeatureValueWithDefinitionDto>>("Get all values not implemented", 501));
     }
+
+    /// <summary>
+    /// List the registered <see cref="IFeatureValueProvider"/>s (scopes) with their write
+    /// constraints: whether a key is required and whether the provider is active in this
+    /// deployment. These are the only provider names the value write endpoints accept.
+    /// </summary>
+    Task<Result<IEnumerable<FeatureValueProviderDto>>> GetValueProvidersAsync()
+    {
+        return Task.FromResult(Result.Failure<IEnumerable<FeatureValueProviderDto>>("Get value providers not implemented", 501));
+    }
 }

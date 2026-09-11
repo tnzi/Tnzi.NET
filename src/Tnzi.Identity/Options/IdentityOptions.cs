@@ -79,6 +79,18 @@ public class IdentityOptions
     /// 配置路径：Identity:StepUp
     /// </summary>
     public StepUpOptions StepUp { get; set; } = new();
+
+    /// <summary>
+    /// 令牌交付方式配置（刷新令牌走响应体还是 HttpOnly cookie）
+    /// 配置路径：Identity:TokenDelivery
+    /// </summary>
+    public TokenDeliveryOptions TokenDelivery { get; set; } = new();
+
+    /// <summary>
+    /// 邀请注册配置
+    /// 配置路径：Identity:Invitation
+    /// </summary>
+    public InvitationOptions Invitation { get; set; } = new();
 }
 
 /// <summary>
@@ -115,6 +127,28 @@ public class JwtOptions
     /// 是否启用刷新令牌
     /// </summary>
     public bool EnableRefreshToken { get; set; } = true;
+
+    /// <summary>
+    /// 刷新令牌轮换的宽限窗（秒）。默认 10；0 表示不留宽限（上一代令牌一出现即判重放）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 轮换之后，上一代令牌在本窗口内再次出现按<b>并发刷新</b>处理（返回当前这一代，不再轮换）；
+    /// 超出窗口才判定为<b>重放</b>并撤销整条会话。
+    /// </para>
+    /// <para>
+    /// ★ <b>没有这个窗口，重放检测会把正常用户当成攻击者。</b>多标签页的 SPA、请求重试、
+    /// 移动端断线重连都会让同一枚旧令牌在极短时间内被交换两次：前端的刷新互斥锁是
+    /// <b>单实例内</b>的，两个标签页各有各的实例却共享同一份存储。没有宽限窗，
+    /// 用户开两个标签页就会被整条会话踢掉，而现象是「随机掉线」，极难归因。
+    /// 这也是 Auth0 把 rotation overlap period 做成一等配置项的原因。
+    /// </para>
+    /// <para>
+    /// 上限不宜太大：窗口有多长，一枚被盗令牌就有多长时间可以安静地跟着用而不触发检测。
+    /// 十秒足够覆盖并发与重试，也短到攻击者无法据此规划。
+    /// </para>
+    /// </remarks>
+    public int RefreshTokenRotationOverlapSeconds { get; set; } = 10;
 }
 
 /// <summary>
@@ -199,6 +233,28 @@ public class TnziSignInOptions
     Order = 200)]
 public class RegistrationOptions
 {
+    /// <summary>
+    /// 是否允许自助注册（<c>POST auth/register</c>：用户名 + 密码 + 邮箱）。默认 <c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>此前这条路径根本没有开关。</strong><c>RegistrationOptions</c> 只有两个
+    /// quick-register 标志（都默认 false），而 <c>RegisterAsync</c> 校验完图形验证码就建账号 ——
+    /// 于是 <c>GET auth/config</c> 出厂报 <c>enableRegistration: false</c>、登录页把注册入口藏起来，
+    /// 而 <c>POST auth/register</c> 照样给任何人开户。这正是本模块在验证码登录上写过的那句话：
+    /// <b>隐藏的是入口，端点仍然可达</b>。
+    /// </para>
+    /// <para>
+    /// ★ <strong>默认取 <c>false</c></strong>，与旁边两个 quick-register 开关一致（deny-by-default）。
+    /// 框架自带完整的邀请流程，「开好账号请人进来」是内部系统的常态；开放注册应当是一个
+    /// 有人明确按下的决定。⚠ 这是<b>运行时行为变更</b>：依赖开放注册的部署升级后
+    /// <c>auth/register</c> 会返回 400，必须在发版说明里点名。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Enable Self Registration", I18n = "admin.modules.system.settings.fields.enableSelfRegistration", Type = SettingFieldType.Boolean, Subsection = "Registration",
+        Description = "Allow anonymous visitors to create an account with username + password")]
+    public bool EnableSelfRegistration { get; set; } = false;
+
     /// <summary>
     /// 是否启用邮箱快速注册
     /// </summary>
@@ -541,11 +597,44 @@ public class AccountSecurityOptions
     public bool EnableLockout { get; set; } = true;
 
     /// <summary>
-    /// 会话超时时间（分钟，0表示不过期）
+    /// 闲置超时（分钟，0 = 不启用）。超过这么久没有任何请求，会话即失效，需要重新登录。
     /// </summary>
-    [RuntimeSetting(Label = "Session Timeout (min)", I18n = "admin.modules.system.settings.fields.accountSecuritySessionTimeout", Type = SettingFieldType.Int, Min = 0, Subsection = "Session",
-        Description = "Inactivity timeout (minutes) for Redis-backed sessions when Session.ExpirationMinutes is 0 (0 = never expires)")]
-    public int SessionTimeoutMinutes { get; set; } = 60;
+    /// <remarks>
+    /// <para>
+    /// ★★ <b>这个开关此前是假的。</b>它只在 Redis 会话且「没有显式过期时间」的那条分支里被读过一次，
+    /// 而调用方一直传显式过期时间 —— 那条分支进不去；数据库会话则一处都不读。
+    /// 于是管理员在设置中心把它从 60 改成 15，界面提示保存成功，行为零变化。
+    /// 现在它是两种会话存储共同的闲置超时判据（OWASP ASVS 7.3.1）。
+    /// </para>
+    /// <para>
+    /// ★ 与之配套的是「活动时间要有人更新」：此前 <c>LastActivityTime</c> 只在刷新令牌轮换
+    /// 和一个管理端点里更新，普通业务请求根本不更新 —— 就算这个判据当时接上了，
+    /// 它也只会把正常使用的人按时踢下线。现在每请求校验时按分钟粒度续期。
+    /// </para>
+    /// <para>
+    /// ★★ <b>默认 0（不启用），这是刻意的。</b>把它接上之前，这个开关从未生效过；
+    /// 如果同时把默认值留在 60，每一个现有部署都会在升级当天凭空多出一条
+    /// 「离开一小时就要重新登录」的规则 —— 而用户会把它当 bug 报，且归因不到这个设置项上。
+    /// 一个从来没生效过的开关，不该在开始生效的同一刻改变所有人的行为。
+    /// </para>
+    /// <para>
+    /// 它因此是**按需开启的加固项**：内部管理系统、涉敏数据的后台，设 15-30 分钟是常见取值；
+    /// 面向消费者的应用通常不设。此前显式配过非 0 值的部署，升级后那个值会第一次真的生效。
+    /// </para>
+    /// <para>
+    /// 它与 <c>Identity:Session:AbsoluteLifetimeHours</c> 是两件事：
+    /// 这条看「多久没动」，那条看「从登录起过了多久」。不启用本项时，
+    /// 结束一条会话的就只剩滑动硬过期（随刷新令牌续）与那条绝对上限。
+    /// </para>
+    /// <para>
+    /// ⚠ 精度受两个粒度限制：活动时间的写入按 60 秒节流、校验结果按
+    /// <c>Session:ValidationCacheSeconds</c>（默认 30 秒）缓存，实际到期落在
+    /// 「N 分钟 −1 分钟 ~ +30 秒」。设成 1-2 分钟不可靠，实用下限约 5 分钟。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Session Idle Timeout (min)", I18n = "admin.modules.system.settings.fields.accountSecuritySessionTimeout", Type = SettingFieldType.Int, Min = 0, Subsection = "Session",
+        Description = "Sign the user out after this many minutes with no requests. 0 (default) disables it; 15-30 is typical for internal or sensitive back-office systems.")]
+    public int SessionTimeoutMinutes { get; set; }
 
     /// <summary>
     /// 是否启用异常登录检测
@@ -628,6 +717,25 @@ public class OAuthOptions
     /// GitHub OAuth配置
     /// </summary>
     public OAuthProviderOptions GitHub { get; set; } = new();
+
+    /// <summary>
+    /// 允许作为 <c>returnUrl</c> 跳转目标的绝对地址来源（如 <c>https://app.example.com</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>OAuth 回调会把访问令牌与刷新令牌放进目标地址的 fragment。</strong>
+    /// 不设白名单时<b>只放行站内相对路径</b>，绝对地址一律拒绝 —— 这一项没配不等于放行一切。
+    /// </para>
+    /// <para>
+    /// 留空时回退到 <c>App:FrontendUrl</c>（前端所在的源，也就是 OAuth 唯一要回到的地方），
+    /// 所以绝大多数部署不需要单独配它。前端与 API 不同源、或者有多个前端入口时才需要列举。
+    /// </para>
+    /// <para>
+    /// 比较的是 scheme + host + port 三者，路径不参与 —— 白名单管的是「回到谁那里」，
+    /// 具体回到哪个页面由前端自己决定。
+    /// </para>
+    /// </remarks>
+    public List<string> AllowedReturnOrigins { get; set; } = [];
 }
 
 /// <summary>

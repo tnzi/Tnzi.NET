@@ -1,12 +1,28 @@
 <template>
   <div class="t-detail-layout" :class="`t-detail-layout--${layout}`" :style="rootStyle">
-    <TPageHeader v-if="showHeader" surface :title="title" :icon="icon" :back="back" :translate="translate">
+    <!-- `level="page"` is explicit because this component ALSO provides the
+         section tier to everything below it (including, by the render tree,
+         this very header). The prop wins; see `TITLE_LEVEL`. -->
+    <TPageHeader v-if="showHeader" surface level="page" :title="title" :icon="icon" :back="back" :translate="translate">
       <template v-if="$slots.title" #title><slot name="title" /></template>
       <template v-if="$slots.actions" #actions><slot name="actions" /></template>
       <template v-if="$slots.extra" #extra><slot name="extra" /></template>
     </TPageHeader>
 
-    <!-- tabs: horizontal section nav above a single body -->
+    <!-- tabs: horizontal section nav above a single body.
+
+         `NTab`, NOT `NTabPane`: this layout renders the body itself (see
+         `.t-detail-layout__body` below), so the tab strip declares tabs only -
+         which is exactly what naive's `NTab` is for. Childless `NTabPane`s also
+         emitted a dead `.n-tab-pane` element per section.
+
+         It is also the shape that WORKS. Naive maps each pane onto its internal
+         `Tab` with `normalizeSlots(paneVNode.children ? { default: children.tab } : void 0)`,
+         and `normalizeSlots(undefined)` does not mean "no slots" - it synthesises
+         a `default` slot rendering a Comment node. `Tab` prefers that slot over
+         `label ?? tab`, so a self-closing `<NTabPane :tab="..." />` renders a tab
+         whose label is an empty comment (verified against naive-ui 2.45.1). Panes
+         WITH children are unaffected, which is why `TTabsPage` never showed it. -->
     <NTabs
       v-if="layout === 'tabs' && sections.length"
       :value="activeSection ?? undefined"
@@ -14,7 +30,7 @@
       class="t-detail-layout__tabs"
       @update:value="onSection"
     >
-      <NTabPane v-for="s in sections" :key="s.key" :name="s.key" :tab="tabLabel(s)" :disabled="s.disabled" />
+      <NTab v-for="s in sections" :key="s.key" :name="s.key" :tab="tabLabel(s)" :disabled="s.disabled" />
     </NTabs>
 
     <!-- side: left vertical menu | right panel -->
@@ -59,12 +75,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, ref, type CSSProperties, type ComponentPublicInstance, type VNodeChild } from 'vue'
-import { NTabs, NTabPane, NMenu } from 'naive-ui'
+import { computed, h, nextTick, provide, ref, type CSSProperties, type ComponentPublicInstance, type VNodeChild } from 'vue'
+import { NTabs, NTab, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
+import { TITLE_LEVEL } from '../layout/title-level'
 import { navBadgeExtra, navBadgeIcon } from '../layout/nav-badge'
-import { normalizeNavBadge } from '../../utils/nav-badge'
 import { maybeTranslateKey } from '../../i18n/translate'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import type { DetailSection, DetailLayout } from '../../headless/useDetail'
@@ -106,6 +122,22 @@ const props = withDefaults(defineProps<Props>(), {
   contentMaxWidth: undefined,
 })
 
+/**
+ * Everything this layout renders below its own header is ONE REGION of the
+ * page, not the page. A `TListShell` (or a bare `TPageHeader`) dropped into the
+ * panel therefore titles itself at the same tier as a `TDetailSection` beside
+ * it in the same menu - which is exactly the position a `side` layout puts them
+ * both in - with no prop at the call site.
+ *
+ * This reaches slot content: Vue resolves `inject` along the RENDER tree, so
+ * content passed into `<slot />` inherits what the slot-rendering component
+ * provides. (`DETAIL_ACTIVE_SECTION_ICON` is provided by the PAGE instead, and
+ * its comment claims a provide from here could never reach a slotted
+ * `TDetailSection`. That claim is not correct - verified by mounting - though
+ * providing from the page works too, so nothing there is broken.)
+ */
+provide(TITLE_LEVEL, 'section')
+
 const rootStyle = computed<CSSProperties | undefined>(() => {
   if (props.contentMaxWidth == null) return undefined
   const value = typeof props.contentMaxWidth === 'number' ? `${props.contentMaxWidth}px` : props.contentMaxWidth
@@ -141,15 +173,29 @@ function label(s: DetailSection): string {
 }
 
 /**
- * Tab strip label. A plain string when the section carries no badge, so a
- * badge-less tab renders exactly the node naive built before; a render fn
- * (label + trailing chip) when it does - `NTabPane.tab` accepts both.
+ * Tab strip label: the section's own `icon` ahead of the text, its count chip
+ * after it. Both read the SAME `DetailSection` fields the `side` NMenu reads,
+ * at the same size, so moving a page between the two layouts does not silently
+ * change what a section declares - `layout` picks a shape, it does not pick
+ * which fields mean something.
+ *
+ * Still a plain string when there is neither, so the common tab keeps exactly
+ * the text node naive built before; `NTab.tab` accepts both (naive's `render()`
+ * helper calls a function and text-nodes a string).
+ *
+ * `navBadgeExtra` returns `undefined` for "nothing to show", which is the same
+ * question `normalizeNavBadge` answers - asking once keeps the two from drifting.
  */
 function tabLabel(s: DetailSection): string | (() => VNodeChild) {
   const text = label(s)
-  if (normalizeNavBadge(s.badge) === null) return text
   const extra = navBadgeExtra(s.badge)
-  return () => h('span', { class: 't-detail-layout__tab-label' }, [text, extra?.()])
+  if (!s.icon && !extra) return text
+  return () =>
+    h('span', { class: 't-detail-layout__tab-label' }, [
+      s.icon ? h(TSvgIcon, { icon: s.icon, size: 14, class: 't-detail-layout__tab-icon' }) : null,
+      text,
+      extra?.(),
+    ])
 }
 
 // Icon of the currently-active section (from the nav `sections` metadata) so a
@@ -262,10 +308,11 @@ const menuOptions = computed(() => {
 <style scoped>
 .t-detail-layout { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
 .t-detail-layout__tabs { flex-shrink: 0; }
-/* Tab label + trailing count chip. No `gap` here on purpose: the chip owns
-   its own leading margin (`.t-nav-badge`, polish.css) so every surface spaces
-   it the same way - a `gap` here would silently double it on this one. */
-.t-detail-layout__tab-label { white-space: nowrap; }
+/* `.t-detail-layout__tab-label` / `__tab-icon` are styled in styles/polish.css,
+   NOT here. `tabLabel()` builds those vnodes but naive's `Tab` renders them, so
+   Vue stamps ITS scope id on them (none) rather than ours - a scoped rule never
+   matches. Same reason `.t-nav-badge` lives there, and the same trap: a rule
+   written here still compiles, still ships, and simply never applies. */
 .t-detail-layout__body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .t-detail-layout__split { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
 .t-detail-layout__nav-col {

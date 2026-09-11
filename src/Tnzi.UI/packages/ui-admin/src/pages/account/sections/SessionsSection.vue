@@ -66,13 +66,16 @@ async function revokeOne(row: UserSessionDto): Promise<void> {
   }
 }
 
+// Sign out every OTHER device and stay signed in here. This is the shape ASVS
+// 7.4.3 asks for, and the only shape people actually use: the previous
+// behaviour revoked the current session too and bounced to the login page, so
+// the button cost you your own session every time you wanted to evict someone
+// else's.
 async function revokeAll(): Promise<void> {
   try {
     await ctx.bridge.me.revokeAllSessions()
     ctx.message.success(t('sessions.allRevoked'))
-    // Revoking ALL sessions necessarily kills the current one - bounce to login
-    // instead of leaving a half-dead admin shell.
-    ctx.logoutAndRedirect()
+    await load()
   } catch (e) {
     ctx.message.error(e instanceof Error ? e.message : String(e))
   }

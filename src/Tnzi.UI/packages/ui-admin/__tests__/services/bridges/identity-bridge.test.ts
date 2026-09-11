@@ -318,6 +318,45 @@ describe('identity-bridge', () => {
     await expect(bridge.getAuthConfig()).resolves.toBeNull()
   })
 
+  it('invitations.create issues an invitation through the admin api', async () => {
+    const invitationApi = {
+      create: vi.fn(async () => ({
+        userId: 'u1',
+        userName: 'newhire',
+        acceptUrl: 'https://admin.example.com/accept-invitation?token=abc',
+        expiresAt: '2026-09-08T00:00:00Z',
+      })),
+      resend: vi.fn(),
+      revoke: vi.fn(),
+    } as any
+    const bridge = makeBridge({ invitationApi })
+
+    const invited = await bridge.invitations.create({ userName: 'newhire', email: 'n@example.com' })
+
+    expect(invitationApi.create).toHaveBeenCalledWith({ userName: 'newhire', email: 'n@example.com' })
+    // acceptUrl is readable only on this response - the server keeps just the hash.
+    expect(invited.acceptUrl).toContain('token=abc')
+  })
+
+  it('invitations.resend passes the optional lifetime through', async () => {
+    const invitationApi = {
+      create: vi.fn(),
+      resend: vi.fn(async () => ({ userId: 'u1', userName: 'n', acceptUrl: 'x', expiresAt: 'y' })),
+      revoke: vi.fn(),
+    } as any
+    const bridge = makeBridge({ invitationApi })
+
+    await bridge.invitations.resend('u1', 24)
+
+    expect(invitationApi.resend).toHaveBeenCalledWith('u1', 24)
+  })
+
+  it('invitations.* reject with a clear error when no invitationApi is wired', async () => {
+    const bridge = makeBridge()
+    await expect(bridge.invitations.create({ userName: 'x' })).rejects.toThrow(/invitations\.create/)
+    await expect(bridge.invitations.revoke('u1')).rejects.toThrow(/invitations\.revoke/)
+  })
+
   it('oauthLoginUrl returns empty string when no client is wired', () => {
     const bridge = makeBridge()
     expect(bridge.oauthLoginUrl('github')).toBe('')

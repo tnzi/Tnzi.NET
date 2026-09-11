@@ -49,4 +49,28 @@ public class BankCheck : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
 
     /// <summary>重打后的替代支票（原票作废时回链新票，形成重打链）</summary>
     public Guid? ReplacedByCheckId { get; set; }
+
+    // ---- 打印设置快照（开票时刻钉住，重新渲染据此还原当初那张纸）----
+    //
+    // 五列全部可空，null = 无快照 = 回退当前银行档案。存量行与手工登记的支票天然全 null，
+    // 因此这组列**不改变任何既有行的渲染结果**，消费应用只加列不必回填。
+    //
+    // 为什么要钉：登记簿之外，票面还取决于银行档案上的模板 / 版式 / 票纸 / 两个偏移，
+    // 而那些字段随时可改。不钉住的话，换过模板或调过偏移之后重新渲染一张历史支票，
+    // 画出来的不是当初真的寄出去的那张纸 —— 且没有任何报错，只是纸变了。
+
+    /// <summary>开票时实际生效的模板名（已解析：含版式默认模板的回退结果）</summary>
+    public string? PrintTemplateName { get; set; }
+
+    /// <summary>开票时的版式</summary>
+    public CheckLayout? PrintLayout { get; set; }
+
+    /// <summary>开票时的票纸类型</summary>
+    public CheckStockType? PrintStockType { get; set; }
+
+    /// <summary>开票时的水平偏移（毫米）</summary>
+    public decimal? PrintOffsetXMm { get; set; }
+
+    /// <summary>开票时的垂直偏移（毫米）</summary>
+    public decimal? PrintOffsetYMm { get; set; }
 }

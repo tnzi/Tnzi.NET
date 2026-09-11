@@ -1,5 +1,4 @@
 using Tnzi.Finance.Documents;
-using Tnzi.Finance.Documents.Services.Internal;
 using Tnzi.Modules;
 using Tnzi.Template;
 
@@ -55,6 +54,18 @@ public class FinanceDocumentsModuleTests
 
         var seeder = services.Single(d => d.ServiceType == typeof(IPostMigrationStartupTask));
         seeder.ImplementationType.ShouldBe(typeof(CheckTemplateSeeder));
+    }
+
+    [Fact]
+    public void TemplateCatalogue_IsRegisteredAlongsideTheRenderer()
+    {
+        var services = ConfigureModule();
+
+        // 版式目录与渲染器同进同出：目录在而渲染器不在（或反过来）会让管理端选得到
+        // 一套自己根本渲染不出来的版式。
+        var catalogue = services.Single(d => d.ServiceType == typeof(ICheckTemplateCatalog));
+        catalogue.ImplementationType.ShouldBe(typeof(CheckTemplateCatalog));
+        catalogue.Lifetime.ShouldBe(ServiceLifetime.Scoped);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 用户管理服务实现
@@ -14,13 +14,13 @@ public class UserService : ApplicationService, IUserService
     private readonly IRepository<UserRole>? _userRoleRepository;
     private readonly IOrganizationService? _organizationService;
     private readonly ICurrentUser? _currentUser;
-    private readonly IPasswordPolicyService? _passwordPolicyService;
     private readonly ICache? _cache;
     private readonly IUserDetailService? _userDetailService;
     private readonly IUserRoleService? _userRoleService;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
     private readonly IFunctionAuthorizationService? _functionAuthorization;
+    private readonly ISessionRevocationService? _sessionRevocation;
 
     public UserService(
         UserManager<User> userManager,
@@ -30,14 +30,14 @@ public class UserService : ApplicationService, IUserService
         IOrganizationService? organizationService = null,
         IEventBus? eventBus = null,
         ICurrentUser? currentUser = null,
-        IPasswordPolicyService? passwordPolicyService = null,
         ICache? cache = null,
         IUserDetailService? userDetailService = null,
         IUserRoleService? userRoleService = null,
         IRepository<UserRole>? userRoleRepository = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        IFunctionAuthorizationService? functionAuthorization = null)
+        IFunctionAuthorizationService? functionAuthorization = null,
+        ISessionRevocationService? sessionRevocation = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -45,7 +45,6 @@ public class UserService : ApplicationService, IUserService
         _userRepository = Check.NotNull(userRepository);
         _organizationService = organizationService;
         _currentUser = currentUser;
-        _passwordPolicyService = passwordPolicyService;
         _cache = cache;
         _userDetailService = userDetailService;
         _userRoleService = userRoleService;
@@ -53,6 +52,43 @@ public class UserService : ApplicationService, IUserService
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _functionAuthorization = functionAuthorization;
+        _sessionRevocation = sessionRevocation;
+    }
+
+    /// <summary>
+    /// 账号状态发生了「此后不该再进来」的变化时，把该用户已经在线的会话与刷新令牌一并作废。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ <b>停用一个账号此前只写了一个锁定时间。</b>锁定判定挂在登录守卫上，只在签发新令牌时生效，
+    /// 而已经签出去的 access token 会一直用到过期，刷新令牌更是可以无限续期 ——
+    /// 于是「停用」在管理端显示成功，被停用的一方却照常在用。
+    /// 这里是「推」的一侧：状态一变就把在线凭据清掉；「拉」的一侧是刷新路径上的守卫链，
+    /// 两层都要有 —— 推漏了事件、拉才能兜住；拉有延迟，推才能立刻生效。
+    /// </para>
+    /// <para>
+    /// 撤销失败不改变主动作的结果（账号确实已经停用了），但会留一条告警：
+    /// 一次没踢掉人的停用是需要有人知道的。
+    /// </para>
+    /// </remarks>
+    private async Task RevokeSessionsAsync(Guid userId, SessionRevocationReason reason)
+    {
+        if (_sessionRevocation == null)
+        {
+            LogWarning(
+                "ISessionRevocationService is not available; existing sessions for user {UserId} stay active after {Reason}.",
+                userId, reason);
+            return;
+        }
+
+        try
+        {
+            await _sessionRevocation.RevokeUserSessionsAsync(userId, reason);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to revoke sessions for user {UserId} after {Reason}.", userId, reason);
+        }
     }
 
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
@@ -69,7 +105,12 @@ public class UserService : ApplicationService, IUserService
             user.TenantId = ResolveNewUserTenantId();
         }
 
-        var result = await _userManager.CreateAsync(user, input.Password);
+        // 无密码创建走 UserManager 的另一个重载：把 null 传给带密码的那个会直接抛。
+        // 两个重载都会跑完整的 UserValidator（重名、邮箱格式），差别仅在密码策略 ——
+        // 没有密码就没有可校验的密码，而不是「跳过了校验」。
+        var result = string.IsNullOrEmpty(input.Password)
+            ? await _userManager.CreateAsync(user)
+            : await _userManager.CreateAsync(user, input.Password);
         if (!result.Succeeded)
         {
             return Fail<UserDto>(
@@ -106,8 +147,7 @@ public class UserService : ApplicationService, IUserService
         // 而这里要的恰恰是「特权字段永远保持 null」。显式赋值让新增字段默认落在安全的一侧。
         var admin = new UpdateUserDto
         {
-            Email = input.Email,
-            PhoneNumber = input.PhoneNumber,
+            // Email / PhoneNumber 刻意不赋值：自助路径不得直改联系方式，见 UpdateProfileDto 的注释。
             FirstName = input.FirstName,
             LastName = input.LastName,
             Nickname = input.Nickname,
@@ -119,6 +159,7 @@ public class UserService : ApplicationService, IUserService
             Address = input.Address,
             Website = input.Website,
             // OrganizationId / RoleIds 刻意不赋值：自助路径不得改所属组织与角色
+            // Email / PhoneNumber 同理：换绑必须走带验证码的换绑端点
         };
 
         return UpdateAsync(id, admin);
@@ -142,13 +183,40 @@ public class UserService : ApplicationService, IUserService
         // 只更新非空字段，避免空字符串覆盖现有值
         // 只更新 User 表的核心字段（Email, PhoneNumber, OrganizationId）
         // Nickname、Avatar 等个人资料字段在 UserDetail 中更新
-        if (!string.IsNullOrWhiteSpace(input.Email))
+        //
+        // ★★★ 联系方式经 UserManager 的 Set*Async 写入，而不是直接赋值。
+        // 两处差别都是安全性的：
+        //   ① Set*Async 会把对应的**确认位清掉**。直接赋值不会，于是改完地址之后
+        //      EmailConfirmed 仍是 true —— 而框架把那一位当作「这个地址属于这个人」的断言
+        //      （找回密码、邮箱 2FA、第三方按邮箱认领账号、消费应用按域名授权都读它）。
+        //      换句话说，直接赋值等于允许任何人给自己盖一个「已验证」的章。
+        //   ② SetEmailAsync 顺带维护 NormalizedEmail 并跑一遍用户校验器
+        //      （RequireUniqueEmail 在那里生效），直接赋值则要等到 UpdateAsync 才补上归一化。
+        //
+        // 想改完就算已验证，走 ConfirmContactAsync —— 那是一个显式的、留痕的管理动作。
+        if (!string.IsNullOrWhiteSpace(input.Email)
+            && !string.Equals(input.Email, user.Email, StringComparison.OrdinalIgnoreCase))
         {
-            user.Email = input.Email;
+            var emailResult = await _userManager.SetEmailAsync(user, input.Email);
+            if (!emailResult.Succeeded)
+            {
+                return Fail<UserDto>(
+                    $"Failed to update user: {emailResult.FormatErrors()}",
+                    400,
+                    ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+            }
         }
-        if (!string.IsNullOrWhiteSpace(input.PhoneNumber))
+        if (!string.IsNullOrWhiteSpace(input.PhoneNumber)
+            && !string.Equals(input.PhoneNumber, user.PhoneNumber, StringComparison.Ordinal))
         {
-            user.PhoneNumber = input.PhoneNumber;
+            var phoneResult = await _userManager.SetPhoneNumberAsync(user, input.PhoneNumber);
+            if (!phoneResult.Succeeded)
+            {
+                return Fail<UserDto>(
+                    $"Failed to update user: {phoneResult.FormatErrors()}",
+                    400,
+                    ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+            }
         }
         if (input.OrganizationId.HasValue)
         {
@@ -263,6 +331,8 @@ public class UserService : ApplicationService, IUserService
                 ErrorCodes.IDENTITY_USER_DELETE_FAILED);
         }
 
+        await RevokeSessionsAsync(id, SessionRevocationReason.AccountDeleted);
+
         // 清除缓存
         if (_cache != null)
         {
@@ -356,6 +426,15 @@ public class UserService : ApplicationService, IUserService
             }
         }
 
+        // 待办筛选（「谁还没接受邀请」「谁欠着改密」）。
+        // ★ 必须把按位与写进表达式本身：HasPendingAction / Enum.HasFlag 都翻译不成 SQL。
+        //   标志值也要先落到局部变量，表达式树里不能直接读可空属性的 .Value。
+        if (query.PendingAction.HasValue)
+        {
+            var flag = query.PendingAction.Value;
+            queryable = queryable.Where(u => (u.PendingActions & flag) != PendingUserActions.None);
+        }
+
         // 邮箱确认状态筛选
         if (query.IsEmailConfirmed.HasValue)
         {
@@ -438,6 +517,19 @@ public class UserService : ApplicationService, IUserService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // ★★★ 未接受邀请的账号不能被「启用」放出来。这不是多余的守卫：本方法下面那句
+        //   SetLockoutEnabledAsync(user, false) 会让 UserManager.IsLockedOutAsync 恒为 false，
+        //   于是 LockedAccountLoginGuard 恒放行；若邀请状态也被这里一并清掉，
+        //   一个没有密码、没有二次验证、角色却已预设好的账号就对全部登录路径敞开了
+        //   （验证码登录只需要收到一封邮件）。让人进来的唯一途径必须是接受邀请本身。
+        if (user.HasPendingAction(PendingUserActions.InvitationPending))
+        {
+            return Fail(
+                "Cannot enable an account that has not accepted its invitation. Resend the invitation instead.",
+                409,
+                ErrorCodes.IDENTITY_ACTIVATION_PENDING);
+        }
+
         await _userManager.SetLockoutEnabledAsync(user, false);
         await _userManager.SetLockoutEndDateAsync(user, null);
 
@@ -475,6 +567,9 @@ public class UserService : ApplicationService, IUserService
         await _userManager.SetLockoutEnabledAsync(user, true);
         await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
 
+        // 把已经在线的会话与刷新令牌一并作废 —— 否则"停用"只对下一次登录生效。
+        await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDisabled);
+
         // 发布用户禁用事件
         if (EventBus != null)
         {
@@ -510,6 +605,8 @@ public class UserService : ApplicationService, IUserService
 
         await _userManager.SetLockoutEnabledAsync(user, true);
         await _userManager.SetLockoutEndDateAsync(user, lockoutEndDate);
+
+        await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountLocked);
 
         // 发布用户锁定事件
         if (EventBus != null)
@@ -654,6 +751,11 @@ public class UserService : ApplicationService, IUserService
                     400,
                     ErrorCodes.IDENTITY_USER_DELETE_FAILED);
             }
+
+            // ★★ 与 DeleteAsync 同一步，不能只有单个删除做。access token 的校验只看会话
+            //   （OnTokenValidated 不查用户还在不在），所以漏掉这一步的后果是：批量删掉的账号
+            //   在令牌剩余寿命里照常通过认证，而管理员那边显示的是「已删除」。
+            await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDeleted);
 
             // 清除缓存
             if (_cache != null)
@@ -972,6 +1074,56 @@ public class UserService : ApplicationService, IUserService
         return Ok();
     }
 
+    /// <inheritdoc />
+    public async Task<Result> ConfirmContactAsync(Guid userId, bool? confirmEmail, bool? confirmPhoneNumber)
+    {
+        if (confirmEmail is null && confirmPhoneNumber is null)
+        {
+            return Fail("Nothing to confirm", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (confirmEmail == true && string.IsNullOrWhiteSpace(user.Email))
+        {
+            return Fail("Cannot confirm an email address that is not set", 400, ErrorCodes.IDENTITY_EMAIL_NOT_SET);
+        }
+
+        if (confirmPhoneNumber == true && string.IsNullOrWhiteSpace(user.PhoneNumber))
+        {
+            return Fail("Cannot confirm a phone number that is not set", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (confirmEmail.HasValue) user.EmailConfirmed = confirmEmail.Value;
+        if (confirmPhoneNumber.HasValue) user.PhoneNumberConfirmed = confirmPhoneNumber.Value;
+
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return Fail(
+                $"Failed to update user: {result.FormatErrors()}",
+                400,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
+        if (_cache != null)
+        {
+            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
+        }
+
+        // ★ 必须留痕：这一步是「有人替另一个人担保了一个地址」，而框架下游拿那个断言
+        // 决定能不能往这个地址发找回密码的码。谁盖的章、什么时候盖的，事后要查得到。
+        LogWarning(
+            "Contact confirmation set by {ActorId} for user {UserId}: email={ConfirmEmail}, phone={ConfirmPhone}.",
+            CurrentUser?.Id, user.Id, confirmEmail, confirmPhoneNumber);
+
+        return Ok();
+    }
+
     public async Task<User?> FindByPhoneNumberAsync(string phoneNumber)
     {
         if (string.IsNullOrEmpty(phoneNumber))
@@ -1144,6 +1296,8 @@ public class UserService : ApplicationService, IUserService
         await _userManager.SetLockoutEnabledAsync(user, true);
         await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
 
+        await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDisabled);
+
         // 发布账户停用事件
         if (EventBus != null)
         {
@@ -1189,6 +1343,8 @@ public class UserService : ApplicationService, IUserService
         {
             return Fail(result.FormatErrors(), 400, ErrorCodes.IDENTITY_USER_DELETE_FAILED);
         }
+
+        await RevokeSessionsAsync(userId, SessionRevocationReason.AccountDeleted);
 
         // 发布账户删除事件
         if (EventBus != null)

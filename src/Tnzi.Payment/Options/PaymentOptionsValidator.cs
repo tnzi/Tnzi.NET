@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Options;
+﻿namespace Tnzi.Payment.Options;
 
 /// <summary>
 /// Payment 配置验证器
@@ -24,6 +24,9 @@ public class PaymentOptionsValidator : OptionsValidatorBase<PaymentOptions>
 
         if (options.RefundReconcileLookbackDays <= 0)
             errors.Add("RefundReconcileLookbackDays must be greater than 0.");
+
+        if (options.ReconciliationExportMaxRows <= 0)
+            errors.Add("ReconciliationExportMaxRows must be greater than 0.");
 
         if (options.MaxRefundAmountPerDay < 0)
             errors.Add("MaxRefundAmountPerDay cannot be negative.");

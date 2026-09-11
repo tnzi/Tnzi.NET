@@ -73,7 +73,7 @@
                 role="button"
                 tabindex="0"
                 @click="openDetail(item)"
-                @keydown.enter="openDetail(item)"
+                @keydown="onRowKeydown($event, item)"
               >
                 <div class="t-audit-timeline__item-main">
                   <strong class="t-audit-timeline__user">{{ item.userName ?? item.userId ?? t('anonymous') }}</strong>
@@ -400,6 +400,15 @@ function changeTagType(type: EntityChangeType | undefined | null): 'success' | '
   if (type === EntityChangeType.Modified) return 'warning'
   if (type === EntityChangeType.Deleted) return 'error'
   return 'default'
+}
+
+function onRowKeydown(event: KeyboardEvent, item: AuditOperationDto): void {
+  if (event.key === 'Enter' || event.key === ' ') {
+    // Space would otherwise scroll the page; both keys "activate" the row.
+    // Same rule as TItemCard - a row is a container-type clickable, not a button.
+    event.preventDefault()
+    openDetail(item)
+  }
 }
 
 function openDetail(item: AuditOperationDto): void {

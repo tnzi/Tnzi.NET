@@ -69,6 +69,32 @@ public class HangfireModule : TnziInfrastructureModule
     }
 
     /// <summary>
+    /// 非开发环境用内存存储时告警。
+    /// </summary>
+    /// <remarks>
+    /// 走 <see cref="ILogger"/> 而不是 <c>Console.WriteLine</c>：后者绕开整条日志管线，
+    /// 结构化日志、级别过滤与集中采集全都收不到 —— 一条只出现在本机控制台的告警，
+    /// 在真正需要它的部署里等于不存在。判据也从直接读 <c>ASPNETCORE_ENVIRONMENT</c>
+    /// 改成 <see cref="IHostEnvironment"/>（宿主可能用别的方式设置环境）。
+    /// </remarks>
+    private static void WarnAboutInMemoryStorage(ApplicationInitializationContext context, HangfireOptions options)
+    {
+        if (options.StorageType != StorageType.Memory)
+            return;
+
+        var environment = context.ServiceProvider.GetService<IHostEnvironment>();
+        if (environment?.IsDevelopment() == true)
+            return;
+
+        var logger = context.ServiceProvider.GetService<ILogger<HangfireModule>>();
+        logger?.LogWarning(
+            "Hangfire is using in-memory storage in the '{Environment}' environment. " +
+            "Every scheduled and background job is lost on restart. " +
+            "Configure Redis, SQL Server or PostgreSQL storage for production.",
+            environment?.EnvironmentName ?? "Production");
+    }
+
+    /// <summary>
     /// 配置存储
     /// </summary>
     private void ConfigureStorage(IGlobalConfiguration config, HangfireOptions options)
@@ -76,16 +102,10 @@ public class HangfireModule : TnziInfrastructureModule
         switch (options.StorageType)
         {
             case StorageType.Memory:
+                // 「非开发环境用内存存储」的告警推迟到 OnApplicationInitializationAsync 发：
+                // 这里还没有容器，拿不到 ILogger，而 Console.WriteLine 绕开了整条日志管线 ——
+                // 结构化日志、日志级别、集中采集全都收不到它，等于这条告警只存在于本机控制台。
                 config.UseInMemoryStorage();
-                var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                if (!string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
-                {
-                    // 非开发环境使用内存存储时输出警告
-                    Console.WriteLine(
-                        $"WARNING: Hangfire is using in-memory storage in '{env ?? "Production"}' environment. " +
-                        "All background jobs will be lost on application restart. " +
-                        "Consider using Redis, SQL Server, or PostgreSQL for production.");
-                }
                 break;
 
             case StorageType.Redis:
@@ -147,6 +167,8 @@ public class HangfireModule : TnziInfrastructureModule
         // configuration now and assigns the global instance, making the static API usable for the
         // remaining modules' initialization regardless of host type or Dashboard state.
         JobStorage.Current = context.ServiceProvider.GetRequiredService<JobStorage>();
+
+        WarnAboutInMemoryStorage(context, options);
 
         var app = context.App;
         if (app == null)

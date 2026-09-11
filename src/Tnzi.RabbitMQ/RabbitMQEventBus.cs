@@ -14,7 +14,7 @@ namespace Tnzi.RabbitMQ;
 /// 处理器发现与执行、确认与重试死信处置）在 <c>RabbitMQEventBus.Consuming.cs</c>。
 /// 两件事共用连接与 Channel 策略，但读起来互不相干，合在一个文件里只会让人两头翻。
 /// </remarks>
-public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
+public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventBus, IDistributedEventSubscriber, IAsyncDisposable, IDisposable
 {
     private readonly IConnection _connection;
     private readonly ILogger<RabbitMQEventBus> _logger;
@@ -94,6 +94,7 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
             var newChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
             await newChannel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
             await newChannel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
+            AttachReturnLogging(newChannel);
 
             _publishChannel = newChannel;
             _logger.LogDebug("Publish channel created/recovered");
@@ -164,15 +165,44 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
         var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
         await channel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
         await channel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
+        AttachReturnLogging(channel);
         return channel;
     }
 
     /// <summary>
     /// Publish a message to a specific channel.
     /// </summary>
+    /// <remarks>
+    /// ★ <c>mandatory: true</c>：交换机上没有任何队列绑定这个路由键时，代理会把消息<b>退回</b>
+    /// （<c>basic.return</c>），<see cref="AttachReturnLogging"/> 因此能记下一条 Error。
+    /// 用 <c>false</c> 时同样的情形是<b>静默丢弃</b> —— 发布方拿到的一切都正常：不抛异常、
+    /// 日志里照常一行 "Published…"，而那条消息连同它记录的那件事一起没了。
+    /// 退回是异步到达的，所以这不构成投递保证，它是<b>可发现性</b>：让"没人在消费"
+    /// 在第一条消息就留下痕迹，而不是等到有人去数数据对不对。
+    /// </remarks>
     private async Task PublishToChannelAsync(IChannel channel, string eventTypeName, BasicProperties properties, byte[] body, CancellationToken cancellationToken)
     {
-        await channel.BasicPublishAsync(_exchangeName, eventTypeName, false, properties, body, cancellationToken);
+        await channel.BasicPublishAsync(_exchangeName, eventTypeName, true, properties, body, cancellationToken);
+    }
+
+    /// <summary>
+    /// 给发布用的 Channel 挂上「消息被代理退回」的日志。
+    /// </summary>
+    /// <remarks>
+    /// 退回只发生在 <c>mandatory: true</c> 且路由不到任何队列时，正常运行期一条都不该出现，
+    /// 因此这里用 Error 而不是 Warning：它的含义是「这条事件没有任何消费者，已经丢了」。
+    /// </remarks>
+    private void AttachReturnLogging(IChannel channel)
+    {
+        channel.BasicReturnAsync += (_, args) =>
+        {
+            _logger.LogError(
+                "RabbitMQ returned an unroutable message for event {EventType} (exchange {Exchange}, reply {ReplyCode} {ReplyText}). " +
+                "No queue is bound for this event type, so the message was discarded. " +
+                "Register an IEventHandler<{EventType}> in the consuming process, or subscribe explicitly.",
+                args.RoutingKey, args.Exchange, args.ReplyCode, args.ReplyText, args.RoutingKey);
+            return Task.CompletedTask;
+        };
     }
 
     /// <summary>
@@ -273,7 +303,7 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
                 handlerTypes.Add(handler.GetType());
         }
 
-        var baseHandlers = GetBaseEventHandlers<TEvent>(eventType, scope.ServiceProvider);
+        var baseHandlers = GetBaseEventHandlers(eventType, scope.ServiceProvider);
         foreach (var handler in baseHandlers)
         {
             if (handler != null)
@@ -284,12 +314,19 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★ 早先这里只打一行 "Runtime subscription is not supported" 就返回 —— 而框架自己
+    /// <b>唯一</b>的分布式订阅点走的正是这个方法（多实例配置变更广播）。调用方拿到的是
+    /// 一次成功返回，实际什么都没发生：那条链路从来没有工作过。
+    /// 处理器仍然从 DI 解析（与自动订阅同一条路径），本方法负责的是「开始消费这个类型」。
+    /// </remarks>
     public void Subscribe<TEvent, THandler>()
         where TEvent : class, IEvent
         where THandler : class, IEventHandler<TEvent>
     {
-        _logger.LogWarning("Runtime subscription is not supported for RabbitMQEventBus. " +
-                          "Use SubscribeEventAsync<TEvent>() method instead.");
+        // 同步等待：接口签名是 void，而"订阅失败"必须让调用方知道 —— 换成即发即忘
+        // 就又回到了"报告成功但没有消费"的老问题。ASP.NET Core 无同步上下文，不会死锁。
+        SubscribeEventAsync(typeof(TEvent)).GetAwaiter().GetResult();
     }
 
     // IIntegrationEventBus implementation
@@ -300,8 +337,7 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
 
     void IIntegrationEventBus.Subscribe<TEvent, THandler>()
     {
-        _logger.LogWarning("IIntegrationEventBus.Subscribe is not supported for RabbitMQEventBus. " +
-                          "Use SubscribeEventAsync<TEvent>() method instead, or register handlers in DI container.");
+        SubscribeEventAsync(typeof(TEvent)).GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />

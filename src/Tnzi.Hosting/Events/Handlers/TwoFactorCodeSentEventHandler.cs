@@ -1,5 +1,4 @@
 using Tnzi.Notification.Metadata;
-using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Hosting.Events.Handlers;
 
@@ -11,19 +10,16 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
 {
     private readonly INotificationService _notificationService;
     private readonly ISettingService? _settingService;
-    private readonly IOptions<IdentityOptions>? _identityOptions;
     private readonly ILogger<TwoFactorCodeSentEventHandler> _logger;
 
     public TwoFactorCodeSentEventHandler(
         INotificationService notificationService,
         ILogger<TwoFactorCodeSentEventHandler> logger,
-        ISettingService? settingService = null,
-        IOptions<IdentityOptions>? identityOptions = null)
+        ISettingService? settingService = null)
     {
         _notificationService = Check.NotNull(notificationService);
         _settingService = settingService;
-        _identityOptions = identityOptions;
-        _logger = logger;
+        _logger = Check.NotNull(logger);
     }
 
     public async Task HandleAsync(TwoFactorCodeSentEvent @event, CancellationToken cancellationToken = default)

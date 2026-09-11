@@ -8,6 +8,7 @@ global using Tnzi.Identity.Presence.Metadata;
 global using Tnzi.Identity.Presence.Options;
 global using Tnzi.EFCore;
 global using Tnzi.Chat.Services;
+global using Tnzi.Chat.Services.Internal;
 global using Tnzi.Storage;
 global using Tnzi.Domain.Repositories;
 global using Moq;

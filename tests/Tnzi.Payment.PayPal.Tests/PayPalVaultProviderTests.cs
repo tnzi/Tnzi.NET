@@ -17,12 +17,15 @@ public class PayPalVaultProviderTests
 
     private readonly StubHttpMessageHandler _handler = new();
 
-    private PayPalProvider CreateProvider(bool enableVault = true, string? vaultReturnUrl = "https://app.example.com/billing/paypal-return")
+    private PayPalProvider CreateProvider(
+        bool enableVault = true,
+        string? vaultReturnUrl = "https://app.example.com/billing/paypal-return",
+        string clientId = "client-id")
     {
         var options = new PayPalOptions
         {
             Enabled = true,
-            ClientId = "client-id",
+            ClientId = clientId,
             ClientSecret = "client-secret",
             Mode = "sandbox",
             Currency = "USD",
@@ -293,6 +296,62 @@ public class PayPalVaultProviderTests
         result.Succeeded.ShouldBeTrue();
         result.Data!.IsHandled.ShouldBeFalse();
         result.Data.Kind.ShouldBe(PaymentCallbackKind.Payment);
+    }
+
+    /// <summary>
+    /// 访问令牌跨请求复用。
+    /// </summary>
+    /// <remarks>
+    /// 令牌此前存在实例字段上，而本类是 Scoped —— 每个请求都是一个新实例、一个空缓存，
+    /// 于是每一次建单 / 查单 / 退款前都先打一次 <c>/v1/oauth2/token</c>：
+    /// 对外请求数翻倍、每笔交易多一次往返，而 PayPal 发的令牌本来有效期一小时。
+    /// 症状只有「PayPal 慢」，没有任何一条错误日志。
+    /// ★ 本用例用一个独占的 ClientId：缓存是按 ClientId 分桶的静态字典，
+    /// 用公共那个的话，命中与否取决于**别的用例有没有先跑过**。
+    /// </remarks>
+    [Fact]
+    public async Task TheAccessToken_IsReusedAcrossProviderInstances()
+    {
+        var clientId = $"cache-{Guid.NewGuid():N}";
+        _handler.OnPost("/v2/checkout/orders", _ => Json(CompletedOrder("ORDER-1", "CAP-1", "10.00")));
+
+        await CreateProvider(clientId: clientId).CreatePaymentAsync(
+            new PaymentProviderCreateDto { TradeNo = "T1", Amount = 10m, Currency = "USD" });
+        await CreateProvider(clientId: clientId).CreatePaymentAsync(
+            new PaymentProviderCreateDto { TradeNo = "T2", Amount = 10m, Currency = "USD" });
+
+        _handler.Requests.Count(r => r.Path == "/v1/oauth2/token").ShouldBe(1);
+    }
+
+    /// <summary>
+    /// 回报的币种必须被带上来。此前只取了 <c>amount.value</c> 把 <c>currency_code</c> 丢掉，
+    /// 于是服务层只能比数值 —— 一笔 100 USD 的订单收到 100 JPY 的回报照样通过金额校验。
+    /// </summary>
+    [Fact]
+    public async Task HandleCallback_CaptureCompleted_CarriesTheReportedCurrency()
+    {
+        var provider = CreateProvider();
+        var payload = JsonSerializer.Serialize(new
+        {
+            id = "WH-EVT-3",
+            event_type = "PAYMENT.CAPTURE.COMPLETED",
+            resource = new
+            {
+                id = "CAP-555",
+                custom_id = "PAY-XYZ",
+                amount = new { value = "30.00", currency_code = "CAD" }
+            }
+        });
+
+        var result = await provider.HandleCallbackAsync(new Dictionary<string, string>
+        {
+            [PaymentConstants.CallbackRawBodyKey] = payload
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.TradeNo.ShouldBe("PAY-XYZ");
+        result.Data.PaidAmount.ShouldBe(30.00m);
+        result.Data.Currency.ShouldBe("CAD");
     }
 
     // ---- 商户发起扣款 ----

@@ -20,6 +20,24 @@ public class RedisOptions
     /// 分布式锁选项
     /// </summary>
     public LockOptions Lock { get; set; } = new();
+
+    /// <summary>
+    /// 是否在每次缓存写入/删除后经 Redis Pub/Sub 广播失效通知（默认: <see langword="false"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 默认关闭是因为<b>框架内没有任何订阅方</b>：<c>RedisCacheService</c> 本身就是共享缓存，
+    /// 所有实例读的是同一份数据，没有本地副本需要失效。此前它在 7 条写路径上逐次
+    /// <c>Task.Run</c> 发布通知（<c>RemoveByPatternAsync</c> 还是<b>逐键</b>发），
+    /// 而 <c>SubscribeCacheInvalidationAsync</c> 在全仓<b>零调用方</b> —— 纯粹的开销。
+    /// </para>
+    /// <para>
+    /// 打开它的正当场景：消费方在 Redis 之上自建了本地 L1 缓存，需要在别的实例写入时清掉自己那份。
+    /// 那种情况下打开本开关，并调用 <see cref="Tnzi.Caching.ICacheSyncService.SubscribeCacheInvalidationAsync"/>
+    /// 订阅。关闭时 <c>ICacheSyncService</c> <b>不注册</b>，注入它的地方会拿到 <see langword="null"/>。
+    /// </para>
+    /// </remarks>
+    public bool PublishCacheInvalidation { get; set; }
 }
 
 /// <summary>

@@ -38,6 +38,18 @@ public sealed class FakeWebSocket : WebSocket
         });
     }
 
+    /// <summary>Enqueue a continuation text frame (EndOfMessage=false).</summary>
+    public void EnqueueTextFragment(string text)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        _receiveScript.Enqueue(buffer =>
+        {
+            var count = Math.Min(bytes.Length, buffer.Count);
+            Array.Copy(bytes, 0, buffer.Array!, buffer.Offset, count);
+            return new WebSocketReceiveResult(count, WebSocketMessageType.Text, endOfMessage: false);
+        });
+    }
+
     /// <summary>Enqueue a close frame.</summary>
     public void EnqueueClose()
     {

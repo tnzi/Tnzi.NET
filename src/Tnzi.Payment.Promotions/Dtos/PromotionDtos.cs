@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Promotions.Dtos;
+﻿namespace Tnzi.Payment.Promotions.Dtos;
 
 /// <summary>
 /// 创建促销 DTO
@@ -565,4 +565,63 @@ public class CreateRedemptionCodeDto
     /// </summary>
     [Range(1, 1000, ErrorMessage = "Quantity must be between 1 and 1000.")]
     public int Quantity { get; set; }
+}
+
+/// <summary>
+/// 用户端「验券」的响应：只带付款人需要看到的那几项。
+/// </summary>
+/// <remarks>
+/// ★ 服务层的 <see cref="CouponValidationResultDto"/> 上挂的是完整的 <see cref="PromotionDto"/>，
+/// 里面有 <c>TotalUsageLimit</c> / <c>UsedCount</c> / <c>IsPublic</c> / <c>StripeCouponId</c> —— 
+/// 运营口径与渠道侧标识，付款人一个都不需要，却能从一个只需登录就能调的端点全量读出来：
+/// 已用次数配上总量就是这次活动的实时进度，<c>IsPublic</c> 直接说明哪些码值得去猜。
+/// 服务层那个形状不动（<c>ApplyCouponAsync</c> 要用它上面的几项判定），
+/// 收窄发生在控制器：内部结构与对外契约本来就不该是同一个东西。
+/// </remarks>
+public class CouponValidationResponseDto
+{
+    /// <summary>是否有效</summary>
+    public bool IsValid { get; set; }
+
+    /// <summary>优惠券代码</summary>
+    public string? CouponCode { get; set; }
+
+    /// <summary>折扣金额</summary>
+    public decimal DiscountAmount { get; set; }
+
+    /// <summary>无效时的原因</summary>
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>券本身的展示信息；无效时为 null</summary>
+    public CouponSummaryDto? Coupon { get; set; }
+}
+
+/// <summary>
+/// 券的展示信息：付款人在收银台上看得到的那几项。
+/// </summary>
+public class CouponSummaryDto
+{
+    /// <summary>活动名称</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>活动说明</summary>
+    public string? Description { get; set; }
+
+    /// <summary>折扣类型（百分比 / 固定金额）</summary>
+    public DiscountType DiscountType { get; set; }
+
+    /// <summary>折扣数值</summary>
+    public decimal DiscountValue { get; set; }
+
+    /// <summary>固定金额折扣的币种</summary>
+    public string? Currency { get; set; }
+
+    /// <summary>最低订单金额</summary>
+    public decimal? MinimumOrderAmount { get; set; }
+
+    /// <summary>最高折扣金额</summary>
+    public decimal? MaxDiscountAmount { get; set; }
+
+    /// <summary>活动结束时间</summary>
+    public DateTime? EndTime { get; set; }
 }

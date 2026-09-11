@@ -25,8 +25,15 @@ public enum CheckStockType
 }
 
 /// <summary>
-/// 支票版式
+/// 支票版式（每页张数的粗粒度选择）
 /// </summary>
+/// <remarks>
+/// ★ 版式的**权威表达是模板**（<see cref="Entities.BankAccount.CheckTemplateName"/> 指向的那条
+/// 模板记录），不是本枚举：票在上/中/下、开窗信封版、每页三张，各自是目录里一条独立模板，
+/// 几何形状写在模板里。本枚举只在**没有选定模板**时充当默认模板的选择器
+/// （<c>Voucher</c> → 出厂的凭证式模板，<c>ThreePerPage</c> → 出厂的每页三张模板），
+/// 因此刻意<b>不再追加成员</b>：新增版式加一条模板，不加一个枚举值。
+/// </remarks>
 public enum CheckLayout
 {
     /// <summary>支票 + 两联存根（Voucher）</summary>
@@ -34,6 +41,21 @@ public enum CheckLayout
 
     /// <summary>每页三张支票</summary>
     ThreePerPage = 2
+}
+
+/// <summary>
+/// 支票在页面上的位置（凭证式版式的目录元数据；每页多张的版式无此概念）
+/// </summary>
+public enum CheckPosition
+{
+    /// <summary>支票在上（其下两联存根）</summary>
+    Top = 1,
+
+    /// <summary>支票在中（上下各一联存根）</summary>
+    Middle = 2,
+
+    /// <summary>支票在下（其上两联存根）</summary>
+    Bottom = 3
 }
 
 /// <summary>

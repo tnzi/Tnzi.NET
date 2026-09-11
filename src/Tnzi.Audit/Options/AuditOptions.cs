@@ -34,12 +34,38 @@ public class AuditOptions
     public int BatchSize { get; set; } = 100;
 
     /// <summary>
+    /// 单次 CSV / JSON 导出允许的最大行数。过滤结果超过它时导出<b>被拒绝</b>并提示收窄条件，
+    /// 而不是静默截断 —— 审计导出是证据类产物，「那段时间的全部记录」与「前 N 条」在合规上不是一回事，
+    /// 而一份被砍掉尾巴、外观却完整的文件没有任何地方能看出来。
+    /// </summary>
+    [RuntimeSetting(Label = "Export Row Limit", I18n = "admin.modules.system.settings.fields.auditExportMaxRows",
+        Type = SettingFieldType.Int, Min = 1,
+        Description = "Maximum number of audit operations a single CSV / JSON export may contain. An export whose filter matches more rows is refused with guidance to narrow the filter; it is never silently truncated")]
+    public int ExportMaxRows { get; set; } = 10000;
+
+    /// <summary>
     /// 排除的请求路径前缀。
-    /// "/hubs" 必须排除：SignalR WebSocket/SSE 经 access_token 查询参数携带 JWT，
-    /// 而审计记录的 Url 字段存 Path + QueryString，不排除会把完整令牌持久化进审计表；
-    /// 且 WS 长连接在断开时才入队，产生耗时数小时的无意义"操作"记录。
+    /// "/hubs" 仍要排除：WS 长连接在断开时才入队，产生耗时数小时的无意义"操作"记录
+    /// （它的 access_token 查询参数如今由 <see cref="SensitiveQueryKeys"/> 脱敏，不再依赖路径排除）。
     /// </summary>
     public string[] ExcludedPaths { get; set; } = ["/swagger", "/health", "/scalar", "/hubs"];
+
+    /// <summary>
+    /// 查询串里要脱敏的参数名（不区分大小写，精确匹配）。作用于 <c>Url</c>（Path + QueryString）
+    /// 与 <c>RequestParameters</c> 两列：命中的参数值一律记为 <c>***</c>，其余原样保留。
+    /// </summary>
+    /// <remarks>
+    /// ★ 初值取自核心的 <see cref="QueryStringRedactor.DefaultSensitiveKeys"/>，与 <c>Tnzi.AspNetCore</c>
+    /// 的请求日志同源 —— 框架自己就会把凭据放进查询串：SignalR 的 <c>access_token</c>、签名文件链接的
+    /// <c>sig</c>、分享链接口令 <c>password</c>、邮件里重置 / 确认链接的 <c>token</c>、passkey 注册的
+    /// <c>enrollmentToken</c>。此前审计表只靠 <see cref="ExcludedPaths"/> 挡住 <c>/hubs</c>，
+    /// 其余端点的令牌原值一行行落进了 <c>Audit_Operation.Url</c>；路径排除盖不住这些端点，
+    /// 因为它们的请求本身正是要审计的操作。
+    /// 与 <see cref="SensitiveFields"/> 刻意是两份名单：请求体字段名走 camelCase（<c>accessToken</c>），
+    /// 查询参数名走 OAuth 的 snake_case（<c>access_token</c>）。部署方按自己的参数名增删。
+    /// </remarks>
+    public HashSet<string> SensitiveQueryKeys { get; set; } =
+        new(QueryStringRedactor.DefaultSensitiveKeys, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Channel 容量 (0 = 无限)</summary>
     public int ChannelCapacity { get; set; } = 10000;
@@ -70,24 +96,17 @@ public class AuditOptions
 
     /// <summary>
     /// 需要脱敏的敏感字段名（不区分大小写，精确匹配）。
-    /// 同时作用于请求体 JSON 字段（RequestBodyRedactor）与实体级审计的属性名
+    /// 同时作用于请求体 JSON 字段（<see cref="RequestBodyRedactor"/>）与实体级审计的属性名
     /// （EntityAuditSaveChangesInterceptor，记录"变了"但值打码）。
     /// PasswordHash/SecurityStamp 覆盖 IdentityUser 继承属性——它们无法打
     /// [AuditIgnore]（属性定义在 ASP.NET Core Identity 基类上）。
     /// </summary>
-    public HashSet<string> SensitiveFields { get; set; } = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "password",
-        "passwordHash",
-        "securityStamp",
-        "token",
-        "secret",
-        "credential",
-        "authorization",
-        "accessToken",
-        "refreshToken",
-        "apiKey",
-        "connectionString",
-        "creditCard"
-    };
+    /// <remarks>
+    /// ★ 初值取自核心的 <see cref="RequestBodyRedactor.DefaultSensitiveFields"/>，
+    /// 与 <c>Tnzi.AspNetCore</c> 的请求日志共用同一份名单 —— 两处各维护一份的结果是
+    /// 「某个流程比别处多露出一个字段」，而那不报错也不会让测试变红。
+    /// 这里仍是可写集合：部署方按自己的业务字段增删。
+    /// </remarks>
+    public HashSet<string> SensitiveFields { get; set; } =
+        new(RequestBodyRedactor.DefaultSensitiveFields, StringComparer.OrdinalIgnoreCase);
 }

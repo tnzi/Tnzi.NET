@@ -9,17 +9,24 @@
  * full PagedList by computing `totalPages` / `hasPreviousPage` / `hasNextPage`
  * so downstream consumers see a consistent surface.
  *
- * The envelope helpers `unwrapResult` / `ensureOk` moved to `@tnzi/core`
+ * The envelope helpers `unwrapUnchecked` / `ensureOk` moved to `@tnzi/core`
  * (`http/response`) - the ApiResult contract is core's, not admin-specific - and
  * are re-exported here so the built-in bridges keep their `from './_mappers'`
  * imports unchanged and consumer bridges can pull the whole plumbing set from
  * one place (`@tnzi/ui-admin` or `@tnzi/core`).
  */
-import { createPagedList, ensureOk, unwrapResult } from '@tnzi/core'
+import { createPagedList, ensureOk, unwrapOk, unwrapUnchecked } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { CrudPageQuery, CrudPageResult } from './types'
 
-export { ensureOk, unwrapResult }
+// `unwrapOk` = ensureOk + unwrapUnchecked. Bridges use it on every WRITE so a
+// business refusal (400 + failed envelope) throws instead of resolving to
+// `null` and being announced as "saved"; `__tests__/services/bridge-write-unwrap.test.ts`
+// scans the bridges for write-verb calls that still go through bare `unwrap`.
+// `unwrapResult` is core's deprecated alias for `unwrapUnchecked`; bridges import it
+// as `unwrap` for reads. Re-exported under BOTH names so the bridge-write gate can
+// match the real name as well as the alias - it must not depend on an import style.
+export { ensureOk, unwrapOk, unwrapUnchecked, unwrapUnchecked as unwrapResult }
 
 export function mapQueryToListRequest(query: CrudPageQuery): Record<string, unknown> {
   return {

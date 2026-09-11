@@ -246,6 +246,11 @@ public class BankAccountService : ApplicationService, IBankAccountService
             return Result.Failure("Configure Finance:Encryption:EncryptionKey before storing bank details.", 400);
 
         var trimmed = plaintext.Trim();
+        // 长度上限来自 EFT 文件的定宽账号字段（CPA-005 的 Originator Account Number 只有 12 位）。
+        // 出款方这侧被截断的后果是整份报文从一个不存在的户头扣款 —— 与收款方那侧同样不能静默发生。
+        var lengthResult = BankNumberHelper.ValidateAccountNumberLength(entity.Scheme, trimmed);
+        if (!lengthResult.Succeeded)
+            return lengthResult;
         // AAD 绑定到本档案的资金科目，密文无法被搬到另一档案复用。
         entity.AccountNumberEncrypted = _protector.Protect(trimmed, FinanceProtectionAad.ForBankAccount(entity.AccountId));
         entity.AccountNumberMasked = BankNumberHelper.Mask(trimmed);

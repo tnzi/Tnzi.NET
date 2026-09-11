@@ -78,6 +78,15 @@ public sealed class ConfiguredToolPermissionEvaluator : IToolPermissionEvaluator
     /// <inheritdoc />
     public Task RefreshRulesAsync() => RefreshDbRulesAsync();
 
+    /// <inheritdoc />
+    public Task RefreshRulesAsync(IReadOnlyList<ToolPermissionRule> rules)
+    {
+        Check.NotNull(rules);
+        Volatile.Write(ref _cachedDbRules, rules);
+        _logger.LogDebug("Replaced tool permission rule cache with {Count} rules supplied by the caller.", rules.Count);
+        return Task.CompletedTask;
+    }
+
     /// <summary>
     /// 刷新数据库缓存的权限规则
     /// </summary>

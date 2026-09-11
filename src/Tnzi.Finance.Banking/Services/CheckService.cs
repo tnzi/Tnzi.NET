@@ -3,7 +3,7 @@ namespace Tnzi.Finance.Banking.Services;
 /// <summary>
 /// 支票打印与登记服务
 /// </summary>
-public class CheckService : ApplicationService, ICheckService
+public partial class CheckService : ApplicationService, ICheckService
 {
     private readonly IRepository<BankCheck, Guid> _checkRepository;
     private readonly IRepository<BankAccount, Guid> _bankAccountRepository;
@@ -12,43 +12,52 @@ public class CheckService : ApplicationService, ICheckService
     /// <see cref="PaymentEntry.Reference"/>（该字段的框架语义即"外部参考号(支票号/交易号)"）。
     /// </summary>
     private readonly IRepository<PaymentEntry, Guid> _paymentRepository;
-    private readonly IReadOnlyRepository<Vendor, Guid> _vendorRepository;
     private readonly CheckNumberAllocator _allocator;
-    private readonly CheckIssuerResolver _issuerResolver;
     private readonly CheckBatchComposer _composer;
     private readonly ICheckDocumentRenderer? _renderer;
-    private readonly IFinanceDataProtector _protector;
+    private readonly ICheckTemplateCatalog? _templateCatalog;
     private readonly FinanceOptions _options;
 
     /// <summary>未加载渲染子模块时，print/preview/reprint/calibration 的 501 引导。</summary>
     private const string RendererMissingMessage =
         "Check rendering requires an ICheckDocumentRenderer implementation. Load the Tnzi.Finance.Documents module (or register your own ICheckDocumentRenderer) to enable check printing.";
 
+    /// <summary>未加载渲染子模块时，版式目录的 501 引导。</summary>
+    private const string CatalogMissingMessage =
+        "The check layout catalogue is provided by the Tnzi.Finance.Documents module (it ships the built-in layouts). Load it, or register your own ICheckTemplateCatalog, to list the available check layouts.";
+
     public CheckService(
         IServiceProvider serviceProvider,
         IRepository<BankCheck, Guid> checkRepository,
         IRepository<BankAccount, Guid> bankAccountRepository,
         IRepository<PaymentEntry, Guid> paymentRepository,
-        IReadOnlyRepository<Vendor, Guid> vendorRepository,
         CheckNumberAllocator allocator,
-        IFinanceDataProtector protector,
         IOptionsSnapshot<FinanceOptions> options,
-        CheckIssuerResolver issuerResolver,
         CheckBatchComposer composer,
-        ICheckDocumentRenderer? renderer = null)
+        ICheckDocumentRenderer? renderer = null,
+        ICheckTemplateCatalog? templateCatalog = null)
         : base(serviceProvider)
     {
         _checkRepository = Check.NotNull(checkRepository);
         _bankAccountRepository = Check.NotNull(bankAccountRepository);
         _paymentRepository = Check.NotNull(paymentRepository);
-        _vendorRepository = Check.NotNull(vendorRepository);
         _allocator = Check.NotNull(allocator);
-        _protector = Check.NotNull(protector);
         _options = Check.NotNull(options).Value;
-        _issuerResolver = Check.NotNull(issuerResolver);
         _composer = Check.NotNull(composer);
         // 可选注入：未加载 Tnzi.Finance.Documents 时为 null，渲染端点返回 501（同 IReceiptExtractor 兜底）。
         _renderer = renderer;
+        // 同上：版式目录随内置版式一起在渲染子模块里，缺席时目录端点 501、模板解析退回原样传递。
+        _templateCatalog = templateCatalog;
+    }
+
+    /// <summary>把生效的打印设置抄进支票行（开票时刻的快照，重新渲染据此还原当初那张纸）。</summary>
+    private static void StampPrintSettings(BankCheck check, CheckPrintSettings settings)
+    {
+        check.PrintTemplateName = settings.TemplateName;
+        check.PrintLayout = settings.Layout;
+        check.PrintStockType = settings.StockType;
+        check.PrintOffsetXMm = settings.OffsetXMm;
+        check.PrintOffsetYMm = settings.OffsetYMm;
     }
 
     public async Task<Result<List<CheckQueueItemDto>>> GetQueueAsync(Guid? bankAccountId = null, CancellationToken cancellationToken = default)
@@ -171,6 +180,10 @@ public class CheckService : ApplicationService, ICheckService
         if (!batch.Succeeded)
             return Fail<CheckFileDto>(batch.Message!, batch.Code ?? 400);
         var bank = batch.Data!.Bank;
+        var settings = ResolvePrintSettings(bank, input.TemplateName);
+        // 存根附加行在事务外先问一次：这是一次消费应用的只读查询，放进工作单元里
+        // 只会拉长事务，而它对打印结果的贡献是装饰性的。
+        var stubLines = await _composer.LoadStubLinesAsync(batch.Data.Payments.Select(p => p.Id), cancellationToken);
 
         var created = new List<BankCheck>();
         CheckFileDto? file = null;
@@ -198,16 +211,19 @@ public class CheckService : ApplicationService, ICheckService
                         IsManual = false,
                         TenantId = p.TenantId
                     };
+                    // 版式快照与支票同一条记录、同一个事务：纸与登记簿要么一起成立，要么一起不成立。
+                    StampPrintSettings(check, settings);
                     await _checkRepository.InsertAsync(check, ct);
                     created.Add(check);
 
                     // 队列口径已限定 PaymentMethod == "check"，故无条件回写支票号到付款单参考号
                     await StampPaymentReferenceAsync(p.Id, checkNumber, ct);
 
-                    items.Add(CheckBatchComposer.BuildRenderItem(checkNumber, p, payee, check.IssueDate));
+                    items.Add(CheckBatchComposer.BuildRenderItem(
+                        checkNumber, p, payee, check.IssueDate, stubLines.GetValueOrDefault(p.Id)));
                 }
 
-                var renderRequest = _composer.BuildRenderRequest(bank, items);
+                var renderRequest = _composer.BuildRenderRequest(bank, items, settings);
                 var renderResult = await renderer.RenderAsync(renderRequest, ct);
                 if (!renderResult.Succeeded)
                     throw new UnitOfWorkAbortException(Result.Failure(renderResult.Message ?? "Check rendering failed.", renderResult.Code ?? 500));
@@ -252,6 +268,9 @@ public class CheckService : ApplicationService, ICheckService
             return Fail<CheckFileDto>(batch.Message!, batch.Code ?? 400);
         var bank = batch.Data!.Bank;
 
+        // 存根附加行与 PrintAsync 走同一次提问，这正是"所见即将打"对存根也成立的原因。
+        var stubLines = await _composer.LoadStubLinesAsync(batch.Data.Payments.Select(p => p.Id), cancellationToken);
+
         // 支票号只 peek 不 consume：从档案当前 NextCheckNumber 起连号推演，
         // 真正的原子分配（含跳号/竞态处理）留给 PrintAsync。
         var previewNumber = bank.NextCheckNumber;
@@ -259,10 +278,11 @@ public class CheckService : ApplicationService, ICheckService
         foreach (var p in batch.Data.Payments)
         {
             var payee = batch.Data.Payees.GetValueOrDefault(p.PartyId);
-            items.Add(CheckBatchComposer.BuildRenderItem(previewNumber++, p, payee, input.IssueDate?.ToUtcDate() ?? p.DocDate));
+            items.Add(CheckBatchComposer.BuildRenderItem(
+                previewNumber++, p, payee, input.IssueDate?.ToUtcDate() ?? p.DocDate, stubLines.GetValueOrDefault(p.Id)));
         }
 
-        var request = _composer.BuildRenderRequest(bank, items);
+        var request = _composer.BuildRenderRequest(bank, items, ResolvePrintSettings(bank, input.TemplateName));
         request.IsPreview = true;
 
         var renderResult = await _renderer.RenderAsync(request, cancellationToken);
@@ -311,11 +331,13 @@ public class CheckService : ApplicationService, ICheckService
                 Currency = currency,
                 AmountInWords = CheckAmountInWords.Convert(it.Amount, currency),
                 IssueDate = issueDate,
-                Memo = it.Memo
+                Memo = it.Memo,
+                // 归一化收口在服务层：请求 DTO 是外部输入，条数/长度不能由调用方决定票面排不排得下。
+                StubLines = CheckStubLineLimits.Normalize(it.StubLines)
             };
         }).ToList();
 
-        var request = _composer.BuildRenderRequest(bank, items);
+        var request = _composer.BuildRenderRequest(bank, items, ResolvePrintSettings(bank, input.TemplateName));
         request.IsPreview = true;
 
         var renderResult = await _renderer.RenderAsync(request, cancellationToken);
@@ -444,9 +466,21 @@ public class CheckService : ApplicationService, ICheckService
         if (bank == null)
             return Fail<CheckFileDto>("Bank account not found.", 404);
 
-        var blankStockCheck = _composer.ValidateBlankStockPrintable(bank);
+        // ★ 重打刻意用**当前**银行档案而不是原票快照：它作废原票、分配新号，产出的是一张
+        // 新的票据，而重打最常见的起因恰恰是「刚调完偏移 / 换了票纸，要一张对得准的纸」——
+        // 钉住原票的偏移会让校准永远打不出效果。新票自己会带上这一次的快照，
+        // 因此「纸与登记簿一致」这条不变量对新票依然成立。
+        // 需要原样重出当初那张纸的是 RenderAsync（同号、零副作用），它读快照。
+        var settings = ResolvePrintSettings(bank, templateOverride: null);
+
+        var blankStockCheck = _composer.ValidateBlankStockPrintable(bank, settings.StockType);
         if (!blankStockCheck.Succeeded)
             return Fail<CheckFileDto>(blankStockCheck.Message!, blankStockCheck.Code ?? 400);
+
+        // ★ 存根附加行是**重新问出来**的，不是从登记簿读出来的 —— 域信息还在消费应用自己的库里，
+        // 所以框架从不为它们持久化任何东西，重打的那张纸上它们照样在。
+        var stubLines = (await _composer.LoadStubLinesAsync(new[] { original.PaymentEntryId!.Value }, cancellationToken))
+            .GetValueOrDefault(original.PaymentEntryId!.Value);
 
         BankCheck? replacement = null;
         CheckFileDto? file = null;
@@ -470,6 +504,7 @@ public class CheckService : ApplicationService, ICheckService
                     IsManual = false,
                     TenantId = original.TenantId
                 };
+                StampPrintSettings(replacement, settings);
                 await _checkRepository.InsertAsync(replacement, ct);
                 await _checkRepository.SaveChangesAsync(ct);
 
@@ -489,9 +524,10 @@ public class CheckService : ApplicationService, ICheckService
                     Currency = original.Currency ?? _options.BaseCurrency,
                     AmountInWords = CheckAmountInWords.Convert(original.Amount ?? 0m, original.Currency),
                     IssueDate = replacement.IssueDate,
-                    Memo = null
+                    Memo = null,
+                    StubLines = stubLines == null ? [] : [.. stubLines]
                 };
-                var renderResult = await renderer.RenderAsync(_composer.BuildRenderRequest(bank, new List<CheckRenderItem> { item }), ct);
+                var renderResult = await renderer.RenderAsync(_composer.BuildRenderRequest(bank, new List<CheckRenderItem> { item }, settings), ct);
                 if (!renderResult.Succeeded)
                     throw new UnitOfWorkAbortException(Result.Failure(renderResult.Message ?? "Check rendering failed.", renderResult.Code ?? 500));
 
@@ -554,7 +590,11 @@ public class CheckService : ApplicationService, ICheckService
         if (bank == null)
             return Fail<CheckFileDto>("Bank account not found.", 404);
 
-        var blankStockCheck = _composer.ValidateBlankStockPrintable(bank);
+        // ★ 版式取**开票时刻的快照**而不是当前档案：这张纸必须与登记簿上那张是同一张。
+        // 存量支票（快照列全空）逐字段退回当前档案，行为与本机制引入前完全一致。
+        var settings = CheckPrintSettings.ForIssuedCheck(check, bank);
+
+        var blankStockCheck = _composer.ValidateBlankStockPrintable(bank, settings.StockType);
         if (!blankStockCheck.Succeeded)
             return Fail<CheckFileDto>(blankStockCheck.Message!, blankStockCheck.Code ?? 400);
 
@@ -565,6 +605,14 @@ public class CheckService : ApplicationService, ICheckService
                 .Where(p => p.Id == check.PaymentEntryId.Value)
                 .Select(p => p.Memo)
                 .FirstOrDefaultAsync(cancellationToken);
+
+        // ★ 存根附加行同样是**重新问一次**得到的（同 ReprintAsync）：框架不为域信息落库，
+        // 而消费应用那侧的记录还在，于是"重新渲染 == 原样重出那张纸"对存根也成立。
+        // 手工登记的票没有付款单，问无可问，存根按出厂样子排。
+        var stubLines = check.PaymentEntryId == null
+            ? null
+            : (await _composer.LoadStubLinesAsync(new[] { check.PaymentEntryId.Value }, cancellationToken))
+                .GetValueOrDefault(check.PaymentEntryId.Value);
 
         // 票面币种字样与金额大写须用同一个值；登记簿未记币种时取本位币（框架不预设某国货币）
         var currency = string.IsNullOrWhiteSpace(check.Currency) ? _options.BaseCurrency : check.Currency;
@@ -577,32 +625,16 @@ public class CheckService : ApplicationService, ICheckService
             Currency = currency,
             AmountInWords = CheckAmountInWords.Convert(amount, currency),
             IssueDate = check.IssueDate,
-            Memo = memo
+            Memo = memo,
+            StubLines = stubLines == null ? [] : [.. stubLines]
         };
 
         // IsPreview 不设：这是真票，不该打不可流通水印
-        var renderResult = await renderer.RenderAsync(_composer.BuildRenderRequest(bank, new List<CheckRenderItem> { item }), cancellationToken);
+        var renderResult = await renderer.RenderAsync(_composer.BuildRenderRequest(bank, new List<CheckRenderItem> { item }, settings), cancellationToken);
         if (!renderResult.Succeeded)
             return Fail<CheckFileDto>(renderResult.Message ?? "Check rendering failed.", renderResult.Code ?? 500);
 
         return Ok(CheckBatchComposer.BuildFile(renderer, $"check_{bank.Name}_{check.CheckNumber}", renderResult.Data!));
-    }
-
-    public async Task<Result<CheckFileDto>> GetCalibrationPdfAsync(Guid bankAccountId, CancellationToken cancellationToken = default)
-    {
-        if (_renderer == null)
-            return Fail<CheckFileDto>(RendererMissingMessage, 501);
-        ICheckDocumentRenderer renderer = _renderer; // 上面已排除 null，捕获非空局部（await 后字段 null-state 会重置）
-
-        var bank = await _bankAccountRepository.AsNoTracking().FirstOrDefaultAsync(b => b.Id == bankAccountId, cancellationToken);
-        if (bank == null)
-            return Fail<CheckFileDto>("Bank account not found.", 404);
-
-        var renderResult = await renderer.RenderCalibrationAsync(_composer.BuildRenderRequest(bank, new List<CheckRenderItem>()), cancellationToken);
-        if (!renderResult.Succeeded)
-            return Fail<CheckFileDto>(renderResult.Message!, renderResult.Code ?? 500);
-
-        return Ok(CheckBatchComposer.BuildFile(renderer, $"calibration_{bank.Name}", renderResult.Data!));
     }
 
     public async Task<Result> VoidByPaymentAsync(Guid paymentEntryId, string reason, CancellationToken cancellationToken = default)

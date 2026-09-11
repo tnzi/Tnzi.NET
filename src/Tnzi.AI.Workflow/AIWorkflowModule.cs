@@ -49,8 +49,12 @@ public class AIWorkflowModule : TnziApplicationModule
         services.AddScoped<WorkflowNodeExecutor>();
         services.AddScoped<WorkflowEngine>();
 
-        // 注册 Watchdog（Scoped - 每次扫描由宿主调度器在其自己的 scope 内解析）
+        // 注册 Watchdog（Scoped - 每次扫描在自己的 scope 内解析）+ 驱动它的后台循环。
+        // ★ 后台循环无条件注册，由 WorkflowWatchdogHostedService 自己读 UseBuiltInScheduler
+        //   决定跑不跑并把结论写进启动日志 —— 按配置决定要不要注册的话，"关掉了"和
+        //   "根本没接上"在日志里长得一模一样，而这正是此前的状况。
         services.AddScoped<WorkflowWatchdogService>();
+        services.AddHostedService<WorkflowWatchdogHostedService>();
 
         // 注册工作流节点
         services.AddScoped<IWorkflowNode, AgentNode>();

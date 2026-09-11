@@ -85,6 +85,10 @@ public class SignerConfiguration : EntityTypeConfigurationBase<Signer, Guid>
         builder.Property(r => r.DeclineReason).HasMaxLength(1000);
         builder.Property(r => r.SignerIp).HasMaxLength(64);
         builder.Property(r => r.SignerUserAgent).HasMaxLength(512);
+        // 匿名端点收进来的两个自由文本字段：列上限与 SubmitAsync 的前置校验取同一个常量
+        // （无上限的匿名可写列是存储滥用面，见 SigningLimits）。
+        builder.Property(r => r.SignatureImage).HasMaxLength(SigningLimits.MaxSignatureImageLength);
+        builder.Property(r => r.ConsentText).HasMaxLength(SigningLimits.MaxConsentTextLength);
 
         builder.HasOne(r => r.Request)
             .WithMany(q => q.Recipients)

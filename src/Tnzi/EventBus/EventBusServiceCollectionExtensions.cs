@@ -9,7 +9,7 @@ public static class EventBusServiceCollectionExtensions
 {
     /// <summary>
     /// 注册事件处理器（自动推断事件类型）
-    /// 从处理器类型中自动推断出处理的事件类型
+    /// 从处理器类型中自动推断出它处理的<b>每一个</b>事件类型
     /// </summary>
     /// <typeparam name="THandler">处理器类型</typeparam>
     /// <param name="services">服务集合</param>
@@ -17,28 +17,7 @@ public static class EventBusServiceCollectionExtensions
     public static IServiceCollection AddEventHandler<THandler>(this IServiceCollection services)
         where THandler : class
     {
-        var handlerType = typeof(THandler);
-        
-        // 查找处理器实现的 IEventHandler<> 接口
-        var eventHandlerInterface = handlerType.GetInterfaces()
-            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
-        
-        if (eventHandlerInterface == null)
-        {
-            throw new InvalidOperationException(
-                $"Handler type {handlerType.Name} does not implement IEventHandler<TEvent> interface.");
-        }
-        
-        // 提取事件类型
-        var eventType = eventHandlerInterface.GetGenericArguments()[0];
-        
-        // 创建泛型接口类型 IEventHandler<TEvent>
-        var handlerServiceType = typeof(IEventHandler<>).MakeGenericType(eventType);
-        
-        // 注册为 Scoped 生命周期
-        services.AddScoped(handlerServiceType, handlerType);
-        
-        return services;
+        return services.AddEventHandler<THandler>(ServiceLifetime.Scoped);
     }
 
     /// <summary>
@@ -63,33 +42,37 @@ public static class EventBusServiceCollectionExtensions
     /// <param name="services">服务集合</param>
     /// <param name="lifetime">服务生命周期</param>
     /// <returns>服务集合</returns>
+    /// <remarks>
+    /// 处理器声明的<b>每一个</b> <c>IEventHandler&lt;TEvent&gt;</c> 都会被注册。
+    /// 早先这里只取 <c>GetInterfaces()</c> 返回的第一个接口，于是一个同时处理两种事件的处理器
+    /// 只订阅到其中一种，另一种<b>连派发环节都到不了</b> —— 没有异常、没有日志，
+    /// 只是那个事件永远没有处理器。
+    /// </remarks>
     public static IServiceCollection AddEventHandler<THandler>(
         this IServiceCollection services,
         ServiceLifetime lifetime)
         where THandler : class
     {
         var handlerType = typeof(THandler);
-        
-        // 查找处理器实现的 IEventHandler<> 接口
-        var eventHandlerInterface = handlerType.GetInterfaces()
-            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
-        
-        if (eventHandlerInterface == null)
+
+        // 查找处理器实现的全部 IEventHandler<> 接口
+        var eventHandlerInterfaces = handlerType.GetInterfaces()
+            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+            .ToList();
+
+        if (eventHandlerInterfaces.Count == 0)
         {
             throw new InvalidOperationException(
                 $"Handler type {handlerType.Name} does not implement IEventHandler<TEvent> interface.");
         }
-        
-        // 提取事件类型
-        var eventType = eventHandlerInterface.GetGenericArguments()[0];
-        
-        // 创建泛型接口类型 IEventHandler<TEvent>
-        var handlerServiceType = typeof(IEventHandler<>).MakeGenericType(eventType);
-        
-        // 根据生命周期注册
-        var descriptor = new ServiceDescriptor(handlerServiceType, handlerType, lifetime);
-        services.Add(descriptor);
-        
+
+        foreach (var eventHandlerInterface in eventHandlerInterfaces)
+        {
+            // IEventHandler<TEvent> 本身就是要注册的服务类型
+            var descriptor = new ServiceDescriptor(eventHandlerInterface, handlerType, lifetime);
+            services.Add(descriptor);
+        }
+
         return services;
     }
 

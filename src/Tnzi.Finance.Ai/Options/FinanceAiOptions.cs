@@ -20,6 +20,19 @@ public class FinanceAiOptions
     public int MaxFileSizeMb { get; set; } = 20;
 
     /// <summary>
+    /// Maximum number of characters of extracted PDF text sent to the model.
+    /// </summary>
+    /// <remarks>
+    /// ★ 这是闸门不是调优项：字节大小有两道闸门，而<b>文本长度一道都没有</b>。
+    /// 一份 20 MB 的纯文字 PDF 解出来是上百万字符，整份原样拼进提示词 ——
+    /// 换回的要么是一张与收据金额毫无关系的账单，要么是供应商侧的长度报错，
+    /// 而两者都由一次普通上传触发。
+    /// 收据正文通常在 5000 字符以内；默认留足余量给多页发票，超出部分截断并注明，
+    /// 不是拒绝：一份正文正常、后面附了几页条款的发票仍应当能录进来。
+    /// </remarks>
+    public int MaxPdfTextChars { get; set; } = 20000;
+
+    /// <summary>
     /// Image content types the vision model accepts. Empty means no gate: send whatever was uploaded.
     /// </summary>
     /// <remarks>

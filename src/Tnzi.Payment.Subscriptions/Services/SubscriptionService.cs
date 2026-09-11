@@ -79,13 +79,7 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
             cancellationToken);
 
         if (existingSubscription != null)
-        {
-            return Fail<SubscriptionCreateResultDto>(
-                plan.ProductCode == null
-                    ? ErrorCodes.SubscriptionAlreadyActive
-                    : ErrorCodes.SubscriptionProductAlreadySubscribed,
-                400);
-        }
+            return DuplicateSubscription(plan);
 
         var channelCode = string.IsNullOrWhiteSpace(request.ChannelCode)
             ? PaymentOptions.DefaultChannelCode
@@ -150,7 +144,8 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
             // 试用期结束后的首次计费时间
             subscription.NextBillingTime = subscription.TrialEndTime;
 
-            await _subscriptionRepository.InsertAsync(subscription, cancellationToken);
+            if (!await TryInsertSubscriptionAsync(subscription, plan, cancellationToken))
+                return DuplicateSubscription(plan);
         }
         else
         {
@@ -159,7 +154,8 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
             subscription.NextBillingTime = CalculateNextBillingTime(DateTime.UtcNow, plan.CycleType, plan.CycleValue);
 
             // 先落库拿到订阅ID，支付单的 BusinessOrderNo 用订阅号，回流时凭它找回订阅
-            await _subscriptionRepository.InsertAsync(subscription, cancellationToken);
+            if (!await TryInsertSubscriptionAsync(subscription, plan, cancellationToken))
+                return DuplicateSubscription(plan);
 
             // 创建首次支付：订阅保持 Pending，待支付完成事件回流后才激活（见 ApplyPaymentCompletedAsync）
             var paymentResult = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
@@ -231,13 +227,32 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         if (subscription.Status == SubscriptionStatus.Cancelled || subscription.Status == SubscriptionStatus.Expired)
             return Fail(ErrorCodes.SubscriptionAlreadyCancelledOrExpired, 400);
 
+        var now = DateTime.UtcNow;
+
+        // ★ 先抢计费锁再取消。后台扣款抢到这条订阅之后（TryClaimAsync 写下 BillingLockedUntil），
+        // 它与渠道之间那次往返期间订阅行照旧可写 —— 此刻取消会当场成功，而钱几秒后照扣不误。
+        // 用户看到的是「已取消」外加一笔扣款，日志里只有一句 orphan payment。
+        // 条件与 TryClaimAsync 逐字相同（未锁定或锁已过期）；抢不到就让调用方稍后再来，
+        // 计费锁最多持有 BillingLockMinutes 分钟，这不是一件永远不会好的事，因此是 409 不是 400。
+        var claimed = await _subscriptionRepository.AsQueryable()
+            .Where(s => s.Id == subscriptionId
+                && (s.BillingLockedUntil == null || s.BillingLockedUntil < now))
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(x => x.BillingLockedUntil, now.AddMinutes(PaymentOptions.BillingLockMinutes)),
+                cancellationToken);
+
+        if (claimed == 0)
+            return Fail(ErrorCodes.SubscriptionBillingInProgress, 409);
+
         subscription.CancelReason = request.Reason;
-        subscription.CancelTime = DateTime.UtcNow;
+        subscription.CancelTime = now;
+        // 取消完成即释放计费锁：留着它只会让后台扫描白等一个锁窗口
+        subscription.BillingLockedUntil = null;
 
         if (request.Immediate)
         {
             subscription.Status = SubscriptionStatus.Cancelled;
-            subscription.EndTime = DateTime.UtcNow;
+            subscription.EndTime = now;
             subscription.AutoRenew = false;
             // 立刻断开后台计费的抓取窗口，缩小"取消与在途扣款"的竞态面
             subscription.NextBillingTime = null;
@@ -713,4 +728,41 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         LogInformation("Reordered {Count} subscription plan(s)", result.Data);
         return Ok();
     }
+
+    /// <summary>「这个用户在这个产品下已经有一条有效订阅了」的统一答复。</summary>
+    private Result<SubscriptionCreateResultDto> DuplicateSubscription(SubscriptionPlan plan)
+        => Fail<SubscriptionCreateResultDto>(
+            plan.ProductCode == null
+                ? ErrorCodes.SubscriptionAlreadyActive
+                : ErrorCodes.SubscriptionProductAlreadySubscribed,
+            400);
+
+    /// <summary>
+    /// 写入订阅；被数据库的判重索引挡下时返回 false 而不是让异常冒出去。
+    /// </summary>
+    /// <remarks>
+    /// 上面那次「有没有有效订阅」的查询与这次写入之间隔着绑卡、试算券、计税几步外部调用，
+    /// 结账页一次双击落在这个窗口里两条请求都会读到「没有」。真正拦住第二条的是索引，
+    /// 而索引抛出来的是 <c>DbUpdateException</c> —— 不翻译的话用户拿到的是 500，
+    /// 和「服务器挂了」长得一模一样，而实际上这是一次完全正常、完全预期的拒绝。
+    /// </remarks>
+    private async Task<bool> TryInsertSubscriptionAsync(Subscription subscription, SubscriptionPlan plan, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _subscriptionRepository.InsertAsync(subscription, cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException ex)
+        {
+            Logger.LogInformation(ex,
+                "Concurrent subscription creation refused by the uniqueness index. UserId: {UserId}, ProductCode: {ProductCode}",
+                subscription.UserId, plan.ProductCode);
+
+            // 这一条实体还挂在变更跟踪里且处于 Added，不丢掉它，下一次 SaveChanges 会把它重放在无关的位置上
+            _subscriptionRepository.Discard(subscription);
+            return false;
+        }
+    }
+
 }

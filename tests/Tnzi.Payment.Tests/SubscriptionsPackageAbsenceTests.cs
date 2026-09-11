@@ -52,6 +52,14 @@ namespace Tnzi.Payment.Tests;
 /// </remarks>
 public class SubscriptionsPackageAbsenceTests
 {
+
+    /// <summary>默认支付配置：对账导出上限保持出厂值，本组用例不受它影响。</summary>
+    private static IOptionsMonitor<PaymentOptions> DefaultPaymentOptions()
+    {
+        var mock = new Mock<IOptionsMonitor<PaymentOptions>>();
+        mock.Setup(x => x.CurrentValue).Returns(new PaymentOptions());
+        return mock.Object;
+    }
     /// <summary>
     /// 只建模、不连库的 <see cref="PaymentTestDbContext"/> —— 集成测试用的就是这个 DbContext，
     /// 它的实体清单即「没装续费包的宿主会建出哪些表」。
@@ -112,6 +120,7 @@ public class SubscriptionsPackageAbsenceTests
         var service = new PaymentStatisticsService(
             RepoOver(new List<PaymentEntity>()).Object,
             RepoOver(new List<Refund>()).Object,
+            DefaultPaymentOptions(),
             LoggingServiceProvider());
 
         var result = await service.GetSubscriptionMetricsAsync();
@@ -134,6 +143,7 @@ public class SubscriptionsPackageAbsenceTests
         var service = new PaymentStatisticsService(
             RepoOver(new List<PaymentEntity>()).Object,
             RepoOver(new List<Refund>()).Object,
+            DefaultPaymentOptions(),
             LoggingServiceProvider());
 
         (await service.GetSubscriptionMetricsAsync()).Code.ShouldNotBe(503);
@@ -162,6 +172,7 @@ public class SubscriptionsPackageAbsenceTests
         var service = new PaymentStatisticsService(
             RepoOver(payments).Object,
             RepoOver(new List<Refund>()).Object,
+            DefaultPaymentOptions(),
             LoggingServiceProvider());
 
         var result = await service.GetStatisticsAsync(new StatisticsQueryDto

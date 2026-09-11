@@ -142,6 +142,41 @@ public class StorageOptions
     /// 获取或设置 对外分享链接配置
     /// </summary>
     public ShareOptions Share { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 压缩 / 解压的资源上限
+    /// </summary>
+    public ArchiveOptions Archive { get; set; } = new();
+}
+
+/// <summary>
+/// 压缩（<c>CompressAsync</c>）与解压（<c>DecompressAsync</c>）的资源上限。
+/// 配置路径：Storage:Archive
+/// </summary>
+/// <remarks>
+/// <para>
+/// 两个端点此前只过扩展名闸门：没有条目数上限、没有解压后总体积上限。一个 zip bomb
+/// （几十 KB 的包解出几十 GB 的零）或一次几万个 id 的打包请求，就能把临时目录与对象存储
+/// 一起打满，而调用方只需要登录。
+/// </para>
+/// <para>
+/// 解压时每个条目还各自受 <see cref="StorageOptions.MaxFileSize"/> 约束 —— 解出来的每一条都是
+/// 一份独立的文件记录，与直传同一道闸门。判据是**边复制边数出来的字节**，不是 zip 头里声称的大小
+/// （头可以撒谎）；单条越界跳过它、不作废整包，与扩展名不合规同一取舍。总体积越界则**作废整次解包**：
+/// 已解出的对象删掉、一条记录都不落 —— 半包成功比整包失败更难被人发现。
+/// </para>
+/// </remarks>
+public class ArchiveOptions
+{
+    /// <summary>
+    /// 获取或设置 一次压缩最多打包多少个文件 / 一个压缩包最多解出多少个条目，默认 1000。
+    /// </summary>
+    public int MaxEntries { get; set; } = 1000;
+
+    /// <summary>
+    /// 获取或设置 一次解压最多解出的总字节数，默认 1 GiB。
+    /// </summary>
+    public long MaxTotalExtractedBytes { get; set; } = 1024L * 1024 * 1024;
 }
 
 /// <summary>
@@ -452,6 +487,12 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
         if (options.Share.MaxFailedPasswordAttempts < 0)
             errors.Add("Share.MaxFailedPasswordAttempts cannot be negative.");
+
+        if (options.Archive.MaxEntries <= 0)
+            errors.Add("Archive.MaxEntries must be greater than 0.");
+
+        if (options.Archive.MaxTotalExtractedBytes <= 0)
+            errors.Add("Archive.MaxTotalExtractedBytes must be greater than 0.");
 
         // 验证S3配置（如果Provider为S3）
         if (options.Provider.Equals("S3", StringComparison.OrdinalIgnoreCase))

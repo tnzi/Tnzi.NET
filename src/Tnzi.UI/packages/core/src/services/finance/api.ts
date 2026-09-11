@@ -134,6 +134,7 @@ import type {
   VoidCheckDto,
   SpoilCheckDto,
   CheckQueryDto,
+  CheckTemplateDto,
   EftBatchDto,
   EftQueueItemDto,
   CreateEftBatchDto,
@@ -161,7 +162,7 @@ import type {
   RecurrencePreviewDto,
   RecurringSweepResultDto,
 } from './types';
-import type { SettlementDocType, FinancePartyType, BankTransactionSource } from './metadata';
+import type { SettlementDocType, FinancePartyType, BankTransactionSource, CheckStockType } from './metadata';
 
 const ADMIN_ACCOUNT_BASE = '/admin/finance/accounts';
 const ADMIN_JOURNAL_BASE = '/admin/finance/journal-entries';
@@ -813,13 +814,41 @@ export function useAdminFinanceCheckApi(client: HttpClient) {
     /** Paged check register. */
     getList: (params?: CheckQueryDto) =>
       client.get<PagedList<BankCheckDto>>(ADMIN_CHECK_BASE, { params }),
-    /** Print checks (merged PDF blob). */
+    /**
+     * Available check layouts (shipped layouts + templates created here).
+     * 501 when the rendering module is not loaded - the shipped layouts ride
+     * with it, so there is nothing to enumerate.
+     */
+    getTemplates: () => client.get<CheckTemplateDto[]>(`${ADMIN_CHECK_BASE}/templates`),
+    /**
+     * A specimen of one layout, rendered from placeholder data - zero side
+     * effects, and it needs no payment, payee or bank account to exist.
+     *
+     * This is how a layout picker shows what a layout looks like: one GET per
+     * layout, dropped straight into an `<iframe>` or scaled down as a
+     * thumbnail. The content is fixed (it carries no current date), so
+     * responses are safe to cache. The sheet is stamped
+     * `SPECIMEN - NOT NEGOTIABLE` and never carries a real account number.
+     *
+     * `bankAccountId` is optional: pass one to borrow that account's bank name,
+     * routing line and print offsets so the specimen matches what would really
+     * come out of the printer; omit it for neutral placeholders.
+     */
+    getTemplateSpecimen: (
+      templateName: string,
+      params?: { stockType?: CheckStockType; bankAccountId?: string },
+    ) =>
+      client.download(
+        `${ADMIN_CHECK_BASE}/templates/${encodeURIComponent(templateName)}/specimen`,
+        { params },
+      ),
+    /** Print checks: one rendered document blob (PDF or HTML, whichever renderer is configured). */
     print: (data: PrintChecksDto) =>
       client.download(`${ADMIN_CHECK_BASE}/print`, { method: 'POST', body: data }),
     /** Register a hand-written check. */
     register: (data: RegisterManualCheckDto) =>
       client.post<BankCheckDto>(`${ADMIN_CHECK_BASE}/register`, data),
-    /** Reprint a check (void the original + new check; merged PDF blob). */
+    /** Reprint a check (void the original + new check); rendered document blob. */
     reprint: (id: string) =>
       client.download(`${ADMIN_CHECK_BASE}/${id}/reprint`, { method: 'POST' }),
     /** Void a check. */
@@ -828,7 +857,7 @@ export function useAdminFinanceCheckApi(client: HttpClient) {
     /** Register a spoiled check. */
     spoil: (data: SpoilCheckDto) =>
       client.post<BankCheckDto>(`${ADMIN_CHECK_BASE}/spoil`, data),
-    /** Alignment calibration test page (PDF blob). */
+    /** Alignment calibration test page; rendered document blob. */
     calibration: (bankAccountId: string) =>
       client.download(`${ADMIN_CHECK_BASE}/calibration/${bankAccountId}`),
     /** Positive-pay issued-check file (CSV blob) for a bank account over an issue-date window. */

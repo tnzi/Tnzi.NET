@@ -124,6 +124,10 @@ export * from './admin-shell-actions'
 // show them. Shared by the sidebar footer and the desktop start menu, which has
 // no sidebar to put them in.
 export * from './useSettingsEntry'
+// The host's own chrome actions (`defineAdminApp({ shell: { actions } })`),
+// resolved for rendering. Renders in the same two places as the Settings entry
+// above - a host action is at parity with a built-in one, not a lesser citizen.
+export * from './useChromeActions'
 // Menu context (which first-level module a route belongs to) pairs with
 // `useAdminShellLayout` for consumers assembling a custom shell.
 export * from './useAdminMenuContext'

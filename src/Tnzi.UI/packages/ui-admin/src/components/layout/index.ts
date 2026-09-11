@@ -10,6 +10,11 @@
 // page containers (single content surface / tabbed sections).
 export { default as TPageHeader } from './TPageHeader.vue'
 export type { BackTarget } from './back-target'
+// The content-page title tier. Exported so an app with a hand-rolled panel can
+// say `provide(TITLE_LEVEL, 'section')` once and have every page-tier component
+// inside it line up with a `TDetailSection`. See ./title-level.ts.
+export { TITLE_LEVEL } from './title-level'
+export type { TTitleLevel } from './title-level'
 export { default as TContentPage } from './TContentPage.vue'
 // Batteries-included container for tabbed content pages - declare `:sections`,
 // drop each tab's content in a same-named slot; NTabs chrome, `t-table-tabs`

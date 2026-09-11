@@ -74,4 +74,59 @@ describe('TKpiCard', () => {
     )
     expect(w.find('.t-stat-card__value .extra-tag').text()).toBe('Action needed')
   })
+
+  describe('clickable mode', () => {
+    /** Dispatch a real KeyboardEvent so `defaultPrevented` can be inspected. */
+    function press(el: Element, key: string): KeyboardEvent {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      el.dispatchEvent(event)
+      return event
+    }
+
+    it.each([['Enter'], [' ']])('activates on %s and prevents the default', (key) => {
+      const w = mountCard({ label: 'Active', value: 3, animated: false, interactive: true })
+      const card = w.find('.t-stat-card')
+
+      const event = press(card.element, key)
+
+      expect(w.emitted('click')).toHaveLength(1)
+      // Space would otherwise scroll the page out from under the card.
+      expect(event.defaultPrevented).toBe(true)
+    })
+
+    it('ignores keys that do not activate a button', () => {
+      const w = mountCard({ label: 'Active', value: 3, animated: false, interactive: true })
+      const card = w.find('.t-stat-card')
+
+      const tab = press(card.element, 'Tab')
+      const letter = press(card.element, 'a')
+
+      expect(w.emitted('click')).toBeUndefined()
+      expect(tab.defaultPrevented).toBe(false)
+      expect(letter.defaultPrevented).toBe(false)
+    })
+
+    it('carries the button role and a tab stop only when clickable', () => {
+      const clickable = mountCard({ label: 'Active', value: 3, animated: false, interactive: true })
+      expect(clickable.find('.t-stat-card').attributes('role')).toBe('button')
+      expect(clickable.find('.t-stat-card').attributes('tabindex')).toBe('0')
+      expect(clickable.find('.t-stat-card').classes()).toContain('t-stat-card--clickable')
+
+      const plain = mountCard({ label: 'Plain', value: 3, animated: false })
+      expect(plain.find('.t-stat-card').attributes('role')).toBeUndefined()
+      expect(plain.find('.t-stat-card').attributes('tabindex')).toBeUndefined()
+      expect(plain.find('.t-stat-card').classes()).not.toContain('t-stat-card--clickable')
+    })
+
+    it.each([['Enter'], [' ']])('leaves a non-clickable card inert on %s', async (key) => {
+      const w = mountCard({ label: 'Plain', value: 3, animated: false })
+      const card = w.find('.t-stat-card')
+
+      const event = press(card.element, key)
+      await card.trigger('click')
+
+      expect(w.emitted('click')).toBeUndefined()
+      expect(event.defaultPrevented).toBe(false)
+    })
+  })
 })

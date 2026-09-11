@@ -14,16 +14,29 @@ public interface IFileStorage
     /// 上传文件
     /// </summary>
     /// <remarks>
+    /// ★ <b>键由调用方（服务层）生成，且只由 <c>StorageKeyHelper</c> 生成。</b>
+    /// <paramref name="fileName"/> 是对象在 provider 里的<b>键</b>，不是给人看的名字：
+    /// 服务层交进来的一律是顺序 GUID + 安全扩展名（或由它派生的缩略图 / 分片键），
+    /// <b>绝不是</b>上传者给的原始文件名 —— 那个只进 <c>FileRecord.OriginalName</c>。
+    /// 实现可以据此假定键是叶子名（不含目录分隔符），但仍应像 <c>LocalStorage</c> 那样兜底取叶子名，
+    /// 因为 provider 可由消费方经 <c>StorageProviderFactory.Register()</c> 注册，框架管不到别人的调用方。
+    /// <para>
+    /// 同键重传<b>允许覆盖</b>（S3 / R2 / Azure 的 Put 默认如此，本地存储用 <c>FileMode.Create</c>）。
+    /// 实现不必做「已存在则拒绝」：唯一性由生成键保证，覆盖语义只被「记录存在而物理文件丢失时按原键重传」
+    /// 这一条路径用到。反过来说，这正是键不能来自调用方的原因 —— 键若可选，覆盖就是越权写。
+    /// </para>
+    /// <para>
     /// ★ 流的生命周期归调用方所有：实现**不得** dispose / close 传入的 <paramref name="stream"/>。
     /// 调用方在上传之后往往还要用这个流（最典型的是取 <c>Length</c> 写进文件记录），
     /// provider 提前关掉它，调用方就会拿到 <see cref="ObjectDisposedException"/>。
     /// 使用会自动接管流的 SDK 时必须显式关掉那个行为
     /// （例如 AWS SDK 的 <c>PutObjectRequest.AutoCloseStream</c> 默认为 <c>true</c>，须置为 <c>false</c>）。
+    /// </para>
     /// <para>
     /// 反过来，调用方也不应假设上传后流的位置：实现会把流读到末尾，需要复用时自行 <c>Seek</c>。
     /// </para>
     /// </remarks>
-    /// <param name="fileName">文件名</param>
+    /// <param name="fileName">存储键（服务端生成的叶子名，见上）</param>
     /// <param name="stream">文件流（由调用方负责释放）</param>
     /// <param name="contentType">内容类型</param>
     /// <returns>文件路径或URL</returns>

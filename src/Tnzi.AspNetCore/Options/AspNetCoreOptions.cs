@@ -126,6 +126,28 @@ public class AspNetCoreOptions
     public bool EnableForwardedHeaders { get; set; } = true;
 
     /// <summary>
+    /// 获取或设置 受信反向代理的声明。默认只信任 loopback（ASP.NET Core 的出厂默认）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>转发头是调用方可以随便写的。</strong>任何人都能在请求里带一个
+    /// <c>X-Forwarded-For: 1.2.3.4</c>，所以「客户端地址」只有在<em>确知这一跳来自自己的代理</em>
+    /// 时才能从头里取。这份声明就是那个「确知」——它配置
+    /// <c>UseForwardedHeaders</c>，由它按代理链从右往左消费、并把结果写进
+    /// <c>Connection.RemoteIpAddress</c>；框架其余部分只读那个结果
+    /// （见 <c>HttpContextExtensions.GetClientIp()</c>）。
+    /// </para>
+    /// <para>
+    /// <strong>没有这份声明时的默认是「只信任 loopback」</strong>，也就是代理与应用同机的部署。
+    /// 代理在另一台机器上时必须把它的地址填进 <see cref="TrustedProxyOptions.KnownProxies"/>
+    /// 或网段填进 <see cref="TrustedProxyOptions.KnownNetworks"/>，否则拿到的是代理自己的地址。
+    /// <em>拿到代理地址是安全的失败方式</em>：限流会把所有人算在同一个桶里（过度限制），
+    /// 而不是让每个调用方各自伪造一个桶（完全不限制）。
+    /// </para>
+    /// </remarks>
+    public TrustedProxyOptions TrustedProxies { get; set; } = new();
+
+    /// <summary>
     /// 获取或设置 是否启用自动路由约定
     /// 当为 true 时,框架会自动为没有显式 [Route] 特性的 Controller 生成路由
     /// 默认值：true
@@ -251,6 +273,72 @@ public class CorsOptions
     /// 获取或设置 是否禁用凭证
     /// </summary>
     public bool DisallowCredentials { get; set; } = false;
+}
+
+/// <summary>
+/// 受信反向代理声明。配置路径：<c>AspNetCore:TrustedProxies</c>
+/// </summary>
+/// <remarks>
+/// 只有在这里被声明的那一跳，转发头才会被采信。语义与
+/// <c>Microsoft.AspNetCore.Builder.ForwardedHeadersOptions</c> 一一对应，
+/// 只是做成了可从 <c>appsettings.json</c> 配置的形状（那个类型的字段是
+/// <c>IPAddress</c> / <c>IPNetwork</c>，绑定不了字符串）。
+/// </remarks>
+public class TrustedProxyOptions
+{
+    /// <summary>
+    /// 获取或设置 受信代理的地址列表（如 <c>["10.0.0.8", "2001:db8::1"]</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 追加在出厂默认（loopback）之上。地址写错会在启动期报错，
+    /// 不会静默退化成「谁都不信」—— 那种退化的症状是「限流突然把所有人算在一起」，
+    /// 没有人会把它联想到一个拼错的地址。
+    /// </remarks>
+    public string[]? KnownProxies { get; set; }
+
+    /// <summary>
+    /// 获取或设置 受信代理网段，CIDR 写法（如 <c>["10.0.0.0/8", "2001:db8::/32"]</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 代理地址不固定时用它（容器编排、云负载均衡的弹性节点）。
+    /// </remarks>
+    public string[]? KnownNetworks { get; set; }
+
+    /// <summary>
+    /// 获取或设置 允许消费的转发头层数。默认 <c>1</c>；<c>null</c> 表示不限层数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 它等于「请求在到达本进程前经过了几层<b>我方</b>代理」。多写会把调用方自己伪造的那一项
+    /// 也当成代理记录读进来，等于白配了 <see cref="KnownProxies"/>；
+    /// 少写只会停在离应用更近的那一跳（拿到的仍是我方代理的地址，安全的失败方式）。
+    /// </para>
+    /// <para>
+    /// <c>null</c>（不限层数）只在每一跳都在 <see cref="KnownProxies"/> /
+    /// <see cref="KnownNetworks"/> 里时才安全：链条一旦走出受信范围，消费就会停下。
+    /// </para>
+    /// </remarks>
+    public int? ForwardLimit { get; set; } = 1;
+
+    /// <summary>
+    /// 获取或设置 是否信任<b>任何</b>上游（清空受信代理与受信网段）。默认 <c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <strong>开了它，转发头就重新变成调用方可以随便写的字段。</strong>
+    /// 它只在「本进程的监听地址只有代理到得了」（容器内网、云负载均衡后的私有子网）
+    /// 时才成立，而那件事框架无从验证 —— 所以它是一句部署方的承诺，不是一个调优项。
+    /// 代理地址不固定但网段固定时，<see cref="KnownNetworks"/> 是更小的那把刀。
+    /// </remarks>
+    public bool TrustAllProxies { get; set; }
+
+    /// <summary>
+    /// 获取或设置 客户端地址所在的请求头名。默认 <c>X-Forwarded-For</c>。
+    /// </summary>
+    /// <remarks>
+    /// 只发 <c>X-Real-IP</c> 的 nginx 配置写 <c>"X-Real-IP"</c>。
+    /// 该头只带一个地址，此时 <see cref="ForwardLimit"/> 应为 <c>1</c>。
+    /// </remarks>
+    public string? ForwardedForHeaderName { get; set; }
 }
 
 /// <summary>

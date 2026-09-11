@@ -13,5 +13,11 @@ public class FeatureOptionsValidator : OptionsValidatorBase<FeatureOptions>
             AddError(errors, nameof(FeatureOptions.CacheRefreshIntervalMinutes),
                 "must be greater than or equal to 0.");
         }
+
+        if (options.ValueCacheSeconds < 0)
+        {
+            AddError(errors, nameof(FeatureOptions.ValueCacheSeconds),
+                "must be greater than or equal to 0 (0 disables the value cache).");
+        }
     }
 }

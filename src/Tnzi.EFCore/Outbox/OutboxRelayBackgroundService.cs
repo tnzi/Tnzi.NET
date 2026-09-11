@@ -28,11 +28,17 @@ public class OutboxRelayBackgroundService : BackgroundService
     private readonly ILogger<OutboxRelayBackgroundService> _logger;
 
     /// <summary>
-    /// 清理计数器，每 N 次轮询执行一次过期消息清理
+    /// 下一次执行过期消息清理的时刻。
     /// </summary>
-    private int _cleanupCounter;
+    /// <remarks>
+    /// ★ 刻意按**时间**触发而不是按轮询次数。原实现是「每 N 次轮询清理一次」，而计数器
+    /// 递增写在「本批为空就提前返回」之后 —— 低流量部署里绝大多数轮询都拿到空批次，
+    /// 计数器几乎不动，<c>RetentionDays</c> 于是成了一句永远不会兑现的配置。
+    /// 初值是 <see cref="DateTimeOffset.MinValue"/>：进程起来后的第一轮就清一次。
+    /// </remarks>
+    private DateTimeOffset _nextCleanupAt = DateTimeOffset.MinValue;
 
-    private const int CleanupInterval = 100;
+    private static readonly TimeSpan CleanupInterval = TimeSpan.FromHours(1);
 
     /// <summary>
     /// 缓存反射 MethodInfo，避免每次发布事件时重复查找
@@ -43,6 +49,9 @@ public class OutboxRelayBackgroundService : BackgroundService
     private static readonly MethodInfo _eventBusPublishMethod =
         typeof(IEventBus).GetMethod(nameof(IEventBus.PublishAsync))
         ?? throw new InvalidOperationException($"Cannot find PublishAsync method on {nameof(IEventBus)}");
+    private static readonly MethodInfo _deadLetterAddMethod =
+        typeof(IEventDeadLetterQueue).GetMethod(nameof(IEventDeadLetterQueue.AddAsync))
+        ?? throw new InvalidOperationException($"Cannot find AddAsync method on {nameof(IEventDeadLetterQueue)}");
 
     public OutboxRelayBackgroundService(
         IServiceScopeFactory scopeFactory,
@@ -145,66 +154,144 @@ public class OutboxRelayBackgroundService : BackgroundService
     {
         var events = await eventStore.GetUnprocessedEventsAsync(_options.BatchSize, stoppingToken);
         var eventList = events.ToList();
-        if (eventList.Count == 0) return;
 
-        // 优先使用 IIntegrationEventBus，否则回退到 IEventBus
-        var integrationEventBus = services.GetService<IIntegrationEventBus>();
-        var eventBus = services.GetService<IEventBus>();
-
-        foreach (var storedEvent in eventList)
+        if (eventList.Count > 0)
         {
-            if (stoppingToken.IsCancellationRequested) break;
+            // 优先使用 IIntegrationEventBus，否则回退到 IEventBus
+            var integrationEventBus = services.GetService<IIntegrationEventBus>();
+            var eventBus = services.GetService<IEventBus>();
 
-            try
+            foreach (var storedEvent in eventList)
             {
-                await PublishStoredEventAsync(storedEvent, integrationEventBus, eventBus, stoppingToken);
-                await eventStore.MarkAsProcessedAsync(storedEvent.EventId, stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to publish outbox event {EventId} ({EventType})",
-                    storedEvent.EventId, storedEvent.EventType);
+                if (stoppingToken.IsCancellationRequested) break;
 
-                await eventStore.MarkAsFailedAsync(storedEvent.EventId, ex.Message, stoppingToken);
-
-                // 超过最大重试次数，标记为已处理（死信），避免无限重试
-                // 使用 MarkAsFailedAsync 后的实际 FailureCount（已在 DB 原子递增）
-                var updatedEvent = await eventStore.GetEventAsync(storedEvent.EventId, stoppingToken);
-                if (updatedEvent != null && updatedEvent.FailureCount >= _options.MaxRetryCount)
-                {
-                    _logger.LogError("Outbox event {EventId} ({EventType}) exceeded max retry count ({MaxRetry}), marking as dead letter",
-                        storedEvent.EventId, storedEvent.EventType, _options.MaxRetryCount);
-                    await eventStore.MarkAsProcessedAsync(storedEvent.EventId, stoppingToken);
-                }
+                await RelayOneAsync(eventStore, services, storedEvent, integrationEventBus, eventBus, stoppingToken);
             }
         }
 
-        // 定期清理过期消息
-        _cleanupCounter++;
-        if (_cleanupCounter >= CleanupInterval)
+        // 清理与本批是否为空无关：空批次正是低流量部署的常态
+        await CleanUpExpiredIfDueAsync(eventStore, services, stoppingToken);
+    }
+
+    private async Task RelayOneAsync(
+        IEventStore eventStore,
+        IServiceProvider services,
+        StoredEvent storedEvent,
+        IIntegrationEventBus? integrationEventBus,
+        IEventBus? eventBus,
+        CancellationToken stoppingToken)
+    {
+        // 在 try 之外持有：死信路由需要知道事件到底有没有被成功物化 ——
+        // 「反序列化不出来」与「投递失败」的处置不同
+        MaterializedEvent? materialized = null;
+
+        try
         {
-            _cleanupCounter = 0;
-            try
+            materialized = MaterializeEvent(storedEvent);
+            await PublishStoredEventAsync(materialized.Value, integrationEventBus, eventBus, stoppingToken);
+            await eventStore.MarkAsProcessedAsync(storedEvent.EventId, stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish outbox event {EventId} ({EventType})",
+                storedEvent.EventId, storedEvent.EventType);
+
+            await eventStore.MarkAsFailedAsync(storedEvent.EventId, ex.Message, stoppingToken);
+
+            // 使用 MarkAsFailedAsync 后的实际 FailureCount（已在 DB 原子递增）
+            var updatedEvent = await eventStore.GetEventAsync(storedEvent.EventId, stoppingToken);
+            if (updatedEvent == null || updatedEvent.FailureCount < _options.MaxRetryCount)
             {
-                var deleted = await eventStore.DeleteExpiredEventsAsync(_options.RetentionDays, stoppingToken);
-                if (deleted > 0)
-                    _logger.LogInformation("Cleaned up {Count} expired outbox messages", deleted);
+                return;
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to clean up expired outbox messages");
-            }
+
+            _logger.LogError("Outbox event {EventId} ({EventType}) exceeded max retry count ({MaxRetry}), marking as dead letter",
+                storedEvent.EventId, storedEvent.EventType, _options.MaxRetryCount);
+
+            // ★ 不能走 MarkAsProcessedAsync：那与「投递成功」写同一组字段，这些从未送达的
+            // 消息会与成功记录混在一起，随后被保留期清理连同 LastError 一起删掉 —— 静默丢失。
+            await eventStore.MarkAsDeadLetterAsync(storedEvent.EventId, ex.Message, stoppingToken);
+
+            await RouteToDeadLetterQueueAsync(services, storedEvent, materialized, ex,
+                updatedEvent.FailureCount, stoppingToken);
         }
     }
 
     /// <summary>
-    /// 反序列化并发布存储的事件
+    /// 把死信同时交给 <see cref="IEventDeadLetterQueue"/>（若已注册）。
     /// </summary>
-    private async Task PublishStoredEventAsync(
+    /// <remarks>
+    /// Outbox 表本身才是死信的持久记录；这里只是把它送到运维惯常查看的那个面上。
+    /// 事件物化不出来（程序集搬家后 <c>Type.GetType</c> 返回 null）时无法构造
+    /// <c>AddAsync&lt;TEvent&gt;</c> 的实参，此时只记录 —— 行还在，证据不丢。
+    /// </remarks>
+    private async Task RouteToDeadLetterQueueAsync(
+        IServiceProvider services,
         StoredEvent storedEvent,
-        IIntegrationEventBus? integrationEventBus,
-        IEventBus? eventBus,
+        MaterializedEvent? materialized,
+        Exception failure,
+        int failureCount,
         CancellationToken cancellationToken)
+    {
+        var deadLetterQueue = services.GetService<IEventDeadLetterQueue>();
+        if (deadLetterQueue == null) return;
+
+        if (materialized is null || !typeof(IEvent).IsAssignableFrom(materialized.Value.Type))
+        {
+            _logger.LogWarning(
+                "Outbox event {EventId} ({EventType}) could not be materialised, so it cannot be handed to the "
+                + "dead letter queue. The outbox row is the record of it; it is kept out of retention cleanup.",
+                storedEvent.EventId, storedEvent.EventType);
+            return;
+        }
+
+        try
+        {
+            var task = (Task?)_deadLetterAddMethod
+                .MakeGenericMethod(materialized.Value.Type)
+                .Invoke(deadLetterQueue,
+                    [materialized.Value.Instance, typeof(OutboxRelayBackgroundService), failure, cancellationToken])
+                ?? throw new InvalidOperationException("AddAsync returned null");
+            await task;
+        }
+        catch (Exception ex)
+        {
+            // 死信队列只是第二块展示面，写不进去不该影响本轮其余消息
+            _logger.LogError(ex, "Failed to add outbox event {EventId} to the dead letter queue after {FailureCount} attempts",
+                storedEvent.EventId, failureCount);
+        }
+    }
+
+    private async Task CleanUpExpiredIfDueAsync(IEventStore eventStore, IServiceProvider services,
+        CancellationToken stoppingToken)
+    {
+        var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var now = timeProvider.GetUtcNow();
+        if (now < _nextCleanupAt) return;
+
+        _nextCleanupAt = now + CleanupInterval;
+
+        try
+        {
+            var deleted = await eventStore.DeleteExpiredEventsAsync(_options.RetentionDays, stoppingToken);
+            if (deleted > 0)
+                _logger.LogInformation("Cleaned up {Count} expired outbox messages", deleted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean up expired outbox messages");
+        }
+    }
+
+    /// <summary>
+    /// 已从存储行物化出来的事件（类型 + 实例）。
+    /// </summary>
+    private readonly record struct MaterializedEvent(Type Type, object Instance);
+
+    /// <summary>
+    /// 解析类型并反序列化存储的事件
+    /// </summary>
+    private static MaterializedEvent MaterializeEvent(StoredEvent storedEvent)
     {
         var eventType = Type.GetType(storedEvent.EventType);
         if (eventType == null)
@@ -217,6 +304,21 @@ public class OutboxRelayBackgroundService : BackgroundService
         {
             throw new InvalidOperationException($"Failed to deserialize event data for type: {storedEvent.EventType}");
         }
+
+        return new MaterializedEvent(eventType, @event);
+    }
+
+    /// <summary>
+    /// 发布已物化的事件
+    /// </summary>
+    private static async Task PublishStoredEventAsync(
+        MaterializedEvent materialized,
+        IIntegrationEventBus? integrationEventBus,
+        IEventBus? eventBus,
+        CancellationToken cancellationToken)
+    {
+        var eventType = materialized.Type;
+        var @event = materialized.Instance;
 
         // 如果是集成事件且 IIntegrationEventBus 可用，使用集成事件总线发布
         if (integrationEventBus != null && typeof(IIntegrationEvent).IsAssignableFrom(eventType))

@@ -742,15 +742,21 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// 获取角色的功能ID列表
+    /// 获取角色的功能ID列表（仅当前生效的功能）
     /// </summary>
     /// <param name="roleId">角色ID</param>
     /// <returns>功能ID列表</returns>
+    /// <remarks>
+    /// 指向退役 / 已禁用功能的休眠授权刻意不返回：这个列表喂的是分配矩阵，而矩阵只渲染生效项。
+    /// 若把休眠 id 一并返回，矩阵会原样提交回来，<see cref="SetRoleFunctionsAsync"/> 按同一判据
+    /// 拒绝 —— 该角色的矩阵就再也保存不了。GET → PUT 的往返必须是一次空操作。
+    /// </remarks>
     public async Task<Result<IEnumerable<Guid>>> GetRoleFunctionIdsAsync(Guid roleId)
     {
+        var liveFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
         var functionIds = await _roleFunctionRepository
             .Where(rf => rf.RoleId == roleId && rf.IsEnabled)
-            .Select(rf => rf.FunctionId)
+            .Join(liveFunctions, rf => rf.FunctionId, f => f.Id, (rf, _) => rf.FunctionId)
             .ToListAsync();
         return Ok((IEnumerable<Guid>)functionIds);
     }
@@ -774,16 +780,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
-        // 验证功能是否存在
-        var existingFunctions = await _moduleFunctionRepository
-            .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
-            .Select(f => f.Id)
-            .ToListAsync();
-
-        var missingFunctions = functionIdList.Except(existingFunctions).ToList();
-        if (missingFunctions.Count > 0)
+        // 验证功能存在且当前生效 —— 与权限解析同一判据，否则授出去的是一条没人读的行
+        var notGrantable = await FunctionLiveness.DescribeNotGrantableAsync(_moduleFunctionRepository, functionIdList);
+        if (notGrantable != null)
         {
-            return Fail($"Functions not found: {string.Join(", ", missingFunctions)}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+            return Fail(notGrantable, 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
         // 获取已存在的角色功能关联
@@ -843,13 +844,19 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// 设置角色的功能（覆盖原有功能）
+    /// 设置角色的功能（覆盖原有的<b>生效</b>功能集）
     /// </summary>
     /// <param name="roleId">角色ID</param>
-    /// <param name="functionIds">功能ID列表</param>
+    /// <param name="functionIds">功能ID列表，须全部为当前生效的功能</param>
+    /// <remarks>
+    /// 覆盖的范围是矩阵够得到的范围：指向退役 / 已禁用功能的休眠授权<b>原样保留</b>。
+    /// 退役是「宿主没加载那个模块」的正常产物，禁用是管理员的临时开关，两者结束时授权都要回来 ——
+    /// 顺手删掉等于把 <c>PermissionRetirementMode.Disable</c> 承诺的「保留」偷换成「清空」。
+    /// 明确要全部删除的走 <see cref="ClearRoleFunctionsAsync"/>。
+    /// </remarks>
     public async Task<Result> SetRoleFunctionsAsync(Guid roleId, IEnumerable<Guid> functionIds)
     {
-        var functionIdList = functionIds.ToList();
+        var functionIdList = functionIds.Distinct().ToList();
 
         var violation = await GetRoleGrantViolationAsync(roleId, functionIdList);
         if (violation != null)
@@ -857,26 +864,29 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
-        // 验证新功能是否存在
-        if (functionIdList.Count > 0)
+        // 验证新功能存在且当前生效
+        var notGrantable = await FunctionLiveness.DescribeNotGrantableAsync(_moduleFunctionRepository, functionIdList);
+        if (notGrantable != null)
         {
-            var existingFunctions = await _moduleFunctionRepository
-                .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
-                .Select(f => f.Id)
-                .ToListAsync();
-
-            var missingFunctions = functionIdList.Except(existingFunctions).ToList();
-            if (missingFunctions.Count > 0)
-            {
-                return Fail($"Functions not found: {string.Join(", ", missingFunctions)}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
-            }
+            return Fail(notGrantable, 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
+
+        // 休眠授权（指向退役 / 已禁用功能）在覆盖范围之外
+        var dormantIds = await FunctionLiveness.GetDormantFunctionIdsAsync(
+            _moduleFunctionRepository, _roleFunctionRepository.Where(rf => rf.RoleId == roleId), rf => rf.FunctionId);
 
         // 原子操作：在同一个 UnitOfWork 中删除旧关联并创建新关联，避免权限窗口期
         var result = await ExecuteInUnitOfWorkAsync(async _ =>
         {
-            // 删除旧关联
-            await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId);
+            // 删除旧关联（休眠行除外）
+            if (dormantIds.Count == 0)
+            {
+                await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId);
+            }
+            else
+            {
+                await _roleFunctionRepository.DeleteAsync(rf => rf.RoleId == roleId && !dormantIds.Contains(rf.FunctionId));
+            }
 
             // 创建新关联
             if (functionIdList.Count > 0)
@@ -1543,10 +1553,14 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail<int>("Source and target role cannot be the same", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        // Get source role's enabled function IDs
+        // Get source role's enabled function IDs. Only grants on functions that are
+        // currently in effect are copied: a dormant grant (retired / disabled function)
+        // would be a row nobody reads, and its code is in no grantor's effective set,
+        // so a non-super grantor could never clone a role that carries one.
+        var liveFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
         var sourceFunctionIds = await _roleFunctionRepository
             .Where(rf => rf.RoleId == sourceRoleId && rf.IsEnabled)
-            .Select(rf => rf.FunctionId)
+            .Join(liveFunctions, rf => rf.FunctionId, f => f.Id, (rf, _) => rf.FunctionId)
             .ToListAsync();
 
         if (sourceFunctionIds.Count == 0)
@@ -1636,10 +1650,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Ok(new PermissionImportResultDto());
         }
 
-        // Resolve function codes to IDs
+        // Resolve function codes to IDs. A code that exists here but is retired or
+        // disabled resolves to nothing: importing it would write a grant nobody reads.
+        // It is reported under NotFound, which is what it is in this deployment.
         var codeList = importData.FunctionCodes.Distinct().ToList();
         var functions = await _moduleFunctionRepository
-            .Where(f => codeList.Contains(f.Code) && f.IsEnabled)
+            .Where(f => codeList.Contains(f.Code) && f.IsEnabled && !f.IsRetired)
             .Select(f => new { f.Id, f.Code })
             .ToListAsync();
 

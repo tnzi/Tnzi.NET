@@ -10,7 +10,7 @@ import { defineStore } from 'pinia';
 import { AuthStateManager } from '@tnzi/core/state';
 import type { StateDeps } from '@tnzi/core/state';
 import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
-import type { LoginDto, LoginResultDto, UserProfile, UpdateUserDto } from '@tnzi/core/services/identity';
+import type { LoginDto, LoginResultDto, UserProfile, UpdateProfileDto } from '@tnzi/core/services/identity';
 import { getStoreHttpClient, getStoreStorage } from '../factory';
 
 // ============================================
@@ -81,7 +81,7 @@ export const useAuthStore = defineStore('auth', () => {
     return getManager().fetchUserProfile();
   }
 
-  async function updateProfile(data: UpdateUserDto): Promise<UserProfile> {
+  async function updateProfile(data: UpdateProfileDto): Promise<UserProfile> {
     return getManager().updateProfile(data);
   }
 

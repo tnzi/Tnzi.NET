@@ -46,7 +46,7 @@ import {
   type CountryPackSeedResult as CoreCountryPackSeedResult,
 } from '@tnzi/core/services/payroll'
 import type { PagedList } from '@tnzi/core'
-import { ensureOk, unwrapResult as unwrap, pagedResult, pageArray } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, pagedResult, pageArray, unwrapOk } from '../_mappers'
 
 // Re-export the DTO types under bridge names consumed by pages/configs.
 export type EmployeeDto = CoreEmployeeDto
@@ -217,15 +217,15 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         return toPaged(result, query)
       },
       get: async (id) => unwrap<EmployeeDto | null>(await api.employees.get(id)),
-      create: async (data) => unwrap<EmployeeDto>(await api.employees.create(data)),
-      update: async (id, data) => unwrap<EmployeeDto>(await api.employees.update(id, data)),
+      create: async (data) => unwrapOk<EmployeeDto>(await api.employees.create(data)),
+      update: async (id, data) => unwrapOk<EmployeeDto>(await api.employees.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) ensureOk(await api.employees.delete(id))
       },
-      ensureVendor: async (id) => unwrap<EmployeeDto>(await api.employees.ensureVendor(id)),
+      ensureVendor: async (id) => unwrapOk<EmployeeDto>(await api.employees.ensureVendor(id)),
       assignments: async (id) => unwrap<SalaryAssignmentDto[]>(await api.employees.getAssignments(id)) ?? [],
       createAssignment: async (id, data) =>
-        unwrap<SalaryAssignmentDto>(await api.employees.createAssignment(id, data)),
+        unwrapOk<SalaryAssignmentDto>(await api.employees.createAssignment(id, data)),
       deleteAssignment: async (id, assignmentId) => {
         ensureOk(await api.employees.deleteAssignment(id, assignmentId))
       },
@@ -245,8 +245,8 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         )
         return toPaged(result, query)
       },
-      create: async (data) => unwrap<SalaryComponentDto>(await api.components.create(data)),
-      update: async (id, data) => unwrap<SalaryComponentDto>(await api.components.update(id, data)),
+      create: async (data) => unwrapOk<SalaryComponentDto>(await api.components.create(data)),
+      update: async (id, data) => unwrapOk<SalaryComponentDto>(await api.components.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) ensureOk(await api.components.delete(id))
       },
@@ -267,8 +267,8 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         return toPaged(result, query)
       },
       getById: async (id) => unwrap<SalaryStructureDto | null>(await api.structures.get(id)),
-      create: async (data) => unwrap<SalaryStructureDto>(await api.structures.create(data)),
-      update: async (id, data) => unwrap<SalaryStructureDto>(await api.structures.update(id, data)),
+      create: async (data) => unwrapOk<SalaryStructureDto>(await api.structures.create(data)),
+      update: async (id, data) => unwrapOk<SalaryStructureDto>(await api.structures.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) ensureOk(await api.structures.delete(id))
       },
@@ -289,9 +289,9 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         return toPaged(result, query)
       },
       getById: async (id) => unwrap<BracketTableDto | null>(await api.brackets.get(id)),
-      resolve: async (code, asOf) => unwrap<BracketTableDto>(await api.brackets.resolve(code, asOf)),
-      create: async (data) => unwrap<BracketTableDto>(await api.brackets.create(data)),
-      update: async (id, data) => unwrap<BracketTableDto>(await api.brackets.update(id, data)),
+      resolve: async (code, asOf) => unwrapOk<BracketTableDto>(await api.brackets.resolve(code, asOf)),
+      create: async (data) => unwrapOk<BracketTableDto>(await api.brackets.create(data)),
+      update: async (id, data) => unwrapOk<BracketTableDto>(await api.brackets.update(id, data)),
       delete: async (ids) => {
         for (const id of ids) ensureOk(await api.brackets.delete(id))
       },
@@ -314,25 +314,25 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         return toPaged(result, query)
       },
       getById: async (id) => unwrap<PayRunDto | null>(await api.runs.get(id)),
-      createDraft: async (data) => unwrap<PayRunDto>(await api.runs.createDraft(data)),
-      updateDraft: async (id, data) => unwrap<PayRunDto>(await api.runs.updateDraft(id, data)),
+      createDraft: async (data) => unwrapOk<PayRunDto>(await api.runs.createDraft(data)),
+      updateDraft: async (id, data) => unwrapOk<PayRunDto>(await api.runs.updateDraft(id, data)),
       deleteDraft: async (id) => {
         ensureOk(await api.runs.deleteDraft(id))
       },
-      calculate: async (id) => unwrap<PayRunDto>(await api.runs.calculate(id)),
-      post: async (id) => unwrap<PayRunDto>(await api.runs.post(id)),
-      pay: async (id, data) => unwrap<PayRunDto>(await api.runs.pay(id, data)),
-      voidRun: async (id) => unwrap<PayRunDto>(await api.runs.void(id)),
+      calculate: async (id) => unwrapOk<PayRunDto>(await api.runs.calculate(id)),
+      post: async (id) => unwrapOk<PayRunDto>(await api.runs.post(id)),
+      pay: async (id, data) => unwrapOk<PayRunDto>(await api.runs.pay(id, data)),
+      voidRun: async (id) => unwrapOk<PayRunDto>(await api.runs.void(id)),
       payslips: async (id) => unwrap<PayslipListDto[]>(await api.runs.getPayslips(id)) ?? [],
       payslip: async (id, payslipId) => unwrap<PayslipDto | null>(await api.runs.getPayslip(id, payslipId)),
       updatePayslipInputs: async (id, payslipId, data) =>
-        unwrap<PayslipDto>(await api.runs.updatePayslipInputs(id, payslipId, data)),
+        unwrapOk<PayslipDto>(await api.runs.updatePayslipInputs(id, payslipId, data)),
       inputs: async (id) => unwrap<PayRunInputDto[]>(await api.runs.getInputs(id)) ?? [],
-      setInput: async (id, data) => unwrap<PayRunInputDto>(await api.runs.setInput(id, data)),
+      setInput: async (id, data) => unwrapOk<PayRunInputDto>(await api.runs.setInput(id, data)),
       deleteInput: async (id, inputId) => {
         ensureOk(await api.runs.deleteInput(id, inputId))
       },
-      createFromExternal: async (data) => unwrap<PayRunDto>(await api.runs.createFromExternal(data)),
+      createFromExternal: async (data) => unwrapOk<PayRunDto>(await api.runs.createFromExternal(data)),
     },
 
     countryPacks: {
@@ -341,7 +341,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
           unwrap<CountryPackDto[]>(await api.countryPacks.getRegistered()) ?? [],
           { searchText: '', filters: {}, ...query },
         ),
-      seed: async (code) => unwrap<CountryPackSeedResult>(await api.countryPacks.seed(code)),
+      seed: async (code) => unwrapOk<CountryPackSeedResult>(await api.countryPacks.seed(code)),
     },
   }
 }

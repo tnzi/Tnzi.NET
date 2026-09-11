@@ -15,6 +15,11 @@ namespace Tnzi.Finance.Services.Internal;
 public class GeneralLedgerReader
 {
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
+    /// <summary>
+    /// 只用于把命中的来源单据 <c>(SourceType, SourceId)</c> 解析成凭证 Id
+    /// （见 <see cref="MatchingSourceEntryIdsAsync"/>），行明细本身始终读 <see cref="_lineRepository"/>
+    /// </summary>
+    private readonly IReadOnlyRepository<JournalEntry, Guid> _entryRepository;
     private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
     private readonly IReadOnlyRepository<Customer, Guid> _customerRepository;
     private readonly IReadOnlyRepository<Vendor, Guid> _vendorRepository;
@@ -29,6 +34,7 @@ public class GeneralLedgerReader
 
     public GeneralLedgerReader(
         IReadOnlyRepository<JournalLine, Guid> lineRepository,
+        IReadOnlyRepository<JournalEntry, Guid> entryRepository,
         IReadOnlyRepository<Account, Guid> accountRepository,
         IReadOnlyRepository<Customer, Guid> customerRepository,
         IReadOnlyRepository<Vendor, Guid> vendorRepository,
@@ -38,6 +44,7 @@ public class GeneralLedgerReader
         IOptionsSnapshot<FinanceOptions> options)
     {
         _lineRepository = Check.NotNull(lineRepository);
+        _entryRepository = Check.NotNull(entryRepository);
         _accountRepository = Check.NotNull(accountRepository);
         _customerRepository = Check.NotNull(customerRepository);
         _vendorRepository = Check.NotNull(vendorRepository);
@@ -249,14 +256,15 @@ public class GeneralLedgerReader
 
         var kw = keyword.ToLower();
 
-        // 付款域的三项（参考号/支票号/往来方名称）挂在 PaymentEntry 上，而凭证只以
-        // SourceType + SourceId(string) 多态回链——EF 翻译不了 Guid.Parse(SourceId)，
-        // 故先在数据库里解析出命中的付款单 Id 集合，再以字符串形式回到主查询做 IN。
+        // 命中的来源单据（付款域自带的三项 + 贡献者贡献的任意来源类型）先解析成**凭证 Id 集合**，
+        // 再以一个 IN 回到主查询。走 Id 而不是把 (SourceType, SourceId) 拼回谓词，是因为这两列
+        // 必须**成对**生效，而来源类型有几种只有运行期才知道——成对下推只能展开成一条 OR 链
+        // （要动态拼表达式树），或把两列拼成一个字符串键（引入分隔符碰撞与各库 concat/collation 差异）。
         // 集合本身经参数化数组下推（EF 10 对参数集合走 json_each/OPENJSON/= ANY，
         // 不再展开成一个个参数），主查询仍是单条 SQL，分页与计数都在数据库侧完成
-        var paymentSourceIds = await MatchingPaymentSourceIdsAsync(kw, cancellationToken);
+        var matchedEntryIds = await MatchingSourceEntryIdsAsync(kw, cancellationToken);
 
-        return paymentSourceIds.Count == 0
+        return matchedEntryIds.Count == 0
             ? lines.Where(l =>
                 (l.Memo != null && l.Memo.ToLower().Contains(kw)) ||
                 (l.JournalEntry!.Memo != null && l.JournalEntry.Memo.ToLower().Contains(kw)) ||
@@ -265,22 +273,75 @@ public class GeneralLedgerReader
                 (l.Memo != null && l.Memo.ToLower().Contains(kw)) ||
                 (l.JournalEntry!.Memo != null && l.JournalEntry.Memo.ToLower().Contains(kw)) ||
                 (l.JournalEntry!.Number != null && l.JournalEntry.Number.ToLower().Contains(kw)) ||
-                (l.JournalEntry!.SourceType == FinanceSourceTypes.PaymentEntry &&
-                 l.JournalEntry.SourceId != null && paymentSourceIds.Contains(l.JournalEntry.SourceId)));
+                matchedEntryIds.Contains(l.JournalEntryId));
     }
 
     /// <summary>
-    /// 关键字命中的收付款单 Id（转成凭证 <c>SourceId</c> 的字符串形式）。
-    /// 命中口径：付款参考号 / 已开具（Issued）支票的支票号 / 往来方（客户或供应商）名称。
-    /// 三个来源都以子查询留在数据库侧，只有最终的 Id 列表回到内存
+    /// 关键字命中的**来源单据**所对应的凭证 Id。
+    /// 命中口径：付款参考号 / 往来方（客户或供应商）名称 / 各 <see cref="IGeneralLedgerSearchContributor"/>
+    /// 贡献的任意 <c>(SourceType, SourceId)</c> 组合（银行域的已开具支票号即其一）
     /// </summary>
     /// <remarks>
-    /// 支票只认 <c>CheckStatus.Issued</c>：作废与毁票的号码虽然占位留痕，
-    /// 但"当前有效票据"才是操作员按支票号找账时想要的答案。
+    /// <b>成对匹配</b>：凭证以 <c>SourceType</c> + <c>SourceId</c>(string) 多态回链业务单据，
+    /// 两者必须成对比较——只按 <c>SourceId</c> 匹配会把另一个来源类型下**同号**的单据一起捞出来。
+    /// <br/><br/>
     /// Guid → string 的转换刻意放在 .NET 侧而非 SQL 侧：各数据库对 uuid 的文本化格式与大小写
-    /// 并不一致，交给 SQL 转换会静默匹配不上（<c>SourceId</c> 写入时用的是 .NET 的 "D" 格式）
+    /// 并不一致，交给 SQL 转换会静默匹配不上（<c>SourceId</c> 写入时用的是 .NET 的 "D" 格式）。
+    /// 同理，成对比较用 <see cref="StringComparer.OrdinalIgnoreCase"/>：候选行由数据库按其自身
+    /// collation 取出，再在内存里收窄成对；用大小写敏感的比较会在不区分大小写的库上**少匹配**。
     /// </remarks>
-    private async Task<List<string>> MatchingPaymentSourceIdsAsync(string keyword, CancellationToken cancellationToken)
+    private async Task<List<Guid>> MatchingSourceEntryIdsAsync(string keyword, CancellationToken cancellationToken)
+    {
+        // SourceType → 该类型下命中的 SourceId 集合
+        var matches = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        void AddMatch(string sourceType, string sourceId)
+        {
+            if (!matches.TryGetValue(sourceType, out var ids))
+                matches[sourceType] = ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            ids.Add(sourceId);
+        }
+
+        foreach (var paymentId in await MatchingPaymentIdsAsync(keyword, cancellationToken))
+            AddMatch(FinanceSourceTypes.PaymentEntry, paymentId.ToString());
+
+        // 内核之外的可搜项（支票号来自银行域的登记簿、消费应用自己的单据号……）经贡献者并入，
+        // 使报表内核不必认识 BankCheck，也不必认识消费应用的任何单据类型。
+        foreach (var contributor in _searchContributors)
+        {
+            foreach (var match in await contributor.MatchAsync(keyword, cancellationToken))
+            {
+                if (!string.IsNullOrEmpty(match.SourceType) && !string.IsNullOrEmpty(match.SourceId))
+                    AddMatch(match.SourceType, match.SourceId);
+            }
+        }
+
+        if (matches.Count == 0)
+            return [];
+
+        // 候选先按 SourceId 在数据库侧收窄（有界：命中的单据数），再在内存里做成对判定。
+        // 这一步不参与分页，故不违反"筛选全部下推"——分页仍发生在主查询的 IN 之上
+        var sourceIds = matches.Values.SelectMany(ids => ids).Distinct(StringComparer.Ordinal).ToList();
+
+        var candidates = await _entryRepository.AsNoTracking()
+            .Where(e => e.SourceId != null && sourceIds.Contains(e.SourceId))
+            .Select(e => new { e.Id, e.SourceType, e.SourceId })
+            .ToListAsync(cancellationToken);
+
+        return
+        [
+            .. candidates
+                .Where(c => c.SourceType != null && c.SourceId != null
+                    && matches.TryGetValue(c.SourceType, out var ids) && ids.Contains(c.SourceId))
+                .Select(c => c.Id)
+        ];
+    }
+
+    /// <summary>
+    /// 关键字命中的收付款单 Id。命中口径：付款参考号 / 往来方（客户或供应商）名称；
+    /// 两个来源都以子查询留在数据库侧，只有最终的 Id 列表回到内存
+    /// </summary>
+    private Task<List<Guid>> MatchingPaymentIdsAsync(string keyword, CancellationToken cancellationToken)
     {
         var vendorIds = _vendorRepository.AsNoTracking()
             .Where(v => v.Name.ToLower().Contains(keyword))
@@ -290,28 +351,13 @@ public class GeneralLedgerReader
             .Where(c => c.Name.ToLower().Contains(keyword))
             .Select(c => c.Id);
 
-        var paymentIds = await _paymentRepository.AsNoTracking()
+        return _paymentRepository.AsNoTracking()
             .Where(p =>
                 (p.Reference != null && p.Reference.ToLower().Contains(keyword)) ||
                 (p.PartyType == FinancePartyType.Vendor && vendorIds.Contains(p.PartyId)) ||
                 (p.PartyType == FinancePartyType.Customer && customerIds.Contains(p.PartyId)))
             .Select(p => p.Id)
             .ToListAsync(cancellationToken);
-
-        var matches = new HashSet<string>(paymentIds.Select(id => id.ToString()), StringComparer.OrdinalIgnoreCase);
-
-        // 内核之外的可搜项（支票号来自银行域的登记簿）经贡献者并入，
-        // 使报表内核不必认识 BankCheck。
-        foreach (var contributor in _searchContributors)
-        {
-            foreach (var match in await contributor.MatchAsync(keyword, cancellationToken))
-            {
-                if (match.SourceType == FinanceSourceTypes.PaymentEntry)
-                    matches.Add(match.SourceId);
-            }
-        }
-
-        return [.. matches];
     }
 
     private static IQueryable<GeneralLedgerLineDto> ProjectLedgerLines(IQueryable<JournalLine> query)

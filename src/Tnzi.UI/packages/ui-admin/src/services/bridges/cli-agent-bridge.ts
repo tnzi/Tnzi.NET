@@ -28,7 +28,7 @@ import {
   type CliRuntimeProbeResultDto,
 } from '@tnzi/core/services/ai'
 
-import { ensureOk, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 export interface CliAgentBridge {
   runtimes: {
@@ -92,7 +92,7 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
       },
       async update(id, input) {
         if (!runtimeApi) throw new Error('AI.Cli module is not available')
-        return unwrap<CliRuntimeDto>(await runtimeApi.update(id, input))
+        return unwrapOk<CliRuntimeDto>(await runtimeApi.update(id, input))
       },
       async remove(id) {
         if (!runtimeApi) throw new Error('AI.Cli module is not available')
@@ -108,7 +108,7 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
       },
       async upsert(agentId, input) {
         if (!bindingApi) throw new Error('AI.Cli module is not available')
-        return unwrap<CliAgentBindingDto>(await bindingApi.upsert(agentId, input))
+        return unwrapOk<CliAgentBindingDto>(await bindingApi.upsert(agentId, input))
       },
       async remove(agentId) {
         if (!bindingApi) throw new Error('AI.Cli module is not available')

@@ -52,11 +52,11 @@ public class FileShareService : ApplicationService, IFileShareService
         // 生成唯一的分享令牌
         var shareToken = GenerateShareToken();
 
-        // 计算密码哈希（如果需要）
+        // 计算密码哈希（如果需要）。PBKDF2 慢哈希，格式带版本前缀（见 SharePasswordHasher）。
         string? passwordHash = null;
         if (!string.IsNullOrEmpty(password))
         {
-            passwordHash = ComputePasswordHash(password);
+            passwordHash = SharePasswordHasher.Hash(password);
         }
 
         var share = new FileShare
@@ -79,8 +79,12 @@ public class FileShareService : ApplicationService, IFileShareService
     public async Task<Result<FileSharePublicDto>> GetShareAsync(string shareToken, CancellationToken cancellationToken = default)
     {
         var share = await _shareRepository.FindAsync((FileShare s) => s.ShareToken == shareToken, cancellationToken);
-        if (share == null)
-            return Fail<FileSharePublicDto>("Share not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // 管理视角带 FileId 与计数，且不论链接活着还是已撤销都如实返回 —— 所以它只给管理者看。
+        // 拒绝与"令牌不存在"同一句：区分开就等于告诉试探者这个令牌是真的。
+        if (share == null || !await CanViewShareAsync(share, cancellationToken))
+            return NotFoundShare<FileSharePublicDto>();
+
         return Ok(MapToPublicDto(share));
     }
 
@@ -119,10 +123,58 @@ public class FileShareService : ApplicationService, IFileShareService
     /// <summary>所有"这条链接用不了"的原因共用同一个回答。</summary>
     private Result<T> NotFoundShare<T>() => Fail<T>("Share not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
+    /// <summary>
+    /// 管理视角能不能看：管理者（见 <see cref="CanManageShareAsync"/>），或者<b>本次请求已凭这条链接通过校验</b>。
+    /// </summary>
+    /// <remarks>
+    /// 后一条服务的是下载流程 <c>Validate → GetShare → 取字节</c>：收件人没有账号，既不是创建者也写不了文件，
+    /// 但校验通过那一刻 <see cref="ValidateShareAccessAsync"/> 已把该文件写进请求作用域的授予表 ——
+    /// 控制器随后凭 GetShare 拿 FileId。授予是请求级凭据，跨请求不成立，所以别的登录用户凭令牌
+    /// 单独调 GetShare 仍是 404。
+    /// </remarks>
+    private async Task<bool> CanViewShareAsync(FileShare share, CancellationToken cancellationToken)
+        => _grantContext.IsGranted(share.FileId) || await CanManageShareAsync(share, cancellationToken);
+
+    /// <summary>
+    /// 谁能<b>管理</b>一条分享（撤销 / 看令牌与计数）：与创建它所要求的是同一份权利。
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>创建者本人 —— 即便他后来失去了对文件的变更权，他发出去的链接仍归他收回。</item>
+    /// <item>对文件有变更权的人（<see cref="IFileAccessAuthorizer.CanWriteAsync"/>：所有者或持 <c>storage.file.update</c>），
+    /// 这正是 <see cref="CreateShareAsync"/> 要求的那份权利。</item>
+    /// <item>文件已删而分享行还在时授权器没有 <c>FileRecord</c> 可问，退回权限码：只有持 <c>storage.file.update</c> 的管理员能收尾。</item>
+    /// </list>
+    /// 请求级授予（分享令牌 / 签署令牌）<b>刻意不算</b>：它证明的是"这一次请求可以读这个文件"，不是"你是这条链接的主人"。
+    /// </remarks>
+    private async Task<bool> CanManageShareAsync(FileShare share, CancellationToken cancellationToken)
+    {
+        if (IsShareCreator(share))
+            return true;
+
+        var file = await _fileRepository.GetAsync(share.FileId, cancellationToken);
+        if (file != null)
+            return await _accessAuthorizer.CanWriteAsync(file, cancellationToken);
+
+        return PermissionChecker != null
+               && await PermissionChecker.IsGrantedAsync(StoragePermissionNames.FileUpdate);
+    }
+
+    /// <summary>
+    /// 归属判定，与 <c>FileAccessAuthorizer.IsOwner</c> 同构：<c>CreatorId</c> 为 null 的行（后台任务产生）不属于任何人。
+    /// </summary>
+    private bool IsShareCreator(FileShare share)
+        => share.CreatorId.HasValue
+           && CurrentUser?.Id is { } me
+           && share.CreatorId.Value == me;
+
     public async Task<Result> RevokeShareAsync(string shareToken, CancellationToken cancellationToken = default)
     {
         var share = await _shareRepository.FindAsync((FileShare s) => s.ShareToken == shareToken, cancellationToken);
-        if (share == null)
+
+        // 撤销要求与创建同一份权利。此前这里一个判据都没有：任何已登录用户拿到一个泄漏的令牌，
+        // 就能把别人发出去的链接撤掉，而创建者毫不知情。
+        if (share == null || !await CanManageShareAsync(share, cancellationToken))
             return Fail("Share not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var writable = await LoadForUpdateAsync(share, cancellationToken);
@@ -164,7 +216,8 @@ public class FileShareService : ApplicationService, IFileShareService
         if (share.RequirePassword)
         {
             var supplied = !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(share.PasswordHash);
-            if (!supplied || !VerifyPasswordHash(password!, share.PasswordHash!))
+            var needsRehash = false;
+            if (!supplied || !SharePasswordHasher.Verify(password!, share.PasswordHash!, out needsRehash))
             {
                 await RecordFailedAttemptAsync(share, options, cancellationToken);
                 return Ok(false);
@@ -172,10 +225,14 @@ public class FileShareService : ApplicationService, IFileShareService
 
             // 连续失败计数只在真正通过时清零 —— 否则攻击者只要偶尔混进一次正确请求
             // 就能把闸门重置。这里"通过"就是唯一的重置条件。
-            if (share.FailedAttemptCount > 0)
+            // ★ 同一次写入顺带把旧格式（单轮 HMAC）的哈希就地升级成 PBKDF2：
+            //   只有此刻手里有明文口令，才算得出新哈希；存量链接因此不需要重发。
+            if (share.FailedAttemptCount > 0 || needsRehash)
             {
                 var writable = await LoadForUpdateAsync(share, cancellationToken);
                 writable.FailedAttemptCount = 0;
+                if (needsRehash)
+                    writable.PasswordHash = SharePasswordHasher.Hash(password!);
                 await _shareRepository.UpdateAsync(writable, cancellationToken);
             }
         }
@@ -409,37 +466,5 @@ public class FileShareService : ApplicationService, IFileShareService
         // 无填充的 URL 安全编码（令牌要进 URL 路径段）。BCL 的 Base64Url 与此前手写的
         // ToBase64String + 字符替换 + TrimEnd('=') 完全等价，既有库中令牌不受影响。
         return Base64Url.EncodeToString(bytes);
-    }
-
-    /// <summary>
-    /// 计算密码哈希（HMAC-SHA256 + 随机盐），存储格式为 salt:hash
-    /// </summary>
-    private static string ComputePasswordHash(string password)
-    {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var hash = ComputeHmacSha256(password, salt);
-        return $"{Convert.ToHexString(salt)}:{Convert.ToHexString(hash)}".ToLowerInvariant();
-    }
-
-    /// <summary>
-    /// 验证密码是否匹配已存储的 salt:hash
-    /// </summary>
-    private static bool VerifyPasswordHash(string password, string storedHash)
-    {
-        var parts = storedHash.Split(':');
-        if (parts.Length != 2)
-            return false;
-
-        var salt = Convert.FromHexString(parts[0]);
-        var expectedHash = Convert.FromHexString(parts[1]);
-        var actualHash = ComputeHmacSha256(password, salt);
-
-        return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
-    }
-
-    private static byte[] ComputeHmacSha256(string password, byte[] salt)
-    {
-        using var hmac = new HMACSHA256(salt);
-        return hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
     }
 }

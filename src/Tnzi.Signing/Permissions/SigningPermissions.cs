@@ -1,6 +1,17 @@
 namespace Tnzi.Signing.Permissions;
 
 /// <summary>
+/// 本模块权限码的字符串常量。管理控制器上的 <c>[ApiAuthorize]</c> 仍写字面量（那是权限目录门禁
+/// 扫描的形态）；这里的常量给<b>代码里的判定</b>用，免得同一个码在两处各拼一遍。
+/// </summary>
+public static class SigningPermissionNames
+{
+    public const string View = "signing.view";
+    public const string TemplateView = "signing.template.view";
+    public const string RequestView = "signing.request.view";
+}
+
+/// <summary>
 /// 电子签署模块管理面的操作级权限码。
 /// </summary>
 /// <remarks>

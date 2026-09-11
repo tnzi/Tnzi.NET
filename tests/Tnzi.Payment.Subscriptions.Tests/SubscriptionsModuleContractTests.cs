@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Configuration;
@@ -243,21 +243,22 @@ public class SubscriptionsModuleContractTests
     }
 
     /// <summary>
-    /// 五条后台扫描全部贡献给了父模块的后台循环，名字与拆分前的日志文案逐字相同。
+    /// 六条后台扫描全部贡献给了父模块的后台循环，前五条的名字与拆分前的日志文案逐字相同。
     /// </summary>
     /// <remarks>
     /// 少注册一条不会报错，表现是「某一类订阅从此再也没被处理过」—— 比如少了续费那条，
-    /// 所有订阅到期后安静地停在原地，既不扣款也不过期。
+    /// 所有订阅到期后安静地停在原地，既不扣款也不过期；少了结算待生效变更那条，
+    /// 不参与续费的订阅（关掉自动续费、暂停中、逾期）约定好的降级永远不会发生。
     /// </remarks>
     [Fact]
-    public void AllFiveScheduledScansAreContributed()
+    public void AllScheduledScansAreContributed()
     {
         var scans = ConfiguredModule()
             .Where(d => d.ServiceType == typeof(IPaymentScheduledScan))
             .Select(d => d.ImplementationType!)
             .ToList();
 
-        scans.Count.ShouldBe(5);
+        scans.Count.ShouldBe(6);
 
         var names = scans
             .Select(t => (IPaymentScheduledScan)Activator.CreateInstance(t, new Mock<ISubscriptionService>().Object)!)
@@ -267,6 +268,7 @@ public class SubscriptionsModuleContractTests
 
         names.ShouldBe(
         [
+            "apply due plan changes",
             "convert due trials",
             "expire overdue subscriptions",
             "renew due subscriptions",

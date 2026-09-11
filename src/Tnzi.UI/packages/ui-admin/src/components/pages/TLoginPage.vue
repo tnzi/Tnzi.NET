@@ -34,6 +34,7 @@ import LoginWaves from './login/LoginWaves.vue'
 import LoginBrandPanel from './login/LoginBrandPanel.vue'
 import {
   provideLoginContext,
+  type PendingActionChallenge,
   DEFAULT_LOGIN_FEATURES,
   type LoginContext,
   type LoginModule,
@@ -160,6 +161,7 @@ const DEFAULT_LABELS: Record<LoginModule, { key: string; fallback: string }> = {
   'reset-pwd': { key: 'admin.login.label.resetPwd', fallback: 'Reset Password' },
   'bind-wechat': { key: 'admin.login.label.bindWechat', fallback: 'Bind WeChat' },
   'two-factor': { key: 'admin.login.label.twoFactor', fallback: 'Two-Factor Verification' },
+  'pending-actions': { key: 'admin.login.label.pendingActions', fallback: 'Action Required' },
 }
 
 const activeLabel = computed(() => {
@@ -237,6 +239,11 @@ const pendingTwoFactor = ref<TwoFactorChallenge | null>(null)
 // `helpers.setCaptchaRequired(...)` when the backend replies
 // `IDENTITY_CAPTCHA_REQUIRED`; PwdLogin reveals + seeds its captcha field.
 const pendingCaptcha = ref<LoginCaptchaData | null>(null)
+// 待办义务 - 凭据与 2FA 都过了，但账号欠着必须先办完的事（目前只有强制改密）。
+// 后端答 403 `IDENTITY_PENDING_ACTIONS_REQUIRED`，回调经 helpers 推进来，
+// 下面的 watcher 自动切到对应模块 —— 没有它，一个密码正确的用户会看到
+// 「登录失败」然后无处可去。
+const pendingAction = ref<PendingActionChallenge | null>(null)
 const helpers = {
   setTwoFactorRequired: (c: TwoFactorChallenge) => {
     pendingTwoFactor.value = c
@@ -250,9 +257,18 @@ const helpers = {
   clearCaptcha: () => {
     pendingCaptcha.value = null
   },
+  setPendingActionRequired: (c: PendingActionChallenge) => {
+    pendingAction.value = c
+  },
+  clearPendingAction: () => {
+    pendingAction.value = null
+  },
 }
 watch(pendingTwoFactor, (challenge) => {
   if (challenge) props.onToggleModule?.('two-factor')
+})
+watch(pendingAction, (challenge) => {
+  if (challenge) props.onToggleModule?.('pending-actions')
 })
 
 // Layout-derived form chrome hints - `reactive` unwraps the computeds so
@@ -305,6 +321,7 @@ const loginContext: LoginContext = {
   features: props.features,
   scene,
   pendingTwoFactor,
+  pendingAction,
   pendingCaptcha,
   helpers,
 }

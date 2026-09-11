@@ -27,6 +27,9 @@ public class ImagingOptionsValidator : OptionsValidatorBase<ImagingOptions>
         if (captcha.DefaultLength < 2 || captcha.DefaultLength > 10)
             AddError(errors, nameof(captcha.DefaultLength), "DefaultLength must be between 2 and 10.");
 
+        if (options.MaxDecodePixels < 0)
+            AddError(errors, nameof(options.MaxDecodePixels), "MaxDecodePixels cannot be negative (use 0 for no limit).");
+
         ValidateSlidingCaptcha(options.SlidingCaptcha, errors);
     }
 
@@ -48,8 +51,14 @@ public class ImagingOptionsValidator : OptionsValidatorBase<ImagingOptions>
             AddError(errors, "SlidingCaptcha.Height",
                 "Height must be greater than PieceSize + 20 to leave room for the puzzle gap.");
 
+        // ★ 容差必须有上界，否则「验证」形同虚设：容差达到拼图块尺寸时，
+        // 拼块放在缺口附近任何位置都算通过，而配置校验一声不响地放行 ——
+        // 这个验证码看起来在工作，实际上谁都能过。此前只校验了下界。
         if (sliding.Tolerance < 0)
             AddError(errors, "SlidingCaptcha.Tolerance", "Tolerance must be greater than or equal to 0.");
+        else if (sliding.Tolerance >= sliding.PieceSize)
+            AddError(errors, "SlidingCaptcha.Tolerance",
+                "Tolerance must be smaller than PieceSize; at or above it almost any slider position passes.");
 
         if (sliding.ExpirationMinutes < 1 || sliding.ExpirationMinutes > 60)
             AddError(errors, "SlidingCaptcha.ExpirationMinutes", "ExpirationMinutes must be between 1 and 60.");

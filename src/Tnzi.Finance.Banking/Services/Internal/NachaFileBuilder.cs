@@ -11,6 +11,11 @@ internal static class NachaFileBuilder
 {
     private const int Width = 94;
     private const int BlockingFactor = 10;
+
+    /// <summary>DFI Account Number 字段宽度（Entry Detail 记录）。
+    /// <see cref="BankNumberHelper.MaxAccountNumberLength"/> 直接引用它当录入上限 —— 两处各写一个数字的话，
+    /// 漂移的症状是「录入通过、生成时才拒」而不是编译失败。</summary>
+    internal const int AccountNumberWidth = 17;
     private const string EntryClassCode = "CCD";
     private const string ServiceClassCredits = "220"; // ACH credits only
 
@@ -121,8 +126,8 @@ internal static class NachaFileBuilder
             transactionCode +                                          // Transaction Code
             rdfi8 +                                                    // Receiving DFI Identification
             checkDigit +                                               // Check Digit
-            EftFieldWriter.Text(e.AccountNumber, 17) +               // DFI Account Number
-            EftFieldWriter.Num(cents, 10) +                          // Amount
+            EftFieldWriter.AccountField(e.AccountNumber, AccountNumberWidth, $"payee '{e.PayeeName}'") + // DFI Account Number
+            EftFieldWriter.Amount(cents, 10, $"payee '{e.PayeeName}'") +     // Amount
             EftFieldWriter.Text(e.Reference, 15) +                   // Individual Identification Number
             EftFieldWriter.Text(e.PayeeName, 22) +                   // Individual Name
             EftFieldWriter.Spaces(2) +                                // Discretionary Data
@@ -139,7 +144,7 @@ internal static class NachaFileBuilder
             EftFieldWriter.Num(entryCount, 6) +                      // Entry/Addenda Count
             EftFieldWriter.Num(entryHash, 10) +                     // Entry Hash
             EftFieldWriter.Num(0, 12) +                              // Total Debit Amount
-            EftFieldWriter.Num(totalCredits, 12) +                  // Total Credit Amount
+            EftFieldWriter.Amount(totalCredits, 12, "the batch total") + // Total Credit Amount
             EftFieldWriter.Text(r.OriginatorId, 10) +               // Company Identification
             EftFieldWriter.Spaces(19) +                              // Message Authentication Code
             EftFieldWriter.Spaces(6) +                               // Reserved
@@ -157,7 +162,7 @@ internal static class NachaFileBuilder
             EftFieldWriter.Num(entryCount, 8) +                     // Entry/Addenda Count
             EftFieldWriter.Num(entryHash, 10) +                     // Entry Hash
             EftFieldWriter.Num(0, 12) +                              // Total Debit Amount
-            EftFieldWriter.Num(totalCredits, 12) +                  // Total Credit Amount
+            EftFieldWriter.Amount(totalCredits, 12, "the file total") + // Total Credit Amount
             EftFieldWriter.Spaces(39);                               // Reserved
         return EftFieldWriter.Fixed(record, Width);
     }

@@ -367,9 +367,25 @@ public class ReconciliationExportResultDto
     public string FileName { get; set; } = string.Empty;
 
     /// <summary>
-    /// 总记录数
+    /// CSV 里实际包含的记录数
     /// </summary>
     public int TotalRecords { get; set; }
+
+    /// <summary>
+    /// 查询条件命中的记录总数（可能大于 <see cref="TotalRecords"/>）
+    /// </summary>
+    public int MatchedRecords { get; set; }
+
+    /// <summary>
+    /// 是否因为超过单次导出上限而被截断。
+    /// </summary>
+    /// <remarks>
+    /// 截断必须如实报告：一份看起来完整、实际少了一半的对账单，比一份明说被截断的糟得多 ——
+    /// 对账的用途正是「两边对得上对不上」，少的那部分会被读成差异。
+    /// 汇总金额（<see cref="TotalRevenue"/> 等）统计的**恰好是 CSV 里那些行**，
+    /// 因此文件与汇总永远自洽；要拿全量就收窄时间窗再导一次。
+    /// </remarks>
+    public bool Truncated { get; set; }
 
     /// <summary>
     /// 汇总：总收入

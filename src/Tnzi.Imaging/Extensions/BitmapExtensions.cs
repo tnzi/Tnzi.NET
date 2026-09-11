@@ -70,10 +70,14 @@ public static class BitmapExtensions
     /// </summary>
     /// <param name="bytes">图片字节数组</param>
     /// <returns>图片对象（调用方负责 Dispose）</returns>
+    /// <remarks>
+    /// 经 <see cref="ImageDecodeGuard"/> 解码：先读文件头判尺寸，超过像素上限直接拒绝。
+    /// 压缩字节数与解码后的内存没有关系 —— 一个 200KB 的 PNG 可以声明 50000×50000。
+    /// </remarks>
     public static Image<Rgba32> LoadFromBytes(byte[] bytes)
     {
         Check.NotNullOrEmpty(bytes);
-        return Image.Load<Rgba32>(bytes);
+        return ImageDecodeGuard.Load(bytes);
     }
 
     /// <summary>
@@ -81,10 +85,11 @@ public static class BitmapExtensions
     /// </summary>
     /// <param name="stream">图片流</param>
     /// <returns>图片对象（调用方负责 Dispose）</returns>
+    /// <inheritdoc cref="LoadFromBytes"/>
     public static Image<Rgba32> LoadFromStream(Stream stream)
     {
         Check.NotNull(stream);
-        return Image.Load<Rgba32>(stream);
+        return ImageDecodeGuard.Load(stream);
     }
 
     /// <summary>
@@ -96,8 +101,7 @@ public static class BitmapExtensions
     public static async Task<Image<Rgba32>> LoadFromBytesAsync(byte[] bytes, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrEmpty(bytes);
-        using var ms = new MemoryStream(bytes);
-        return await Image.LoadAsync<Rgba32>(ms, cancellationToken);
+        return await ImageDecodeGuard.LoadAsync(bytes, cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -109,7 +113,7 @@ public static class BitmapExtensions
     public static async Task<Image<Rgba32>> LoadFromStreamAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         Check.NotNull(stream);
-        return await Image.LoadAsync<Rgba32>(stream, cancellationToken);
+        return await ImageDecodeGuard.LoadAsync(stream, cancellationToken: cancellationToken);
     }
 
     #endregion

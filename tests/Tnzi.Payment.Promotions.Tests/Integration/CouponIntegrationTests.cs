@@ -318,6 +318,11 @@ public class CouponIntegrationTests : PromotionsIntegrationTestBase
         first.Succeeded.ShouldBeTrue();
         second.Succeeded.ShouldBeFalse();
         second.Message.ShouldBe(ErrorCodes.RedemptionCodeUserLimitReached);
+
+        // 每用户上限的判定在总量 CAS **之后**读（那一刻本事务持有兑换码行的锁，计数才是准的），
+        // 因此被它拒掉时必须把刚递增的名额补回去 —— 否则每一次被拒都白烧一个名额，
+        // 这个码的剩余数量会莫名其妙地少下去。
+        (await ReloadAsync<RedemptionCode>(code.Id))!.RedeemedQuantity.ShouldBe(1);
     }
 
     /// <summary>

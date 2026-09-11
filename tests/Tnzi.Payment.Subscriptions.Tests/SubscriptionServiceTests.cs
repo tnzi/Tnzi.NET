@@ -106,65 +106,9 @@ public class SubscriptionServiceTests
         result.Message.ShouldBe(ErrorCodes.SubscriptionAlreadyCancelledOrExpired);
     }
 
-    [Fact]
-    public async Task CancelSubscriptionAsync_ImmediateCancel_SetsCancelledStatus()
-    {
-        // Arrange
-        var subscription = new Subscription
-        {
-            Id = Guid.NewGuid(),
-            SubscriptionNo = "SUB001",
-            Status = SubscriptionStatus.Active,
-            UserId = Guid.NewGuid()
-        };
-
-        _subscriptionRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Subscription, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(subscription);
-        _subscriptionRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Subscription>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var request = new CancelSubscriptionDto { Reason = "No longer needed", Immediate = true };
-
-        // Act
-        var result = await _service.CancelSubscriptionAsync(subscription.Id, request);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        subscription.Status.ShouldBe(SubscriptionStatus.Cancelled);
-        subscription.CancelReason.ShouldBe("No longer needed");
-        subscription.EndTime.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task CancelSubscriptionAsync_DeferredCancel_SetsPendingRenewalStatus()
-    {
-        // Arrange
-        var subscription = new Subscription
-        {
-            Id = Guid.NewGuid(),
-            SubscriptionNo = "SUB002",
-            Status = SubscriptionStatus.Active,
-            AutoRenew = true,
-            UserId = Guid.NewGuid()
-        };
-
-        _subscriptionRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Subscription, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(subscription);
-        _subscriptionRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Subscription>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var request = new CancelSubscriptionDto { Reason = "Switching plan", Immediate = false };
-
-        // Act
-        var result = await _service.CancelSubscriptionAsync(subscription.Id, request);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        subscription.Status.ShouldBe(SubscriptionStatus.PendingRenewal);
-        subscription.AutoRenew.ShouldBeFalse();
-    }
+    // 取消的两条成功路径改用条件更新（CAS）抢计费锁，需要真实 EF Provider，
+    // 因此覆盖移到集成测试 SubscriptionCancellationIntegrationTests。
+    // 这里保留的是在抢锁之前就该拒绝的分支（不存在 / 已取消或已过期）。
 
     #endregion
 

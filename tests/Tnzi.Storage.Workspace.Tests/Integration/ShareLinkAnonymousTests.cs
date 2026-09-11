@@ -101,6 +101,31 @@ public class ShareLinkAnonymousTests : WorkspaceIntegrationTestBase
     }
 
     [Fact]
+    public async Task TheDownloadFlow_StillResolvesTheShareAfterValidation()
+    {
+        // 控制器的下载流程是 Validate → GetShare → 取字节。GetShare 现在是管理视角（创建者 /
+        // 文件写权限才看得到），而收件人两样都不是 —— 让它通过的是校验刚写进本次请求的授予。
+        // 没有这条，收紧管理视角的那一刀会把匿名下载整条切断。
+        var file = await SeedFileAsync();
+        var grants = new FileAccessGrantContext();
+        var share = await SeedShareAsync(file.Id);
+        var shares = CreateShareService(grants, CreateRealAuthorizer(grants));
+
+        // 校验之前：一个拿着令牌的匿名访客看不到管理视角。
+        Assert.Equal(404, (await shares.GetShareAsync(share.ShareToken)).Code);
+
+        Assert.True((await shares.ValidateShareAccessAsync(share.ShareToken)).Data);
+
+        var resolved = await shares.GetShareAsync(share.ShareToken);
+        Assert.True(resolved.Succeeded, resolved.Message);
+        Assert.Equal(file.Id, resolved.Data!.FileId);
+
+        // 授予只让他读，不让他撤销别人发的链接。
+        Assert.Equal(404, (await shares.RevokeShareAsync(share.ShareToken)).Code);
+        Assert.True(DbContext.FileShares.AsNoTracking().Single(s => s.ShareToken == share.ShareToken).IsEnabled);
+    }
+
+    [Fact]
     public async Task TheLinkNeverBecomesAWriteCredential()
     {
         // 收件人是外部的人。他能取到这一个文件,不该能删它、改它,或换一张不受

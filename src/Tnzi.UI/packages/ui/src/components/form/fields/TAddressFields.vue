@@ -60,6 +60,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NInput, NSelect, type SelectOption } from 'naive-ui'
+import { resolveAddressKey, type AddressFieldKey } from '../../../headless/form/useAddressFields'
 
 export interface AddressValue {
   street?: string | null
@@ -124,12 +125,16 @@ const model = computed<Record<string, unknown>>(
   () => (props.modelValue ?? {}) as Record<string, unknown>,
 )
 
-/** Logical key → the key actually present on the bound model. */
+/**
+ * Logical key → the key actually present on the bound model.
+ *
+ * ★ Shared with `useAddressFields` (`@tnzi/ui` headless) rather than kept here: a host
+ * that renders its own form grid uses that composable instead of this component, and two
+ * copies of this mapping would drift without anything failing - the symptom is one address
+ * field that silently reads nothing.
+ */
 function actualKey(key: keyof AddressValue): string {
-  const mapped = props.keyMap?.[key]
-  if (mapped) return mapped
-  if (props.prefix) return props.prefix + key.charAt(0).toUpperCase() + key.slice(1)
-  return key
+  return resolveAddressKey(key as AddressFieldKey, { keyMap: props.keyMap, prefix: props.prefix })
 }
 
 function get(key: keyof AddressValue): string | null {

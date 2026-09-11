@@ -11,13 +11,15 @@ namespace Tnzi.Authorization.Tests.Integration;
 /// 当前用户可在测试中切换（发起人 / 批准人 / 第三方）。
 /// </summary>
 /// <remarks>
-/// 这些用例钉的是三条不变量：决定的人不能是发起人、批准的是一份参数而不是一个操作名、
-/// 一张许可只换一次执行。三条各自都能被「看起来很合理」的实现绕过去。
+/// 这些用例钉的是四条不变量：决定的人不能是发起人、批准的是一份参数而不是一个操作名、
+/// 一张许可只换一次执行、许可只能由发起人取用。每一条都能被「看起来很合理」的实现绕过去。
+/// 另钉一条：发起去重按「动作 + 目标 + 发起人 + 参数」，别人的待批请求不会被递给你。
 /// </remarks>
 public class DualControlServiceIntegrationTests : IntegratedTestBase<AuthorizationTestDbContext>
 {
     private static readonly Guid Requester = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid Approver = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid ThirdParty = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
     private Guid _actingUser = Requester;
 
@@ -274,6 +276,66 @@ public class DualControlServiceIntegrationTests : IntegratedTestBase<Authorizati
         var second = await RequestAsync();
 
         Assert.Equal(first, second);
+    }
+
+    /// <summary>
+    /// ★ 审批人批的是「<b>这个人</b>做这件事」，所以许可只能由发起人取用。
+    /// 少了这一比，任何知道 requestId 的调用方都能把别人批下来的许可换成自己的执行。
+    /// </summary>
+    [Fact]
+    public async Task OnlyTheRequesterCanConsumeThePermit()
+    {
+        var id = await RequestAsync();
+
+        ActAs(Approver);
+        Assert.True((await Service.ApproveAsync(id)).Succeeded);
+
+        // 审批人自己、以及一个碰巧知道 id 的第三方，都不能拿这张许可去执行。
+        var byApprover = await Service.ConsumeAsync(id, "payrun.void", "{\"amount\":100}");
+        Assert.False(byApprover.Succeeded);
+        Assert.Equal(403, byApprover.Code);
+
+        ActAs(ThirdParty);
+        var byStranger = await Service.ConsumeAsync(id, "payrun.void", "{\"amount\":100}");
+        Assert.False(byStranger.Succeeded);
+        Assert.Equal(403, byStranger.Code);
+
+        // 被拒的尝试不能把许可烧掉：发起人回来照常能用。
+        ActAs(Requester);
+        Assert.True((await Service.ConsumeAsync(id, "payrun.void", "{\"amount\":100}")).Succeeded);
+    }
+
+    /// <summary>
+    /// ★ 去重键必须含发起人：否则 B 发起同一动作会拿回 A 那张待批请求 ——
+    /// 连同 A 的参数原文 —— 而 B 既批不了它也用不了它。
+    /// </summary>
+    [Fact]
+    public async Task AnotherPersonsPendingRequestIsNeverHandedBackAsYours()
+    {
+        var alices = await RequestAsync(payload: "{\"amount\":100}");
+
+        ActAs(ThirdParty);
+        var bobs = await Service.RequestAsync(new DualControlRequestInput("payrun.void", "PR-1", "{\"amount\":100}"));
+
+        Assert.True(bobs.Succeeded);
+        Assert.NotEqual(alices, bobs.Data!.Id);
+        Assert.Equal(ThirdParty, bobs.Data.RequesterId);
+    }
+
+    /// <summary>
+    /// ★ 去重键必须含参数：同一个人对同一目标改了参数再发起，那是一次新的请求，
+    /// 不能静默地把旧参数那张递回来 —— 「保存成功」与「你的参数被换掉了」在响应上分不出来。
+    /// </summary>
+    [Fact]
+    public async Task ADifferentPayloadIsANewRequestNotTheOldOneInDisguise()
+    {
+        var small = await RequestAsync(payload: "{\"amount\":100}");
+        var large = await RequestAsync(payload: "{\"amount\":1000000}");
+
+        Assert.NotEqual(small, large);
+
+        var stored = await Service.GetAsync(large);
+        Assert.Equal("{\"amount\":1000000}", stored.Data!.PayloadJson);
     }
 
     [Fact]

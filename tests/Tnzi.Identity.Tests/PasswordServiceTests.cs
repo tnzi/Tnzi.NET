@@ -1,4 +1,4 @@
-
+﻿
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -93,6 +93,41 @@ public class PasswordServiceTests
 
         // Assert
         Assert.True(result.Succeeded); // 为了安全，即使邮箱不存在也返回成功
+    }
+
+    /// <summary>
+    /// ★★★ 还没接受邀请的账号不能走找回密码。
+    /// </summary>
+    /// <remarks>
+    /// 这条路径<b>不过登录守卫</b>（它不签发令牌），所以 <c>PendingActionsLoginGuard</c>
+    /// 管不到它。不挡在这里，任何知道这个邮箱的人都能替一个还没入职的账号设上密码。
+    /// ★ 回「若邮箱存在则已发送」而不是报错：端点匿名可达，区分开就成了账号状态的试探入口。
+    /// </remarks>
+    [Fact]
+    public async Task ForgotPasswordAsync_OnAnInvitedAccount_SuppressesTheResetSilently()
+    {
+        // Arrange
+        var email = "newhire@example.com";
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = "newhire",
+            Email = email,
+            PendingActions = PendingUserActions.InvitationPending
+        };
+
+        _userManagerMock.Setup(x => x.FindByEmailAsync(email))
+            .ReturnsAsync(user);
+
+        // Act
+        var result = await _passwordService.ForgotPasswordAsync(email);
+
+        // Assert：对外与「邮箱不存在」同形，对内什么都不做
+        Assert.True(result.Succeeded);
+        _userManagerMock.Verify(x => x.GeneratePasswordResetTokenAsync(It.IsAny<User>()), Times.Never);
+        _eventBusMock.Verify(
+            x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.PasswordResetRequestedEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -311,5 +346,47 @@ public class PasswordServiceTests
 
         // Assert
         _userManagerMock.Verify(x => x.ResetPasswordAsync(user, It.IsAny<string>(), newPassword), Times.Once);
+    }
+    /// <summary>
+    /// ★★★ 共享出口拒绝设回最近用过的密码，并把新密码写进历史。
+    /// </summary>
+    /// <remarks>
+    /// 这两步是「第六条改密路径」（<c>RegistrationService.SetPasswordAsync</c>）此前漏掉的部分：
+    /// 不查重，设回上一个密码会被接受；不写历史，下一次查重也查不到 —— 缺陷自我延续。
+    /// </remarks>
+    [Fact]
+    public async Task ForceSetPasswordAsync_RejectsAPasswordAlreadyInHistory()
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "u", PasswordHash = "old-hash" };
+
+        _passwordPolicyServiceMock.Setup(x => x.ValidatePasswordStrength(It.IsAny<string>())).Returns((string?)null);
+        _passwordPolicyServiceMock.Setup(x => x.CheckPasswordHistoryAsync(user.Id, "Recycled123!"))
+            .ReturnsAsync(true);
+
+        var result = await _passwordService.ForceSetPasswordAsync(user, "Recycled123!");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _userManagerMock.Verify(
+            x => x.ResetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ForceSetPasswordAsync_RecordsTheNewPasswordInHistory()
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "u", PasswordHash = "new-hash" };
+
+        _passwordPolicyServiceMock.Setup(x => x.ValidatePasswordStrength(It.IsAny<string>())).Returns((string?)null);
+        _passwordPolicyServiceMock.Setup(x => x.CheckPasswordHistoryAsync(user.Id, It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.GeneratePasswordResetTokenAsync(user)).ReturnsAsync("reset-token");
+        _userManagerMock.Setup(x => x.ResetPasswordAsync(user, "reset-token", "Fresh123!"))
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await _passwordService.ForceSetPasswordAsync(user, "Fresh123!");
+
+        Assert.True(result.Succeeded);
+        _passwordPolicyServiceMock.Verify(
+            x => x.SavePasswordHistoryAsync(user.Id, "new-hash"), Times.Once);
     }
 }

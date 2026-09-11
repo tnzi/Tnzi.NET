@@ -1,9 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!--
+    发布出去的测试底座。
+
+    ★ 它住在 tests/ 而不是 src/，同时又是一个 NuGet 包 —— 两件事都是有意的。
+    src/ 被四套机制赋予了确定语义（版本线与强签名 / modules-index 对账 / 公开镜像投影 /
+    打包脚本递归扫描），本项目只满足其中两条：它该跟着框架的版本线走、该被打包，
+    但它不是模块、不该进 modules-index。搬进 src/ 只为拿到打包，代价是 46 个测试项目
+    改引用路径外加一条门禁排除，而收益与「住在哪」无关。
+
+    所以版本线与包元数据在这里显式导入，打包由 build/nuget-pack.ps1 点名（那个脚本只递归扫 src/）。
+  -->
+  <Import Project="..\..\build\version.props" />
+  <Import Project="..\..\build\public.props" />
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <IsPackable>true</IsPackable>
+    <Description>Test harness for applications built on the Tnzi.NET framework: an integration-test base over an in-memory SQLite DbContext with the framework's ambient services mocked, plus module-graph and reflection helpers.</Description>
+    <PackageTags>Tnzi;testing;xunit;integration-test</PackageTags>
+    <!-- 不是模块，官网没有它的模块页；生成的 README 改链到公开镜像里的源码目录（tests/ 在投影允许列表内）。 -->
+    <TnziDocsUrl>https://github.com/tnzi/Tnzi.NET/tree/main/tests/Tnzi.TestBase</TnziDocsUrl>
     <!-- 共享测试基础库，不含测试用例，跳过 dotnet test -->
     <IsTestProject>false</IsTestProject>
   </PropertyGroup>

@@ -98,4 +98,100 @@ public class RateLimitService : IRateLimitService
             "User {UserId} banned for {Duration} due to rate limit violation",
             userId, duration);
     }
+
+    // ---------- 匿名分区 ----------
+
+    /// <summary>
+    /// 匿名连接名额：先占后判。
+    ///
+    /// ★ 先增再比而不是"先读、判断、再增"：后者在两条并发的握手之间有窗口，
+    /// 两边都读到 max-1 就都通过了。占不下时立刻退回来，净效果为零。
+    /// </summary>
+    public async Task<bool> TryAcquireAnonymousConnectionAsync(string partitionKey)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+
+        var cacheKey = CacheKeys.SignalR.AnonymousConnectionCount(partitionKey);
+        var count = await _cache.IncrementAsync(cacheKey, 1, _options.AnonymousConnectionCountTtl);
+
+        if (count > _options.MaxConnectionsPerAnonymousPartition)
+        {
+            await _cache.DecrementAsync(cacheKey);
+            _logger.LogWarning(
+                "Anonymous partition {Partition} exceeded max connections ({Count}/{Max})",
+                partitionKey, count - 1, _options.MaxConnectionsPerAnonymousPartition);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 释放匿名连接名额
+    /// </summary>
+    public async Task ReleaseAnonymousConnectionAsync(string partitionKey)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+
+        var cacheKey = CacheKeys.SignalR.AnonymousConnectionCount(partitionKey);
+        var remaining = await _cache.DecrementAsync(cacheKey);
+
+        // TTL 过期后计数会从 0 起算，重复的断开可能把它推成负数；负数会让该分区
+        // 拿到远超上限的额度，所以清掉。
+        if (remaining < 0)
+        {
+            await _cache.RemoveAsync(cacheKey);
+        }
+    }
+
+    /// <summary>
+    /// 匿名分区是否可以继续发消息
+    /// </summary>
+    public async Task<bool> CheckAnonymousMessageRateLimitAsync(string partitionKey)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+
+        var count = await _cache.GetCounterAsync(CacheKeys.SignalR.AnonymousMessageRateCount(partitionKey));
+        if (count >= _options.MaxMessagesPerMinute)
+        {
+            _logger.LogWarning(
+                "Anonymous partition {Partition} exceeded message rate limit ({Count}/{Max})",
+                partitionKey, count, _options.MaxMessagesPerMinute);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 记录一条匿名分区的消息
+    /// </summary>
+    public async Task RecordAnonymousMessageAsync(string partitionKey)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+        await _cache.IncrementAsync(
+            CacheKeys.SignalR.AnonymousMessageRateCount(partitionKey), 1, TimeSpan.FromMinutes(1));
+    }
+
+    /// <summary>
+    /// 匿名分区是否被封禁
+    /// </summary>
+    public async Task<bool> IsAnonymousBannedAsync(string partitionKey)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+        return await _cache.ExistsAsync(CacheKeys.SignalR.AnonymousBan(partitionKey));
+    }
+
+    /// <summary>
+    /// 封禁一个匿名分区
+    /// </summary>
+    public async Task BanAnonymousAsync(string partitionKey, TimeSpan duration)
+    {
+        Check.NotNullOrWhiteSpace(partitionKey);
+
+        await _cache.SetAsync(CacheKeys.SignalR.AnonymousBan(partitionKey), true, duration);
+        _logger.LogWarning(
+            "Anonymous partition {Partition} banned for {Duration} due to rate limit violation",
+            partitionKey, duration);
+    }
 }

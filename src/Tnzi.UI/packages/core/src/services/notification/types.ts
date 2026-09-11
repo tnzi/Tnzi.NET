@@ -42,6 +42,12 @@ export interface RecipientOutput {
   name?: string | null;
   status: NotificationStatus;
   sentTime?: string | null;
+  /**
+   * Quiet-hours deferral: delivery was held until this instant instead of being
+   * dropped. The value survives delivery, so it must be read together with
+   * `status` - a `Sent` row that carries one was delayed, not late.
+   */
+  deferredUntil?: string | null;
   failureReason?: string | null;
   externalMessageId?: string | null;
   userId?: string | null;
@@ -343,4 +349,135 @@ export interface SetNotificationPreferenceDto {
   quietHoursStart?: string;
   quietHoursEnd?: string;
   maxFrequencyPerHour?: number;
+}
+
+/**
+ * Platform a registered push device runs on.
+ *
+ * Does NOT pick a delivery route: all three go out through FCM (iOS via FCM's
+ * APNs relay). It is for recognising and counting devices only.
+ * Backend: DevicePlatform (Tnzi.Notification.Push).
+ */
+export const DevicePlatform = {
+  Android: 1,
+  Ios: 2,
+  Web: 3,
+} as const;
+
+export type DevicePlatform = (typeof DevicePlatform)[keyof typeof DevicePlatform];
+
+/**
+ * Input for POST /notifications/devices.
+ *
+ * Upsert semantics - call it on every app start. FCM re-issues the token on
+ * reinstall, data clear and rotation, and the client cannot know whether the
+ * server has seen the current one.
+ */
+export interface RegisterPushDeviceDto {
+  token: string;
+  platform: DevicePlatform;
+  deviceName?: string;
+  /**
+   * Platform-reported device identifier (iOS `identifierForVendor`, a Firebase
+   * installation id, Android SSAID...). Optional.
+   *
+   * ★ For RECOGNITION ONLY - it addresses nothing. It is a value the client
+   * asserts and the server cannot verify, and it travels through business
+   * tables, logs and the admin UI. Addressing by it would make hijacking a
+   * device's push address a single ordinary request. Delivery is addressed by
+   * `userId` or by the device key alone.
+   */
+  externalDeviceId?: string;
+}
+
+/**
+ * Input for POST /notifications/devices/unregister (sign-out).
+ *
+ * The token travels in the body, not the query string: a query string is
+ * copied verbatim into access logs and reverse-proxy logs, and this value IS
+ * the "which device has this app installed" fact.
+ */
+export interface UnregisterPushDeviceDto {
+  token: string;
+}
+
+/**
+ * A registered push device.
+ *
+ * `tokenMask` is a masked tail (e.g. `…a1b2c3d4`), never the full token: the
+ * list, not the token, is the sensitive part - one query would otherwise export
+ * "who has this app installed on which devices". Unregister by `id`.
+ */
+export interface PushDeviceDto {
+  id: string;
+  /**
+   * The user signed in on this device, or `undefined` for an anonymous device.
+   *
+   * A row carries two addressing dimensions that can coexist: the signed-in
+   * user, and the device's own anonymous identity. An app with no accounts at
+   * all only ever produces rows without a `userId`.
+   */
+  userId?: string;
+  tokenMask: string;
+  platform: DevicePlatform;
+  deviceName?: string;
+  /** Platform-reported identifier, for recognition only - it addresses nothing. */
+  externalDeviceId?: string;
+  lastSeenAt: string;
+  creationTime: string;
+}
+
+/**
+ * What the server hands back when an anonymous device registers.
+ *
+ * ★ `deviceKey` is plaintext exactly once and is never retrievable again - only
+ * its hash is stored. Persist it in the platform's secure storage (iOS Keychain
+ * / Android Keystore) right away: losing it loses this device's identity, and
+ * there is deliberately no recovery endpoint, because such an endpoint would be
+ * a bypass around the key itself.
+ *
+ * ★ `deviceId` is public and `deviceKey` is private, and they do different jobs.
+ * The id goes into business records as the ownership key ("which device
+ * submitted this form") and travels through the server, the admin UI and logs;
+ * the key only ever proves "I am that device". Knowing the id does not let
+ * anyone re-point the row, which is the whole reason they are separate values.
+ */
+export interface AnonymousDeviceRegistrationDto {
+  /** Always present. The client does not need to store it - every call returns it. */
+  deviceId: string;
+  /**
+   * Present ONLY on the call that issued it; absent when you passed a key in.
+   *
+   * ★ That is what lets registration and refresh be the same call: pass the key
+   * if you have one, store the key if one comes back. The client never has to
+   * decide whether this is a first launch.
+   */
+  deviceKey?: string;
+}
+
+/** Paged query for GET /admin/notification-devices. */
+export interface PushDeviceQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  orderBy?: string;
+  userId?: string;
+  platform?: DevicePlatform;
+  lastSeenAfter?: string;
+  /**
+   * `true` shows only anonymous devices, `false` only devices with a signed-in
+   * user; omit to show both.
+   *
+   * Without this filter an anonymous device can only be spotted by an empty
+   * user column, which on screen is indistinguishable from a page that has not
+   * finished loading.
+   */
+  anonymousOnly?: boolean;
+  /**
+   * Exact match on the platform-reported device identifier.
+   *
+   * For the case where an operator only has the identifier a user read out to
+   * them: the token comes back masked and the client never sees the row id.
+   * This is a lookup filter, not an addressing path.
+   */
+  externalDeviceId?: string;
 }

@@ -94,30 +94,43 @@ public class UnitOfWorkFilter : IAsyncActionFilter
             }
             else
             {
-                if (_unitOfWorkManager != null)
-                {
-                    await _unitOfWorkManager.RollbackTransactionAsync();
-                }
-                else if (_unitOfWork != null)
-                {
-                    await _unitOfWork.RollbackTransactionAsync();
-                }
+                await RollbackAsync();
             }
         }
         catch (Exception ex)
         {
-            // 发生异常，回滚事务
-            if (_unitOfWorkManager != null)
+            // ★★★ 回滚自己抛出时，绝不能让它顶替原始异常。
+            // 直接 await 一个会抛的回滚，抛出去的就是「连接已断开」这类**次生**故障，
+            // 而真正的那个（业务异常、并发冲突、约束冲突）连同它的堆栈一起消失 ——
+            // 事故现场只剩下一条与病因无关的错误，而且它看起来相当可信。
+            // 断连恰恰是「回滚失败」与「原始异常」最常见的共同成因，所以这不是罕见路径。
+            try
             {
-                await _unitOfWorkManager.RollbackTransactionAsync();
+                await RollbackAsync();
             }
-            else if (_unitOfWork != null)
+            catch (Exception rollbackFailure)
             {
-                await _unitOfWork.RollbackTransactionAsync();
+                _logger.LogError(rollbackFailure,
+                    "Rolling back after an action failure did not succeed. Action: {Controller}.{Action}",
+                    context.RouteData.Values["controller"], context.RouteData.Values["action"]);
             }
+
             _logger.LogError(ex, "Transaction rolled back due to exception. Action: {Controller}.{Action}",
                 context.RouteData.Values["controller"], context.RouteData.Values["action"]);
             throw;
+        }
+    }
+
+    /// <summary>回滚当前事务（两种持有方式二选一）。</summary>
+    private async Task RollbackAsync()
+    {
+        if (_unitOfWorkManager != null)
+        {
+            await _unitOfWorkManager.RollbackTransactionAsync();
+        }
+        else if (_unitOfWork != null)
+        {
+            await _unitOfWork.RollbackTransactionAsync();
         }
     }
 

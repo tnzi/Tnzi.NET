@@ -30,6 +30,15 @@ public class KafkaOptions
     /// 消费者配置
     /// </summary>
     public KafkaConsumerOptions Consumer { get; set; } = new();
+
+    /// <summary>
+    /// 启动时按容器里已注册的 <c>IEventHandler&lt;T&gt;</c> 自动订阅对应的集成事件（默认: true）。
+    /// </summary>
+    /// <remarks>
+    /// 关掉它意味着这个进程只发布、不消费，除非应用自己调用 <c>SubscribeEvent</c>。
+    /// 与 RabbitMQ 模块的 <c>RabbitMQ:AutoSubscribe</c> 同义，两个传输共用同一个启动器。
+    /// </remarks>
+    public bool AutoSubscribe { get; set; } = true;
 }
 
 /// <summary>
@@ -110,6 +119,15 @@ public class KafkaConsumerOptions
     /// 处理器失败重试的退避时间（毫秒，默认: 500）。
     /// </summary>
     public int ConsumeRetryBackoffMs { get; set; } = 500;
+
+    /// <summary>
+    /// 拉取消息本身出错（<c>ConsumeException</c>）后的退避时间（毫秒，默认: 1000，0 表示不退避）。
+    /// </summary>
+    /// <remarks>
+    /// 主题不存在、鉴权失败、分区不可用这类错误会让每次 <c>Consume</c> 立刻抛出而不等满轮询超时，
+    /// 没有退避就是一个满速自旋：烧 CPU、刷日志，而问题本身一条都修不了。
+    /// </remarks>
+    public int ConsumeErrorBackoffMs { get; set; } = 1000;
 
     /// <summary>
     /// 是否启用死信投递（默认: true）。

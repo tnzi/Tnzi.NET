@@ -609,6 +609,19 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            // Push device registry. The permission code is seeded only by the
+            // optional Tnzi.Notification.Push module, so an email-only backend
+            // hides this menu entry on its own - no extra module gate needed.
+            path: 'devices',
+            name: 'notification.devices',
+            component: () => import('../pages/notification/Devices.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.notification.devices.title',
+              permission: 'notification.pushDevice.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 

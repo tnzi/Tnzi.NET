@@ -54,6 +54,35 @@ public class LoggingOptions
     /// 请求日志选项
     /// </summary>
     public RequestLoggingOptions RequestLogging { get; set; } = new();
+
+    /// <summary>
+    /// 日志检索（<c>admin/logs/search</c>）的扫描预算
+    /// </summary>
+    public LogSearchOptions Search { get; set; } = new();
+}
+
+/// <summary>
+/// 日志检索的扫描预算。
+///
+/// 关键词**命中**时扫描很快就会停在结果上限；真正的代价在**不命中**的那次 ——
+/// 它会把整个日志目录读完。保留期默认是 Information/Warning 30 天、Error 60 天、
+/// Fatal 90 天，一个中等流量的站点这就是几个 GB 的顺序读。没有预算的话，
+/// 一个已登录管理员敲错一个关键词就够让磁盘和一个线程忙上很久，而且可以重复。
+///
+/// 预算触发时结果如实标注 <see cref="LogSearchResultDto.TruncationReason"/>，
+/// 不静默返回"没找到" —— 那两者对调用方长得一模一样。
+/// </summary>
+public class LogSearchOptions
+{
+    /// <summary>
+    /// 单次检索最多读取的字节数（默认 256 MB）。小于等于 0 表示不限制。
+    /// </summary>
+    public long MaxScanBytes { get; set; } = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// 单次检索最多花费的秒数（默认 10 秒）。小于等于 0 表示不限制。
+    /// </summary>
+    public double MaxScanSeconds { get; set; } = 10.0;
 }
 
 /// <summary>

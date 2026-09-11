@@ -19,5 +19,11 @@
     <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 详细输出的负载构造是 internal：测试要能断言「默认不外泄异常消息与检查项 data」，
+         而把它做成公共 API 只是为了测试可见性，那会把一个实现细节钉进对外契约。 -->
+    <InternalsVisibleTo Include="Tnzi.HealthChecks.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>
 

@@ -23,3 +23,20 @@ import { setLocaleMessages } from '../src/i18n/messages'
 // exactly why the production path does NOT do this.
 setLocaleMessages('en', en as unknown as Record<string, unknown>)
 setLocaleMessages('zh-cn', zhCn as unknown as Record<string, unknown>)
+
+// Icons. `TSvgIcon` renders `@iconify/vue`'s `Icon`, which asks the public
+// Iconify API for any icon that has not been bundled - through happy-dom's
+// `fetch`, from every test file that paints an icon. Those requests were still
+// in flight when vitest tore the environment down; happy-dom aborts them and
+// vitest reports the abort as an unhandled error (a red CI run on 2026-09-04
+// with every test passing). Install an API module that never issues a query:
+// an unbundled icon renders as an empty span, which is exactly what a consumer
+// without network gets, and no test asserts on remote icon data.
+// `icon-manifest.test.ts` registers real collections with `addCollection` and
+// is unaffected - bundled icons resolve locally without the API.
+import { _api } from '@iconify/vue'
+
+_api.setAPIModule('', {
+  prepare: () => [],
+  send: () => {},
+})

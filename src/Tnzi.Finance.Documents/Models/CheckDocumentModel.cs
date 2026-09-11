@@ -11,6 +11,23 @@ namespace Tnzi.Finance.Documents.Models;
 /// </remarks>
 public class CheckDocumentModel
 {
+    /// <summary>本次生效的模板名（已解析：含"档案没配就按版式取出厂默认"的回退结果）</summary>
+    public string TemplateName { get; set; } = string.Empty;
+
+    /// <summary>本次生效的版式名（<c>Voucher</c> / <c>ThreePerPage</c>）</summary>
+    /// <remarks>
+    /// 以字符串而非枚举暴露：<c>@Model</c> 是 dynamic，模板里写 <c>== "ThreePerPage"</c>
+    /// 比让模板作者去 using 一个后端枚举现实得多。判定「一页几张」请用
+    /// <see cref="ChecksPerPage"/>，判定票纸请用 <see cref="IsPrePrinted"/>。
+    /// </remarks>
+    public string Layout { get; set; } = string.Empty;
+
+    /// <summary>本次生效的票纸类型名（<c>PrePrinted</c> / <c>Blank</c>）</summary>
+    public string StockType { get; set; } = string.Empty;
+
+    /// <summary>每页支票张数（由生效模板声明；<see cref="Pages"/> 已按此切好）</summary>
+    public int ChecksPerPage { get; set; } = 1;
+
     /// <summary>
     /// 预览模式：支票号是"下一个待分配号"的预览值，尚未开票。模板据此打不可流通水印。
     /// </summary>
@@ -18,6 +35,19 @@ public class CheckDocumentModel
 
     /// <summary>预览水印文案（英文，面向用户）</summary>
     public string PreviewLabel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 样张模式：占位数据渲染的版式样票（供选版式时与手上的票纸比对）
+    /// </summary>
+    /// <remarks>
+    /// 模板据此把<b>票纸自带的元素</b>在屏幕上区分出来（出厂模板的做法是给页根加
+    /// <c>specimen</c> 类、样式表把 <see cref="PrePrintedClass"/> 的元素淡显）。
+    /// <para>
+    /// ★ <b>只有样张该这么做</b>：付款预览（<c>IsPreview</c> 而非本标志）屏幕上就该显示
+    /// 完整票面——那时的任务是校对整张支票。真票与预览的渲染产物不受本标志影响。
+    /// </para>
+    /// </remarks>
+    public bool IsSpecimen { get; set; }
 
     /// <summary>预印票纸模式（票纸上已印公司/银行/支票号/$/PAY TO/MICR）</summary>
     public bool IsPrePrinted { get; set; }
@@ -42,7 +72,32 @@ public class CheckDocumentModel
     /// <summary>付款银行标识</summary>
     public CheckBankView Bank { get; set; } = new();
 
-    /// <summary>本次渲染的全部支票（每张一页，页间 <c>page-break-after</c>）</summary>
+    /// <summary>本次渲染的全部支票（一张一张，不分页）</summary>
+    /// <remarks>
+    /// 每页一张的版式直接 <c>@foreach (var chk in Model.Checks)</c> 即可（既有模板都这么写）；
+    /// 每页多张的版式请用 <see cref="Pages"/>，切页已经替模板做好了。
+    /// </remarks>
+    public List<CheckDocumentItem> Checks { get; set; } = new();
+
+    /// <summary>
+    /// 按 <see cref="ChecksPerPage"/> 切好的页（<see cref="Checks"/> 的分组视图，同一批数据）
+    /// </summary>
+    /// <remarks>
+    /// 切页放在工厂里而不是让模板自己按下标步进：模板是用户可编辑内容，
+    /// 一个写歪的下标循环会安静地漏印一张支票 —— 而支票号已经分配出去了。
+    /// </remarks>
+    public List<CheckDocumentPage> Pages { get; set; } = new();
+}
+
+/// <summary>
+/// 一页（每页多张的版式用；每页一张时每页恰好一项）
+/// </summary>
+public class CheckDocumentPage
+{
+    /// <summary>页码（从 1 起，模板可打"第 N 页"）</summary>
+    public int Number { get; set; }
+
+    /// <summary>本页的支票（最后一页可能不足 <see cref="CheckDocumentModel.ChecksPerPage"/> 张）</summary>
     public List<CheckDocumentItem> Checks { get; set; } = new();
 }
 
@@ -80,8 +135,19 @@ public class CheckDocumentItem
     /// <summary>金额数字（防篡改前缀 <c>***</c>，如 <c>***1,234.56</c>）</summary>
     public string AmountText { get; set; } = string.Empty;
 
-    /// <summary>金额大写（<c>*</c> 填满行尾防改写）</summary>
+    /// <summary>金额大写（<c>*</c> 填满行尾防改写）；币种字样由模板单独排版的元素提供</summary>
     public string AmountInWordsText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 金额大写 + 币种词，再以 <c>*</c> 填满行尾（<c>... and 56/100 Dollars ******</c>）
+    /// </summary>
+    /// <remarks>
+    /// 给<b>大写金额与数字金额同处一行</b>的版式用（CPA-006 §5.4.1 Figure C 开窗信封版）：
+    /// 那一行的右端就是数字金额框，放不下单独的 "DOLLARS" 元素，规范第 9 条因此许可
+    /// 把币种词并进机打的大写金额。用这个字段的模板<b>不要</b>再排
+    /// <see cref="CurrencyLabel"/>，否则票面上币种字样出现两次。
+    /// </remarks>
+    public string AmountInWordsWithCurrencyText { get; set; } = string.Empty;
 
     /// <summary>币种代码</summary>
     public string Currency { get; set; } = string.Empty;
@@ -108,4 +174,25 @@ public class CheckDocumentItem
 
     /// <summary>MICR 行（映射到 E-13B 字体码位 A/B/C/D，打印用；白纸模式才有值）</summary>
     public string? MicrGlyphs { get; set; }
+
+    /// <summary>
+    /// 存根附加行（消费应用自己域里的「标签 : 值」；<b>空列表 = 存根按出厂样子排</b>）
+    /// </summary>
+    /// <remarks>
+    /// 模板在既有固定行<b>之后</b>追加它们，因此没有附加行时渲染结果与从前逐字相同。
+    /// 条数与长度在银行域已归一化（<c>CheckStubLineLimits</c>），模板不必也不该再限制。
+    /// </remarks>
+    public List<CheckDocumentStubLine> StubLines { get; set; } = new();
+}
+
+/// <summary>
+/// 存根上的一行附加信息（已格式化，模板直出）
+/// </summary>
+public class CheckDocumentStubLine
+{
+    /// <summary>字段名（存根表格左列）</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>字段值（右列；可空 —— 只有标签的一行是分节标题）</summary>
+    public string? Value { get; set; }
 }

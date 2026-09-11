@@ -14,6 +14,16 @@ public class SessionOptionsValidator : OptionsValidatorBase<SessionOptions>
             errors.Add("Session.ExpirationMinutes cannot be negative.");
         }
 
+        if (options.AbsoluteLifetimeHours < 0)
+        {
+            errors.Add("Session.AbsoluteLifetimeHours cannot be negative (0 disables the absolute cap).");
+        }
+
+        if (options.ValidationCacheSeconds < 0)
+        {
+            errors.Add("Session.ValidationCacheSeconds cannot be negative (0 disables caching).");
+        }
+
         // 验证 Redis 键前缀
         if (options.StorageType == SessionStorageType.Redis)
         {

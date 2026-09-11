@@ -13,4 +13,13 @@ public sealed record GraphExtractionResult(
     /// 空结果
     /// </summary>
     public static GraphExtractionResult Empty { get; } = new([], []);
+
+    /// <summary>
+    /// LLM 的响应<b>无法解析</b>。与"确实一个实体都没有"必须可区分：两者都返回空集合，
+    /// 但前者意味着这段文本的图谱从未被抽取过，而调用方看到的却是"抽完了，没东西"。
+    /// </summary>
+    public bool ResponseUnparsable { get; init; }
+
+    /// <summary>响应无法解析时的结果。</summary>
+    public static GraphExtractionResult Unparsable { get; } = new([], []) { ResponseUnparsable = true };
 }

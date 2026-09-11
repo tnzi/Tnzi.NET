@@ -751,8 +751,13 @@ export interface UserQuotaQueryDto extends PagedQueryDto {
 /**
  * Budget check status (USD cost budget). Serialized as the PascalCase member
  * name by the backend's global JsonStringEnumConverter.
+ *
+ * `Indeterminate`: the budget is enabled but nothing in the period recorded a
+ * cost (cost tracking off, or no model rate configured), so the aggregated
+ * 0 USD means "cannot be measured", not "nothing was spent". Render it as a
+ * warning, never as a green "within budget".
  */
-export type BudgetStatus = 'WithinBudget' | 'WarningThreshold' | 'BudgetExceeded';
+export type BudgetStatus = 'WithinBudget' | 'WarningThreshold' | 'BudgetExceeded' | 'Indeterminate';
 
 /** Per-agent USD spend breakdown inside a budget summary. */
 export interface AgentSpendDto {

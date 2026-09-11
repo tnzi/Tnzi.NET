@@ -86,11 +86,28 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
 
             try
             {
-                await _repository.InsertAsync(entry);
+                await _repository.InsertAsync(entry, cancellationToken);
+
+                // ★ 显式 flush，而不是把 SaveChanges 留给提交。事务启用时仓储会推迟保存，于是：
+                //   ① 同一工作单元里第二次登记读到的链尾还是库里那条，两条算出同一个 Sequence；
+                //   ② 唯一索引在提交时才拒绝，那时本循环早已退出，整个业务操作 500 而不是重试。
+                //   flush 经工作单元进行，仍在调用方事务内（回滚照样撤掉）；EF 在显式事务内保存前
+                //   自动建保存点，冲突失败后回滚到保存点，事务本身仍可继续用。未启用事务时
+                //   InsertAsync 已经落库，这一步是空操作。
+                await _repository.SaveChangesAsync(cancellationToken);
                 return Ok();
             }
-            catch (Exception ex) when (attempt < attempts && IsConcurrencyConflict(ex))
+            catch (Exception ex) when (IsConcurrencyConflict(ex))
             {
+                // 失败的实体仍以 Added 留在变更跟踪器里：不丢弃，它会被下一次 SaveChanges（重试那次，
+                // 或本作用域里任何一次无关的保存）重放、再撞一次同一条索引 —— 重试循环因此从未成功过。
+                _repository.Discard(entry);
+
+                if (attempt >= attempts)
+                {
+                    break;
+                }
+
                 // 另一个请求抢到了同一个序号：重读链尾后重试。
                 LogInformation(
                     "Record access audit chain conflict for user {UserId} at sequence {Sequence}, retrying ({Attempt}/{Total}).",

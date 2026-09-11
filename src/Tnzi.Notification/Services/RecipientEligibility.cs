@@ -1,7 +1,7 @@
 namespace Tnzi.Notification.Services;
 
 /// <summary>
-/// 回答「这条消息现在还应该发给谁」：退订、渠道偏好、每小时上限三道过滤，按顺序跑一遍。
+/// 回答「这条消息现在还应该发给谁」：退订、渠道偏好、每小时上限、静默时段四道过滤，按顺序跑一遍。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,8 +14,15 @@ namespace Tnzi.Notification.Services;
 /// 加第四道时要同时记得改两处。加每小时上限那次正好撞上这个形态。
 /// </para>
 /// <para>
-/// ★ <b>三道并列而不是二选一</b>：退订按<b>地址</b>（收件人未必是注册用户）、偏好与上限按<b>人</b>，
-/// 管的是不同的东西 —— 任何一道说「别发」就不发。
+/// ★ <b>四道并列而不是二选一</b>：退订按<b>地址</b>（收件人未必是注册用户）、偏好与上限与
+/// 静默时段按<b>人</b>，管的是不同的东西 —— 任何一道说「别发」就不发。
+/// </para>
+/// <para>
+/// ★★ <b>第四道的处置不同：延后，不是丢弃。</b>前三道把人标成
+/// <see cref="NotificationStatus.Cancelled"/>（这条消息对他到此为止），
+/// 静默时段把人标成 <see cref="NotificationStatus.Scheduled"/> 并写下
+/// <see cref="Recipient.DeferredUntil"/> —— 它表达的是时机而不是意愿。
+/// 所以它<b>排在最后</b>：先被退订/关掉渠道/超出上限拦下的人根本不该进入排期。
 /// </para>
 /// <para>
 /// ★ <b>每一道都就地落库自己的标记</b>，不指望调用方：两条调用路径都有「过滤完什么都不剩 →
@@ -45,14 +52,64 @@ internal sealed class RecipientEligibility
     }
 
     /// <summary>
-    /// 依次跑完三道过滤，返回仍应当发送的收件人。被拦下的已就地标记并落库。
+    /// 依次跑完四道过滤。被拦下的已就地标记并落库。
     /// </summary>
-    public async Task<List<Recipient>> FilterAsync(
+    /// <returns>
+    /// <c>Sendable</c> = 现在就该发的那些；<c>DeferredCount</c> = 本轮因静默时段被延后的人数
+    /// （调用方据此分辨「谁也没剩下」到底是「都被拦掉了」还是「都挪到晚点了」——
+    /// 前者这条消息到此为止，后者它还有下文）。
+    /// </returns>
+    public async Task<(List<Recipient> Sendable, int DeferredCount)> FilterAsync(
         Message notification, List<Recipient> candidates, CancellationToken cancellationToken)
     {
         var remaining = await ExcludeOptedOutAsync(notification, candidates, cancellationToken);
         remaining = await ExcludePreferenceDisabledAsync(notification, remaining, cancellationToken);
-        return await ExcludeOverFrequencyCapAsync(notification, remaining, cancellationToken);
+        remaining = await ExcludeOverFrequencyCapAsync(notification, remaining, cancellationToken);
+        return await DeferQuietHoursAsync(notification, remaining, cancellationToken);
+    }
+
+    /// <summary>
+    /// 把「本人此刻正在免打扰时段里」的收件人<b>延后</b>到时段结束，返回现在就该发的那些。
+    /// </summary>
+    /// <remarks>
+    /// 判定规则在 <see cref="QuietHoursRecipientFilter"/> 与 <see cref="QuietHoursWindow"/>
+    /// （纯函数，含「为什么是延后而不是丢弃」的完整说明）；这里只负责问一次偏好表、
+    /// 把结果套上去、并把标记落库。
+    /// <para>
+    /// ★ 查询只在真有人设了静默时段时才发生（<c>ShouldConsultQuietHours</c> 先挡一道），
+    /// 与另外两道按人的过滤同款。
+    /// </para>
+    /// </remarks>
+    private async Task<(List<Recipient> Sendable, int DeferredCount)> DeferQuietHoursAsync(
+        Message notification, List<Recipient> candidates, CancellationToken cancellationToken)
+    {
+        if (!QuietHoursRecipientFilter.ShouldConsultQuietHours(notification, candidates))
+            return (candidates, 0);
+
+        var raw = await _preferenceService.GetQuietHoursAsync(
+            PreferenceRecipientFilter.UserIdsToCheck(candidates),
+            notification.Type,
+            cancellationToken);
+
+        if (raw.Count == 0)
+            return (candidates, 0);
+
+        var windows = raw.ToDictionary(kv => kv.Key, kv => new QuietHoursWindow(kv.Value.Start, kv.Value.End));
+        var remaining = QuietHoursRecipientFilter.Apply(candidates, windows, DateTime.UtcNow, out var deferred);
+
+        if (deferred.Count == 0)
+            return (candidates, 0);
+
+        _logger.LogInformation(
+            "Notification {NotificationId}: deferred {DeferredCount} of {TotalCount} recipient(s) who are inside the quiet hours they set for this channel",
+            notification.Id, deferred.Count, candidates.Count);
+
+        // ★ 就地落库，理由与另外三道逐字相同 —— 只是这一次落的不是「不发了」而是
+        //   「什么时候再发」，而没有它，到期扫描根本看不见这些人。
+        await _notificationRepository.UpdateAsync(notification, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return (remaining, deferred.Count);
     }
 
     /// <summary>

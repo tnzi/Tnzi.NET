@@ -5,3 +5,4 @@ global using Moq;
 
 global using Tnzi.Notification.Options;
 global using Tnzi.Notification.Push.Services;
+global using Tnzi.Notification.Services.Internal;

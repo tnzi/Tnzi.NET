@@ -180,15 +180,12 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
             }
         }
 
-        // 最终提交阶段：减少事务深度到 0
-        Interlocked.Decrement(ref _transactionDepth);
-
-        // 清除环境事务作用域：事务已进入提交阶段,后续(含 post-commit 队列内)的事件发布
-        // 不应再被判定为"事务中"而重新入队,否则会形成自引用死循环。
-        // AsyncLocal 边界说明：本方法是 async,此处 Set(null) 只影响本方法内部执行流
-        // (post-commit 队列恰在其中);调用者流会残留一个 IsTransactionActive=false 的引用,
-        // 消费方(如 LocalEventBus)判定的是 IsTransactionActive 而非 null,语义等价于已清除
-        AmbientUnitOfWork.Set(null);
+        // ★ 事务深度与环境事务作用域都**不能**在提交循环之前清掉。最终提交里的
+        // SaveChangesAsync 往往就是本事务的第一次保存（事务内只做仓储写入、中途不 flush
+        // 是最常见的形状），提前离开事务态会让那次保存跑在自动提交模式下，
+        // 也会让它收集到的领域事件被判定为"不在事务中"而就地发布 ——
+        // 提交随后失败时，那些事件已经发出去了（幽灵事件），且主实体已经落库无从回滚。
+        // 两者一律推迟到提交循环之后。
 
         // 使用 fail-fast 策略提交所有已创建的 UnitOfWork
         // 如果任何一个提交失败，立即停止并回滚所有尚未提交的 UnitOfWork
@@ -234,29 +231,48 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
                         kvp.Key.Name);
                 }
 
-                // 事务深度已在上方减少，无需再次操作
+                // 事务已终结（部分提交的情况下也无法再继续），离开事务态
+                Interlocked.Exchange(ref _transactionDepth, 0);
+                AmbientUnitOfWork.Set(null);
 
                 // 直接抛出原始异常，保留完整的异常栈信息
                 throw;
             }
         }
 
+        // 提交全部成功：先离开事务态，再执行 post-commit 队列。
+        // 顺序是必须的 —— 队列里的事件发布若仍被判定为"事务中"会重新入队，形成自引用死循环。
+        // AsyncLocal 边界说明：本方法是 async,此处 Set(null) 只影响本方法内部执行流
+        // (post-commit 队列恰在其中);调用者流会残留一个 IsTransactionActive=false 的引用,
+        // 消费方(如 LocalEventBus)判定的是 IsTransactionActive 而非 null,语义等价于已清除
+        Interlocked.Decrement(ref _transactionDepth);
+        AmbientUnitOfWork.Set(null);
+
         // 全部提交成功，执行 post-commit actions（如延迟事件发布）
         var queue = _serviceProvider.GetService<IPostCommitActionQueue>();
         if (queue != null && queue.Count > 0)
         {
+            var queuedCount = queue.Count;
             try
             {
                 await queue.ExecuteAsync(cancellationToken);
             }
+            catch (AggregateException ex)
+            {
+                // Post-commit actions 失败不影响已提交的事务，仅记录错误。
+                // 队列逐个隔离失败并跑完全部动作，故这里的计数能区分「个别失败」与「全体失败」
+                _logger?.LogError(ex,
+                    "{FailedCount} of {TotalCount} post-commit actions failed after transaction commit",
+                    ex.InnerExceptions.Count, queuedCount);
+            }
             catch (Exception ex)
             {
-                // Post-commit actions 失败不影响已提交的事务，仅记录错误
-                _logger?.LogError(ex, "Error executing post-commit actions after transaction commit");
+                _logger?.LogError(ex,
+                    "Error executing {TotalCount} post-commit actions after transaction commit", queuedCount);
             }
         }
 
-        // 事务深度已在提交前减少
+        // 事务深度与环境事务作用域已在 post-commit 队列执行前清理
     }
 
     public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)

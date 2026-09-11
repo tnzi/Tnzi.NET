@@ -9,7 +9,7 @@ public class TextToolsTests
 
     public TextToolsTests()
     {
-        _tools = new TextTools(NullLogger<TextTools>.Instance);
+        _tools = new TextTools();
     }
 
     #region GetTextStatisticsAsync

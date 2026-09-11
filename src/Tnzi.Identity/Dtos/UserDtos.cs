@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Dtos;
+﻿namespace Tnzi.Identity.Dtos;
 
 /// <summary>
 /// 用户列表项DTO（不包含 UserDetail 字段，用于列表查询）
@@ -12,6 +12,17 @@ public class UserListItemDto
     public Guid? OrganizationId { get; set; }
     public string? OrganizationName { get; set; }
     public bool IsLockedOut { get; set; }
+
+    /// <summary>
+    /// 这个账号还欠着的事（未接受邀请 / 必须改密 / …）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="IsLockedOut"/> 分开呈现：未接受邀请的账号在库里两者同时为真，
+    /// 但含义完全不同（「新人还没来」vs「这个人被停用了」），
+    /// 管理台把它们混成一种状态就没法用了。
+    /// </remarks>
+    public PendingUserActions PendingActions { get; set; }
+
     public bool IsEmailConfirmed { get; set; }
     public bool IsPhoneNumberConfirmed { get; set; }
     public bool TwoFactorEnabled { get; set; }
@@ -47,9 +58,22 @@ public class CreateUserDto
     [Required]
     public string UserName { get; set; } = null!;
 
-    [Required]
-    public string Password { get; set; } = null!;
-    
+    /// <summary>
+    /// 初始密码。<b>可以为空</b>，此时创建出的账号没有密码。
+    /// </summary>
+    /// <remarks>
+    /// ★ 从必填改为可空，是为了让「管理员开号 + 本人来设密码」这条路走得通
+    /// （<see cref="Services.IInvitationService"/>）。让邀请自己拼一个 <c>User</c> 塞进库
+    /// 才是危险的做法：那样会绕开这条路径上的重名校验、密码策略与注册事件，
+    /// 而 <c>CreateAsync</c> 是它们唯一的共同出口。
+    /// <para>
+    /// 留空创建出的账号<b>登录不进去</b>：没有 <c>PasswordHash</c> 则密码登录必失败，
+    /// 而邀请路径还会另外置上 <see cref="PendingUserActions.InvitationPending"/>，
+    /// 由守卫挡住其余全部签发路径。
+    /// </para>
+    /// </remarks>
+    public string? Password { get; set; }
+
     [EmailAddress]
     public string? Email { get; set; }
     
@@ -109,9 +133,14 @@ public class UpdateUserDto
 /// </remarks>
 public class UpdateProfileDto
 {
-    public string? Email { get; set; }
-
-    public string? PhoneNumber { get; set; }
+    // ★★★ 这里**刻意没有** Email / PhoneNumber。
+    //
+    // 它们曾经在，于是 PUT /users/profile 可以直接改掉联系方式 —— 而旁边就摆着
+    // 一整套换绑流程（change-email/send-code → change-email/confirm，验证码发到**新地址**）。
+    // 一个端点能绕过另一个端点的验证仪式，那套仪式就等于不存在。
+    // 更糟的是直接赋值不清确认位：换完地址仍带着「已验证」的章，而那一位是框架对外的断言。
+    //
+    // 要改联系方式就走换绑端点；管理员要直接改，走 admin/users/{id} + confirm-contact。
 
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
@@ -124,6 +153,18 @@ public class UpdateProfileDto
     public string? Bio { get; set; }
     public string? Address { get; set; }
     public string? Website { get; set; }
+}
+
+/// <summary>
+/// 管理端「确认联系方式」入参。两项都为 <c>null</c> 时拒绝（没有要办的事）。
+/// </summary>
+public class ConfirmContactDto
+{
+    /// <summary>把邮箱标记为已确认 / 未确认；<c>null</c> 表示不动这一位。</summary>
+    public bool? ConfirmEmail { get; set; }
+
+    /// <summary>把手机号标记为已确认 / 未确认；<c>null</c> 表示不动这一位。</summary>
+    public bool? ConfirmPhoneNumber { get; set; }
 }
 
 /// <summary>
@@ -140,7 +181,12 @@ public class UserListQueryDto : PagedQueryDto
     public Guid? RoleId { get; set; }
     
     public bool? IsLockedOut { get; set; }
-    
+
+    /// <summary>
+    /// 按待办筛选：命中<b>任意一位</b>即返回（管理台的「谁还没接受邀请」就是这一条）。
+    /// </summary>
+    public PendingUserActions? PendingAction { get; set; }
+
     public bool? IsEmailConfirmed { get; set; }
     
     public string? SortBy { get; set; }
@@ -188,6 +234,17 @@ public class ResetPasswordByAdminDto
 {
     [Required]
     public string NewPassword { get; set; } = null!;
+
+    /// <summary>
+    /// 要求本人下次登录时必须修改这个密码。默认 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>默认开启</b>：管理员设的密码经过了一条带外通道（口头、聊天工具、便签）才到本人手里，
+    /// 那条通道上谁都可能看见。让它默认是临时的，才对得起管理端上「登录后需重新修改」那句提示 ——
+    /// 在此之前那句话是假的，框架根本没有这个机制。
+    /// 明确不需要时（比如系统账号、自动化用途）传 false。
+    /// </remarks>
+    public bool RequireChangeOnNextLogin { get; set; } = true;
 }
 
 /// <summary>

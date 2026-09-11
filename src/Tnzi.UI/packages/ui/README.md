@@ -45,6 +45,7 @@ createApp(App).use(createPinia()).use(createTnziUi()).mount('#app')
 | `@tnzi/ui/utils` | Naive UI 辅助函数 |
 | `@tnzi/ui/resolvers` | `TnziUiResolver`（`unplugin-vue-components` 自动导入） |
 | `@tnzi/ui/theme/presets/*` | 主题预设 JSON |
+| `@tnzi/ui/icons` | 本包（及其 @tnzi 依赖）会渲染的 Iconify 名字清单 + `bundleTnziIcons` / `selectTnziIcons`（生成；离线打包图标用） |
 | `@tnzi/ui/style.css` | 打包样式（必需引入） |
 
 组件命名一律 `T` 前缀，便于与应用自有组件区分。

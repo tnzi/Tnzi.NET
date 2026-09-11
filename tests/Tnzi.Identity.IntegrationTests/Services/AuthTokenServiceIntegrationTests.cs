@@ -34,7 +34,11 @@ public class AuthTokenServiceIntegrationTests : IDisposable
         var repository = new EFCoreRepository<TestIdentityDbContext, AuthToken, Guid>(
             _dbContext,
             serviceProvider: _serviceProvider);
-        _service = new AuthTokenService(repository, _serviceProvider);
+        // 令牌值以 DataProtection 密文落库、以 SHA-256 哈希查找。用短暂的临时 key ring
+        // （EphemeralDataProtectionProvider）就够了：这一组测的是「写进去还读得回来、
+        // 且按值查得到」，不是 key ring 的持久化行为。
+        _service = new AuthTokenService(
+            repository, new EphemeralDataProtectionProvider(), _serviceProvider);
     }
 
     [Fact]
@@ -47,8 +51,34 @@ public class AuthTokenServiceIntegrationTests : IDisposable
 
         var saved = await _dbContext.AuthTokens.FindAsync(tokenId);
         Assert.NotNull(saved);
-        Assert.Equal("token-1", saved.Value);
+
+        // ★★★ 落库的**不是**明文。这一条是本轮改动的核心断言：拿到这张表的人
+        //   不应当直接得到一枚能用的刷新令牌。
+        Assert.NotEqual("token-1", saved.Value);
+        Assert.Equal(OneTimeToken.Hash("token-1"), saved.ValueHash);
+
+        // 而经服务读回来仍是原值（宽限窗与邀请预填资料都依赖这条）。
+        Assert.Equal("token-1", _service.RevealTokenValue(saved));
         Assert.False(saved.IsUsed);
+    }
+
+    /// <summary>
+    /// 按值查找走哈希列。密文每次不同，若查询还打在 Value 上，这条必然落空 ——
+    /// 也就是「所有刷新、2FA 验证、邀请接受一律失效」。
+    /// </summary>
+    [Fact]
+    public async Task FindTokenByValueAsync_MatchesOnHash()
+    {
+        var userId = Guid.NewGuid();
+        await EnsureUserExistsAsync(userId);
+        await _service.SaveTokenAsync(userId, "email", "reset", "token-1", DateTime.UtcNow.AddMinutes(10));
+
+        var found = await _service.FindTokenByValueAsync("email", "reset", "token-1");
+        var miss = await _service.FindTokenByValueAsync("email", "reset", "token-x");
+
+        Assert.NotNull(found);
+        Assert.Equal(userId, found!.UserId);
+        Assert.Null(miss);
     }
 
     [Fact]
@@ -62,7 +92,9 @@ public class AuthTokenServiceIntegrationTests : IDisposable
 
         Assert.Equal(tokenId, updatedTokenId);
         Assert.Single(_dbContext.AuthTokens);
-        Assert.Equal("token-2", _dbContext.AuthTokens.Single().Value);
+        var row = _dbContext.AuthTokens.Single();
+        Assert.Equal(OneTimeToken.Hash("token-2"), row.ValueHash);
+        Assert.Equal("token-2", _service.RevealTokenValue(row));
     }
 
     [Fact]

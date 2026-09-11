@@ -177,7 +177,7 @@
               <div v-if="searchResult" class="t-log-viewer-page__search-results">
                 <div class="t-log-viewer-page__search-summary">
                   {{ t('searchMatches', { count: searchResult.hits.length }) }}
-                  <span v-if="searchResult.truncated">· {{ t('truncated') }}</span>
+                  <span v-if="searchResult.truncated">· {{ t('truncatedBy.' + (searchResult.truncationReason || 'None')) }}</span>
                   <span class="t-log-viewer-page__search-elapsed">{{ searchResult.elapsedMs }}ms</span>
                 </div>
                 <ul class="t-log-viewer-page__search-list">

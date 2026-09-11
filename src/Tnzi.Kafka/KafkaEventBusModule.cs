@@ -93,6 +93,21 @@ public class KafkaEventBusModule : TnziInfrastructureModule
         services.AddSingleton<IDistributedEventBus>(provider => provider.GetRequiredService<KafkaEventBus>());
         services.AddSingleton<IIntegrationEventBus>(provider => provider.GetRequiredService<KafkaEventBus>());
 
+        // 连通性探针（与 RabbitMQ 模块同形）：让就绪探针能反映代理状态
+        services.AddSingleton<IDistributedEventBusHealthProbe, KafkaHealthProbe>();
+
+        // ★ 启动时把已注册的集成事件处理器变成真正的消费者（与 RabbitMQ 模块共用同一个启动器）。
+        // 此前 SubscribeEvent 在全仓零调用方：消息留在主题里不丢，但没有任何人消费，
+        // 而文档写着「消费端事件处理器无需修改」。
+        // 闭包捕获 services 而不是在这里快照事件类型：本模块 LoadOrder 11 很靠前，
+        // 配置阶段还看不见后加载的业务模块注册的处理器；容器构建完成后再枚举才是全量。
+        services.AddSingleton<IHostedService>(provider => new DistributedEventSubscriptionInitializer(
+            services,
+            provider.GetRequiredService<KafkaEventBus>(),
+            provider.GetRequiredService<ILogger<DistributedEventSubscriptionInitializer>>(),
+            "Kafka",
+            provider.GetService<IOptions<KafkaOptions>>()?.Value.AutoSubscribe ?? true));
+
         return Task.CompletedTask;
     }
 }

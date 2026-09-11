@@ -81,6 +81,12 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         services.AddScoped<IChatAccessService, ChatAccessService>();
 
         services.AddScoped<IChatContactService, ChatContactService>();
+
+        // 写入侧的文件归属校验（IFileReadAccessProbe，实现随 Tnzi.Storage 注册）。
+        // 这里默认放行：本套用例绝大多数关心的是别的事，而没有它每一条带附件的消息
+        // 都会答 501。关心这道校验本身的用例自己换掉它（见 ChatFileAttachmentGuardTests）。
+        services.AddScoped(_ => PermissiveFileAccess());
+
         services.AddScoped<IConversationService, ConversationService>();
 
         // Admin maintenance service - IConnectionManager is an optional ctor dependency
@@ -89,6 +95,14 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         services.AddScoped<IChatAdminService, ChatAdminService>();
 
         services.AddScoped<IChatConfigService, ChatConfigService>();
+    }
+
+    /// <summary>一律放行的文件归属探针。</summary>
+    private static IFileReadAccessProbe PermissiveFileAccess()
+    {
+        var probe = new Mock<IFileReadAccessProbe>();
+        probe.Setup(p => p.CanReadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        return probe.Object;
     }
 
     /// <summary>Override in a test class to change ChatOptions (defaults = everything enabled).</summary>

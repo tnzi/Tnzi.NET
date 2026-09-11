@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 客户/供应商对账单
@@ -36,7 +36,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     {
         Check.NotNull(query);
 
-        var to = (query.To ?? DateTime.UtcNow.Date).ToUtcDate();
+        var to = (query.To ?? TimeProvider.GetUtcNow().UtcDateTime.Date).ToUtcDate();
         // Activity 形态没给起点时按一个月：月结是这种对账单最常见的用途。
         var from = (query.From ?? to.AddMonths(-1)).ToUtcDate();
         if (from > to)
@@ -79,7 +79,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     public async Task<Result<List<DunningCandidateDto>>> GetDunningCandidatesAsync(
         FinancePartyType partyType, DateTime? asOf = null, CancellationToken cancellationToken = default)
     {
-        var date = (asOf ?? DateTime.UtcNow.Date).ToUtcDate();
+        var date = (asOf ?? TimeProvider.GetUtcNow().UtcDateTime.Date).ToUtcDate();
 
         // 账龄报表已经按往来方汇总过一遍，直接用——催收工作台与账龄报表给出
         // 两套"谁欠多少"是最伤信任的失败模式。

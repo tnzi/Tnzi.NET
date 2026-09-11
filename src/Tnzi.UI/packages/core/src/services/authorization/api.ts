@@ -118,7 +118,13 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
     getPagedList: (query?: RoleFunctionQueryDto) =>
       client.get<PagedList<RoleFunctionDto>>(ROLE_FUNCTIONS_BASE, { params: query }),
 
-    /** Get all function IDs assigned to a role */
+    /**
+     * Get the function IDs assigned to a role whose functions are currently in
+     * effect (enabled and not retired). Grants on retired / disabled functions
+     * are kept server-side but not returned: they never render in a matrix, and
+     * `setFunctions` rejects them, so echoing them back would make every save of
+     * this role fail.
+     */
     getRoleFunctionIds: (roleId: string) =>
       client.get<string[]>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/function-ids`),
 
@@ -130,7 +136,12 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
     removeFunctions: (roleId: string, functionIds: string[]) =>
       client.post<void>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/remove`, { functionIds }),
 
-    /** Set (overwrite) all functions for a role */
+    /**
+     * Set (overwrite) the role's functions. Every id must be a function that is
+     * currently in effect (404 otherwise, naming the offending codes). Grants on
+     * retired / disabled functions lie outside the overwrite and are preserved;
+     * use `clearFunctions` to drop everything.
+     */
     setFunctions: (roleId: string, functionIds: string[]) =>
       client.put<void>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/set`, { functionIds }),
 
@@ -189,7 +200,11 @@ export function useAdminUserFunctionApi(client: HttpClient) {
     getUserFunctions: (userId: string) =>
       client.get<ModuleFunctionDto[]>(`${USER_FUNCTIONS_BASE}/user/${userId}`),
 
-    /** Get all function IDs directly granted to a user */
+    /**
+     * Get the function IDs directly granted to a user whose functions are
+     * currently in effect (enabled and not retired) - same contract as the
+     * role surface: dormant rows are kept server-side but never echoed back.
+     */
     getUserFunctionIds: (userId: string) =>
       client.get<string[]>(`${USER_FUNCTIONS_BASE}/user/${userId}/function-ids`),
 
@@ -201,7 +216,11 @@ export function useAdminUserFunctionApi(client: HttpClient) {
     removeFunctions: (userId: string, functionIds: string[]) =>
       client.post<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/remove`, { functionIds }),
 
-    /** Set (overwrite) the user's whole direct-grant set */
+    /**
+     * Set (overwrite) the user's direct-grant set. Every id must be a function
+     * currently in effect (404 otherwise, naming the codes); rows on retired /
+     * disabled functions are preserved rather than overwritten.
+     */
     setFunctions: (userId: string, functionIds: string[]) =>
       client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set`, { functionIds }),
 

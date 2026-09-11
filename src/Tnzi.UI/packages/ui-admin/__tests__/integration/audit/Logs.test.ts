@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import Logs from '../../../src/pages/audit/Logs.vue'
@@ -49,6 +49,9 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
 
 describe('Logs page (Tier 2: timeline view)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
+  // The drawer teleports to document.body, so a wrapper left mounted by a failing
+  // assertion would leak into the next test's body query and cascade.
+  enableAutoUnmount(afterEach)
 
   it('mounts the timeline view and fetches audit entries on load', async () => {
     const wrapper = mount(Logs)
@@ -60,6 +63,40 @@ describe('Logs page (Tier 2: timeline view)', () => {
     // Two seeded operation entries should be rendered as timeline items.
     const items = wrapper.findAll('.n-timeline-item')
     expect(items.length).toBeGreaterThanOrEqual(2)
+  })
+
+  // A timeline row is a `role="button"` container, so both activation keys must
+  // work and Space must not scroll the page instead. Same rule as TItemCard.
+  it.each([['Enter'], [' ']])('opens a row detail on %s and prevents the default', async (key) => {
+    const wrapper = mount(Logs, { attachTo: document.body })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+
+    const row = wrapper.find('.t-audit-timeline__item')
+    expect(row.exists()).toBe(true)
+    expect(document.body.querySelector('.n-drawer')).toBeNull()
+
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    row.element.dispatchEvent(event)
+    await nextTick()
+
+    expect(document.body.querySelector('.n-drawer')).not.toBeNull()
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('leaves non-activating keys alone on a timeline row', async () => {
+    const wrapper = mount(Logs, { attachTo: document.body })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+
+    const event = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    wrapper.find('.t-audit-timeline__item').element.dispatchEvent(event)
+    await nextTick()
+
+    expect(document.body.querySelector('.n-drawer')).toBeNull()
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('does not show TCrudPage chrome (timeline view replaces it)', async () => {

@@ -382,6 +382,8 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         }
 
         var currentRequest = executionContextAccessor?.CurrentRequest;
+        // User 级规则靠它绑定到人；与下面发出的审批请求同源，两条路径不会各说各话
+        context.UserId = currentRequest?.UserId;
         context.WorkflowId = currentRequest?.WorkflowId;
         context.IsWorkflowRun = currentRequest?.WorkflowId.HasValue == true;
         context.WorkflowExecutionId = GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowExecutionId);

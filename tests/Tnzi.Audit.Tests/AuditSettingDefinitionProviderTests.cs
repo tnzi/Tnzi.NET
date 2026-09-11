@@ -35,14 +35,16 @@ public class AuditSettingDefinitionProviderTests
     [Fact]
     public void Group_HasExpectedFields()
     {
-        // 记录粒度组：RetentionDays + 5 个 Capture 小节字段。
+        // 记录粒度组：RetentionDays + ExportMaxRows + 5 个 Capture 小节字段。
         // EnableEntityAudit 自实体级审计采集管道落地后成为真热配
         // （EntityAuditSaveChangesInterceptor 经 IOptionsMonitor 热读）；
+        // ExportMaxRows 由 AuditOperationService 经 IOptionsMonitor 热读（导出超限拒绝）；
         // EnableResponseResult 仍为"假热配"不暴露（AuditMiddleware 未消费）。
-        Assert.Equal(6, _group.Fields.Count);
+        Assert.Equal(7, _group.Fields.Count);
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableOperationAudit");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableEntityAudit");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:RetentionDays");
+        Assert.Contains(_group.Fields, f => f.Key == "Audit:ExportMaxRows");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestParameters");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableRequestBodyCapture");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:MaxRequestBodySize");

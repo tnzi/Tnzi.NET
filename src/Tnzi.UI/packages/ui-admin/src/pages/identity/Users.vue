@@ -40,6 +40,7 @@ import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
+import { hasFlag, type Flags } from '@tnzi/core/utils'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import TFormSchemaRenderer from '../_shared/form-schema'
@@ -55,6 +56,11 @@ interface UserListItem {
   password?: string
   creationTime?: string
   isLockedOut?: boolean
+  /**
+   * 待办标志集合。★ 线上是成员名字符串（`"InvitationPending"`），不是数字。
+   * 判定走 `@tnzi/core/utils` 的 `hasFlag`；`&` 对字符串会静默恒为 0。
+   */
+  pendingActions?: Flags<number>
   /** Role NAMES (denormalised from UserRole.RoleName by the backend). */
   roles?: string[]
 }
@@ -133,6 +139,34 @@ const handleDisable = (id: string) => withRefresh(() => bridge.users.disable(id)
 const handleLock = (id: string) => withRefresh(() => bridge.users.lock(id), 'actions.lockSuccess')
 const handleUnlock = (id: string) => withRefresh(() => bridge.users.unlock(id), 'actions.unlockSuccess')
 
+const handleResendInvitation = (id: string) =>
+  withRefresh(async () => {
+    await bridge.invitations.resend(id)
+  }, 'actions.resendInvitationSuccess')
+
+const handleRevokeInvitation = (id: string) =>
+  withRefresh(async () => {
+    await bridge.invitations.revoke(id)
+  }, 'actions.revokeInvitationSuccess')
+
+/**
+ * An account still waiting for its invitee to accept the invitation.
+ *
+ * ★★ Read through `hasFlag`, never with `&`. `pendingActions` arrives as the member
+ * name (`"InvitationPending"`), so the bitwise form coerces to `NaN` and answers
+ * `false` for every row - silently. That took both invitation actions off every row
+ * (they are gated on `isPending`) and, worse, put Enable / Disable / Lock / Unlock
+ * back onto un-accepted invitations, which are gated on `!isPending`. The backend
+ * spells out why that last one matters: enabling such an account clears
+ * `LockoutEnabled`, and the lockout guard then passes an account that has no
+ * password and no second factor but already carries its roles.
+ */
+const isPending = (row: UserListItem) =>
+  hasFlag(row.pendingActions, PENDING_INVITATION, { None: 0, InvitationPending: PENDING_INVITATION })
+
+/** `PendingUserActions.InvitationPending` (bit 0). */
+const PENDING_INVITATION = 1 << 0
+
 /**
  * Row operations.
  *
@@ -157,10 +191,16 @@ const rowActions: RowAction<UserListItem>[] = [
   editAction(crud),
   { key: 'manageRoles', label: 'actions.manageRoles', show: () => crud.canUpdate, onClick: (row) => openUser(row.id, 'roles') },
   { key: 'directGrants', label: 'actions.managePermissions', show: () => canViewGrants.value, onClick: (row) => openUser(row.id, 'grants') },
-  { key: 'enable', label: 'actions.enable', show: (row) => crud.canUpdate && row.isLockedOut === true, confirm: 'actions.confirmEnable', onClick: (row) => void handleEnable(row.id) },
-  { key: 'disable', label: 'actions.disable', show: (row) => crud.canUpdate && row.isLockedOut !== true, confirm: 'actions.confirmDisable', onClick: (row) => void handleDisable(row.id) },
-  { key: 'unlock', label: 'actions.unlock', show: (row) => crud.canUpdate && row.isLockedOut === true, onClick: (row) => void handleUnlock(row.id) },
-  { key: 'lock', label: 'actions.lock', show: (row) => crud.canUpdate && row.isLockedOut !== true, onClick: (row) => void handleLock(row.id) },
+  // ★ 邀请中的账号只给「重发 / 撤销」，不给启用·停用·锁定·解锁。
+  //   后端对未接受邀请的账号拒绝 enable（否则那一步会连同 LockoutEnabled 一起清掉，
+  //   把一个没有密码、没有二次验证、角色却已预设好的账号放进系统）；这里不显示
+  //   那几个按钮，是为了不让管理员点一个注定被拒的操作。
+  { key: 'resendInvitation', label: 'actions.resendInvitation', show: (row) => crud.canUpdate && isPending(row), confirm: 'actions.confirmResendInvitation', onClick: (row) => void handleResendInvitation(row.id) },
+  { key: 'revokeInvitation', label: 'actions.revokeInvitation', show: (row) => crud.canDelete && isPending(row), confirm: 'actions.confirmRevokeInvitation', onClick: (row) => void handleRevokeInvitation(row.id) },
+  { key: 'enable', label: 'actions.enable', show: (row) => crud.canUpdate && !isPending(row) && row.isLockedOut === true, confirm: 'actions.confirmEnable', onClick: (row) => void handleEnable(row.id) },
+  { key: 'disable', label: 'actions.disable', show: (row) => crud.canUpdate && !isPending(row) && row.isLockedOut !== true, confirm: 'actions.confirmDisable', onClick: (row) => void handleDisable(row.id) },
+  { key: 'unlock', label: 'actions.unlock', show: (row) => crud.canUpdate && !isPending(row) && row.isLockedOut === true, onClick: (row) => void handleUnlock(row.id) },
+  { key: 'lock', label: 'actions.lock', show: (row) => crud.canUpdate && !isPending(row) && row.isLockedOut !== true, onClick: (row) => void handleLock(row.id) },
   deleteAction(crud),
 ]
 </script>

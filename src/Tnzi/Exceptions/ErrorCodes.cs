@@ -49,6 +49,24 @@ public static class ErrorCodes
     public const string IDENTITY_USER_NOT_FOUND = "IDENTITY_USER_NOT_FOUND";
     public const string IDENTITY_USER_ALREADY_EXISTS = "IDENTITY_USER_ALREADY_EXISTS";
     public const string IDENTITY_USER_LOCKED = "IDENTITY_USER_LOCKED";
+
+    /// <summary>
+    /// 账号已开好但本人还没接受邀请。所有登录路径与找回密码路径共用这一个码，
+    /// 前端据它引导用户去点邀请链接，而不是让人一遍遍地重置密码。
+    /// </summary>
+    public const string IDENTITY_ACTIVATION_PENDING = "IDENTITY_ACTIVATION_PENDING";
+
+    /// <summary>邀请令牌无效、已用过或已过期。三种情况共用一个码，刻意不区分。</summary>
+    public const string IDENTITY_INVITATION_INVALID = "IDENTITY_INVITATION_INVALID";
+
+    /// <summary>
+    /// 凭据已经过关，但账号欠着必须先办完的事（改密码之类）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这不是「登录失败」。前端见到它应当停在登录流程里、渲染对应的那一步，
+    /// 而不是把人退回登录页 —— 与 <see cref="IDENTITY_2FA_REQUIRED"/> 同一形态。
+    /// </remarks>
+    public const string IDENTITY_PENDING_ACTIONS_REQUIRED = "IDENTITY_PENDING_ACTIONS_REQUIRED";
     public const string IDENTITY_INVALID_PASSWORD = "IDENTITY_INVALID_PASSWORD";
     public const string IDENTITY_PASSWORD_TOO_WEAK = "IDENTITY_PASSWORD_TOO_WEAK";
     public const string IDENTITY_ROLE_ERROR = "IDENTITY_ROLE_ERROR";
@@ -65,6 +83,18 @@ public static class ErrorCodes
     public const string IDENTITY_PASSWORD_CHANGE_FAILED = "IDENTITY_PASSWORD_CHANGE_FAILED";
     public const string IDENTITY_PASSWORD_RESET_FAILED = "IDENTITY_PASSWORD_RESET_FAILED";
     public const string IDENTITY_OAUTH_ERROR = "IDENTITY_OAUTH_ERROR";
+
+    /// <summary>
+    /// 第三方身份带来的邮箱未被提供商证实过，因此<b>不自动关联</b>到同邮箱的既有账号。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 按邮箱自动认领账号，前提是那个邮箱确实属于登录者。有些提供商的资料邮箱
+    /// 是用户自己填的、从不校验（GitHub 的 profile email、Facebook / Twitter），
+    /// 于是「用受害者的邮箱注册一个第三方账号，再用它登录」就能接管本地账号。
+    /// 拿不到「已验证」这个断言时，正确的做法不是拒绝这个人，而是<b>不替他认领账号</b>：
+    /// 让他用常规方式登录一次，再从个人中心主动绑定 —— 那时「他是不是账号主人」已经被证明过了。
+    /// </remarks>
+    public const string IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED = "IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED";
     public const string IDENTITY_EMAIL_NOT_SET = "IDENTITY_EMAIL_NOT_SET";
     public const string IDENTITY_EMAIL_ALREADY_CONFIRMED = "IDENTITY_EMAIL_ALREADY_CONFIRMED";
     public const string IDENTITY_EMAIL_NOT_CONFIRMED = "IDENTITY_EMAIL_NOT_CONFIRMED";
@@ -73,6 +103,25 @@ public static class ErrorCodes
     public const string IDENTITY_SESSION_ALREADY_ACTIVE = "IDENTITY_SESSION_ALREADY_ACTIVE";
     public const string IDENTITY_SESSION_LIMIT_REACHED = "IDENTITY_SESSION_LIMIT_REACHED";
     public const string IDENTITY_SESSION_REVOKED = "IDENTITY_SESSION_REVOKED";
+
+    /// <summary>
+    /// 检测到刷新令牌重放：一枚已经被轮换掉的刷新令牌在宽限窗之外又被使用。
+    /// 整条会话已被撤销，客户端必须重新登录（不要重试刷新）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 刻意<b>与「令牌无效」用不同的码</b>，尽管两者返回的文案相同。
+    /// 收到它的那一方多半是<b>合法用户</b>（谁先刷新谁赢，输的一方可能是真人），
+    /// 而「你的会话因为安全原因被结束了，请重新登录」与「登录过期了」对用户是两件事。
+    /// 对攻击者它不构成新信息：会话此刻已经死了，知道自己被发现并不能换来任何东西。
+    /// </remarks>
+    public const string IDENTITY_REFRESH_TOKEN_REUSED = "IDENTITY_REFRESH_TOKEN_REUSED";
+
+    /// <summary>
+    /// 请求的客户端特征与会话建立时不一致（令牌很可能已被搬到别的设备上使用）。
+    /// 会话已撤销，需要重新认证。
+    /// </summary>
+    public const string IDENTITY_SESSION_BINDING_MISMATCH = "IDENTITY_SESSION_BINDING_MISMATCH";
+
     public const string IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED";
     public const string IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED";
 

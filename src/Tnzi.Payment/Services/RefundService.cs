@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Services;
+﻿namespace Tnzi.Payment.Services;
 
 /// <summary>
 /// 退款服务实现
@@ -11,6 +11,24 @@ public class RefundService : ApplicationService, IRefundService
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
 
     private const int ReconcileScanPageSize = 200;
+
+    /// <summary>
+    /// 仍然占着支付可退额度的退款状态。
+    /// </summary>
+    /// <remarks>
+    /// 反过来说，<c>Rejected</c> / <c>Cancelled</c> / <c>Failed</c> 三个终态**不**占额度。
+    /// 此前的写法是排除法且漏了 <c>Rejected</c>：一笔审批被拒的全额退款照样计入已退金额，
+    /// 于是这笔支付**永久**变成不可退，而拒绝审批的人以为自己只是没批准这一次。
+    /// 改成正列举，新增状态时必须显式决定它算不算占用。
+    /// </remarks>
+    private static readonly RefundStatus[] ActiveRefundStatuses =
+    [
+        RefundStatus.Pending,
+        RefundStatus.Processing,
+        RefundStatus.Approved,
+        RefundStatus.Refunding,
+        RefundStatus.Succeeded
+    ];
 
     private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
@@ -47,12 +65,30 @@ public class RefundService : ApplicationService, IRefundService
 
         var options = PaymentOptions;
 
-        // 事务保护：退款金额校验 + 退款记录创建原子操作，防止并发超退
+        // 事务保护：额度占用 + 退款记录创建原子操作，防止并发超退
         var refund = await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            // 校验退款金额不超过已付金额减去已退款金额
+            // 裸 SQL 必须先强开事务：物理事务延迟到首次 SaveChanges 才 BEGIN，
+            // 不开就跑在自动提交模式下 —— 回滚撤不掉这次占用，行锁也不持有到事务结束。
+            await _paymentRepository.EnsureTransactionStartedAsync(ct);
+
+            // ★ 额度占用：在支付这一行上做原子条件自增。这是并发超退唯一堵得住的地方 ——
+            // 对退款表求和读不到别人未提交的行，两笔并发退款各自都会读到「还剩这么多」。
+            // 第二笔在这条语句上等第一笔提交，然后对已提交的占用额重新求值。
+            var reserved = await _paymentRepository.AsQueryable()
+                .Where(p => p.Id == payment.Id
+                    && p.ReservedRefundAmount + request.RefundAmount <= p.PaidAmount)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(x => x.ReservedRefundAmount, x => x.ReservedRefundAmount + request.RefundAmount),
+                    ct);
+
+            if (reserved == 0)
+                return Fail<Refund>(ErrorCodes.PaymentRefundExceedAmount, 400);
+
+            // 求和这一道**刻意保留**：既有部署迁移后 ReservedRefundAmount 从 0 起算，
+            // 而退款表里可能已有历史行。没有它，那些支付会凭空多出一整份可退额度。
             var existingRefundAmount = await _refundRepository
-                .Where(r => r.PaymentId == payment.Id && r.Status != RefundStatus.Cancelled && r.Status != RefundStatus.Failed)
+                .Where(r => r.PaymentId == payment.Id && ActiveRefundStatuses.Contains(r.Status))
                 .SumAsync(r => r.RefundAmount, ct);
 
             if (request.RefundAmount > payment.PaidAmount - existingRefundAmount)
@@ -64,7 +100,7 @@ public class RefundService : ApplicationService, IRefundService
             var todayRefunds = await _refundRepository
                 .Where(r => r.CreationTime >= todayStart && r.CreationTime < todayEnd
                             && r.Currency == payment.Currency
-                            && r.Status != RefundStatus.Cancelled && r.Status != RefundStatus.Failed)
+                            && ActiveRefundStatuses.Contains(r.Status))
                 .SumAsync(r => r.RefundAmount, ct);
 
             if (todayRefunds + request.RefundAmount > options.MaxRefundAmountPerDay)
@@ -130,6 +166,8 @@ public class RefundService : ApplicationService, IRefundService
         if (request.Approved)
             return await ProcessRefundAsync(refundId, cancellationToken);
 
+        // 拒绝审批 = 这笔退款不会再发生 → 把它占用的可退额度还给支付
+        await ReleaseRefundReservationAsync(refund.PaymentId, cancellationToken);
         return Ok();
     }
 
@@ -181,6 +219,7 @@ public class RefundService : ApplicationService, IRefundService
         {
             refund.Status = RefundStatus.Failed;
             await _refundRepository.UpdateAsync(refund, cancellationToken);
+            await ReleaseRefundReservationAsync(payment.Id, cancellationToken);
             await PublishRefundEventAsync(refund, payment, succeeded: false, result.Message);
             return Fail(result.Message ?? ErrorCodes.StripeRefundFailed);
         }
@@ -264,6 +303,7 @@ public class RefundService : ApplicationService, IRefundService
         {
             if (status is RefundStatus.Failed or RefundStatus.Cancelled)
             {
+                await ReleaseRefundReservationAsync(payment.Id, cancellationToken);
                 Logger.LogWarning("Refund settled as {Status}. RefundNo: {RefundNo}", status, refund.RefundNo);
                 await PublishRefundEventAsync(refund, payment, succeeded: false, $"Channel settled refund as {status}");
             }
@@ -276,6 +316,25 @@ public class RefundService : ApplicationService, IRefundService
 
         Logger.LogInformation("Refund processed. RefundNo: {RefundNo}, Amount: {Amount}",
             refund.RefundNo, refund.RefundAmount);
+    }
+
+    /// <summary>
+    /// 重算支付上被退款单占用的额度。
+    /// </summary>
+    /// <remarks>
+    /// 刻意是**重算**而不是「减掉这一笔」：同一笔退款可能被重复判为终态
+    /// （渠道重投、对账扫描与执行路径同时收到结果），做减法会把额度还两次，
+    /// 从此这笔支付可以退出超过它收到的钱。重算按定义幂等，重复调用不会出错。
+    /// </remarks>
+    private async Task ReleaseRefundReservationAsync(Guid paymentId, CancellationToken cancellationToken)
+    {
+        var active = await _refundRepository.AsQueryable()
+            .Where(r => r.PaymentId == paymentId && ActiveRefundStatuses.Contains(r.Status))
+            .SumAsync(r => r.RefundAmount, cancellationToken);
+
+        await _paymentRepository.AsQueryable()
+            .Where(p => p.Id == paymentId && p.ReservedRefundAmount != active)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.ReservedRefundAmount, active), cancellationToken);
     }
 
     /// <summary>
@@ -335,6 +394,9 @@ public class RefundService : ApplicationService, IRefundService
 
         if (affected == 0)
             return Fail(ErrorCodes.RefundCannotCancel, 409);
+
+        // 取消 = 这笔退款不会再发生 → 把它占用的可退额度还给支付
+        await ReleaseRefundReservationAsync(refund.PaymentId, cancellationToken);
 
         Logger.LogInformation("Refund cancelled. RefundNo: {RefundNo}, Reason: {Reason}",
             refund.RefundNo, reason);

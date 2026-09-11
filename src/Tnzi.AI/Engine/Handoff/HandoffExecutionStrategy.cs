@@ -67,6 +67,10 @@ public class HandoffExecutionStrategy : IExecutionStrategy
 
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, handoffTarget);
 
+            // 转接过去的 Agent 是模型自己选的，不是这次请求最初面向的那一个 ——
+            // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效
+            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
+
             // 保存当前 Agent 作为"上一个"（供下一跳回退用）
             previousAgentName = currentAgent.Name;
             previousAgentId = effectiveTargets.TryGetValue(currentAgent.Name, out var currentId)
@@ -179,6 +183,9 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             }
 
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, detectedHandoff);
+
+            // 同上：流式路径也要标记，否则同一条规则在流式与非流式下答案不一样
+            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
 
             previousAgentName = currentAgent.Name;
             previousAgentId = effectiveTargets.TryGetValue(currentAgent.Name, out var currentId)

@@ -41,4 +41,26 @@ export interface StateDeps {
    * by route name instead, which is deployment-prefix agnostic.
    */
   loginPath?: string;
+  /**
+   * How the backend delivers the refresh token.
+   *
+   * - `'bearer'` (default): the refresh token comes back in the response body and
+   *   is persisted through the `storage` adapter, alongside the access token.
+   * - `'cookie'`: the backend sets an `HttpOnly` cookie
+   *   (`Identity:TokenDelivery:Mode = Cookie`) and the body carries no refresh
+   *   token. Nothing auth-related is written to `storage` at all - the access
+   *   token lives in memory only and is re-obtained from the cookie on reload.
+   *
+   * ★ Why `'cookie'` is worth the extra moving part: a token in `localStorage`
+   * is readable by any script on the page (one XSS and it is gone) and by any
+   * process running as the user (this is exactly what infostealer malware
+   * collects). An `HttpOnly` cookie is readable by neither. It also happens to be
+   * the only shape that browser-level device binding (DBSC) can protect - that
+   * mechanism binds *cookies* to a device key and does nothing for bearer tokens
+   * in web storage.
+   *
+   * Must match the backend setting: `'cookie'` against a `Bearer` backend leaves
+   * the client with no refresh token at all.
+   */
+  tokenDelivery?: 'bearer' | 'cookie';
 }

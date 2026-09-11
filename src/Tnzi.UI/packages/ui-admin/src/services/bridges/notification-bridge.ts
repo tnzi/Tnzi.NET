@@ -21,6 +21,7 @@ import {
   useAdminNotificationPreferenceApi,
   useAdminNotificationTemplateApi,
   useUnsubscribeApi,
+  useAdminPushDeviceApi,
   NotificationType,
   type NotificationInfo,
   type QueryNotificationRequest,
@@ -28,6 +29,9 @@ import {
   type NotificationPreferenceQueryDto,
   type SetNotificationPreferenceDto,
   type DeliveryReportDto,
+  type DevicePlatform,
+  type PushDeviceDto,
+  type PushDeviceQueryDto,
   type UnsubscribePreviewDto,
 } from '@tnzi/core/services/notification'
 import type {
@@ -39,7 +43,7 @@ import type {
 } from '@tnzi/core/services/template'
 import type { PagedList } from '@tnzi/core/types'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminNotificationApi>[0]
 
@@ -50,6 +54,7 @@ export interface NotificationBridgeDeps {
   notificationApi?: ReturnType<typeof useAdminNotificationApi>
   preferenceApi?: ReturnType<typeof useAdminNotificationPreferenceApi>
   templateApi?: ReturnType<typeof useAdminNotificationTemplateApi>
+  deviceApi?: ReturnType<typeof useAdminPushDeviceApi>
 }
 
 /** messages sub-contract with extra send / cancel / delivery-report actions */
@@ -135,6 +140,20 @@ export interface NotificationBridge {
    * upsert via PUT /admin/notification-preferences/user/{userId}.
    */
   subscriptions: BridgeCrudContract<NotificationPreferenceDto>
+
+  /**
+   * Push device registry, backed by /admin/notification-devices.
+   *
+   * ★ Read + delete only. Registration is a **client** action - the device
+   * posts its own token - so an operator-typed row would match no real device
+   * and every push to it would fail forever with nobody knowing why. The
+   * create/update members therefore reject rather than call a nonexistent
+   * endpoint.
+   *
+   * ★ Only present when the app loads the optional `Tnzi.Notification.Push`
+   * module; an email-only deployment has neither the table nor these routes.
+   */
+  devices: BridgeCrudContract<PushDeviceDto>
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
@@ -144,6 +163,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
   const notificationApi = deps.notificationApi ?? (deps.client ? useAdminNotificationApi(deps.client) : null)
   const preferenceApi = deps.preferenceApi ?? (deps.client ? useAdminNotificationPreferenceApi(deps.client) : null)
   const templateApi = deps.templateApi ?? (deps.client ? useAdminNotificationTemplateApi(deps.client) : null)
+  const deviceApi = deps.deviceApi ?? (deps.client ? useAdminPushDeviceApi(deps.client) : null)
 
   if (!notificationApi) {
     const noFetch = backendGapReject('no deps provided')
@@ -171,6 +191,12 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         create: backendGapReject('subscriptions.create'),
         update: backendGapReject('subscriptions.update'),
         delete: backendGapReject('subscriptions.delete'),
+      },
+      devices: {
+        fetch: backendGapReject('devices.fetch'),
+        create: backendGapReject('devices.create'),
+        update: backendGapReject('devices.update'),
+        delete: backendGapReject('devices.delete'),
       },
       // ★ The unsubscribe stubs resolve rather than reject: the landing page
       // reads "cannot act on this link", which is exactly what it should show
@@ -248,7 +274,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
         create: async (data) => {
           const payload = data as unknown as CreateTemplateDto
-          const result = unwrap<TemplateEntityDto>(await templateApi.create(payload))
+          const result = unwrapOk<TemplateEntityDto>(await templateApi.create(payload))
           // TemplateEntityDto → TemplateInfoDto widening is structural; the
           // list view only consumes Info fields, the form modal reads back
           // the full entity on edit.
@@ -256,7 +282,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
         update: async (id, data) => {
           const payload = data as unknown as UpdateTemplateDto
-          const result = unwrap<TemplateEntityDto>(await templateApi.update(String(id), payload))
+          const result = unwrapOk<TemplateEntityDto>(await templateApi.update(String(id), payload))
           return result as unknown as TemplateInfoDto
         },
         delete: async (ids) => {
@@ -386,7 +412,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             quietHoursEnd: input.quietHoursEnd,
             maxFrequencyPerHour: input.maxFrequencyPerHour,
           }
-          return unwrap(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
+          return unwrapOk(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
         },
         update: async (_id, data) => {
           const input = data as unknown as NotificationPreferenceDto & { userId: string }
@@ -398,7 +424,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             quietHoursEnd: input.quietHoursEnd,
             maxFrequencyPerHour: input.maxFrequencyPerHour,
           }
-          return unwrap(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
+          return unwrapOk(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
         },
         delete: async (ids) => {
           for (const id of ids) {
@@ -448,5 +474,48 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         resubscribe: async () => false,
       }
 
-  return { messages, templates, subscriptions, publicUnsubscribe }
+  const devices: BridgeCrudContract<PushDeviceDto> = deviceApi
+    ? {
+        fetch: async (query: CrudPageQuery): Promise<CrudPageResult<PushDeviceDto>> => {
+          const filters = (query.filters ?? {}) as Record<string, unknown>
+          const orderBy = query.sortField
+            ? `${query.sortField}${query.sortOrder === 'desc' ? ' desc' : ''}`
+            : undefined
+          const params: PushDeviceQueryDto = {
+            pageIndex: query.pageIndex,
+            pageSize: query.pageSize,
+            orderBy,
+            userId: typeof filters.userId === 'string' ? filters.userId : undefined,
+            // filters 是 Record<string, unknown>，窄化只能到 number；
+            // DevicePlatform 是数值联合，需显式断言。
+            platform: typeof filters.platform === 'number' ? (filters.platform as DevicePlatform) : undefined,
+            lastSeenAfter: typeof filters.lastSeenAfter === 'string' ? filters.lastSeenAfter : undefined,
+          }
+          const result = unwrap<{ items: PushDeviceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+            await deviceApi.getList(params),
+          )
+          return pagedResult({
+            items: result.items ?? [],
+            totalCount: result.totalCount ?? 0,
+            pageIndex: result.pageIndex ?? query.pageIndex,
+            pageSize: result.pageSize ?? query.pageSize,
+          })
+        },
+        // A device row is written by the device itself; see the contract docs.
+        create: backendGapReject('devices.create - a device registers its own token'),
+        update: backendGapReject('devices.update - device fields are reported by the client'),
+        delete: async (ids: string[]) => {
+          for (const id of ids) {
+            ensureOk(await deviceApi.delete(id))
+          }
+        },
+      }
+    : {
+        fetch: backendGapReject('devices.fetch'),
+        create: backendGapReject('devices.create'),
+        update: backendGapReject('devices.update'),
+        delete: backendGapReject('devices.delete'),
+      }
+
+  return { messages, templates, subscriptions, devices, publicUnsubscribe }
 }

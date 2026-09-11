@@ -6,6 +6,11 @@ namespace Tnzi.Chat.Tests.Services;
 /// 守的是这条不对称:发送方因为是文件创建者而天然放行,接收方两样都不是 ——
 /// 没有这条判据,同一张图在发的人那里能看、在收的人那里 404。
 /// </summary>
+/// <remarks>
+/// ★ 本组只验<b>读取</b>侧（谁看得见会话里的文件）。夹具用 <c>Guid.NewGuid()</c> 造文件 id，
+/// 所以它从不问「这个 id 凭什么是你的」—— 那一半在
+/// <see cref="ChatFileAttachmentGuardTests"/>，两组合起来才是完整的判据。
+/// </remarks>
 public class ChatFileReferenceAccessResolverTests : Integration.IntegrationTestBase
 {
     private IConversationService Conversations => ServiceProvider.GetRequiredService<IConversationService>();

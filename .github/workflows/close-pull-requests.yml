@@ -6,7 +6,13 @@ name: Close pull requests
 # refuses to turn off all three merge methods at once, so closing them on arrival is
 # the only way to make "we can't take PRs" true rather than just documented.
 #
-# This is the only workflow carried into the mirror. The others are deliberately left
+# This is the only workflow carried into the mirror - which also means the same file
+# sits in the private development repo, where `pull_request_target` would fire just the
+# same. The job is therefore gated on the mirror's repository name: in the development
+# repo it must never run (2026-09-04 it closed a development PR within seconds, and with
+# the quality workflows keyed to `pull_request`, that branch got no CI at all afterwards).
+#
+# The others are deliberately left
 # behind: the publishing ones need secrets and would imply packages ship from here,
 # and the quality ones read files under docs/, which the mirror does not carry.
 #
@@ -23,6 +29,8 @@ permissions:
 
 jobs:
   close:
+    # Mirror only. See the header: the development repo carries this file too.
+    if: github.repository == 'tnzi/Tnzi.NET'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7

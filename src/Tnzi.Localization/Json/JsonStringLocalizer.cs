@@ -4,7 +4,13 @@ namespace Tnzi.Localization.Json;
 /// JSON-based string localizer
 /// Loads translation resources from JSON files, supports both flat and nested JSON formats
 /// Nested keys are flattened using dot notation (e.g., {"Auth": {"Login": "Login"}} -> key "Auth.Login")
-/// Lookup priority: {resourcesPath}/{baseName}.{culture}.json -> {resourcesPath}/{culture}.json
+/// File lookup: {resourcesPath}/{baseName}.{culture}.json -> {resourcesPath}/{culture}.json
+///
+/// 键的查找链是三级：当前文化 → 父文化 → <c>Localization:DefaultCulture</c>。
+///
+/// ★ 第三级不是可有可无的：没有它时，一个只写在默认语言资源里的键，在别的语言下
+/// 返回的是**键名本身** —— 界面上直接显示 <c>Auth.Login.Title</c>。Resx 模式有中性资源
+/// 兜底，所以同一套配置换个 <c>ResourceFormat</c> 会突然变弱，而这一点在配置上看不出来。
 /// </summary>
 public class JsonStringLocalizer : IStringLocalizer
 {
@@ -12,14 +18,54 @@ public class JsonStringLocalizer : IStringLocalizer
     private readonly string _resourcesPath;
     private readonly ILogger _logger;
     private readonly IMissingTranslationTracker? _missingTranslationTracker;
+    private readonly CultureInfo? _defaultCulture;
     private readonly ConcurrentDictionary<string, Dictionary<string, string>> _resourceCache = new();
 
-    public JsonStringLocalizer(string baseName, string resourcesPath, ILoggerFactory loggerFactory, IMissingTranslationTracker? missingTranslationTracker = null)
+    /// <summary>
+    /// 初始化一个 <see cref="JsonStringLocalizer"/> 实例
+    /// </summary>
+    /// <param name="baseName">资源基名</param>
+    /// <param name="resourcesPath">资源目录</param>
+    /// <param name="loggerFactory">日志工厂</param>
+    /// <param name="missingTranslationTracker">缺失翻译追踪器（可选）</param>
+    /// <param name="defaultCulture">
+    /// 查找链最后一级的默认语言（<c>Localization:DefaultCulture</c>）。
+    /// 传 null 时退回两级查找。
+    /// </param>
+    public JsonStringLocalizer(
+        string baseName,
+        string resourcesPath,
+        ILoggerFactory loggerFactory,
+        IMissingTranslationTracker? missingTranslationTracker = null,
+        string? defaultCulture = null)
     {
         _baseName = Check.NotNull(baseName);
         _resourcesPath = Check.NotNull(resourcesPath);
         _logger = Check.NotNull(loggerFactory).CreateLogger<JsonStringLocalizer>();
         _missingTranslationTracker = missingTranslationTracker;
+        _defaultCulture = ParseDefaultCulture(defaultCulture);
+    }
+
+    /// <summary>
+    /// 解析默认语言名。配错时只记一条警告然后退回两级查找 —— 一个拼错的语言名
+    /// 不该让整个应用启动失败，但也不能一声不吭。
+    /// </summary>
+    private CultureInfo? ParseDefaultCulture(string? defaultCulture)
+    {
+        if (string.IsNullOrWhiteSpace(defaultCulture)) return null;
+
+        try
+        {
+            return new CultureInfo(defaultCulture);
+        }
+        catch (CultureNotFoundException)
+        {
+            _logger.LogWarning(
+                "Localization:DefaultCulture '{DefaultCulture}' is not a valid culture name; "
+                + "JSON lookups will not fall back to it.",
+                defaultCulture);
+            return null;
+        }
     }
 
     /// <summary>
@@ -55,21 +101,14 @@ public class JsonStringLocalizer : IStringLocalizer
     public IEnumerable<LocalizedString> GetAllStrings(bool includeParentCultures)
     {
         var culture = CultureInfo.CurrentUICulture;
-        var resources = LoadJsonResource(culture);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var kvp in resources)
+        foreach (var source in BuildLookupChain(culture, includeParentCultures))
         {
-            yield return new LocalizedString(kvp.Key, kvp.Value, resourceNotFound: false);
-        }
-
-        // 包含父文化的翻译
-        if (includeParentCultures && culture.Parent != CultureInfo.InvariantCulture)
-        {
-            var parentResources = LoadJsonResource(culture.Parent);
-            foreach (var kvp in parentResources)
+            foreach (var kvp in LoadJsonResource(source))
             {
-                // 不覆盖子文化已有的翻译
-                if (!resources.ContainsKey(kvp.Key))
+                // 更靠前的文化已经给出的键不被后面的覆盖
+                if (seen.Add(kvp.Key))
                 {
                     yield return new LocalizedString(kvp.Key, kvp.Value, resourceNotFound: false);
                 }
@@ -83,27 +122,64 @@ public class JsonStringLocalizer : IStringLocalizer
     private string? GetStringSafely(string name)
     {
         var culture = CultureInfo.CurrentUICulture;
-        var resources = LoadJsonResource(culture);
 
-        if (resources.TryGetValue(name, out var value))
+        foreach (var source in BuildLookupChain(culture, includeFallbacks: true))
         {
-            return value;
-        }
-
-        // 尝试从父文化加载
-        if (culture.Parent != CultureInfo.InvariantCulture)
-        {
-            var parentResources = LoadJsonResource(culture.Parent);
-            if (parentResources.TryGetValue(name, out value))
+            if (LoadJsonResource(source).TryGetValue(name, out var value))
             {
                 return value;
             }
         }
 
-        // 追踪缺失的翻译
+        // 整条链都没有才算缺失 —— 被默认语言兜住的键不该刷满缺失报告
         _missingTranslationTracker?.TrackMissing(culture.Name, name);
 
         return null;
+    }
+
+    /// <summary>
+    /// 查找顺序：当前文化及其**整条**父链 → 默认语言及其整条父链。
+    /// 同名文化只出现一次（请求的就是默认语言时不重复枚举）。
+    ///
+    /// ★ 必须走完整条父链而不是只上一级：带脚本子标签的文化中间还夹着一层，
+    /// <c>zh-CN</c> 的父是 <c>zh-Hans</c> 而不是 <c>zh</c>（ICU 的层级）。只上一级的话，
+    /// 一个按 <c>zh.json</c> 组织资源的应用在 <c>zh-CN</c> 请求下一条都命中不了，
+    /// 而在 <c>fr-FR</c>（父就是 <c>fr</c>）下工作正常 —— 于是这个缺陷只在部分语言上出现。
+    /// </summary>
+    /// <param name="culture">请求的文化</param>
+    /// <param name="includeFallbacks">是否包含父链与默认语言</param>
+    private IEnumerable<CultureInfo> BuildLookupChain(CultureInfo culture, bool includeFallbacks)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var source in Ancestry(culture))
+        {
+            if (seen.Add(source.Name)) yield return source;
+            if (!includeFallbacks) yield break;
+        }
+
+        if (!includeFallbacks || _defaultCulture == null) yield break;
+
+        foreach (var source in Ancestry(_defaultCulture))
+        {
+            if (seen.Add(source.Name)) yield return source;
+        }
+    }
+
+    /// <summary>
+    /// 一个文化自己加上它的每一级父文化，到不变文化为止（不含不变文化）。
+    /// </summary>
+    private static IEnumerable<CultureInfo> Ancestry(CultureInfo culture)
+    {
+        for (var current = culture;
+             current != null && !string.IsNullOrEmpty(current.Name);
+             current = current.Parent)
+        {
+            yield return current;
+
+            // CultureInfo.Parent 在不变文化上返回自身，不加这一步会死循环
+            if (current.Parent.Equals(current)) yield break;
+        }
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 科目表服务
@@ -34,9 +34,9 @@ public interface IChartOfAccountsService
     /// </remarks>
     /// <param name="accountIds">科目ID集合（去重后上限 500——参数化 IN 列表有数据库上限，
     /// 超过请分批）</param>
-    /// <param name="asOf">基准日（含当日）</param>
+    /// <param name="asOf">基准日（含当日）；不给则按服务端当日</param>
     /// <param name="cancellationToken">取消令牌</param>
-    Task<Result<List<AccountBalanceDto>>> GetBalancesAsync(IEnumerable<Guid> accountIds, DateTime asOf, CancellationToken cancellationToken = default);
+    Task<Result<List<AccountBalanceDto>>> GetBalancesAsync(IEnumerable<Guid> accountIds, DateTime? asOf = null, CancellationToken cancellationToken = default);
 
     /// <summary>为当前租户播种默认科目表（仅当科目表为空时）</summary>
     Task<Result<int>> SeedDefaultAsync(CancellationToken cancellationToken = default);

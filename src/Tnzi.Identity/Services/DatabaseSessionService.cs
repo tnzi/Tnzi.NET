@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 基于数据库的会话管理服务实现
@@ -11,9 +11,21 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     // Optional - validity cache for the per-request OnTokenValidated check, so an
     // authenticated request doesn't hit the DB for every call. Invalidated on revoke.
     private readonly ICache? _cache;
-    private readonly SessionOptions _sessionOptions;
+    private readonly IEventBus? _eventBus;
+    private readonly IOptionsMonitor<SessionOptions>? _sessionOptionsMonitor;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptionsMonitor;
+    private readonly SessionOptions _fallbackSessionOptions = new();
 
     private const string ValidityCachePrefix = "identity:session:valid:";
+
+    /// <summary>
+    /// 活动时间的最小写入间隔（秒）。闲置超时要有意义，就得有人在普通请求上更新
+    /// <see cref="UserSession.LastActivityTime"/>；但每请求一次数据库写是不可接受的开销，
+    /// 而闲置超时的量级是分钟，一分钟的粒度对它没有任何影响。
+    /// </summary>
+    private const int ActivityWriteThrottleSeconds = 60;
+
+    private SessionOptions SessionOptions => _sessionOptionsMonitor?.CurrentValue ?? _fallbackSessionOptions;
 
     public DatabaseSessionService(IRepository<UserSession, Guid> repository, IServiceProvider serviceProvider)
         : base(serviceProvider)
@@ -24,23 +36,42 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         // still construct the service successfully.
         _userRepository = serviceProvider.GetService<IRepository<User, Guid>>();
         _cache = serviceProvider.GetService<ICache>();
-        _sessionOptions = serviceProvider.GetService<IOptions<SessionOptions>>()?.Value ?? new SessionOptions();
+        _eventBus = serviceProvider.GetService<IEventBus>();
+        // IOptionsMonitor 而不是 IOptions：绑定 / 闲置超时这几项都在配置中心里可热改，
+        // 构造时取快照会让「改了但要重启才生效」，而重启前没有任何地方看得出来。
+        _sessionOptionsMonitor = serviceProvider.GetService<IOptionsMonitor<SessionOptions>>();
+        _identityOptionsMonitor = serviceProvider.GetService<IOptionsMonitor<IdentityOptions>>();
     }
 
     private static string ValidityCacheKey(Guid sessionId) => ValidityCachePrefix + sessionId.ToString("N");
 
+    /// <summary>
+    /// 闲置超时（分钟，0 = 不启用）。取 <c>Identity:AccountSecurity:SessionTimeoutMinutes</c>。
+    /// </summary>
+    private int IdleTimeoutMinutes => _identityOptionsMonitor?.CurrentValue.AccountSecurity.SessionTimeoutMinutes ?? 0;
+
     /// <inheritdoc />
     public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
     {
+        var now = DateTime.UtcNow;
+        // 绝对上限在建立那一刻就定死，后续任何续期都不会推动它。
+        var absoluteExpiresAt = SessionLifetime.ComputeAbsoluteExpiry(now, SessionOptions.AbsoluteLifetimeHours);
+
         var session = new UserSession
         {
             UserId = userId,
             DeviceInfo = deviceInfo,
             IpAddress = ipAddress,
             UserAgent = userAgent,
-            CreationTime = DateTime.UtcNow,
-            LastActivityTime = DateTime.UtcNow,
-            ExpiresAt = expiresAt,
+            CreationTime = now,
+            LastActivityTime = now,
+            // 建立时也要夹：绝对上限比刷新令牌周期还短的部署（例如上限 8 小时、刷新 7 天），
+            // 不夹的话 ExpiresAt 会比真实寿命长得多，而并发计数读的正是它 ——
+            // 于是已经死掉的会话仍占着并发名额。
+            ExpiresAt = expiresAt.HasValue
+                ? SessionLifetime.ClampToAbsolute(expiresAt.Value, absoluteExpiresAt)
+                : absoluteExpiresAt,
+            AbsoluteExpiresAt = absoluteExpiresAt,
             IsRevoked = false
         };
 
@@ -51,35 +82,184 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<bool> IsSessionValidAsync(Guid sessionId)
     {
-        if (sessionId == Guid.Empty)
+        var snapshot = await GetSnapshotAsync(sessionId);
+        return snapshot != null && IsAlive(snapshot, DateTime.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public async Task<SessionValidationResult> ValidateAsync(Guid sessionId, SessionValidationContext context)
+    {
+        Check.NotNull(context);
+
+        var snapshot = await GetSnapshotAsync(sessionId);
+        var now = DateTime.UtcNow;
+
+        if (snapshot == null || !IsAlive(snapshot, now))
         {
-            return false;
+            return SessionValidationResult.Invalid;
         }
 
-        var cacheSeconds = _sessionOptions.ValidationCacheSeconds;
+        var options = SessionOptions;
+
+        // ① 设备特征。抹掉版本号之后仍然对不上，说明令牌换了一台机器在用。
+        if (options.BindToUserAgent && !SessionBinding.Matches(snapshot.UserAgent, context.UserAgent))
+        {
+            LogWarning(
+                "Session {SessionId} rejected: user-agent fingerprint changed (bound at sign-in, differs now).",
+                sessionId);
+            return SessionValidationResult.BindingMismatch;
+        }
+
+        // ② 来源地址。默认只记录不拦：换 Wi-Fi、切蜂窝、VPN 都会让正常会话换地址。
+        var ipChanged = options.IpChangeBehavior != SessionIpChangeBehavior.Ignore
+            && !string.IsNullOrEmpty(context.IpAddress)
+            && !string.IsNullOrEmpty(snapshot.IpAddress)
+            && !string.Equals(snapshot.IpAddress, context.IpAddress, StringComparison.OrdinalIgnoreCase);
+
+        if (ipChanged && options.IpChangeBehavior == SessionIpChangeBehavior.Revoke)
+        {
+            LogWarning("Session {SessionId} rejected: source address changed and policy is Revoke.", sessionId);
+            return SessionValidationResult.BindingMismatch;
+        }
+
+        await TouchAsync(sessionId, snapshot, context, ipChanged, now);
+
+        return SessionValidationResult.Valid;
+    }
+
+    /// <inheritdoc />
+    public async Task<UserSessionDto?> GetSessionAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return await _repository
+            .Where(s => s.Id == sessionId)
+            .ProjectTo<UserSession, UserSessionDto>()
+            .FirstOrDefaultAsync();
+    }
+
+    /// <summary>
+    /// 会话是不是还活着。判据本身在 <see cref="SessionLifetime.IsAlive"/> —— 两个会话后端共用一份，
+    /// 且它是纯函数，闲置超时那条分支因此有测试覆盖得到（默认关闭时集成测试跑不到它）。
+    /// </summary>
+    private bool IsAlive(SessionSnapshot snapshot, DateTime now)
+        => SessionLifetime.IsAlive(
+            snapshot.IsRevoked,
+            snapshot.ExpiresAt,
+            snapshot.AbsoluteExpiresAt,
+            snapshot.LastActivityTime,
+            IdleTimeoutMinutes,
+            now);
+
+    /// <summary>
+    /// 续期活动时间（并在地址变化时更新地址、发一条事件）。按 <see cref="ActivityWriteThrottleSeconds"/> 节流。
+    /// </summary>
+    private async Task TouchAsync(
+        Guid sessionId, SessionSnapshot snapshot, SessionValidationContext context, bool ipChanged, DateTime now)
+    {
+        var staleActivity = snapshot.LastActivityTime.AddSeconds(ActivityWriteThrottleSeconds) <= now;
+        if (!staleActivity && !ipChanged)
+        {
+            return;
+        }
+
+        var previousIp = snapshot.IpAddress;
+        var newIp = ipChanged ? context.IpAddress : snapshot.IpAddress;
+
+        await _repository
+            .Where(s => s.Id == sessionId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(s => s.LastActivityTime, now)
+                .SetProperty(s => s.IpAddress, newIp));
+
+        // 缓存里的快照跟着更新，否则本窗口内的后续请求会反复触发同一次写。
+        snapshot.LastActivityTime = now;
+        snapshot.IpAddress = newIp;
+        await StoreSnapshotAsync(sessionId, snapshot);
+
+        if (ipChanged && _eventBus != null)
+        {
+            // 地址一变就更新记录，所以同一次变化只会发一条。
+            await _eventBus.PublishAsync(new SessionIpChangedEvent
+            {
+                UserId = snapshot.UserId,
+                SessionId = sessionId,
+                PreviousIpAddress = previousIp,
+                CurrentIpAddress = context.IpAddress,
+                ChangedTime = now
+            }, cancellationToken: default);
+        }
+    }
+
+    private async Task<SessionSnapshot?> GetSnapshotAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var cacheSeconds = SessionOptions.ValidationCacheSeconds;
         var useCache = _cache != null && cacheSeconds > 0;
         var cacheKey = ValidityCacheKey(sessionId);
 
         if (useCache)
         {
-            var cached = await _cache!.GetAsync<bool?>(cacheKey);
-            if (cached.HasValue)
+            var cached = await _cache!.GetAsync<SessionSnapshot>(cacheKey);
+            if (cached != null)
             {
-                return cached.Value;
+                return cached;
             }
         }
 
-        var now = DateTime.UtcNow;
-        var valid = await _repository
-            .Where(s => s.Id == sessionId && !s.IsRevoked && (s.ExpiresAt == null || s.ExpiresAt > now))
-            .AnyAsync();
+        var snapshot = await _repository
+            .Where(s => s.Id == sessionId)
+            .Select(s => new SessionSnapshot
+            {
+                UserId = s.UserId,
+                IsRevoked = s.IsRevoked,
+                ExpiresAt = s.ExpiresAt,
+                AbsoluteExpiresAt = s.AbsoluteExpiresAt,
+                LastActivityTime = s.LastActivityTime,
+                UserAgent = s.UserAgent,
+                IpAddress = s.IpAddress,
+            })
+            .FirstOrDefaultAsync();
 
-        if (useCache)
+        if (snapshot != null && useCache)
         {
-            await _cache!.SetAsync<bool?>(cacheKey, valid, TimeSpan.FromSeconds(cacheSeconds));
+            await StoreSnapshotAsync(sessionId, snapshot);
         }
 
-        return valid;
+        return snapshot;
+    }
+
+    private async Task StoreSnapshotAsync(Guid sessionId, SessionSnapshot snapshot)
+    {
+        var cacheSeconds = SessionOptions.ValidationCacheSeconds;
+        if (_cache == null || cacheSeconds <= 0)
+        {
+            return;
+        }
+
+        await _cache.SetAsync(ValidityCacheKey(sessionId), snapshot, TimeSpan.FromSeconds(cacheSeconds));
+    }
+
+    /// <summary>
+    /// 每请求校验所需的会话字段。刻意是可变的普通类而不是 record：
+    /// 它要经缓存序列化往返，也要在 <see cref="TouchAsync"/> 里就地更新后写回。
+    /// </summary>
+    private sealed class SessionSnapshot
+    {
+        public Guid UserId { get; set; }
+        public bool IsRevoked { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public DateTime? AbsoluteExpiresAt { get; set; }
+        public DateTime LastActivityTime { get; set; }
+        public string? UserAgent { get; set; }
+        public string? IpAddress { get; set; }
     }
 
     private async Task InvalidateValidityCacheAsync(params Guid[] sessionIds)
@@ -248,7 +428,9 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         }
 
         session.LastActivityTime = DateTime.UtcNow;
-        session.ExpiresAt = expiresAt;
+        // ★ 续期不得越过绝对上限，否则这条上限就只是一个不参与任何判断的字段：
+        // 刷新令牌每次都把 ExpiresAt 推到「今天 + 刷新周期」，一条会话可以被无限续下去。
+        session.ExpiresAt = SessionLifetime.ClampToAbsolute(expiresAt, session.AbsoluteExpiresAt);
         await _repository.UpdateAsync(session);
         // 续期后有效性可能延长，清缓存让下次校验读到新值。
         await InvalidateValidityCacheAsync(sessionId);
@@ -259,15 +441,22 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
     {
+        var result = await CleanInactiveSessionsAsync(inactiveThreshold);
+        return result.Succeeded ? Ok(result.Data!.Count) : Fail<int>(result.Message ?? "Cleanup failed", result.Code ?? 500);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyCollection<Guid>>> CleanInactiveSessionsAsync(TimeSpan inactiveThreshold)
+    {
         var cutoffTime = DateTime.UtcNow - inactiveThreshold;
 
         var expiredSessions = await _repository
             .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
             .ToListAsync();
 
-        if (!expiredSessions.Any())
+        if (expiredSessions.Count == 0)
         {
-            return Ok(0);
+            return Ok<IReadOnlyCollection<Guid>>(Array.Empty<Guid>());
         }
 
         foreach (var session in expiredSessions)
@@ -276,11 +465,12 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             session.RevokedAt = DateTime.UtcNow;
         }
 
+        var ids = expiredSessions.Select(s => s.Id).ToArray();
         await _repository.UpdateManyAsync(expiredSessions);
-        await InvalidateValidityCacheAsync(expiredSessions.Select(s => s.Id).ToArray());
+        await InvalidateValidityCacheAsync(ids);
 
-        LogInformation("Cleaned {Count} expired sessions (inactive since {CutoffTime})", expiredSessions.Count, cutoffTime);
-        return Ok(expiredSessions.Count);
+        LogInformation("Cleaned {Count} expired sessions (inactive since {CutoffTime})", ids.Length, cutoffTime);
+        return Ok<IReadOnlyCollection<Guid>>(ids);
     }
 
     /// <inheritdoc />

@@ -82,7 +82,7 @@ public class CliAgentRedLineTests
             Path.Combine("src", "Tnzi.AI", "AIModule.Registration.cs")
         };
 
-        var offenders = EnumerateFrameworkSources(repoRoot)
+        var offenders = RepoScan.EnumerateFiles("src", "*.cs")
             .Where(file =>
             {
                 var content = File.ReadAllText(file);
@@ -145,39 +145,6 @@ public class CliAgentRedLineTests
         // 管理端下拉必须带上这一位，否则管理员会选中一个必然 501 的 provider。
         var dto = Path.Combine(repoRoot, "src", "Tnzi.AI", "Dtos", "CliAgentDtos.cs");
         Assert.Contains("Implemented", File.ReadAllText(dto), StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// 枚举框架 C# 源码。
-    /// </summary>
-    /// <remarks>
-    /// 刻意<b>不</b>对 <c>src/</c> 整棵树做 <c>AllDirectories</c>：<c>src/Tnzi.UI</c> 下有
-    /// 前端 monorepo 的 <c>node_modules</c>，递归它会让测试宿主直接崩掉
-    /// （实测就是这样发现的）。这里按项目目录逐个扫，并跳过 UI 与构建产物目录。
-    /// </remarks>
-    private static IEnumerable<string> EnumerateFrameworkSources(string repoRoot)
-    {
-        var srcRoot = Path.Combine(repoRoot, "src");
-
-        foreach (var projectDirectory in Directory.EnumerateDirectories(srcRoot))
-        {
-            var name = Path.GetFileName(projectDirectory);
-            if (string.Equals(name, "Tnzi.UI", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories))
-            {
-                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                    || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                yield return file;
-            }
-        }
     }
 
     private static bool ContainsOutsideComments(string content, string symbol)

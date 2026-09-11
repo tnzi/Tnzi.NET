@@ -7,7 +7,7 @@ namespace Tnzi.Kafka;
 /// 不执行本进程内处理器;不替换 IEventBus(本地总线始终可用)
 /// 实现IAsyncDisposable以支持消费者任务的优雅关闭
 /// </summary>
-public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncDisposable, IDisposable
+public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IDistributedEventSubscriber, IAsyncDisposable, IDisposable
 {
     private readonly IProducer<string, string> _producer;
     private readonly ILogger<KafkaEventBus> _logger;
@@ -98,15 +98,45 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
     /// 订阅事件（Kafka特有方法，用于手动订阅）
     /// </summary>
     public void SubscribeEvent<TEvent>() where TEvent : class, IEvent
+        => SubscribeEvent(typeof(TEvent));
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 非泛型入口，供 <see cref="DistributedEventSubscriptionInitializer"/> 按启动时发现的
+    /// 事件类型逐个订阅。订阅本身是同步的（建消费者 + 起后台循环），因此这里不需要真异步。
+    /// </remarks>
+    public Task SubscribeEventAsync(Type eventType, CancellationToken cancellationToken = default)
     {
-        var eventType = typeof(TEvent);
+        SubscribeEvent(eventType);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 订阅事件（按运行时类型）。
+    /// </summary>
+    /// <remarks>
+    /// 泛型重载只是这个方法的门面：消费循环真正需要的只有事件的具体类型（反序列化目标、
+    /// 主题名、处理器接口的类型实参），泛型参数除约束外一处也没用到。
+    /// </remarks>
+    public void SubscribeEvent(Type eventType)
+    {
+        Check.NotNull(eventType);
+
+        if (!typeof(IEvent).IsAssignableFrom(eventType) || !eventType.IsClass || eventType.IsAbstract)
+        {
+            throw new ArgumentException(
+                $"Type '{eventType.FullName}' cannot be subscribed: it must be a non-abstract class implementing IEvent.",
+                nameof(eventType));
+        }
+
         var eventTypeName = eventType.FullName ?? eventType.Name;
         var topic = $"{_options.TopicPrefix}.{eventTypeName}";
         var groupId = $"{_options.GroupIdPrefix}.{eventTypeName}";
 
         if (_consumers.ContainsKey(eventType) || _consumerCancellationTokens.ContainsKey(eventType))
         {
-            _logger.LogWarning("Event {EventType} is already subscribed", eventTypeName);
+            // 启动期自动订阅与应用自己调用 Subscribe 会同时到达同一个类型，这是常态不是异常
+            _logger.LogDebug("Event {EventType} is already subscribed; the request is a no-op", eventTypeName);
             return;
         }
 
@@ -156,7 +186,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
                                 }
 
                                 var json = result.Message.Value;
-                                var @event = JsonSerializer.Deserialize<TEvent>(json, TnziJsonDefaults.Options);
+                                var @event = JsonSerializer.Deserialize(json, eventType, TnziJsonDefaults.Options) as IEvent;
 
                                 if (@event == null)
                                 {
@@ -167,7 +197,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
 
                                 // 执行处理器；失败时按重试预算在进程内重试，耗尽后进 DLQ 或保留偏移量等待重投。
                                 // 关键不变量：处理器失败绝不无条件提交偏移量（杜绝静默丢消息）。
-                                var failureCount = await RunHandlersAsync<TEvent>(eventType, @event);
+                                var failureCount = await RunHandlersAsync(eventType, @event);
                                 var attemptsMade = 1;
 
                                 while (true)
@@ -196,7 +226,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
                                             await Task.Delay(_options.Consumer.ConsumeRetryBackoffMs, cts.Token);
                                         }
 
-                                        failureCount = await RunHandlersAsync<TEvent>(eventType, @event);
+                                        failureCount = await RunHandlersAsync(eventType, @event);
                                         attemptsMade++;
                                         continue;
                                     }
@@ -231,7 +261,15 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
                             }
                             catch (ConsumeException ex)
                             {
+                                // 退避后再拉：持续性的消费错误（主题不存在、鉴权失败、分区不可用）
+                                // 每次 Consume 都会立刻抛出而不等满轮询超时，没有退避就是一个
+                                // 满速自旋 —— 烧 CPU、刷日志，而问题本身一条都修不了。
                                 _logger.LogError(ex, "Error consuming event {EventType} from Kafka", eventTypeName);
+
+                                if (_options.Consumer.ConsumeErrorBackoffMs > 0)
+                                {
+                                    await Task.Delay(_options.Consumer.ConsumeErrorBackoffMs, cts.Token);
+                                }
                             }
                         }
                     }
@@ -333,7 +371,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
     /// <summary>
     /// 获取事件的所有处理器（支持事件继承）
     /// </summary>
-    private IEnumerable<object> GetEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private static IEnumerable<object> GetEventHandlers(Type eventType, IServiceProvider serviceProvider)
     {
         var allHandlers = new List<object>();
         var handlerTypes = new HashSet<Type>();
@@ -351,7 +389,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
         }
 
         // 2. 获取基类事件的处理器（事件继承支持）
-        var baseEventHandlers = GetBaseEventHandlers<TEvent>(eventType, serviceProvider);
+        var baseEventHandlers = GetBaseEventHandlers(eventType, serviceProvider);
         foreach (var handler in baseEventHandlers)
         {
             if (handler != null && !handlerTypes.Contains(handler.GetType()))
@@ -367,7 +405,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
     /// <summary>
     /// 获取基类事件的处理器（支持事件继承）
     /// </summary>
-    private IEnumerable<object> GetBaseEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private static IEnumerable<object> GetBaseEventHandlers(Type eventType, IServiceProvider serviceProvider)
     {
         var handlers = new List<object>();
 
@@ -391,11 +429,11 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
     /// 在独立 DI scope 内执行某事件的全部处理器，返回失败的处理器数量。
     /// 单个处理器失败不影响其他处理器（错误隔离），但失败会被计数以决定是否提交偏移量。
     /// </summary>
-    private async Task<int> RunHandlersAsync<TEvent>(Type eventType, TEvent @event) where TEvent : class, IEvent
+    private async Task<int> RunHandlersAsync(Type eventType, IEvent @event)
     {
         // 每次（含重试）使用全新 scope，确保 Scoped 处理器被重新解析
         using var handlerScope = _serviceProvider.CreateScope();
-        var handlers = GetEventHandlers<TEvent>(eventType, handlerScope.ServiceProvider);
+        var handlers = GetEventHandlers(eventType, handlerScope.ServiceProvider);
 
         var tasks = new List<Task<bool>>();
         foreach (var handler in handlers)
@@ -420,13 +458,13 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
     /// 执行处理器并实现错误隔离（单个处理器失败不影响其他处理器）。
     /// 返回 true 表示成功（含条件处理器主动跳过、缺失 HandleAsync 的配置型问题），false 表示执行抛异常。
     /// </summary>
-    private async Task<bool> ExecuteHandlerWithErrorIsolationAsync<TEvent>(object handler, TEvent @event, Type eventType) where TEvent : class, IEvent
+    private async Task<bool> ExecuteHandlerWithErrorIsolationAsync(object handler, IEvent @event, Type eventType)
     {
         var handlerType = handler.GetType();
         try
         {
             // 获取或创建处理器元数据（编译委托缓存）
-            var metadata = EventHandlerInvoker.GetMetadata(handlerType);
+            var metadata = EventHandlerInvoker.GetMetadata(handlerType, eventType);
 
             // 检查条件处理器
             if (metadata.CanHandleDelegate != null)
@@ -447,8 +485,9 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
             else
             {
                 // 配置型问题（缺失 HandleAsync）：重试无益，记录告警但不计为可重试失败
-                _logger.LogWarning("Handler {HandlerType} does not have HandleAsync method with expected signature",
-                    handlerType.Name);
+                _logger.LogWarning(
+                    "Handler {HandlerType} does not have a HandleAsync accepting {EventType} with the expected signature",
+                    handlerType.Name, eventType.Name);
             }
 
             return true;
@@ -517,7 +556,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
         }
 
         // 检查基类事件的处理器（去重）
-        var baseHandlers = GetBaseEventHandlers<TEvent>(eventType, scope.ServiceProvider);
+        var baseHandlers = GetBaseEventHandlers(eventType, scope.ServiceProvider);
         foreach (var handler in baseHandlers)
         {
             if (handler != null)
@@ -527,12 +566,17 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
         return handlerTypes.Count;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ★ 早先这里只打一行 "Runtime subscription is not supported" 就返回 —— 而框架自己
+    /// 唯一的分布式订阅点（多实例配置变更广播）走的正是这个方法：调用方拿到成功返回，
+    /// 那条链路从未工作过。处理器仍然从 DI 解析（与自动订阅同一条路径）。
+    /// </remarks>
     public void Subscribe<TEvent, THandler>()
         where TEvent : class, IEvent
         where THandler : class, IEventHandler<TEvent>
     {
-        _logger.LogWarning("Runtime subscription is not supported for KafkaEventBus. " +
-                          "Use SubscribeEvent<TEvent>() method instead.");
+        SubscribeEvent(typeof(TEvent));
     }
 
     public void Unsubscribe<TEvent, THandler>()
@@ -556,11 +600,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IAsyncD
 
     void IIntegrationEventBus.Subscribe<TEvent, THandler>()
     {
-        // IIntegrationEventBus的Subscribe方法要求TEvent是IIntegrationEvent
-        // KafkaEventBus使用SubscribeEvent来订阅事件，而不是运行时订阅
-        // 这个方法主要用于声明订阅关系，实际订阅需要通过SubscribeEvent完成
-        _logger.LogWarning("IIntegrationEventBus.Subscribe is not supported for KafkaEventBus. " +
-                          "Use SubscribeEvent<TEvent>() method instead, or register handlers in DI container.");
+        SubscribeEvent(typeof(TEvent));
     }
 
     /// <summary>

@@ -69,6 +69,12 @@ export interface PermissionRulesDto {
 
 /** Evaluation test request - supplies a context and returns the matched decision (debug). */
 export interface PermissionEvaluateRequestDto {
+  /**
+   * Evaluate on behalf of this user. Persisted User-scope rules bind to the
+   * user they name and only match when this is that user's id; omitted means
+   * "a caller no User-scope rule names".
+   */
+  userId?: string | null;
   toolName?: string | null;
   toolGroup?: string | null;
   workingDirectory?: string | null;

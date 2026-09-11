@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Controllers.Admin;
+﻿namespace Tnzi.Finance.Controllers.Admin;
 
 /// <summary>
 /// 科目表管理控制器
@@ -57,8 +57,7 @@ public class DefaultFinanceAccountAdminController : ApiAdminControllerBase
     [HttpPost("balances")]
     public virtual async Task<ApiResult<List<AccountBalanceDto>>> GetBalances([FromBody] GetAccountBalancesDto request)
     {
-        var result = await _accountService.GetBalancesAsync(
-            request.AccountIds ?? [], request.AsOf ?? DateTime.UtcNow);
+        var result = await _accountService.GetBalancesAsync(request.AccountIds ?? [], request.AsOf);
         return result.ToApiResult();
     }
 

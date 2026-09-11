@@ -8,18 +8,42 @@ namespace Tnzi.EFCore.Internal;
 internal static class DbContextServiceResolver
 {
     /// <summary>
-    /// 从 DbContext 获取 IServiceProvider
+    /// 从 DbContext 获取**应用**的 <see cref="IServiceProvider"/>
     /// </summary>
+    /// <remarks>
+    /// ★ 必须取应用容器，不能取 EF 内部容器。<c>dbContext.GetService&lt;IServiceProvider&gt;()</c>
+    /// 命中的恰恰是 EF 内部容器自己（依赖注入容器一律把 <see cref="IServiceProvider"/> 解析为当前作用域），
+    /// 应用注册的服务在那里一个都看不到，而且它**有值**——于是调用方拿到一个能用但答什么都没有的容器。
+    /// 症状是 <c>TnziDbContextHelper</c> 派发领域事件时取不到 <c>IEventBus</c>，事件被静默丢弃：
+    /// 没有异常、没有日志、没有事件。
+    /// 应用容器由 <c>AddDbContext</c> 记在 <see cref="CoreOptionsExtension.ApplicationServiceProvider"/>
+    /// 上（框架用的是 <c>(serviceProvider, options)</c> 重载，因此它是请求作用域容器，
+    /// Scoped 服务可正常解析）。
+    /// </remarks>
     public static IServiceProvider? GetServiceProvider(DbContext dbContext)
     {
         try
         {
-            var provider = dbContext.Database.GetService<IServiceProvider>();
-            if (provider == null && dbContext is IInfrastructure<IServiceProvider> infra)
+            var applicationServiceProvider = dbContext
+                .GetService<IDbContextOptions>()
+                .FindExtension<CoreOptionsExtension>()
+                ?.ApplicationServiceProvider;
+
+            if (applicationServiceProvider != null)
             {
-                provider = infra.Instance;
+                return applicationServiceProvider;
             }
-            return provider;
+        }
+        catch
+        {
+            // 选项扩展不可得（手工 new 出来的 DbContext）时走下面的回退
+        }
+
+        // 回退：EF 内部容器。手工构造的 DbContext 没有应用容器，此时它是唯一可得的容器，
+        // 解析应用服务会全部落空，但这与「没有容器」是同一个结果，不会更糟。
+        try
+        {
+            return dbContext is IInfrastructure<IServiceProvider> infra ? infra.Instance : null;
         }
         catch { return null; }
     }

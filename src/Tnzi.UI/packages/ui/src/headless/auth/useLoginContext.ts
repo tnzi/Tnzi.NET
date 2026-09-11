@@ -19,6 +19,7 @@ export type LoginModule =
   | 'reset-pwd'
   | 'bind-wechat'
   | 'two-factor'
+  | 'pending-actions'
 
 /**
  * Outstanding 2FA challenge - populated by `pwdLogin` / `codeLogin` callbacks
@@ -28,6 +29,63 @@ export type LoginModule =
  */
 /** A 2FA delivery channel. */
 export type TwoFactorMethodName = 'totp' | 'sms' | 'email'
+
+/**
+ * A pending action the account owes before it can be used.
+ *
+ * Populated by the login callbacks via `helpers.setPendingActionRequired(...)`
+ * when the backend answers 403 `IDENTITY_PENDING_ACTIONS_REQUIRED`. Credentials
+ * already checked out and 2FA (if any) already passed - the person is who they
+ * say they are, they just have to finish something first.
+ *
+ * ★ Without a module reading this, the backend's challenge surfaces as a plain
+ * "login failed" and the user has nowhere to go, with a password that is correct.
+ */
+export interface PendingActionChallenge {
+  /** Single-use token from the challenge, 10 minutes. Spend it on the completing call. */
+  tempToken: string
+  /** User-facing label so the form can say who is being changed. */
+  userName?: string
+  /** Outstanding action names, e.g. `['ChangePassword']`. */
+  requiredActions: string[]
+}
+
+/** 完成强制改密时提交的内容。刻意不含账号：改谁由 tempToken 决定。 */
+export interface CompletePasswordChangePayload {
+  tempToken: string
+  newPassword: string
+}
+
+/** 完成一件需要验证码的待办（绑验证器 / 确认邮箱）。 */
+export interface CompletePendingActionCodePayload {
+  tempToken: string
+  code: string
+}
+
+/**
+ * 办完一件待办之后的结果。
+ *
+ * `completed: false` 表示还欠着别的，**临时令牌仍然可用** —— 同一枚继续办下一件。
+ */
+export interface PendingActionOutcome {
+  completed: boolean
+  remainingActions: string[]
+  /**
+   * 后端没有直接签发会话，而是要求再过一道二次验证（账号还开着别的 2FA 方式，办完这件
+   * 之后签发仍要过守卫链）。挑战已经经 helpers 交给 shell（切到 two-factor 模块），本页
+   * 到此为止；此时 `completed` 为 false、`remainingActions` 为空，且这枚待办令牌已被消费。
+   */
+  challenged?: boolean
+}
+
+/** 还欠哪些事，以及办它们需要的材料。 */
+export interface PendingActionDescription {
+  requiredActions: string[]
+  userName: string
+  /** 欠着绑验证器时带上密钥与 otpauth 地址，否则前端没有二维码可扫。 */
+  totpSetup?: { sharedKey: string; authenticatorUri: string } | null
+  maskedEmail?: string | null
+}
 
 export interface TwoFactorChallenge {
   /** Challenge identifier returned by the backend (e.g. session token). */
@@ -153,6 +211,13 @@ export interface LoginCallbackHelpers {
   setTwoFactorRequired: (challenge: TwoFactorChallenge) => void
   clearTwoFactor: () => void
   /**
+   * Switch to the module that lets the user discharge a pending action
+   * (currently: a forced password change).
+   */
+  setPendingActionRequired: (challenge: PendingActionChallenge) => void
+  /** Dismiss the pending-action state (e.g. after it is discharged). */
+  clearPendingAction: () => void
+  /**
    * Reveal the adaptive login captcha with the fresh picture the backend
    * returned in its `IDENTITY_CAPTCHA_REQUIRED` response. `PwdLogin` watches
    * `pendingCaptcha` and shows the captcha field seeded with it.
@@ -172,6 +237,37 @@ export interface LoginCallbackHelpers {
 export interface LoginCallbacks {
   pwdLogin?: (payload: PwdLoginPayload, helpers: LoginCallbackHelpers) => Promise<void>
   codeLogin?: (payload: CodeLoginPayload, helpers: LoginCallbackHelpers) => Promise<void>
+  /**
+   * 完成登录时被要求的密码修改。成功后直接建立会话 —— 用户不必再登录一次。
+   * 由 `ChangePassword` 模块在拿到待办挑战后调用。
+   */
+  /**
+   * 读还欠哪些事 + 材料。不消费令牌。
+   */
+  describePendingActions?: (tempToken: string) => Promise<PendingActionDescription | null>
+  /**
+   * 完成强制改密。全部办完则建立会话，否则返回还剩什么。
+   *
+   * ★ `helpers` 是可选的，但**强烈建议传**：办完之后签发会话仍要过守卫链，账号还开着别的
+   * 2FA 方式时后端答 403 `2FA_REQUIRED` + 新临时令牌 —— 事情已经办完（密码已改、这枚待办
+   * 令牌已消费），同页重试必再失败。有 helpers 才能把挑战交给 shell；不传则报错，与从前一致。
+   */
+  completePasswordChange?: (
+    payload: CompletePasswordChangePayload,
+    helpers?: LoginCallbackHelpers,
+  ) => Promise<PendingActionOutcome>
+  /** 完成绑定验证器。`helpers` 的意义同 `completePasswordChange`。 */
+  completeTotpEnrollment?: (
+    payload: CompletePendingActionCodePayload,
+    helpers?: LoginCallbackHelpers,
+  ) => Promise<PendingActionOutcome>
+  /** 给「确认邮箱」发码。地址由服务端取，不接受指定。 */
+  sendPendingActionEmailCode?: (tempToken: string) => Promise<void>
+  /** 完成确认邮箱。`helpers` 的意义同 `completePasswordChange`。 */
+  completeEmailConfirmation?: (
+    payload: CompletePendingActionCodePayload,
+    helpers?: LoginCallbackHelpers,
+  ) => Promise<PendingActionOutcome>
   register?: (payload: RegisterPayload) => Promise<void>
   resetPwd?: (payload: ResetPwdPayload) => Promise<void>
   sendCode?: (payload: SendCodePayload) => Promise<void>
@@ -180,7 +276,12 @@ export interface LoginCallbacks {
    * returned `requires2FA: true`. Maps to
    * `POST /auth/verify-2fa` (Tnzi.Identity.DefaultAuthController.VerifyTwoFactor).
    */
-  verifyTwoFactor?: (payload: VerifyTwoFactorPayload) => Promise<void>
+  /**
+   * ★ `helpers` 是可选的，但**强烈建议传**：2FA 通过之后后端可能紧接着要求一件待办
+   * （强制改密），而那个挑战只能经 helpers 交给 shell。不传的话用户会看到
+   * 「验证失败」而他的验证码其实是对的。既有调用方不传仍可编译，行为与从前一致。
+   */
+  verifyTwoFactor?: (payload: VerifyTwoFactorPayload, helpers?: LoginCallbackHelpers) => Promise<void>
   /**
    * Optionally (re)send the 2FA code (SMS / email channels). Maps to
    * `POST /auth/send-2fa-code`. Also called when the user switches TO an
@@ -375,6 +476,7 @@ export interface LoginContext {
    * `helpers.setTwoFactorRequired(...)`.
    */
   pendingTwoFactor: Ref<TwoFactorChallenge | null>
+  pendingAction: Ref<PendingActionChallenge | null>
   /**
    * Outstanding adaptive-login captcha challenge. `null` when none is active.
    * Populated by the `pwdLogin` callback via `helpers.setCaptchaRequired(...)`
@@ -405,6 +507,7 @@ export function useLoginContext(): LoginContext {
   const ctx = inject(LOGIN_CONTEXT_KEY, null)
   if (ctx) return ctx
   const pendingTwoFactor = ref<TwoFactorChallenge | null>(null)
+  const pendingAction = ref<PendingActionChallenge | null>(null)
   const pendingCaptcha = ref<LoginCaptchaData | null>(null)
   return {
     translate: (key, fallback) => fallback ?? key,
@@ -416,6 +519,7 @@ export function useLoginContext(): LoginContext {
     features: DEFAULT_LOGIN_FEATURES,
     scene: reactive({ typing: false, passwordVisible: false, passwordLength: 0 }),
     pendingTwoFactor,
+    pendingAction,
     pendingCaptcha,
     helpers: {
       setTwoFactorRequired: (c) => {
@@ -423,6 +527,12 @@ export function useLoginContext(): LoginContext {
       },
       clearTwoFactor: () => {
         pendingTwoFactor.value = null
+      },
+      setPendingActionRequired: (c) => {
+        pendingAction.value = c
+      },
+      clearPendingAction: () => {
+        pendingAction.value = null
       },
       setCaptchaRequired: (c) => {
         pendingCaptcha.value = c

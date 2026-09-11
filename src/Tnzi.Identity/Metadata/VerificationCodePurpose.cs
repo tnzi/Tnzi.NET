@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Metadata;
+﻿namespace Tnzi.Identity.Metadata;
 
 /// <summary>
 /// 一次性验证码的用途。**发码时写死、验码时精确匹配**，一个用途发出的码不能拿去完成另一个用途。
@@ -51,4 +51,16 @@ public enum VerificationCodePurpose
     /// 一个为登录发出的码不应该能确认一笔转账，反之亦然。
     /// </summary>
     StepUp = 6,
+
+    /// <summary>
+    /// 登录时被要求「先确认邮箱」这件待办（<see cref="PendingUserActions.ConfirmEmail"/>）。
+    /// </summary>
+    /// <remarks>
+    /// ★ <strong>刻意不复用 <see cref="ChangeContact"/>。</strong>两者都往邮箱发码，
+    /// 但问的是不同的问题：换绑问「你能收到<b>这个新地址</b>吗」，本用途问
+    /// 「你还能收到<b>账号上现有的这个地址</b>吗」。共用一个用途就是把两个流程放进同一个码池 ——
+    /// 而那正是这个枚举存在要防的事：让人以为自己在做 A 而把码念出来，攻击者拿它去做 B。
+    /// 撞击窗口窄（新地址通常不等于现地址）不是共用的理由，窄不等于没有。
+    /// </remarks>
+    ConfirmEmail = 7,
 }

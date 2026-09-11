@@ -47,19 +47,22 @@ public class PermissionDbSeeder
     private readonly ILogger<PermissionDbSeeder> _logger;
     private readonly IOptions<Options.AuthorizationOptions>? _options;
     private readonly IRepository<RoleFunction, Guid>? _roleFunctionRepository;
+    private readonly IRepository<UserFunction, Guid>? _userFunctionRepository;
 
     public PermissionDbSeeder(
         IRepository<FunctionModule, Guid> moduleRepository,
         IRepository<ModuleFunction, Guid> functionRepository,
         ILogger<PermissionDbSeeder> logger,
         IOptions<Options.AuthorizationOptions>? options = null,
-        IRepository<RoleFunction, Guid>? roleFunctionRepository = null)
+        IRepository<RoleFunction, Guid>? roleFunctionRepository = null,
+        IRepository<UserFunction, Guid>? userFunctionRepository = null)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
         _functionRepository = Check.NotNull(functionRepository);
         _logger = Check.NotNull(logger);
         _options = options;
         _roleFunctionRepository = roleFunctionRepository;
+        _userFunctionRepository = userFunctionRepository;
     }
 
     /// <summary>
@@ -271,14 +274,26 @@ public class PermissionDbSeeder
             {
                 if (retirement == Options.PermissionRetirementMode.Delete)
                 {
+                    // Both grant tables go with the row. ModuleFunction is soft-deleted, so
+                    // the cascade on UserFunction.FunctionId never fires: without this
+                    // explicit delete the allow/deny rows keep pointing at a tombstone, and
+                    // re-declaring the code inserts a fresh id (the soft-delete filter hides
+                    // the tombstone), leaving them permanently invisible and uncleanable.
+                    // The manual delete path refuses a function that still has user grants;
+                    // Delete mode is the deliberate "clean the database" choice, so it removes
+                    // them instead.
                     if (_roleFunctionRepository != null)
                     {
                         await _roleFunctionRepository.DeleteAsync(rf => rf.FunctionId == orphan.Id, cancellationToken: cancellationToken);
                     }
+                    if (_userFunctionRepository != null)
+                    {
+                        await _userFunctionRepository.DeleteAsync(uf => uf.FunctionId == orphan.Id, cancellationToken: cancellationToken);
+                    }
                     await _functionRepository.DeleteAsync(f => f.Id == orphan.Id, cancellationToken: cancellationToken);
                     functionByCode.Remove(orphan.Code);
                     _logger.LogInformation(
-                        "PermissionDbSeeder: deleted system-managed permission {Code} and its role grants (no provider declares it anymore; Authorization:PermissionRetirement=Delete).",
+                        "PermissionDbSeeder: deleted system-managed permission {Code} together with its role grants and user direct grants (no provider declares it anymore; Authorization:PermissionRetirement=Delete).",
                         orphan.Code);
                 }
                 else

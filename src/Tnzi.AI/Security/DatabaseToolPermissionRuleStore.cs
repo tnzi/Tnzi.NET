@@ -50,6 +50,9 @@ public class DatabaseToolPermissionRuleStore : IToolPermissionRuleStore
             Priority = entity.Priority,
             IsDestructiveOnly = entity.IsDestructiveOnly,
             IsSubAgentOnly = entity.IsSubAgentOnly,
+            // 不映射它就是「存了、显示了、评估时不看」：User 级规则会退化成全局规则 ——
+            // Allow 对每个用户放行（fail-open），Deny 拒绝所有人
+            UserId = entity.UserId,
             Reason = entity.Reason
         };
     }

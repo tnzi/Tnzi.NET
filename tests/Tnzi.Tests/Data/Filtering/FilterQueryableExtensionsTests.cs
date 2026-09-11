@@ -4,7 +4,6 @@
 // </copyright>
 // -----------------------------------------------------------------------
 
-using System.Text.Json;
 
 namespace Tnzi.Tests.Data.Filtering;
 

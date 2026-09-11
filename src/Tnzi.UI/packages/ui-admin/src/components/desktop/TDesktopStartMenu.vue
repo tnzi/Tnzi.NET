@@ -20,6 +20,7 @@ import { TAvatar, TSvgIcon } from '@tnzi/ui'
 import { useAdminRouteStore, type AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useSettingsEntry } from '../../headless/useSettingsEntry'
+import { useChromeActions } from '../../headless/useChromeActions'
 import { resolveWindowIcon } from './desktop-labels'
 import { desktopTileStyle, useDesktopTint } from './desktop-tints'
 
@@ -45,6 +46,13 @@ const tintFor = useDesktopTint()
  * Same gating, same navigation, opened as a window.
  */
 const settings = useSettingsEntry()
+/**
+ * The host's own chrome actions live in the sidebar footer in every other
+ * layout - and this one has no sidebar, so they would silently vanish for any
+ * app that turns the desktop on. Same list, same gating, same strip as the two
+ * built-ins beside them.
+ */
+const hostActions = useChromeActions()
 
 const t = (key: string, fallback: string): string => props.translate?.(key, fallback) ?? fallback
 
@@ -129,6 +137,13 @@ function onPick(item: AdminMenuItem): void {
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') setShow(false)
+}
+
+function onHostAction(run: () => void): void {
+  // Same reason as onOpenSettings: the panel is a launcher, and whatever the
+  // action opens would come up underneath it.
+  setShow(false)
+  run()
 }
 
 function onOpenSettings(): void {
@@ -239,6 +254,18 @@ function onOpenSettings(): void {
             @click="onOpenSettings"
           >
             <TSvgIcon icon="mdi:cog-outline" :size="17" aria-hidden="true" />
+          </button>
+          <button
+            v-for="action in hostActions"
+            :key="action.key"
+            type="button"
+            class="t-desktop-start__footer-btn"
+            :class="{ 'is-active': action.active }"
+            :title="action.label"
+            :aria-label="action.label"
+            @click="onHostAction(action.run)"
+          >
+            <TSvgIcon :icon="action.icon" :size="17" aria-hidden="true" />
           </button>
         </footer>
       </div>

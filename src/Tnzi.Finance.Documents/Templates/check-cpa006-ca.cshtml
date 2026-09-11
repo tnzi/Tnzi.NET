@@ -59,20 +59,62 @@ body {
 .issuer-name { font-size: 11pt; font-weight: 700; letter-spacing: .2mm; }
 .issuer-line { font-size: 7pt; line-height: 1.35; color: #222; }
 
-.cheque-no { right: 10mm; top: 5mm; width: 60mm; text-align: right; font-size: 12pt; font-weight: 700; }
+/* Declared heights on the two top-right blocks are load-bearing, not decoration:
+   the courtesy-amount clear area below is measured against them (see `.courtesy`).
+   A content-sized block has no bottom edge anybody can compute, so the clearance
+   would only be checkable by rendering and measuring pixels. */
+.cheque-no { right: 10mm; top: 5mm; width: 60mm; height: 6mm; text-align: right; font-size: 12pt; font-weight: 700; }
 .cheque-no-label { font-size: 7pt; font-weight: 400; color: #444; }
 
-/* CPA-006: the date field is printed 6-8pt with a Y/M/D guide on the stock. */
-.date-block { right: 10mm; top: 17mm; width: 62mm; text-align: right; }
-.date-guide { font-size: 6pt; letter-spacing: 1.1mm; color: #444; }
-.date-value { font-size: 10pt; letter-spacing: 1.1mm; border-bottom: 0.25mm solid #000; padding-top: .6mm; }
+/* ---- date field, CPA-006 section 5.4.1 item 6 ----
+
+   Two requirements, both of which this layout used to miss:
+
+     a. the word "DATE" is required at a MINIMUM of 8 point. The Y/M/D guide is
+        not a substitute for it - the guide says which format, the word says
+        which field.
+     b. the format indicators go BELOW the date ("below the guidance boxes, or
+        below the date if the date field is filled using an automated process").
+        Ours is machine-printed, so: below the value, never above it.
+
+   Both elements are carried by pre-printed stock, so both take
+   Model.PrePrintedClass - on blank stock we print them, on pre-printed stock we
+   keep their space and drop the ink. */
+.date-block { right: 10mm; top: 16mm; width: 66mm; height: 9mm; }
+.date-row { display: flex; align-items: flex-end; justify-content: flex-end; }
+.date-label { font-size: 8pt; font-weight: 700; letter-spacing: .3mm; padding-bottom: .9mm; margin-right: 2.5mm; }
+.date-value { min-width: 46mm; text-align: right; font-size: 10pt; letter-spacing: 1.1mm; border-bottom: 0.25mm solid #000; padding-bottom: .6mm; white-space: nowrap; }
+.date-guide { text-align: right; font-size: 6pt; letter-spacing: 1.1mm; color: #444; padding-top: .5mm; }
 
 .pay-label { left: 10mm; top: 33.5mm; font-size: 6.5pt; text-transform: uppercase; letter-spacing: .3mm; color: #333; }
 .payee { left: 10mm; top: 37mm; width: 132mm; font-size: 11pt; font-weight: 700; border-bottom: 0.25mm solid #000; padding-bottom: .6mm; white-space: nowrap; overflow: hidden; }
 .payee-address { left: 10mm; top: 43.5mm; width: 132mm; font-size: 7pt; line-height: 1.3; color: #222; }
 
-/* Courtesy amount: pre-printed "$" is >= 10pt per CPA-006; the box guards the digits. */
-.courtesy { right: 10mm; top: 35mm; width: 52mm; height: 9mm; }
+/* ---- Courtesy amount ----
+   Pre-printed "$" is >= 10pt per CPA-006; the box guards the digits.
+
+   CPA-006 section 5.4.3 requires a minimum 0.64cm (6.4mm) CLEAR AREA on every
+   side of the amount field, the pre-printed "$" included. That area is empty
+   paper - it is what lets a reader isolate the amount, and it is a hard
+   dimensional minimum, not a style preference.
+
+   Geometry on this layout (page is 215.9mm wide):
+     box          153.9mm .. 205.9mm   x   33mm .. 42mm
+     "$"          148.9mm              (box left, offset -5mm)
+     amount field 148.9mm .. 205.9mm   x   33mm .. 42mm   ("$" + box together)
+     clear area   142.5mm .. 212.3mm   x   26.6mm .. 48.4mm
+
+   What that costs the neighbours:
+     above  .date-block  ends at 25mm    (needs <= 26.6mm)   1.6mm spare
+     below  .legal       starts at 50mm  (needs >= 48.4mm)   1.6mm spare
+     left   .payee       ends at 142mm   (needs <= 142.5mm)  0.5mm spare
+
+   `.date-block` and `.cheque-no` declare heights for this reason alone: without
+   a declared height the top edge of the clear area cannot be computed from the
+   stylesheet at all, and the only way left to check it is to render and measure.
+   Moving any of these numbers means re-doing this arithmetic - and
+   CheckCourtesyAmountClearanceTests will re-do it for you. */
+.courtesy { right: 10mm; top: 33mm; width: 52mm; height: 9mm; }
 .courtesy-box { position: absolute; inset: 0; border: 0.3mm solid #000; }
 .courtesy-sign { position: absolute; left: -5mm; top: 1.4mm; font-size: 11pt; font-weight: 700; }
 .courtesy-value { position: absolute; right: 1.6mm; top: 1.6mm; font-size: 12pt; font-weight: 700; white-space: nowrap; }
@@ -121,18 +163,46 @@ body {
 .stub-table td { padding: 1.2mm 0; vertical-align: top; }
 .stub-amount { font-weight: 700; }
 
+/* Stub lines supplied by the application (file no., matter, work order, ...).
+   A hairline separates them from the fixed rows above; `+` sibling selector so
+   only the FIRST extra row carries it. Nothing matches these rules when the
+   application supplies no lines, which is why the stub is unchanged without them. */
+.stub-extra th, .stub-extra td { border-top: 0.2mm solid #e6e8ec; padding-top: 2mm; }
+.stub-extra + .stub-extra th, .stub-extra + .stub-extra td { border-top: 0; padding-top: 1.2mm; }
+
 @@media print {
     body { background: #fff; }
     .cheque-page { margin: 0; box-shadow: none; }
     /* Pre-printed stock: keep the space, drop the ink. */
     .noprint { visibility: hidden; }
 }
+
+/* ---------- specimen mode (layout picker) ----------
+   A specimen is rendered from placeholder data so somebody choosing a layout
+   can hold it against the paper in the printer. The question it has to answer
+   is "what does this layout put on MY stock", and on pre-printed stock the
+   answer is "the elements below are already there - the printer only adds the
+   variable data".
+
+   `.noprint` alone cannot say that: it lives inside @@media print, so on screen
+   those elements render exactly as they do on blank stock, and the two stock
+   types look the same in a thumbnail. Fading them is the signal that survives
+   on screen and at thumbnail scale. One knob - change the opacity, or swap it
+   for a grayscale/dashed treatment, whatever reads best on your stock.
+
+   Scoped under `.specimen`, which only a specimen puts on the page root: a real
+   cheque and a payment preview match nothing here, so their output is
+   untouched (a preview SHOULD show the full face - you are proof-reading a
+   cheque then, not comparing paper). */
+.specimen .noprint { opacity: .28; }
 </style>
 </head>
 <body>
 @foreach (var chk in Model.Checks)
 {
-    <section class="cheque-page" style="@Model.OffsetStyle">
+    @* The ternary supplies its own leading space, so a real cheque still renders
+       exactly `class="cheque-page"` - byte-identical to before specimen mode. *@
+    <section class="cheque-page@(Model.IsSpecimen ? " specimen" : "")" style="@Model.OffsetStyle">
 
         @* ============================ cheque body ============================ *@
         <div class="cheque @(Model.IsPrePrinted ? "" : "blank-stock")">
@@ -167,10 +237,15 @@ body {
                 <span class="cheque-no-label">No.</span> @chk.CheckNumberText
             </div>
 
-            @* Date - the Y/M/D guide is pre-printed, the value is always ours *@
+            @* Date - CPA-006 5.4.1 item 6: the word "DATE" at 8pt or more, and the
+               format indicators BELOW the value (ours is machine-printed). Both the
+               word and the indicators live on pre-printed stock; the value is always ours. *@
             <div class="abs date-block">
+                <div class="date-row">
+                    <span class="date-label @Model.PrePrintedClass">DATE</span>
+                    <span class="date-value">@chk.IssueDateText</span>
+                </div>
                 <div class="date-guide @Model.PrePrintedClass">Y Y Y Y&nbsp;&nbsp;M M&nbsp;&nbsp;D D</div>
-                <div class="date-value">@chk.IssueDateText</div>
             </div>
 
             <div class="abs pay-label @Model.PrePrintedClass">Pay to the order of</div>
@@ -245,9 +320,36 @@ body {
                 <tr><th>Date</th><td>@chk.IssueDateIso</td></tr>
                 <tr><th>Payee</th><td>@chk.PayeeName</td></tr>
                 <tr><th>Amount</th><td class="stub-amount">@chk.AmountText @chk.Currency</td></tr>
-                <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
-                <tr><th>Reference</th><td>@chk.Reference</td></tr>
-                <tr><th>Memo</th><td>@chk.Memo</td></tr>
+                @* The four rows above are unconditional: a cheque always has a number, a date, a
+                   payee and an amount, and a blank one of those means something went wrong and
+                   should be visible. The three below are only sometimes carried by the payment.
+
+                   A printed label with nothing after it reads as MISSING information rather than
+                   absent information - whoever files the stub cannot tell an empty memo from a
+                   memo that failed to print. It also spends stub height, and height is the one
+                   thing this surface has none of.
+
+                   ! The supplied lines further down follow the OPPOSITE rule on purpose: there a
+                   label with no value is a section heading, so CheckStubLineLimits.Normalize keeps
+                   it and drops only lines with no LABEL. Do not "make them consistent". *@
+                @if (!string.IsNullOrWhiteSpace(chk.PaymentNumber))
+                {
+                    <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
+                }
+                @if (!string.IsNullOrWhiteSpace(chk.Reference))
+                {
+                    <tr><th>Reference</th><td>@chk.Reference</td></tr>
+                }
+                @if (!string.IsNullOrWhiteSpace(chk.Memo))
+                {
+                    <tr><th>Memo</th><td>@chk.Memo</td></tr>
+                }
+                @* Application-supplied stub lines, appended AFTER the fixed rows so
+                   a stub without them looks exactly as it always has. *@
+                @foreach (var line in chk.StubLines)
+                {
+                    <tr class="stub-extra"><th>@line.Label</th><td>@line.Value</td></tr>
+                }
             </table>
         </div>
 
@@ -261,9 +363,36 @@ body {
                 <tr><th>Date</th><td>@chk.IssueDateIso</td></tr>
                 <tr><th>Payee</th><td>@chk.PayeeName</td></tr>
                 <tr><th>Amount</th><td class="stub-amount">@chk.AmountText @chk.Currency</td></tr>
-                <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
-                <tr><th>Reference</th><td>@chk.Reference</td></tr>
-                <tr><th>Memo</th><td>@chk.Memo</td></tr>
+                @* The four rows above are unconditional: a cheque always has a number, a date, a
+                   payee and an amount, and a blank one of those means something went wrong and
+                   should be visible. The three below are only sometimes carried by the payment.
+
+                   A printed label with nothing after it reads as MISSING information rather than
+                   absent information - whoever files the stub cannot tell an empty memo from a
+                   memo that failed to print. It also spends stub height, and height is the one
+                   thing this surface has none of.
+
+                   ! The supplied lines further down follow the OPPOSITE rule on purpose: there a
+                   label with no value is a section heading, so CheckStubLineLimits.Normalize keeps
+                   it and drops only lines with no LABEL. Do not "make them consistent". *@
+                @if (!string.IsNullOrWhiteSpace(chk.PaymentNumber))
+                {
+                    <tr><th>Payment</th><td>@chk.PaymentNumber</td></tr>
+                }
+                @if (!string.IsNullOrWhiteSpace(chk.Reference))
+                {
+                    <tr><th>Reference</th><td>@chk.Reference</td></tr>
+                }
+                @if (!string.IsNullOrWhiteSpace(chk.Memo))
+                {
+                    <tr><th>Memo</th><td>@chk.Memo</td></tr>
+                }
+                @* Application-supplied stub lines, appended AFTER the fixed rows so
+                   a stub without them looks exactly as it always has. *@
+                @foreach (var line in chk.StubLines)
+                {
+                    <tr class="stub-extra"><th>@line.Label</th><td>@line.Value</td></tr>
+                }
             </table>
         </div>
 

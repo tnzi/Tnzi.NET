@@ -16,7 +16,25 @@ public class BudgetService : ApplicationService, IBudgetService
     /// 注意：USD 预算检查为 "best effort" 级别（非原子性），并发请求可能短暂超支。
     /// 通过较短的缓存 TTL（默认 60s）和 WarningThreshold 时主动失效缓存来缩小竞态窗口。
     /// </summary>
-    private static readonly ConcurrentDictionary<string, (decimal Spend, DateTime Expiry)> SpendCache = new();
+    private static readonly ConcurrentDictionary<string, (PeriodSpend Spend, DateTime Expiry)> SpendCache = new();
+
+    /// <summary>
+    /// 一个周期的花费聚合。除了金额还带两个计数，用来分清「这个月没花钱」与「成本根本没被记下来」——
+    /// 两者聚合出来都是 0 美元，外观逐字相同。
+    /// </summary>
+    /// <param name="Usd">已记账部分的花费合计</param>
+    /// <param name="TotalEntries">周期内的用量记录条数</param>
+    /// <param name="CostedEntries">其中带成本的条数</param>
+    private readonly record struct PeriodSpend(decimal Usd, int TotalEntries, int CostedEntries)
+    {
+        /// <summary>有用量却一条成本都没有 —— 0 美元是量不出来，不是没花钱。</summary>
+        public bool IsCostUnmeasurable => TotalEntries > 0 && CostedEntries == 0;
+    }
+
+    /// <summary>
+    /// 「预算开着但成本量不出来」的告警是否已经打过。逐请求打会淹掉日志，配置修好后重新置回。
+    /// </summary>
+    private static volatile bool _unmeasurableCostWarningLogged;
 
     /// <summary>
     /// 清除所有内存缓存条目。仅供测试使用。
@@ -62,7 +80,14 @@ public class BudgetService : ApplicationService, IBudgetService
         // 检查总预算（按租户或用户维度）
         var currentSpend = await GetCurrentPeriodSpendAsync(userId, tenantId, options, ct);
 
-        var result = EvaluateBudget(currentSpend, budgetLimit, options.WarningThreshold);
+        if (currentSpend.IsCostUnmeasurable)
+        {
+            return BuildIndeterminateResult(budgetLimit);
+        }
+
+        _unmeasurableCostWarningLogged = false;
+
+        var result = EvaluateBudget(currentSpend.Usd, budgetLimit, options.WarningThreshold);
 
         // 当接近预算上限时，主动失效缓存以减小 TOCTOU 竞态窗口，
         // 确保下次请求从 DB 读取最新数据
@@ -96,16 +121,19 @@ public class BudgetService : ApplicationService, IBudgetService
         var options = _aiOptions.CurrentValue.Budget;
 
         var q = _usageLogRepository
-            .Where(l => l.CreationTime >= startTime && l.CreationTime <= endTime && l.EstimatedCostUsd != null);
+            .Where(l => l.CreationTime >= startTime && l.CreationTime <= endTime);
 
         if (tenantId.HasValue)
         {
             q = q.Where(l => l.TenantId == tenantId.Value);
         }
 
-        // 总花费
-        var totalSpend = await q
-            .SumAsync(l => l.EstimatedCostUsd ?? 0m, ct);
+        // 总花费（与 CheckBudgetAsync 同源，含「成本量不出来」的判据 ——
+        // 管理端的 0% 与运行时的判断必须是同一件事）
+        var periodSpend = await AggregateSpendAsync(q, ct);
+        var totalSpend = periodSpend.Usd;
+
+        q = q.Where(l => l.EstimatedCostUsd != null);
 
         // 按 Agent 分组
         var agentSpends = await q
@@ -138,7 +166,9 @@ public class BudgetService : ApplicationService, IBudgetService
             CurrentSpendUsd = totalSpend,
             BudgetLimitUsd = budgetLimit,
             UsagePercentage = Math.Min(usagePercentage, 1.0),
-            Status = EvaluateBudgetStatus(usagePercentage, options.WarningThreshold),
+            Status = periodSpend.IsCostUnmeasurable
+                ? BudgetStatus.Indeterminate
+                : EvaluateBudgetStatus(usagePercentage, options.WarningThreshold),
             ByAgent = agentSpends.Select(a => new AgentSpendDto
             {
                 AgentId = a.AgentId,
@@ -153,6 +183,38 @@ public class BudgetService : ApplicationService, IBudgetService
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 预算开着、本周期有用量、却一条成本都没记下来时的如实回答。
+    /// </summary>
+    /// <remarks>
+    /// 报 WithinBudget 是在给一道从未生效过的闸门开合格证：界面会显示「已启用、用量 0%」，
+    /// 与「这个月真没花钱」逐字相同，没有任何症状可供发现。仍然放行 —— 预算是 advisory 管控，
+    /// 一个热设置勾选框不该让所有 AI 请求当场停摆；要拦死交由宿主按本状态决定。
+    /// </remarks>
+    private BudgetCheckResult BuildIndeterminateResult(decimal budgetLimit)
+    {
+        if (!_unmeasurableCostWarningLogged)
+        {
+            _unmeasurableCostWarningLogged = true;
+            Logger.LogWarning(
+                "AI budget control is enabled but no usage entry in the current period carries a cost, " +
+                "so spend cannot be measured and the budget is not being enforced. " +
+                "Enable AI:CostTracking:Enabled and configure AI:CostTracking:ModelCosts (or DefaultCostRate), " +
+                "or have the host supply estimatedCostUsd when logging usage.");
+        }
+
+        return new BudgetCheckResult
+        {
+            IsAllowed = true,
+            Status = BudgetStatus.Indeterminate,
+            CurrentSpendUsd = 0m,
+            BudgetLimitUsd = budgetLimit,
+            UsagePercentage = 0,
+            Reason = "Budget cannot be evaluated: usage was recorded in this period but none of it carries a cost. " +
+                     "Enable cost tracking and configure model cost rates, or supply the cost when logging usage."
+        };
+    }
 
     private async Task<BudgetCheckResult?> CheckAgentBudgetAsync(Guid agentId, BudgetOptions options, CancellationToken ct)
     {
@@ -181,7 +243,7 @@ public class BudgetService : ApplicationService, IBudgetService
         return result;
     }
 
-    private async Task<decimal> GetCurrentPeriodSpendAsync(Guid? userId, Guid? tenantId, BudgetOptions options, CancellationToken ct)
+    private async Task<PeriodSpend> GetCurrentPeriodSpendAsync(Guid? userId, Guid? tenantId, BudgetOptions options, CancellationToken ct)
     {
         var cacheKey = BuildCacheKey(userId, tenantId);
         var ttl = TimeSpan.FromSeconds(Math.Max(options.CacheTtlSeconds, 0));
@@ -194,7 +256,7 @@ public class BudgetService : ApplicationService, IBudgetService
         var (periodStart, periodEnd) = GetCurrentMonthPeriod();
 
         var q = _usageLogRepository
-            .Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd && l.EstimatedCostUsd != null);
+            .Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd);
 
         if (tenantId.HasValue)
             q = q.Where(l => l.TenantId == tenantId.Value);
@@ -202,7 +264,7 @@ public class BudgetService : ApplicationService, IBudgetService
         // Note: UsageLog (CreationAuditedEntity) 没有 UserId 字段，
         // 预算管控在租户+Agent 维度生效。用户维度在缓存键中区分仅用于隔离，不过滤查询。
 
-        var spend = await q.SumAsync(l => l.EstimatedCostUsd ?? 0m, ct);
+        var spend = await AggregateSpendAsync(q, ct);
 
         SetCacheEntry(cacheKey, spend, ttl);
         return spend;
@@ -215,24 +277,50 @@ public class BudgetService : ApplicationService, IBudgetService
 
         if (SpendCache.TryGetValue(cacheKey, out var cached) && cached.Expiry > DateTime.UtcNow)
         {
-            return cached.Spend;
+            return cached.Spend.Usd;
         }
 
         var (periodStart, periodEnd) = GetCurrentMonthPeriod();
 
-        var spend = await _usageLogRepository
-            .Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd
-                        && l.EstimatedCostUsd != null && l.AgentId == agentId)
-            .SumAsync(l => l.EstimatedCostUsd ?? 0m, ct);
+        var spend = await AggregateSpendAsync(
+            _usageLogRepository.Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd
+                                           && l.AgentId == agentId),
+            ct);
 
         SetCacheEntry(cacheKey, spend, ttl);
-        return spend;
+        return spend.Usd;
+    }
+
+    /// <summary>
+    /// 一次查询同时取回花费合计、记录条数与其中带成本的条数。
+    /// </summary>
+    /// <remarks>
+    /// 三者必须同源同一次读：只取合计的话，「没花钱」与「成本没被记下来」都是 0 美元，分不开。
+    /// 判据取自数据而不是 <c>AI:CostTracking</c> 配置 —— 成本也可以由宿主经
+    /// <c>IUsageLogService.LogUsageAsync(..., estimatedCostUsd, ...)</c> 直接写入，
+    /// 那种部署里成本追踪关着预算照样是准的。
+    /// </remarks>
+    private static async Task<PeriodSpend> AggregateSpendAsync(IQueryable<UsageLog> query, CancellationToken ct)
+    {
+        var aggregate = await query
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Usd = g.Sum(l => l.EstimatedCostUsd ?? 0m),
+                TotalEntries = g.Count(),
+                CostedEntries = g.Sum(l => l.EstimatedCostUsd != null ? 1 : 0)
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return aggregate == null
+            ? new PeriodSpend(0m, 0, 0)
+            : new PeriodSpend(aggregate.Usd, aggregate.TotalEntries, aggregate.CostedEntries);
     }
 
     /// <summary>
     /// 设置缓存条目，超出 MaxCacheEntries 时先清除已过期条目，仍超出则清除最旧条目。
     /// </summary>
-    private static void SetCacheEntry(string key, decimal spend, TimeSpan ttl)
+    private static void SetCacheEntry(string key, PeriodSpend spend, TimeSpan ttl)
     {
         if (SpendCache.Count >= MaxCacheEntries && !SpendCache.ContainsKey(key))
         {

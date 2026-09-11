@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 银行对账服务
@@ -33,7 +33,6 @@ public class ReconciliationService : ApplicationService, IReconciliationService
     /// </summary>
     private readonly IEnumerable<IJournalLineHoldProvider> _holdProviders;
     private readonly FinanceDocumentHelper _helper;
-    private readonly FinanceOptions _options;
 
     public ReconciliationService(
         IServiceProvider serviceProvider,
@@ -42,8 +41,7 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         IReadOnlyRepository<JournalLine, Guid> journalLineRepository,
         IReadOnlyRepository<Account, Guid> accountRepository,
         IEnumerable<IJournalLineHoldProvider>? holdProviders,
-        FinanceDocumentHelper helper,
-        IOptionsSnapshot<FinanceOptions> options)
+        FinanceDocumentHelper helper)
         : base(serviceProvider)
     {
         _reconciliationRepository = Check.NotNull(reconciliationRepository);
@@ -52,7 +50,6 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         _accountRepository = Check.NotNull(accountRepository);
         _holdProviders = holdProviders ?? Enumerable.Empty<IJournalLineHoldProvider>();
         _helper = Check.NotNull(helper);
-        _options = Check.NotNull(options).Value;
     }
 
     public async Task<Result<IPagedList<ReconciliationDto>>> GetPagedAsync(ReconciliationQueryDto query, CancellationToken cancellationToken = default)
@@ -310,7 +307,7 @@ public class ReconciliationService : ApplicationService, IReconciliationService
             return Fail<ReconciliationDto>($"The reconciliation is off by {difference}. Cleared balance {clearedBalance} must equal the statement ending balance {reconciliation.StatementEndingBalance}.", 400);
 
         reconciliation.Status = ReconciliationStatus.Completed;
-        reconciliation.CompletedTime = DateTime.UtcNow;
+        reconciliation.CompletedTime = TimeProvider.GetUtcNow().UtcDateTime;
 
         try
         {

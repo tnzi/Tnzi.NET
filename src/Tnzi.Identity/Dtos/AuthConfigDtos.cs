@@ -38,6 +38,15 @@ public class AuthConfigDto
     /// <summary>是否启用注册入口（邮箱或短信快速注册任一启用即为 true）</summary>
     public bool EnableRegistration { get; set; }
 
+    /// <summary>
+    /// 是否允许自助注册（用户名 + 密码 + 邮箱）。对应 <c>Identity:Registration:EnableSelfRegistration</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <c>EnableRegistration</c> 的关系：后者是三条注册路径的并集（用来决定「显不显示注册入口」），
+    /// 这一项决定其中的密码注册那一条显不显示。此前没有它，于是配置说关着而端点开着。
+    /// </remarks>
+    public bool RegisterViaPassword { get; set; }
+
     /// <summary>注册是否支持短信渠道</summary>
     public bool RegisterViaSms { get; set; }
 

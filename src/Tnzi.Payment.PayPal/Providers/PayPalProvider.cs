@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Payment.PayPal.Providers;
 
 /// <summary>
@@ -10,8 +10,20 @@ public partial class PayPalProvider : IPaymentProvider
     private readonly IOptions<PayPalOptions> _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<PayPalProvider> _logger;
-    private string? _accessToken;
-    private DateTime _tokenExpireTime;
+
+    /// <summary>
+    /// 访问令牌的**跨请求**缓存，按 (环境, ClientId) 分桶。
+    /// </summary>
+    /// <remarks>
+    /// 此前令牌存在实例字段上，而本类是 Scoped —— 每个请求都是一个新实例、一个空缓存，
+    /// 于是每一次建单 / 查单 / 退款前都先打一次 <c>/v1/oauth2/token</c>：
+    /// 对外请求数翻倍、每笔交易多一次往返，而 PayPal 发的令牌本来有效期一小时。
+    /// 症状只有「PayPal 慢」，没有任何一条错误日志。
+    /// 分桶到 ClientId 是为了让沙箱与生产、或多商户配置互不串用；
+    /// 轮换凭据自然落到新桶上。
+    /// </remarks>
+    private static readonly ConcurrentDictionary<string, (string Token, DateTime ExpiresAt)> AccessTokens =
+        new(StringComparer.Ordinal);
 
     public string ChannelCode => "PayPal";
     public string ChannelName => "PayPal";
@@ -79,6 +91,17 @@ public partial class PayPalProvider : IPaymentProvider
             orderMessage.Headers.Add("PayPal-Request-Id", $"order:{input.TradeNo}");
 
             var response = await client.SendAsync(orderMessage);
+            // 不看状态码直接反序列化时，一个 4xx 的错误体解出来是一个空的订单对象，
+            // 于是失败被读成「PayPal 没给订单号」—— 真正的原因（哪个字段不合法）连日志都不留。
+            // 退款那条路径一直是这么写的，建单这条漏了。
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("PayPal order creation rejected. TradeNo: {TradeNo}, Status: {Status}, Body: {Body}",
+                    input.TradeNo, response.StatusCode, errorBody);
+                return Result.Failure<PaymentProviderOrderResult>(ErrorCodes.PayPalOrderCreationFailed, 400);
+            }
+
             var content = await response.Content.ReadFromJsonAsync<PayPalOrderResponse>();
 
             if (content == null || string.IsNullOrEmpty(content.Id))
@@ -320,12 +343,19 @@ public partial class PayPalProvider : IPaymentProvider
 
             decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var paidAmount);
 
+            // 币种与金额在同一个对象上，此前只取了 value 把它丢掉 ——
+            // 于是服务层只能比数值，一笔 100 USD 的订单收到 100 JPY 的回报照样通过校验
+            var currency =
+                TryGetNestedString(resource, "amount", "currency_code")
+                ?? TryGetNestedString(resource, "seller_receivable_breakdown", "gross_amount", "currency_code");
+
             return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
             {
                 TradeNo = tradeNo,
                 ExternalTradeNo = externalTradeNo,
                 Status = status.Value,
                 PaidAmount = paidAmount,
+                Currency = currency,
                 FailReason = status == PaymentStatus.Failed ? eventType : null,
                 EventId = eventId
             }));
@@ -415,9 +445,14 @@ public partial class PayPalProvider : IPaymentProvider
 
     private async Task<string?> GetAccessTokenAsync(HttpClient client)
     {
-        // 检查缓存的 token 是否仍然有效（提前 60 秒过期以避免竞态）
-        if (_accessToken != null && DateTime.UtcNow < _tokenExpireTime.AddSeconds(-60))
-            return _accessToken;
+        var cacheKey = $"{_options.Value.Mode}|{_options.Value.ClientId}";
+
+        // 缓存的 token 仍然有效就直接用（提前 60 秒过期，避免拿着一个正好在路上过期的令牌）
+        if (AccessTokens.TryGetValue(cacheKey, out var cached)
+            && DateTime.UtcNow < cached.ExpiresAt.AddSeconds(-60))
+        {
+            return cached.Token;
+        }
 
         try
         {
@@ -434,23 +469,32 @@ public partial class PayPalProvider : IPaymentProvider
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
 
             var response = await client.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("PayPal token request rejected. Status: {Status}, Body: {Body}",
+                    response.StatusCode, errorBody);
+                AccessTokens.TryRemove(cacheKey, out _);
+                return null;
+            }
+
             var content = await response.Content.ReadFromJsonAsync<PayPalTokenResponse>();
 
             if (content == null || string.IsNullOrEmpty(content.AccessToken))
             {
-                _accessToken = null;
+                AccessTokens.TryRemove(cacheKey, out _);
                 return null;
             }
 
-            _accessToken = content.AccessToken;
-            _tokenExpireTime = DateTime.UtcNow.AddSeconds(content.ExpiresIn > 0 ? content.ExpiresIn : 3600);
+            var expiresAt = DateTime.UtcNow.AddSeconds(content.ExpiresIn > 0 ? content.ExpiresIn : 3600);
+            AccessTokens[cacheKey] = (content.AccessToken, expiresAt);
 
-            return _accessToken;
+            return content.AccessToken;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get PayPal access token.");
-            _accessToken = null;
+            AccessTokens.TryRemove(cacheKey, out _);
             return null;
         }
     }

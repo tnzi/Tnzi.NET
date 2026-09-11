@@ -50,6 +50,34 @@
   --tnzi-admin-radius-lg: 12px;
   --tnzi-admin-radius-full: 9999px;
 
+  /* ------ Content title tiers ------
+     TWO tiers, stated once, for the title of a content surface:
+
+       page    - the identity of the surface you navigated to. `TPageHeader`
+                 (and therefore `TContentPage` / `TListShell` / `TCrudPage` /
+                 `TCardPage` / the `TDetailLayout` page header).
+       section - one region INSIDE such a surface. `TDetailSection`, and
+                 `TPageHeader` whenever it renders inside a detail panel
+                 (see `TITLE_LEVEL` in components/layout/title-level.ts).
+
+     Both steps down at the same breakpoint. The step is the point: the two
+     tiers used to be two bare literals in two scoped stylesheets - 18px with a
+     phone step and 16px without - so on a phone they both landed on 16px and
+     the hierarchy they exist to express silently disappeared exactly where
+     screen space makes it matter most.
+
+     Consumers rebrand a tier by overriding these at `:root`. That is the only
+     way that works from outside: the components' rules are SCOPED, so their
+     `.t-page-header__title[data-v-…]` beats a consumer's plain
+     `.t-page-header__title` and a theme sheet would need a specificity hack. */
+  --tnzi-admin-title-page-size: 18px;
+  --tnzi-admin-title-page-weight: 600;
+  --tnzi-admin-title-page-tracking: normal;
+
+  --tnzi-admin-title-section-size: 16px;
+  --tnzi-admin-title-section-weight: 600;
+  --tnzi-admin-title-section-tracking: normal;
+
   /* ------ Admin-specific surfaces ------ */
   /* The per-surface background tokens (--tnzi-admin-{sider,header,tab,footer}-bg
      and --tnzi-admin-content-bg) are intentionally NOT defined here. Each
@@ -202,6 +230,11 @@
     --tnzi-admin-header-height: 52px;
     --tnzi-admin-tab-height: 40px;
     --tnzi-admin-content-padding: var(--tnzi-admin-content-padding-mobile);
+
+    /* Both title tiers step, so the page/section distinction survives the
+       narrow screen instead of collapsing onto one size. */
+    --tnzi-admin-title-page-size: 16px;
+    --tnzi-admin-title-section-size: 15px;
   }
 }
 @media (max-width: 480px) {

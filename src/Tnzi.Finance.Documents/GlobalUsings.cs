@@ -27,6 +27,7 @@ global using Tnzi.Finance.Metadata;
 // Tnzi.Finance.Banking（支票渲染契约 ICheckDocumentRenderer + 版式枚举 + Internal 经
 // InternalsVisibleTo 可见的 MicrLineComposer —— 支票是银行票据，渲染契约随银行域走）
 global using Tnzi.Finance.Banking;
+global using Tnzi.Finance.Banking.Dtos;
 global using Tnzi.Finance.Banking.Metadata;
 global using Tnzi.Finance.Banking.Services.Internal;
 

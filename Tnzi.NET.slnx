@@ -113,6 +113,7 @@
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Kafka.Tests/Tnzi.Kafka.Tests.csproj" />
     <Project Path="tests/Tnzi.Localization.Tests/Tnzi.Localization.Tests.csproj" />
+    <Project Path="tests/Tnzi.Logging.Tests/Tnzi.Logging.Tests.csproj" />
     <Project Path="tests/Tnzi.Mapster.Tests/Tnzi.Mapster.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Tests/Tnzi.Notification.Tests.csproj" />
     <Project Path="tests/Tnzi.Notification.Push.Tests/Tnzi.Notification.Push.Tests.csproj" />

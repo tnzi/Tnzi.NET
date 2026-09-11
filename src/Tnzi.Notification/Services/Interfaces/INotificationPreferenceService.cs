@@ -66,7 +66,32 @@ public interface INotificationPreferenceService
     /// 检查用户当前是否在指定渠道的静默时段内（内部方法）
     /// 无偏好记录或未设置静默时段时返回 false
     /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>群发路径不要用它</b>：逐个问在一次千人群发上就是一千次往返。
+    /// 用 <see cref="GetQuietHoursAsync"/>，两者共用同一份判定。
+    /// </remarks>
     Task<bool> IsInQuietHoursAsync(Guid userId, string channel, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 一次取回这一批人在该渠道上生效的静默时段。<b>没设的人不出现在结果里。</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="FilterEnabledUsersAsync"/> / <see cref="GetFrequencyCapsAsync"/> 同款的
+    /// 批量形状，理由一样：逐个查在一次千人群发上就是一千次往返。
+    /// </para>
+    /// <para>
+    /// ★ <b>静默时段只有渠道级，不分分类</b>（<c>Category == null</c> 的那一行）：
+    /// 「现在别吵我」是一句关于时间的话，按消息分类分别设置一个免打扰时段，
+    /// 表达的不是任何用户真正想要的东西。这也与 <see cref="IsInQuietHoursAsync"/> 一致。
+    /// </para>
+    /// <para>
+    /// ★ 两个时刻缺任一即视为<b>没设</b>：只有开始没有结束的窗口没有结束时刻可算，
+    /// 而延后必须写得出「什么时候再发」。
+    /// </para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, (TimeOnly Start, TimeOnly End)>> GetQuietHoursAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 一次取回这一批人在该渠道上生效的每小时上限。<b>没设上限的人不出现在结果里</b>。

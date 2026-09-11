@@ -454,3 +454,24 @@ export type AdminGlobalThemeDto = GlobalThemeSnapshotDto;
 
 /** @deprecated Renamed to {@link SaveGlobalThemeSnapshotDto} when themes became scoped. */
 export type SaveAdminGlobalThemeDto = SaveGlobalThemeSnapshotDto;
+
+// ---------------------------------------------------------------------------
+// Scheduled jobs. Served by Tnzi.Hangfire's `DefaultScheduledJobAdminController`,
+// not by Tnzi.System - but the admin console files it under the system menu and
+// there is no `services/hangfire` domain, so the contract lives here.
+// ---------------------------------------------------------------------------
+
+/** One recurring job as Hangfire reports it. Mirrors `Tnzi.Hangfire.Dtos.ScheduledJobDto`. */
+export interface ScheduledJobDto {
+  id: string;
+  cron?: string | null;
+  queue?: string | null;
+  lastExecution?: string | null;
+  nextExecution?: string | null;
+  createdAt?: string | null;
+  timeZoneId?: string | null;
+  lastJobId?: string | null;
+  lastJobState?: string | null;
+  error?: string | null;
+  removed: boolean;
+}

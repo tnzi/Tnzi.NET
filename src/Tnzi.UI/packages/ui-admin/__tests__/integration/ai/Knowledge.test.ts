@@ -28,6 +28,7 @@ const knowledgeFetch = vi.fn(async () => ({
       documentCount: 87,
       chunkCount: 1024,
       isEnabled: true,
+      isUserQueryable: true,
       creationTime: '2026-04-01T00:00:00Z',
     },
     {
@@ -41,6 +42,7 @@ const knowledgeFetch = vi.fn(async () => ({
       documentCount: 312,
       chunkCount: 4096,
       isEnabled: false,
+      isUserQueryable: false,
       creationTime: '2026-04-02T00:00:00Z',
     },
   ],
@@ -158,6 +160,14 @@ describe('Knowledge page (TCardPage card grid + document drawer)', () => {
     const wrapper = mount(Knowledge, { global: { stubs } })
     await flushPromises()
     expect(wrapper.findAll('.t-entity-card')).toHaveLength(2)
+  })
+
+  it('flags the knowledge base that is open to direct user queries', async () => {
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const cards = wrapper.findAll('.t-entity-card')
+    expect(cards[0]?.text()).toContain('User queryable')
+    expect(cards[1]?.text()).not.toContain('User queryable')
   })
 
   it('cards show knowledge base names and the page title', async () => {

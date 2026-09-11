@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Metadata;
+﻿namespace Tnzi.Payment.Metadata;
 
 /// <summary>
 /// Payment 模块错误码常量定义
@@ -47,6 +47,16 @@ public static class ErrorCodes
     /// 金额必须大于0
     /// </summary>
     public const string PaymentInvalidAmount = "PAYMENT_INVALID_AMOUNT";
+
+    /// <summary>
+    /// 订单有效期超出允许区间（1 .. <see cref="PaymentConstants.MaxPaymentExpireMinutes"/> 分钟）
+    /// </summary>
+    public const string PaymentInvalidExpireMinutes = "PAYMENT_INVALID_EXPIRE_MINUTES";
+
+    /// <summary>
+    /// 回跳地址不在允许的主机名清单内（见 <c>Payment:AllowedRedirectHosts</c>）
+    /// </summary>
+    public const string PaymentReturnUrlNotAllowed = "PAYMENT_RETURN_URL_NOT_ALLOWED";
 
     /// <summary>
     /// 渠道不支持 off-session 自动扣款
@@ -142,6 +152,11 @@ public static class ErrorCodes
     public const string PayPalRefundFailed = "PAYPAL_REFUND_FAILED";
 
     /// <summary>
+    /// PayPal 拒绝了建单请求（响应非 2xx）
+    /// </summary>
+    public const string PayPalOrderCreationFailed = "PAYPAL_ORDER_CREATION_FAILED";
+
+    /// <summary>
     /// PayPal 账户保存 / 商户发起扣款失败（Vault v3 + reference transactions）
     /// </summary>
     public const string PayPalVaultFailed = "PAYPAL_VAULT_FAILED";
@@ -189,6 +204,11 @@ public static class ErrorCodes
     /// 用户邮箱不存在
     /// </summary>
     public const string InvoiceUserEmailNotFound = "INVOICE_USER_EMAIL_NOT_FOUND";
+
+    /// <summary>
+    /// 发票产物生成失败，或产物既不在 Storage 里也不在磁盘上
+    /// </summary>
+    public const string InvoiceDocumentUnavailable = "INVOICE_DOCUMENT_UNAVAILABLE";
 
     #endregion
 
@@ -278,6 +298,11 @@ public static class ErrorCodes
     /// 只有逾期欠费的订阅才能立即重试扣款
     /// </summary>
     public const string SubscriptionCannotRetryBilling = "SUBSCRIPTION_CANNOT_RETRY_BILLING";
+
+    /// <summary>
+    /// 该订阅正处于一次在途扣款中，此刻不能取消（稍后重试）
+    /// </summary>
+    public const string SubscriptionBillingInProgress = "SUBSCRIPTION_BILLING_IN_PROGRESS";
 
     /// <summary>
     /// 该产品下已存在有效订阅

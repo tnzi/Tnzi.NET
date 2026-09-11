@@ -19,6 +19,9 @@ public class LogFileService : ILogFileService
     private const int SearchResultsCapMax = 1000;
     private const int SearchResultsCapDefault = 200;
 
+    // 每读这么多行检查一次时间预算（掩码要求是 2^n - 1）。
+    private const int TimeCheckLineMask = 1023;
+
     // Recognised level directory names; anything else passed to a level
     // parameter is rejected.
     private static readonly string[] ValidLevels =
@@ -167,8 +170,20 @@ public class LogFileService : ILogFileService
             Keyword = keyword,
         };
 
+        // 扫描预算。关键词命中时循环很快停在结果上限；代价全在**不命中**的那次 ——
+        // 它会把整个保留窗口读完（Error 60 天、Fatal 90 天）。没有预算，一个敲错的
+        // 关键词就是一次可重复的顺序全盘读。
+        var budget = _options.Search ?? new LogSearchOptions();
+        var maxBytes = budget.MaxScanBytes > 0 ? budget.MaxScanBytes : long.MaxValue;
+        var maxTicks = budget.MaxScanSeconds > 0
+            ? (long)(budget.MaxScanSeconds * Stopwatch.Frequency)
+            : long.MaxValue;
+        var scannedBytes = 0L;
+        var stop = LogSearchTruncation.None;
+
         foreach (var lv in levelsToScan)
         {
+            if (stop != LogSearchTruncation.None) break;
             var levelDir = Path.Combine(basePath, lv);
             if (!Directory.Exists(levelDir)) continue;
             var files = Directory.EnumerateFiles(levelDir, "log-*.txt", SearchOption.TopDirectoryOnly)
@@ -177,7 +192,11 @@ public class LogFileService : ILogFileService
                 .ToList();
             foreach (var file in files)
             {
-                if (cancellationToken.IsCancellationRequested) break;
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    stop = LogSearchTruncation.Cancelled;
+                    break;
+                }
                 if (fromUtc.HasValue && file.LastWriteTimeUtc < fromUtc.Value) continue;
                 if (toUtc.HasValue && file.LastWriteTimeUtc > toUtc.Value.AddDays(1)) continue;
                 var lineNumber = 0;
@@ -187,6 +206,21 @@ public class LogFileService : ILogFileService
                 while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
                 {
                     lineNumber++;
+                    // 行长度按字符计而不是重新编码一次 —— 这是预算不是计费，
+                    // 日志行以 ASCII 为主，差一个常数因子不影响它挡住什么。
+                    scannedBytes += line.Length + 1;
+                    if (scannedBytes > maxBytes)
+                    {
+                        stop = LogSearchTruncation.ByteBudget;
+                        break;
+                    }
+                    // 时间预算按行数抽查：ElapsedTicks 本身很便宜，但百万行级别上
+                    // 每行一次仍是纯开销，而预算的粒度到不了这么细。
+                    if ((lineNumber & TimeCheckLineMask) == 0 && sw.ElapsedTicks > maxTicks)
+                    {
+                        stop = LogSearchTruncation.TimeBudget;
+                        break;
+                    }
                     // 内存比较用 OrdinalIgnoreCase，避免为每一行额外分配一份小写副本
                     if (line.Contains(keyword, StringComparison.OrdinalIgnoreCase))
                     {
@@ -199,16 +233,18 @@ public class LogFileService : ILogFileService
                         });
                         if (result.Hits.Count >= cap)
                         {
-                            result.Truncated = true;
+                            stop = LogSearchTruncation.ResultLimit;
                             break;
                         }
                     }
                 }
-                if (result.Truncated) break;
+                if (stop != LogSearchTruncation.None) break;
             }
-            if (result.Truncated) break;
         }
         sw.Stop();
+        result.ScannedBytes = scannedBytes;
+        result.TruncationReason = stop;
+        result.Truncated = stop != LogSearchTruncation.None;
         result.ElapsedMs = sw.ElapsedMilliseconds;
         return Result<LogSearchResultDto>.Success(result);
     }

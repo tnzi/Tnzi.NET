@@ -44,14 +44,6 @@ public class MiddlewareChainIntegrationTests
         mw.Order.ShouldBe(AiMiddlewareOrders.SubAgentLimit);
     }
 
-    [Fact]
-    public void ViewImageMiddleware_Order_IsCorrect()
-    {
-        var mw = new ViewImageMiddleware(
-            NullLogger<ViewImageMiddleware>.Instance);
-        mw.Order.ShouldBe(AiMiddlewareOrders.ViewImage);
-    }
-
     #endregion
 
     #region 中间件管道 - 端到端执行
@@ -134,7 +126,6 @@ public class MiddlewareChainIntegrationTests
             typeof(SubAgentLimitMiddleware),
             typeof(SummarizationMiddleware),
             typeof(FileUploadMiddleware),
-            typeof(ViewImageMiddleware),
             typeof(TodoMiddleware),
             typeof(ClarificationMiddleware),
             typeof(SkillConstraintMiddleware),

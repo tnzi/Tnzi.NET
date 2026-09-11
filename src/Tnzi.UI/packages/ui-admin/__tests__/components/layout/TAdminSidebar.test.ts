@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import TAdminSidebar from '../../../src/components/layout/TAdminSidebar.vue'
 import {
@@ -8,6 +9,11 @@ import {
   type AdminMenuItem,
 } from '../../../src/stores/useAdminRouteStore'
 import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
+import {
+  ADMIN_SHELL_CONFIG_KEY,
+  type AdminChromeAction,
+} from '../../../src/plugin/shell-config'
 
 function seedRoutes(): AdminRouteRecord[] {
   return [
@@ -200,5 +206,161 @@ describe('built-in settings footer', () => {
     })
     expect(wrapper.find('.custom-footer').exists()).toBe(true)
     expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(false)
+  })
+})
+
+describe('host chrome actions in the sidebar footer', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    useAdminRouteStore().setConstantRoutes(seedRoutes())
+  })
+
+  function mountWithActions(
+    actions: AdminChromeAction[],
+    routerOverrides: Record<string, unknown> = {},
+  ) {
+    const push = vi.fn()
+    const router = { hasRoute: (name: string) => name === 'settings', push, ...routerOverrides }
+    const wrapper = mount(TAdminSidebar, {
+      global: {
+        stubs: { NMenu: menuStub, TSystemLogo: true, TSvgIcon: true },
+        provide: { [ADMIN_SHELL_CONFIG_KEY as symbol]: { actions } },
+        config: { globalProperties: { $router: router } },
+      },
+    })
+    return { wrapper, push }
+  }
+
+  const noop = (): void => undefined
+
+  it('renders host actions ALONGSIDE the built-in settings entry, not instead of it', () => {
+    const { wrapper } = mountWithActions([
+      { key: 'scans', icon: 'mdi:inbox', label: 'Inbox', onClick: noop },
+    ])
+    // The built-in settings entry survives - the whole point of not routing
+    // this through TAdminSidebar's `#footer` slot, which replaces the footer.
+    expect(wrapper.find('.t-sidebar-settings-footer__btn:not(.t-sidebar-settings-footer__btn--host)').exists()).toBe(true)
+    const host = wrapper.findAll('.t-sidebar-settings-footer__btn--host')
+    expect(host).toHaveLength(1)
+    expect(host[0]!.attributes('title')).toBe('Inbox')
+    expect(host[0]!.attributes('aria-label')).toBe('Inbox')
+  })
+
+  it('invokes the action handler on click', async () => {
+    const onClick = vi.fn()
+    const { wrapper } = mountWithActions([
+      { key: 'scans', icon: 'mdi:inbox', label: 'Inbox', onClick },
+    ])
+    await wrapper.find('.t-sidebar-settings-footer__btn--host').trigger('click')
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides an action whose show predicate is false, and re-evaluates it', async () => {
+    const granted = ref(false)
+    const { wrapper } = mountWithActions([
+      { key: 'scans', icon: 'mdi:inbox', label: 'Inbox', show: () => granted.value, onClick: noop },
+      { key: 'always', icon: 'mdi:star', label: 'Always', onClick: noop },
+    ])
+    expect(wrapper.findAll('.t-sidebar-settings-footer__btn--host')).toHaveLength(1)
+    granted.value = true
+    await nextTick()
+    expect(wrapper.findAll('.t-sidebar-settings-footer__btn--host')).toHaveLength(2)
+  })
+
+  it('renders the footer for host actions even when there is no settings route', () => {
+    const { wrapper } = mountWithActions(
+      [{ key: 'scans', icon: 'mdi:inbox', label: 'Inbox', onClick: noop }],
+      { hasRoute: () => false },
+    )
+    expect(wrapper.find('.t-sidebar-settings-footer').exists()).toBe(true)
+    expect(wrapper.findAll('.t-sidebar-settings-footer__btn--host')).toHaveLength(1)
+  })
+
+  it('paints the active tint from the action predicate', () => {
+    const { wrapper } = mountWithActions([
+      { key: 'scans', icon: 'mdi:inbox', label: 'Inbox', active: () => true, onClick: noop },
+    ])
+    expect(wrapper.find('.t-sidebar-settings-footer__btn--host').classes()).toContain('is-active')
+  })
+
+  it('changes nothing when the host contributes no actions', () => {
+    const { wrapper } = mountWithActions([])
+    expect(wrapper.find('.t-sidebar-settings-footer__btn--host').exists()).toBe(false)
+    expect(wrapper.find('.t-sidebar-settings-footer__btn').exists()).toBe(true)
+  })
+
+  /**
+   * The Settings entry is gated on a settings-view permission. An app that
+   * grants it to owners only leaves everyone else a strip whose ONLY entry is
+   * the host action - which is the case that matters most, because the people
+   * who use the tool all day are exactly the ones without the permission.
+   */
+  it('gives a lone host action the labelled anchor role instead of a bare glyph', () => {
+    const { wrapper } = mountWithActions(
+      [{ key: 'scans', icon: 'mdi:inbox', label: 'Returned Scans', onClick: noop }],
+      { hasRoute: () => false },
+    )
+    const buttons = wrapper.findAll('.t-sidebar-settings-footer__actions > button')
+    expect(buttons).toHaveLength(1)
+    // First child = the anchor role in the footer's positional layout. The
+    // label span has to BE there for that role to render as icon + text; the
+    // earlier version had no span at all, so the anchor stretched a lone icon.
+    expect(buttons[0]!.classes()).toContain('t-sidebar-settings-footer__btn--host')
+    expect(buttons[0]!.find('.t-sidebar-settings-footer__label').text()).toBe('Returned Scans')
+  })
+
+  it('carries a label on every host action so any of them can take the anchor role', () => {
+    const { wrapper } = mountWithActions(
+      [
+        { key: 'a', icon: 'mdi:inbox', label: 'First', onClick: noop },
+        { key: 'b', icon: 'mdi:star', label: 'Second', onClick: noop },
+      ],
+      { hasRoute: () => false },
+    )
+    const labels = wrapper
+      .findAll('.t-sidebar-settings-footer__btn--host .t-sidebar-settings-footer__label')
+      .map((n) => n.text())
+    expect(labels).toEqual(['First', 'Second'])
+  })
+
+  /**
+   * Order is load-bearing, not cosmetic: the built-in-menus toggle is
+   * deliberately label-less, so if it came before the host actions it would
+   * take the anchor role whenever Settings is out of reach and render as a
+   * stretched, wordless glyph.
+   */
+  it('places host actions after Settings but before the label-less built-in toggle', () => {
+    setActivePinia(createPinia())
+    useAdminRouteStore().setConstantRoutes(seedRoutes())
+    useAdminAuthStore().setSuperUser(true)
+    const router = { hasRoute: (name: string) => name === 'settings', push: vi.fn() }
+    const wrapper = mount(TAdminSidebar, {
+      global: {
+        stubs: { NMenu: menuStub, TSystemLogo: true, TSvgIcon: true },
+        provide: {
+          [ADMIN_SHELL_CONFIG_KEY as symbol]: {
+            actions: [{ key: 'scans', icon: 'mdi:inbox', label: 'Inbox', onClick: noop }],
+          },
+        },
+        config: { globalProperties: { $router: router } },
+      },
+    })
+    const kinds = wrapper.findAll('.t-sidebar-settings-footer__actions > button').map((b) => {
+      if (b.classes().includes('t-sidebar-settings-footer__btn--host')) return 'host'
+      if (b.classes().includes('t-sidebar-settings-footer__ops')) return 'toggle'
+      return 'settings'
+    })
+    expect(kinds).toEqual(['settings', 'host', 'toggle'])
+  })
+
+  it('drops a malformed entry rather than rendering a button that throws on click', () => {
+    const { wrapper } = mountWithActions([
+      { key: '', icon: 'mdi:inbox', label: 'No key', onClick: noop },
+      { key: 'no-handler', icon: 'mdi:inbox', label: 'No handler' } as unknown as AdminChromeAction,
+      { key: 'ok', icon: 'mdi:inbox', label: 'Fine', onClick: noop },
+    ])
+    const host = wrapper.findAll('.t-sidebar-settings-footer__btn--host')
+    expect(host).toHaveLength(1)
+    expect(host[0]!.attributes('title')).toBe('Fine')
   })
 })

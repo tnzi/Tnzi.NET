@@ -342,7 +342,7 @@ async function submitPrint() {
       paymentEntryIds: [...checkedQueueKeys.value],
       issueDate: printIssueDate.value != null ? tsToIsoDate(printIssueDate.value) : null,
     })
-    downloadBlob(blob, `checks-${Date.now()}.pdf`)
+    downloadBlob(blob, `checks-${Date.now()}.${renderedExt(blob)}`)
     message.success(t('printModal.success'))
     printDetail.close()
     checkedQueueKeys.value = []
@@ -363,7 +363,7 @@ async function downloadCalibration() {
   calibrating.value = true
   try {
     const blob = await bridge.checks.calibration(queueAccountId.value)
-    downloadBlob(blob, `check-calibration-${queueAccountId.value}.pdf`)
+    downloadBlob(blob, `check-calibration-${queueAccountId.value}.${renderedExt(blob)}`)
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -509,7 +509,7 @@ async function reprint(row: BankCheckRow) {
   if (!id) return
   try {
     const blob = await bridge.checks.reprint(id)
-    downloadBlob(blob, `check-reprint-${id}.pdf`)
+    downloadBlob(blob, `check-reprint-${id}.${renderedExt(blob)}`)
     message.success(t('reprintSuccess'))
     await crud.refresh()
   } catch (error) {
@@ -537,6 +537,14 @@ const rowActions: RowAction<BankCheckRow>[] = [
     onClick: (r) => openVoid(r),
   },
 ]
+// The renderer decides the format: the shipped default renders an editable HTML
+// cheque template and the PDF renderer is opt-in, and the server names the
+// MIME type accordingly. Name the download after what actually came back
+// instead of promising `.pdf`.
+function renderedExt(blob: Blob): 'html' | 'pdf' {
+  return blob.type.startsWith('text/html') ? 'html' : 'pdf'
+}
+
 </script>
 
 <style scoped>

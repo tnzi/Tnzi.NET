@@ -22,6 +22,7 @@ global using Tnzi.Audit.Options;
 global using Tnzi.Audit.Retention;
 global using Tnzi.Audit.Services;
 global using Tnzi.Domain.Entities;
+global using Tnzi.Security;
 global using Tnzi.Security.Claims;
 global using Tnzi.Settings;
 global using Tnzi.Domain.Repositories;

@@ -21,12 +21,18 @@ public interface IFileShareService
     Task<Result<FileSharePublicDto>> CreateShareAsync(Guid fileId, DateTime? expiresAt = null, int? maxAccessCount = null, string? password = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取分享信息（管理视角，含令牌与计数；<b>绝不含 PasswordHash</b>）
+    /// 获取分享信息（管理视角，含令牌与计数；<b>绝不含 PasswordHash</b>）。
     /// </summary>
+    /// <remarks>
+    /// 只给<b>管理者</b>看：分享的创建者，或对该文件有变更权的人（与 <see cref="CreateShareAsync"/> 要求的同一份权利）；
+    /// 另外放行本次请求已凭这条链接通过 <see cref="ValidateShareAccessAsync"/> 的调用（下载流程要凭它拿 FileId）。
+    /// 其余一律 404，与令牌不存在无法区分 —— 已撤销 / 已过期的链接也不例外，管理者看到的是它的真实状态。
+    /// 收件人自己看的是 <see cref="GetSharePreviewAsync"/>。
+    /// </remarks>
     Task<Result<FileSharePublicDto>> GetShareAsync(string shareToken, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 撤销分享
+    /// 撤销分享。要求与创建同一份权利（创建者，或对文件有变更权）；否则 404。
     /// </summary>
     Task<Result> RevokeShareAsync(string shareToken, CancellationToken cancellationToken = default);
 

@@ -39,6 +39,15 @@ public partial class SkillService : ApplicationService, ISkillService
     /// <inheritdoc cref="SkillUpdatePermission"/>
     private const string SkillDeletePermission = "ai.skill.delete";
 
+    /// <summary>
+    /// 管理端读技能所需的权限码。用于把「内部技能」从自服务读路径上摘掉：
+    /// <c>IsInternal</c> 的语义是「不对 Agent 暴露，仅作为其他技能的共享资源依赖」，
+    /// 因此它也不该出现在用户端的列表 / 搜索 / 详情里；而 <c>GetBySlugAsync</c> 与
+    /// <c>SearchAsync</c> <b>同时</b>被管理端控制器调用，管理员必须仍然看得见它们
+    /// —— 服务无从知道谁在问，只能自己问权限码（与 <see cref="HasManagePermissionAsync"/> 同一理由）。
+    /// </summary>
+    private const string SkillViewPermission = "ai.skill.view";
+
     private const string SharedSkillDeniedMessage =
         "Access denied: shared skills are managed by administrators.";
 
@@ -99,7 +108,8 @@ public partial class SkillService : ApplicationService, ISkillService
     public async Task<Result<List<SkillSummaryDto>>> GetAvailableAsync()
     {
         var skills = await _registry.GetAvailableSkillsAsync();
-        var dtos = skills.MapToList<SkillSummaryDto>();
+        var visible = await FilterInternalAsync(skills);
+        var dtos = visible.MapToList<SkillSummaryDto>();
         return Ok(dtos);
     }
 
@@ -111,6 +121,10 @@ public partial class SkillService : ApplicationService, ISkillService
         if (skill == null)
             return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
 
+        // 内部技能对非管理调用者答 404 而不是 403：403 会确认这条 slug 存在。
+        if (skill.IsInternal && !await HasManagePermissionAsync(SkillViewPermission))
+            return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
+
         return Ok(skill.MapTo<SkillDetailDto>());
     }
 
@@ -119,8 +133,25 @@ public partial class SkillService : ApplicationService, ISkillService
         Check.NotNullOrWhiteSpace(query);
 
         var skills = await _registry.SearchAsync(query, maxResults);
-        var dtos = skills.MapToList<SkillSummaryDto>();
+        var visible = await FilterInternalAsync(skills);
+        var dtos = visible.MapToList<SkillSummaryDto>();
         return Ok(dtos);
+    }
+
+    /// <summary>
+    /// 摘掉内部技能（<see cref="SkillDefinition.IsInternal"/>），除非调用者持
+    /// <see cref="SkillViewPermission"/>。没有任何内部技能时不问权限，避免给每次
+    /// 用户端列表 / 搜索都加一次授权查询。
+    /// </summary>
+    private async Task<IReadOnlyList<SkillDefinition>> FilterInternalAsync(IReadOnlyList<SkillDefinition> skills)
+    {
+        if (!skills.Any(s => s.IsInternal))
+            return skills;
+
+        if (await HasManagePermissionAsync(SkillViewPermission))
+            return skills;
+
+        return skills.Where(s => !s.IsInternal).ToList();
     }
 
     public async Task<Result<SkillActivationResult>> ActivateAsync(string slug, Dictionary<string, string>? parameters = null)

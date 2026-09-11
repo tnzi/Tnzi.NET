@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { ref } from 'vue'
+import { h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import TFormModal from '../../../src/components/crud/TFormModal.vue'
+import { useFormModal } from '../../../src/headless/useFormModal'
 
 const modalStub = {
   name: 'Modal',
@@ -9,6 +10,16 @@ const modalStub = {
   emits: ['update:show'],
   template:
     '<div v-if="show" class="n-modal-stub"><slot /><slot name="footer" /></div>',
+}
+
+// Stands in for the leave transition: naive's NModal keeps the body mounted
+// until its transition finishes, so this stub renders the slots regardless of
+// `show`. The `modalStub` above unmounts immediately and therefore cannot
+// reproduce what a closing modal looks like.
+const lingeringModalStub = {
+  name: 'Modal',
+  props: ['show'],
+  template: '<div class="n-modal-stub"><slot /><slot name="footer" /></div>',
 }
 
 const buttonStub = {
@@ -79,5 +90,56 @@ describe('TFormModal', () => {
       global: { stubs },
     })
     expect(wrapper.find('.t-form-modal__confirm').exists()).toBe(false)
+  })
+
+  describe('while the close transition runs', () => {
+    const lingeringStubs = { Modal: lingeringModalStub, Button: buttonStub }
+
+    function mountWithBody(mode: 'create' | 'edit' | 'view', record: { name: string } | null) {
+      const state = useFormModal<{ name: string }>()
+      state.open(mode, record)
+      const wrapper = mount(TFormModal, {
+        props: { state: state as never, title: 'Edit' },
+        global: { stubs: lingeringStubs },
+        slots: {
+          default: (params: { formData: { name: string } | null }) =>
+            h('span', { class: 'form-value' }, params.formData?.name ?? 'EMPTY'),
+        },
+      })
+      return { state, wrapper }
+    }
+
+    it('keeps painting the values the body had', async () => {
+      const { state, wrapper } = mountWithBody('edit', { name: 'Alice' })
+      expect(wrapper.find('.form-value').text()).toBe('Alice')
+
+      state.close()
+      await nextTick()
+
+      // The body is still on screen. Handing it a null record here would make it
+      // repaint from empty values that are thrown away when it unmounts.
+      expect(wrapper.find('.form-value').text()).toBe('Alice')
+    })
+
+    it('does not grow a confirm button on a closing view modal', async () => {
+      const { state, wrapper } = mountWithBody('view', { name: 'Alice' })
+      expect(wrapper.find('.t-form-modal__confirm').exists()).toBe(false)
+
+      state.close()
+      await nextTick()
+
+      expect(wrapper.find('.t-form-modal__confirm').exists()).toBe(false)
+    })
+
+    it('paints the next record on the next open', async () => {
+      const { state, wrapper } = mountWithBody('edit', { name: 'Alice' })
+      state.close()
+      await nextTick()
+
+      state.open('edit', { name: 'Bob' })
+      await nextTick()
+
+      expect(wrapper.find('.form-value').text()).toBe('Bob')
+    })
   })
 })

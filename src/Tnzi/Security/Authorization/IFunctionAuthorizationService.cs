@@ -43,9 +43,34 @@ public interface IFunctionAuthorizationService
     /// <paramref name="grantorUserId"/> 是否可支配（管理）指定角色：为其授予/回收权限、
     /// 变更其用户成员。委托规则（权限集包含模型）：超管支配一切角色；其余用户仅能支配
     /// "显式权限集是自己有效权限集子集"的角色，且永远不能支配超管配置角色。
-    /// 默认实现返回 true：没有委托语义的实现保持宽松（护栏由调用方按可空服务跳过）。
     /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>默认实现返回 <c>false</c>（fail-closed）。</strong>
+    /// 它曾经返回 <c>true</c>，理由是「没有委托语义的实现保持宽松」—— 但那个理由站不住：
+    /// 调用方（<c>UserService.GetRoleMembershipViolationAsync</c> 等）已经用
+    /// <b>服务为 null</b> 表达「没有权限系统，跳过护栏」这一档；而一个<b>注册了</b>本契约、
+    /// 却没有覆写这个方法的实现，表达的是「我不知道谁能支配谁」，那时放行一切
+    /// 等于让委托护栏在容器里静默全开，且没有任何症状。
+    /// 与同接口上 <c>IsSuperAdminAsync =&gt; false</c> 的方向保持一致。
+    /// </remarks>
     /// <param name="grantorUserId">授权者用户ID</param>
     /// <param name="roleId">目标角色ID</param>
-    Task<bool> CanManageRoleAsync(Guid grantorUserId, Guid roleId) => Task.FromResult(true);
+    Task<bool> CanManageRoleAsync(Guid grantorUserId, Guid roleId) => Task.FromResult(false);
+
+    /// <summary>
+    /// 受保护的角色名 —— 成员自动获得超管旁路的那些角色（<c>Authorization:SuperAdminRoles</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>它存在是为了让「角色定义」这条写路径也能守住超管边界。</strong>
+    /// <see cref="CanManageRoleAsync"/> 判定时读的是角色<b>当前的名字</b>，
+    /// 于是「先加入一个自己支配得了的普通角色，再把它改名成超管角色名」可以整个绕过它：
+    /// 加入那一刻名字还是普通的，改名那一步以前没有任何守卫。
+    /// <c>RoleService</c> 拿这个列表在创建 / 改名时直接拒绝目标名。
+    /// </para>
+    /// <para>
+    /// 默认空集：没有加载授权模块的宿主根本没有超管概念，也就没有要保护的名字。
+    /// </para>
+    /// </remarks>
+    IReadOnlyList<string> GetSuperAdminRoleNames() => [];
 }

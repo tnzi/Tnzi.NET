@@ -346,6 +346,37 @@ public class PayRunLifecycleTests : PayrollIntegrationTestBase
         wagesNet.ShouldBe(0m); // 过账贷 900 / 付款借 900 / 两笔冲销 → 净 0
     }
 
+    /// <summary>
+    /// 作废之后，工资单不能还写着"已付款"。
+    /// </summary>
+    /// <remarks>
+    /// 付款凭证已被冲销，钱并没有出去；留着 Paid，「本月已付」的任何一处呈现
+    /// 都会把这批人算进去，而他们其实还等着这笔工资。
+    /// ★ 两个凭证 id 刻意保留（指向仍在账上的原始凭证，是这张工资单落在哪张凭证上的唯一线索）。
+    /// </remarks>
+    [Fact]
+    public async Task Void_AfterPayment_ClearsThePaidFlagButKeepsTheJournalTrail()
+    {
+        await StandardScenarioAsync();
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+        (await CalculateAsync(runId)).Succeeded.ShouldBeTrue();
+        (await PostAsync(runId)).Succeeded.ShouldBeTrue();
+        var bankId = await AccountIdByCodeAsync("1120");
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.PayAsync(runId, new PayRunPaymentDto
+        {
+            PaymentAccountId = bankId,
+            PaymentDate = PayDate
+        }))).Succeeded.ShouldBeTrue();
+
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.VoidAsync(runId))).Succeeded.ShouldBeTrue();
+
+        var payslips = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(runId));
+        var slip = await ReloadAsync<Payslip>(payslips.Data!.Single().Id);
+        slip!.PaymentStatus.ShouldBe(PayslipPaymentStatus.Unpaid, "付款凭证已冲销，这笔钱没有出去");
+        slip.PaymentJournalEntryId.ShouldNotBeNull("原始付款凭证仍在账上，链接是唯一线索");
+        slip.JournalEntryId.ShouldNotBeNull();
+    }
+
     [Fact]
     public async Task Void_DraftRun_Rejected()
     {

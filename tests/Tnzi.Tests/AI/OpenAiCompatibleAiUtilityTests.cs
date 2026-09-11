@@ -1,5 +1,5 @@
-using System.Net;
-using Tnzi.AI.Options;
+﻿using System.Net;
+using Tnzi.AI.Extensions;
 
 namespace Tnzi.Tests.AI;
 
@@ -294,6 +294,57 @@ public class OpenAiCompatibleAiUtilityTests
         using var body = JsonDocument.Parse(handler.Requests[0].Body);
         Assert.Equal(7, body.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.Equal(1.5, body.RootElement.GetProperty("temperature").GetDouble(), 3);
+    }
+
+    // ------------------------------------------------------------------
+    // 输出预算 —— 默认值不能按最窄的调用点定
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ExecuteAsync_DefaultMaxTokens_LeavesRoomForAnAnswer()
+    {
+        // 四个框架内消费者（RAG 问答、知识图谱抽取、Agent 评估、建议生成）都吃这个默认值
+        // 且都不传覆盖。按标题长度定默认值会把它们的输出静默截断 —— 图谱抽取期望完整 JSON，
+        // 截断后解析失败，产出零实体且不报错。
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, Registry(), new AiUtilityOptions());
+
+        await sut.ExecuteAsync("system", "user");
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.True(body.RootElement.GetProperty("max_tokens").GetInt32() >= 1024,
+            "the utility default must be usable for question answering, not sized for a title");
+    }
+
+    [Fact]
+    public async Task GenerateTitleAsync_AsksForATitleSizedBudget()
+    {
+        // 标题是那个「窄」的调用点，所以由它显式传小值，而不是让所有人共用一个小默认值
+        var handler = new RecordingHandler(Completion("A short title"));
+        var sut = CreateSut(handler, Registry(), new AiUtilityOptions());
+
+        await sut.GenerateTitleAsync("a long conversation transcript", maxLength: 50);
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        var maxTokens = body.RootElement.GetProperty("max_tokens").GetInt32();
+        Assert.True(maxTokens > 0 && maxTokens <= 256,
+            $"a title call should ask for a small budget, got {maxTokens}");
+        Assert.True(maxTokens < new AiUtilityOptions().MaxTokens,
+            "the title budget must be tighter than the shared default");
+    }
+
+    [Fact]
+    public async Task GenerateTitleAsync_KeepsAnExplicitCallerBudget()
+    {
+        var handler = new RecordingHandler(Completion("A short title"));
+        var sut = CreateSut(handler, Registry(), new AiUtilityOptions());
+
+        await sut.GenerateTitleAsync("transcript", maxLength: 50,
+            options: new AiUtilityCallOptions { MaxTokens = 512, Model = "from-call" });
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.Equal(512, body.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.Equal("from-call", ModelOf(handler.Requests[0]));
     }
 
     // ------------------------------------------------------------------

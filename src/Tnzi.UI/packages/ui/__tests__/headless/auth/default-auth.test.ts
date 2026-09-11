@@ -18,6 +18,8 @@ function makeHelpers(): LoginCallbackHelpers {
     clearTwoFactor: vi.fn(),
     setCaptchaRequired: vi.fn(),
     clearCaptcha: vi.fn(),
+    setPendingActionRequired: vi.fn(),
+    clearPendingAction: vi.fn(),
   } as unknown as LoginCallbackHelpers;
 }
 
@@ -119,5 +121,74 @@ describe('buildDefaultLoginCallbacks - code login', () => {
     expect(authApi.sendCodeLoginCode).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'someone@example.com', captchaId: 'cid', captchaCode: 'ABCD' }),
     );
+  });
+});
+
+/**
+ * Discharging a pending action issues a session, and issuing still runs the
+ * guard chain. An account that also has TOTP enabled therefore gets a 403
+ * `2FA_REQUIRED` back from the completion endpoint. The action IS done at that
+ * point (the pending token was consumed), so reading the envelope as a failure
+ * strands the user on a form that can only be rejected again.
+ */
+describe('buildDefaultLoginCallbacks - pending actions', () => {
+  const pendingActionsEnvelope = {
+    succeeded: false,
+    errorCode: 'IDENTITY_PENDING_ACTIONS_REQUIRED',
+    errorDetails: { tempToken: 'pa-1', requiredActions: ['ChangePassword'] },
+  };
+  const twoFactorEnvelope = {
+    succeeded: false,
+    errorCode: '2FA_REQUIRED',
+    errorDetails: { tempToken: 'tmp-2', supportedTypes: [TwoFactorType.Totp] },
+  };
+
+  it('hands a 2FA_REQUIRED answer to the shell as a challenge for the challenged account', async () => {
+    const { runtime, applyTokenSession } = makeRuntime({
+      loginWithRefreshToken: vi.fn().mockResolvedValue(pendingActionsEnvelope),
+      completePendingPasswordChange: vi.fn().mockResolvedValue(twoFactorEnvelope),
+    });
+    const helpers = makeHelpers();
+    const callbacks = buildDefaultLoginCallbacks(runtime);
+
+    await callbacks.pwdLogin!({ userName: 'alice', password: 'old-pass' }, helpers);
+    expect(helpers.setPendingActionRequired).toHaveBeenCalledWith(expect.objectContaining({ tempToken: 'pa-1' }));
+
+    const outcome = await callbacks.completePasswordChange!({ tempToken: 'pa-1', newPassword: 'new-pass' }, helpers);
+
+    expect(outcome).toEqual({ completed: false, remainingActions: [], challenged: true });
+    expect(helpers.setTwoFactorRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ challengeId: 'tmp-2', method: 'totp', userName: 'alice' }),
+    );
+    expect(applyTokenSession).not.toHaveBeenCalled();
+  });
+
+  it('without helpers the challenge can only surface as the backend message', async () => {
+    const { runtime } = makeRuntime({
+      completePendingPasswordChange: vi.fn().mockResolvedValue({ ...twoFactorEnvelope, message: 'Two-factor required' }),
+    });
+
+    await expect(
+      buildDefaultLoginCallbacks(runtime).completePasswordChange!({ tempToken: 'pa-1', newPassword: 'new-pass' }),
+    ).rejects.toThrow('Two-factor required');
+  });
+
+  it('still establishes the session when the last action completes with tokens', async () => {
+    const { runtime, applyTokenSession } = makeRuntime({
+      completePendingPasswordChange: vi.fn().mockResolvedValue({
+        succeeded: true,
+        data: { completed: true, remainingActions: [], token: { accessToken: 'at', refreshToken: 'rt', expiresIn: 60 } },
+      }),
+    });
+    const helpers = makeHelpers();
+
+    const outcome = await buildDefaultLoginCallbacks(runtime).completePasswordChange!(
+      { tempToken: 'pa-1', newPassword: 'new-pass' },
+      helpers,
+    );
+
+    expect(outcome).toEqual({ completed: true, remainingActions: [] });
+    expect(applyTokenSession).toHaveBeenCalledTimes(1);
+    expect(helpers.setTwoFactorRequired).not.toHaveBeenCalled();
   });
 });

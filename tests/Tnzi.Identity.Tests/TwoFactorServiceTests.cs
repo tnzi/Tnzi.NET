@@ -9,7 +9,6 @@ public class TwoFactorServiceTests
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<IOptionsSnapshot<IdentityOptions>> _identityOptionsMock;
-    private readonly Mock<ILogger<TwoFactorService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     private readonly TwoFactorService _twoFactorService;
@@ -37,7 +36,6 @@ public class TwoFactorServiceTests
                 ResendIntervalSeconds = 60
             }
         });
-        _loggerMock = new Mock<ILogger<TwoFactorService>>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
         var loggerFactory = new Mock<ILoggerFactory>();

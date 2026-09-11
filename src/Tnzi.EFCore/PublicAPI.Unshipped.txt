@@ -68,3 +68,29 @@ static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! col
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
 virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Discard(TEntity! entity) -> void
+*REMOVED*Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Dapper.DapperService!>? logger = null) -> void
+Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider) -> void
+Tnzi.EFCore.Outbox.EfCoreEventStore.MarkAsDeadLetterAsync(System.Guid eventId, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+*REMOVED*Tnzi.EFCore.Options.DataAuthOptions
+*REMOVED*Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.get -> bool
+*REMOVED*Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.set -> void
+*REMOVED*Tnzi.EFCore.Options.DataAuthOptions.DataAuthOptions() -> void
+Tnzi.EFCore.IndexFilter
+Tnzi.EFCore.IndexFilter.And(Tnzi.EFCore.IndexFilter! other) -> Tnzi.EFCore.IndexFilter!
+Tnzi.EFCore.IndexFilter.AndNotDeleted() -> Tnzi.EFCore.IndexFilter!
+Tnzi.EFCore.IndexFilter.Build() -> string!
+Tnzi.EFCore.IndexFilter.Build(Tnzi.EFCore.DatabaseProvider provider) -> string!
+override Tnzi.EFCore.IndexFilter.ToString() -> string!
+static Tnzi.EFCore.IndexFilter.EqualTo(string! columnName, int value) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.IsTrue(string! columnName) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.NotDeleted() -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.NotEmpty(string! columnName) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.NotEqualTo(string! columnName, int value) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.NotNull(string! columnName) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.Null(string! columnName) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilter.Raw(System.Func<Tnzi.EFCore.DatabaseProvider, string!>! sql) -> Tnzi.EFCore.IndexFilter!
+static Tnzi.EFCore.IndexFilterFactory.GetColumnTrue(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
+Tnzi.EFCore.DesignTimeMultiTenancy
+static Tnzi.EFCore.DesignTimeMultiTenancy.Enabled.get -> bool?
+static Tnzi.EFCore.DesignTimeMultiTenancy.Enabled.set -> void
+static Tnzi.EFCore.DesignTimeMultiTenancy.Resolve(bool? injected) -> bool

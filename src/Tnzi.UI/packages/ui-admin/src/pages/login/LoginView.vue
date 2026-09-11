@@ -41,6 +41,7 @@ import Register from './modules/Register.vue'
 import ResetPwd from './modules/ResetPwd.vue'
 import BindWechat from './modules/BindWechat.vue'
 import TwoFactorChallenge from './modules/TwoFactorChallenge.vue'
+import PendingActions from './modules/PendingActions.vue'
 
 defineOptions({ name: 'TnziAdminLoginPage' })
 
@@ -51,6 +52,7 @@ const KNOWN_MODULES: readonly LoginModule[] = [
   'reset-pwd',
   'bind-wechat',
   'two-factor',
+  'pending-actions',
 ] as const
 
 const moduleComponents = {
@@ -60,6 +62,7 @@ const moduleComponents = {
   'reset-pwd': ResetPwd,
   'bind-wechat': BindWechat,
   'two-factor': TwoFactorChallenge,
+  'pending-actions': PendingActions,
 }
 
 const route = useRoute()

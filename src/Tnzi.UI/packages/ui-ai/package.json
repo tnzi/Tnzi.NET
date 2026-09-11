@@ -46,6 +46,10 @@
       "types": "./dist/workflow/index.d.ts",
       "import": "./dist/workflow.js"
     },
+    "./icons": {
+      "types": "./dist/icons/index.d.ts",
+      "import": "./dist/icons/index.js"
+    },
     "./theme": {
       "types": "./dist/theme/index.d.ts",
       "import": "./dist/theme.js"
@@ -93,6 +97,7 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
+    "@iconify/utils": "catalog:",
     "@vue-flow/background": "^1.3.2",
     "@vue-flow/core": "^1.48.2",
     "@vue-flow/minimap": "^1.5.4",

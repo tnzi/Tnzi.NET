@@ -10,16 +10,13 @@ public class DapperService : IDapperService
 {
     private readonly DbContext _dbContext;
     private readonly IDatabaseProvider _databaseProvider;
-    private readonly ILogger<DapperService>? _logger;
 
     public DapperService(
         DbContext dbContext,
-        IDatabaseProvider databaseProvider,
-        ILogger<DapperService>? logger = null)
+        IDatabaseProvider databaseProvider)
     {
         _dbContext = Check.NotNull(dbContext);
         _databaseProvider = Check.NotNull(databaseProvider);
-        _logger = logger;
     }
 
     /// <summary>

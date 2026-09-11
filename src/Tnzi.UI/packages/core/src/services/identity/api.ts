@@ -43,6 +43,17 @@ import type {
   TwoFactorMethodRequestDto,
   TotpSetupDto,
   EnableTotpDto,
+  // Pending actions
+  CompletePasswordChangeDto,
+  CompletePendingActionCodeDto,
+  PendingActionChallengeDto,
+  PendingActionResultDto,
+  // Invitation
+  CreateInvitationDto,
+  InvitationDto,
+  InvitationPreviewDto,
+  AcceptInvitationDto,
+  AcceptInvitationResultDto,
   // User
   UserDto,
   UserListItemDto,
@@ -56,6 +67,7 @@ import type {
   LockUserDto,
   AssignOrganizationDto,
   AssignRolesDto,
+  ConfirmContactDto,
   RemoveRolesDto,
   UpdateUserBatchDto,
   UserImportResult,
@@ -122,12 +134,39 @@ const ADMIN_LOGIN_LOG_BASE = '/admin/login-logs';
 const ADMIN_LOGIN_SECURITY_BASE = '/admin/login-security';
 const ADMIN_USER_DETAIL_BASE = '/admin/user-details';
 const ADMIN_TENANT_BASE = '/admin/tenants';
+const ADMIN_INVITATION_BASE = '/admin/invitations';
+const INVITATION_BASE = '/invitations';
 
 // ============================================
 // Auth API (DefaultAuthController)
 // ============================================
 
-export function useAuthApi(client: HttpClient) {
+/**
+ * Options for {@link useAuthApi}.
+ */
+export interface AuthApiOptions {
+  /**
+   * Send cookies on the auth endpoints (`credentials: 'include'`).
+   *
+   * Required when the backend runs `Identity:TokenDelivery:Mode = Cookie` AND the
+   * SPA is on a different origin than the API - without it the browser neither
+   * stores the `Set-Cookie` from login nor sends it back on refresh.
+   *
+   * Defaults to `false` and is deliberately NOT on by default: `include` on a
+   * cross-origin request requires the server to answer with
+   * `Access-Control-Allow-Credentials` and a concrete origin, so turning it on
+   * unconditionally would break every deployment that runs CORS with
+   * `AllowAnyOrigin`.
+   */
+  withCredentials?: boolean;
+}
+
+export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
+  // Auth endpoints that set, read, or clear the refresh-token cookie.
+  const cookieAware = options.withCredentials
+    ? { skipAuthRefresh: true, withCredentials: true }
+    : { skipAuthRefresh: true };
+
   return {
     /**
      * Get public auth config (which login methods / register / recovery /
@@ -150,23 +189,53 @@ export function useAuthApi(client: HttpClient) {
 
     /** Login with refresh token */
     loginWithRefreshToken: (data: LoginDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/login-with-refresh-token`, data, { skipAuthRefresh: true }),
+      client.post<TokenResultDto>(`${AUTH_BASE}/login-with-refresh-token`, data, cookieAware),
 
     /** Refresh token */
     refreshToken: (data: RefreshTokenDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/refresh-token`, data, { skipAuthRefresh: true }),
+      client.post<TokenResultDto>(`${AUTH_BASE}/refresh-token`, data, cookieAware),
 
     /** Register (returns token result) */
     register: (data: RegisterDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/register`, data, { skipAuthRefresh: true }),
+      client.post<TokenResultDto>(`${AUTH_BASE}/register`, data, cookieAware),
 
     /** Logout (requires authentication) */
     logout: () =>
-      client.post<string>(`${AUTH_BASE}/logout`, undefined, { skipAuthRefresh: true }),
+      client.post<string>(`${AUTH_BASE}/logout`, undefined, cookieAware),
 
     /** Forgot password (sends reset email) */
     forgotPassword: (data: ForgotPasswordDto) =>
       client.post<string>(`${AUTH_BASE}/forgot-password`, data),
+
+    /**
+     * Read what the sign-in is asking for, plus the material to do it.
+     *
+     * Call this with the `tempToken` from a 403 `IDENTITY_PENDING_ACTIONS_REQUIRED`
+     * response. Does not consume the token. Anonymous: whoever gets here does not
+     * have an access token yet.
+     */
+    describePendingActions: (tempToken: string) =>
+      client.get<PendingActionChallengeDto>(
+        `${AUTH_BASE}/pending-actions/${encodeURIComponent(tempToken)}`,
+      ),
+
+    /** Discharge "must change the password first". */
+    completePendingPasswordChange: (data: CompletePasswordChangeDto) =>
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/change-password`, data),
+
+    /** Discharge "must enrol an authenticator first". */
+    completePendingTotpEnrollment: (data: CompletePendingActionCodeDto) =>
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/enroll-totp`, data),
+
+    /** Send the code for "must confirm the email first". The address comes from the account. */
+    sendPendingActionEmailCode: (tempToken: string) =>
+      client.post<void>(
+        `${AUTH_BASE}/pending-actions/${encodeURIComponent(tempToken)}/send-email-code`,
+      ),
+
+    /** Discharge "must confirm the email first". */
+    completePendingEmailConfirmation: (data: CompletePendingActionCodeDto) =>
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/confirm-email`, data),
 
     /** Reset password by token */
     resetPassword: (data: ResetPasswordDto) =>
@@ -210,7 +279,7 @@ export function useAuthApi(client: HttpClient) {
 
     /** Code login */
     codeLogin: (data: CodeLoginDto) =>
-      client.post<CodeLoginResultDto>(`${AUTH_BASE}/code-login`, data, { skipAuthRefresh: true }),
+      client.post<CodeLoginResultDto>(`${AUTH_BASE}/code-login`, data, cookieAware),
 
     // -- Password Recovery by Code --
 
@@ -230,7 +299,7 @@ export function useAuthApi(client: HttpClient) {
 
     /** Verify 2FA and login */
     verifyTwoFactor: (data: VerifyTwoFactorDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data, { skipAuthRefresh: true }),
+      client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data, cookieAware),
 
     // -- Passkey (WebAuthn) --
     // Two-step by nature: begin produces browser options plus an opaque state
@@ -376,9 +445,17 @@ export function useProfileApi(client: HttpClient) {
     revokeSession: (sessionId: string) =>
       client.delete<void>(`${PROFILE_BASE}/sessions/${sessionId}`),
 
-    /** Revoke all sessions */
-    revokeAllSessions: () =>
-      client.delete<void>(`${PROFILE_BASE}/sessions`),
+    /**
+     * Sign out other devices.
+     *
+     * Defaults to keeping the session that issued this request - that is what
+     * ASVS 7.4.3 asks for ("terminate all *other* active sessions"), and a button
+     * that also signs you out of the tab you clicked it in is a button nobody
+     * presses. Pass `includeCurrent: true` for a true "sign out everywhere".
+     */
+    revokeAllSessions: (includeCurrent = false) =>
+      client.delete<void>(
+        `${PROFILE_BASE}/sessions${includeCurrent ? '?includeCurrent=true' : ''}`),
 
     // -- Linked Accounts --
 
@@ -563,6 +640,20 @@ export function useAdminUserApi(client: HttpClient) {
     removeRoles: (userId: string, data: RemoveRolesDto) =>
       client.post<void>(`${ADMIN_USER_BASE}/${userId}/remove-roles`, data),
 
+    /**
+     * Mark a user's email / phone as confirmed.
+     *
+     * Separate endpoint on purpose: `update` now CLEARS the confirmed flag whenever
+     * the address changes (writing it directly used to leave the flag standing, so
+     * an account could end up "verified" on an address nobody ever proved). Vouching
+     * for an address is a different act - it needs someone to press it deliberately,
+     * and it is written to the audit trail.
+     *
+     * Pass `null` for a field to leave that flag alone.
+     */
+    confirmContact: (userId: string, data: ConfirmContactDto) =>
+      client.post<void>(`${ADMIN_USER_BASE}/${userId}/confirm-contact`, data),
+
     /** Get user statistics */
     getStatistics: (params?: { organizationId?: string; roleId?: string }) =>
       client.get<UserStatisticsDto>(`${ADMIN_USER_BASE}/statistics`, { params }),
@@ -580,6 +671,58 @@ export function useAdminUserApi(client: HttpClient) {
 // ============================================
 // Admin Role Management API (DefaultRoleAdminController)
 // ============================================
+
+/**
+ * Invitation management (admin side): open an account, send the link, resend, revoke.
+ *
+ * There is deliberately no "list invitations" endpoint - an invitation *is* an account
+ * in the `Pending` state, so `useAdminUserApi().getList({ invitationState: 1 })` answers
+ * "who has not accepted yet" without a second list to keep in sync.
+ */
+export function useAdminInvitationApi(client: HttpClient) {
+  return {
+    /**
+     * Open an account and issue an invitation.
+     *
+     * The returned `acceptUrl` is readable only once - use it to deliver the link
+     * yourself, or let the app's `UserInvitedEvent` handler mail it.
+     */
+    create: (data: CreateInvitationDto) =>
+      client.post<InvitationDto>(ADMIN_INVITATION_BASE, data),
+
+    /** Resend the invitation. The previous link stops working immediately. */
+    resend: (userId: string, lifetimeHours?: number) =>
+      client.post<InvitationDto>(
+        `${ADMIN_INVITATION_BASE}/${userId}/resend`
+          + (lifetimeHours == null ? '' : `?lifetimeHours=${lifetimeHours}`),
+      ),
+
+    /** Revoke: delete the not-yet-accepted account, which invalidates its link. */
+    revoke: (userId: string) =>
+      client.delete<void>(`${ADMIN_INVITATION_BASE}/${userId}`),
+  };
+}
+
+/**
+ * Invitation acceptance (invitee side). Both endpoints are anonymous - whoever holds
+ * the token has, by definition, no account to sign in with yet.
+ */
+export function useInvitationApi(client: HttpClient) {
+  return {
+    /** Read what to show on the acceptance page. Does not consume the token. */
+    preview: (token: string) =>
+      client.get<InvitationPreviewDto>(`${INVITATION_BASE}/${encodeURIComponent(token)}`),
+
+    /**
+     * Accept the invitation.
+     *
+     * `completed: false` means the account is still inactive and the token is still
+     * usable - render `remainingSteps` and let the user come back to the same link.
+     */
+    accept: (data: AcceptInvitationDto) =>
+      client.post<AcceptInvitationResultDto>(`${INVITATION_BASE}/accept`, data),
+  };
+}
 
 export function useAdminRoleApi(client: HttpClient) {
   return {

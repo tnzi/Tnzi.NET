@@ -136,7 +136,7 @@ type Vm = {
   sessionRules: unknown[]
   rulesSnapshot: typeof snapshot | null
   evalResult: typeof evalResult | null
-  evalCtx: { toolName: string }
+  evalCtx: { toolName: string; userId?: string | null }
   scopeWeight: (s: number) => number
   behaviorWeight: (b: number) => number
   behaviorTone: (b: number) => string
@@ -224,9 +224,15 @@ describe('ToolPermissions page', () => {
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
     vm.evalCtx.toolName = 'write_file'
+    vm.evalCtx.userId = '9b2f0f9e-2d1c-4f6a-9c1e-1a2b3c4d5e6f'
     await vm.runEvaluate()
     await flushPromises()
     expect(evaluate).toHaveBeenCalledTimes(1)
+    // User-scope rules bind to the user they name, so the evaluate request must
+    // carry the user the admin is testing as (omitted = caller-agnostic).
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: 'write_file', userId: '9b2f0f9e-2d1c-4f6a-9c1e-1a2b3c4d5e6f' }),
+    )
     expect(vm.evalResult?.behavior).toBe('Deny')
     // The big decision banner + reason are rendered.
     const html = wrapper.html()

@@ -62,6 +62,11 @@
       "import": "./dist/state/index.js",
       "require": "./dist/state/index.cjs"
     },
+    "./icons": {
+      "types": "./dist/icons/index.d.ts",
+      "import": "./dist/icons/index.js",
+      "require": "./dist/icons/index.cjs"
+    },
     "./headless": {
       "types": "./dist/headless/index.d.ts",
       "import": "./dist/headless/index.js",

@@ -123,17 +123,27 @@ export function ensureOk(result: unknown, fallbackMessage = 'Request failed'): v
 }
 
 /**
- * Tolerant result unwrapper: returns `result.data` when `result` looks like an
- * `ApiResult` envelope (has `data` + `succeeded`/`success`), otherwise passes
- * `result` through unchanged.
+ * Unwrap **without checking whether the request succeeded**: returns
+ * `result.data` when `result` looks like an `ApiResult` envelope (has `data` +
+ * `succeeded`/`success`), otherwise passes `result` through unchanged.
  *
- * Complements the strict {@link unwrapData} (which throws on failure / null
- * data): use `unwrapResult` when the value may already be unwrapped `T` - e.g.
- * behind `useXxxApi` methods that are inconsistent about returning the full
- * envelope vs. the bare payload. Does NOT assert success; pair with
- * {@link ensureOk} when a failure must throw.
+ * @remarks
+ * ★★ **The "Unchecked" in the name is the whole point.** A business refusal
+ * (400 + a failed envelope) is *resolved* by `HttpClient`, not thrown, so this
+ * function turns it into `null` and hands it back as if it were data. On a write
+ * that produces a green "saved" toast over a row that was never created. This was
+ * a live defect across 16 bridges and 155 call sites before it was swept.
+ *
+ * Pick by what a failure has to do:
+ * - a **write**, or any read whose failure must surface -> {@link unwrapOk}
+ * - failure already handled by the caller (a list that renders empty, a lookup
+ *   that may legitimately come back missing) -> this function
+ * - a value that is definitely an envelope and must never be null -> {@link unwrapData}
+ *
+ * It exists because `useXxxApi` methods are inconsistent about returning the full
+ * envelope versus the bare payload, so callers cannot assume either.
  */
-export function unwrapResult<T>(result: ApiResult<T> | T): T {
+export function unwrapUnchecked<T>(result: ApiResult<T> | T): T {
   if (
     result &&
     typeof result === 'object' &&
@@ -143,6 +153,31 @@ export function unwrapResult<T>(result: ApiResult<T> | T): T {
     return (result as ApiResult<T>).data as T;
   }
   return result as T;
+}
+
+/**
+ * @deprecated Renamed to {@link unwrapUnchecked}. The old name read like the
+ * default way to unwrap a result, which is exactly the mistake it invites: it
+ * does **not** check whether the request succeeded. Use `unwrapOk` for writes,
+ * `unwrapUnchecked` when a failure is genuinely handled elsewhere.
+ */
+export const unwrapResult = unwrapUnchecked;
+
+/**
+ * Unwrap a **write** result: assert the envelope reports success, then return
+ * its payload (or the bare value when the server answered without an envelope).
+ *
+ * `HttpClient` resolves a business refusal (400 + failed envelope) instead of
+ * rejecting, and {@link unwrapUnchecked} alone turns that refusal into `null`. A bridge
+ * that hands `null` back to `useCrudPage.submit` gets a green "saved" toast, a
+ * closed form and a refreshed list that does not contain the row - the user's
+ * input is gone and nothing says why. Every write path must go through this
+ * helper (or call `ensureOk` first); reads whose failure is handled elsewhere
+ * may use `unwrapUnchecked`.
+ */
+export function unwrapOk<T>(result: ApiResult<T> | T, fallbackMessage = 'Request failed'): T {
+  ensureOk(result, fallbackMessage);
+  return unwrapUnchecked<T>(result);
 }
 
 /**

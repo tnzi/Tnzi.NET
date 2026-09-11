@@ -102,7 +102,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         {
             if (handler == null) continue;
 
-            var metadata = EventHandlerInvoker.GetMetadata(handler.GetType());
+            var metadata = EventHandlerInvoker.GetMetadata(handler.GetType(), eventType);
             if (metadata.IsBackground)
             {
                 backgroundHandlerTypes.Add(handler.GetType());
@@ -304,7 +304,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         try
         {
             // 获取或创建处理器元数据（编译委托缓存）
-            var metadata = EventHandlerInvoker.GetMetadata(handlerType);
+            var metadata = EventHandlerInvoker.GetMetadata(handlerType, eventType);
 
             // 检查条件处理器
             if (metadata.CanHandleDelegate != null)
@@ -334,8 +334,9 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
             }
             else
             {
-                _logger.LogWarning("Handler {HandlerType} does not implement IEventHandler interface correctly",
-                    handlerType.Name);
+                _logger.LogWarning(
+                    "Handler {HandlerType} does not implement IEventHandler<{EventType}> (nor a base-event interface that accepts it); nothing to invoke",
+                    handlerType.Name, eventType.Name);
             }
 
             _logger.LogDebug("Handler {HandlerType} completed successfully for event {EventType}",

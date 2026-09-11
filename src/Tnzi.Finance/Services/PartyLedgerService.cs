@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 往来方账面视图服务
@@ -51,7 +51,7 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
         if (name == null)
             return Fail<PartyLedgerSummaryDto>("Party not found.", 404);
 
-        var asOfDate = (asOf ?? DateTime.UtcNow).ToUtcDate();
+        var asOfDate = (asOf ?? TimeProvider.GetUtcNow().UtcDateTime).ToUtcDate();
         var periodTo = (to ?? asOfDate).ToUtcDate();
         var periodFrom = (from ?? new DateTime(periodTo.Year, 1, 1)).ToUtcDate();
 
@@ -175,7 +175,7 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
     {
         var fromDate = from?.ToUtcDate();
         var toExclusive = to?.ToUtcDate().AddDays(1);
-        var today = DateTime.UtcNow.ToUtcDate();
+        var today = TimeProvider.GetUtcNow().UtcDateTime.ToUtcDate();
 
         var entries = new List<PartyLedgerEntryDto>();
 

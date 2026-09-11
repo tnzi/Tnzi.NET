@@ -157,6 +157,70 @@ describe('TPageHeader three-column geometry', () => {
 
   // --- narrow screens keep stacking ---
 
+  // --- the leading glyph: back arrow and route icon land in the same place ---
+  //
+  // Navigating a list into a record swaps one leading glyph for another, and
+  // before this the swap moved it: the back button is a 28px hit target around
+  // an 18px arrow, so left-aligning the BOX put the arrow 4-5px right of where
+  // the list page's 20px icon sat, and the bar's 16px column gap left 21px
+  // between arrow and title where the list has 8. Measured in Chrome: glyph
+  // left 17 -> 22, size 20 -> 18, gap 8 -> 21. Both margins pull the box back
+  // so the GLYPH lands where the icon was; the hover pill still overhangs,
+  // which is what a hit target is for.
+  //
+  // Source-asserted because happy-dom does no layout - see the file header.
+
+  it('sizes the back button from the shared glyph box', () => {
+    const back = ruleBody(css, '.t-page-header__back')
+    expect(decl(back, 'width')).toBe('var(--t-page-header-glyph-box)')
+    expect(decl(back, 'height')).toBe('var(--t-page-header-glyph-box)')
+  })
+
+  it('pulls the back BOX back so the GLYPH aligns with the route icon', () => {
+    const back = ruleBody(css, '.t-page-header__back')
+    const inset = decl(back, '--t-page-header-glyph-inset')
+    // Half the difference between the hit target and the glyph inside it.
+    expect(inset).toContain('--t-page-header-glyph-box')
+    expect(inset).toContain('--t-page-header-glyph-size')
+    // Left: cancel the inset so the arrow's left edge sits where the icon's did.
+    expect(decl(back, 'margin-left')).toContain('--t-page-header-glyph-inset')
+    // Right: trade the bar's column gap for the identity row's own gap, so the
+    // space after the arrow equals the space after the icon.
+    const right = decl(back, 'margin-right') ?? ''
+    expect(right).toContain('--t-page-header-glyph-gap')
+    expect(right).toContain('--t-page-header-bar-gap')
+    expect(right).toContain('--t-page-header-glyph-inset')
+  })
+
+  it('drives the bar gap and the identity gap from the same tokens the back margin reads', () => {
+    // A literal in either place would silently break the arithmetic above.
+    expect(decl(ruleBody(wide, '.t-page-header__bar'), 'gap')).toBe('var(--t-page-header-bar-gap)')
+    expect(decl(ruleBody(css, '.t-page-header__left'), 'gap')).toBe('var(--t-page-header-glyph-gap)')
+  })
+
+  it('gives the identity row the glyph box as its minimum height', () => {
+    // On phones the bar top-aligns its columns; without this the identity row is
+    // only as tall as its text and the 28px back button centres ~2px low.
+    expect(decl(ruleBody(css, '.t-page-header__left'), 'min-height')).toBe(
+      'var(--t-page-header-glyph-box)',
+    )
+  })
+
+  it('insets the surface card by the same 12px the list header card uses', () => {
+    // On a list page this component sits inside TListShell's header card
+    // (naive `size="small"`, 12px content padding); on a detail page it IS the
+    // card. 16px here put the leading glyph 4px further right on the detail
+    // page than on the list it was reached from - measured 89 vs 85.
+    expect(decl(ruleBody(css, '.t-page-header--surface'), 'padding')).toBe('12px')
+  })
+
+  it('steps the glyph size with the title tier', () => {
+    // The section tier drops the title; a leading glyph that stayed at the page
+    // size would read as a different control.
+    expect(decl(ruleBody(css, '.t-page-header'), '--t-page-header-glyph-size')).toBe('20px')
+    expect(decl(ruleBody(css, '.t-page-header--section'), '--t-page-header-glyph-size')).toBe('18px')
+  })
+
   it('lets the actions stack under the identity below 768px', () => {
     expect(PHONE).toMatch(/\.t-page-header__bar\s*\{[^}]*flex-wrap:\s*wrap/)
     expect(decl(ruleBody(PHONE, '.t-page-header:not(.t-page-header--inline-actions) .t-page-header__actions'), 'flex-basis')).toBe('100%')

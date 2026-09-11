@@ -12,7 +12,19 @@ public enum BudgetStatus
     WarningThreshold = 1,
 
     /// <summary>预算已超限</summary>
-    BudgetExceeded = 2
+    BudgetExceeded = 2,
+
+    /// <summary>
+    /// 无法判定 —— 预算已启用，但本周期有用量而<b>没有任何一条记下了成本</b>，
+    /// 聚合出来的 0 美元是「量不出来」而不是「没花钱」。
+    /// </summary>
+    /// <remarks>
+    /// 典型成因：只开了 <c>AI:Budget:Enabled</c> 而没开 <c>AI:CostTracking:Enabled</c>，
+    /// 或开了却一条费率（<c>ModelCosts</c> / <c>DefaultCostRate</c>）都没配。
+    /// 此状态下请求仍然放行（<c>IsAllowed=true</c>）：预算是 advisory 管控，
+    /// 一个勾选框不该让所有 AI 请求当场停摆。要拦死请由宿主按本状态自行决定。
+    /// </remarks>
+    Indeterminate = 3
 }
 
 /// <summary>

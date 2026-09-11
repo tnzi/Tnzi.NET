@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Metadata;
+﻿namespace Tnzi.Payment.Metadata;
 
 /// <summary>
 /// Payment 模块业务常量定义
@@ -13,9 +13,16 @@ public static class PaymentConstants
     public const string DefaultCurrency = "USD";
 
     /// <summary>
-    /// 默认支付渠道
+    /// 默认支付渠道：<see cref="OfflineChannelCode"/>。
     /// </summary>
-    public const string DefaultPaymentChannel = "Stripe";
+    /// <remarks>
+    /// 必须是本模块自带的渠道。它曾是 <c>Stripe</c>，而 Stripe 自 2026-08-29 起住在可选子模块
+    /// <c>Tnzi.Payment.Stripe</c> 里：不加载它的应用什么都没配错，却在启动期收到一条
+    /// 「默认渠道不可用」的 Error。出厂值不该指向一个可能不在进程里的东西。
+    /// 线下渠道是唯一不依赖第三方凭据的真实渠道；要让 Stripe / PayPal 当默认，显式设
+    /// <c>Payment:DefaultChannelCode</c> 并加载对应的包。<c>PaymentStartupDiagnosticsTests</c> 钉着这条。
+    /// </remarks>
+    public const string DefaultPaymentChannel = OfflineChannelCode;
 
     /// <summary>
     /// 默认支付方式
@@ -26,6 +33,16 @@ public static class PaymentConstants
     /// 支付过期时间（分钟）
     /// </summary>
     public const int DefaultPaymentExpireMinutes = 30;
+
+    /// <summary>
+    /// 调用方可指定的订单有效期上限（分钟），一年。
+    /// </summary>
+    /// <remarks>
+    /// 上限不是调优项而是闸门：没有它，一个足够大的值就让订单**永不过期** ——
+    /// 过期清扫再也扫不到它，为它核销掉的优惠券也就永远不会归还。
+    /// 一年之外的「订单」不是订单，是一笔应该由别的机制管理的长期承诺。
+    /// </remarks>
+    public const int MaxPaymentExpireMinutes = 365 * 24 * 60;
 
     /// <summary>
     /// 默认发票到期天数

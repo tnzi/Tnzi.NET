@@ -33,5 +33,9 @@ public class RecipientConfiguration : EntityTypeConfigurationBase<Recipient, Gui
         builder.HasIndex(r => r.Status);
         builder.HasIndex(r => r.UserId);
         builder.HasIndex(r => new { r.UserId, r.IsRead });
+
+        // 静默时段到期扫描的谓词就是这两列：Status = Scheduled 且 DeferredUntil <= now。
+        // 绝大多数行的 DeferredUntil 是 null，所以这个索引很窄。
+        builder.HasIndex(r => new { r.Status, r.DeferredUntil });
     }
 }

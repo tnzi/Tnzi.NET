@@ -13,6 +13,13 @@ public class DistributedSessionService : ApplicationService, ISessionService
     private readonly IOptionsSnapshot<IdentityOptions>? _identityOptions;
     private readonly IRepository<UserSession, Guid>? _repository;
     private readonly IDistributedLock? _distributedLock;
+    private readonly IEventBus? _eventBus;
+
+    /// <summary>
+    /// 活动时间的最小写入间隔（秒）。与 <see cref="DatabaseSessionService"/> 同口径：
+    /// 闲置超时的量级是分钟，一分钟的写入粒度对它没有影响，而每请求一次写是不可接受的。
+    /// </summary>
+    private const int ActivityWriteThrottleSeconds = 60;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -31,7 +38,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
         IServiceProvider serviceProvider,
         IRepository<UserSession, Guid>? repository = null,
         IDistributedLock? distributedLock = null,
-        IOptionsSnapshot<IdentityOptions>? identityOptions = null)
+        IOptionsSnapshot<IdentityOptions>? identityOptions = null,
+        IEventBus? eventBus = null)
         : base(serviceProvider)
     {
         _cache = Check.NotNull(cache);
@@ -39,6 +47,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         _identityOptions = identityOptions;
         _repository = repository;
         _distributedLock = distributedLock;
+        _eventBus = eventBus;
 
         // 验证：如果启用了数据库审计日志，必须有 repository
         if (_sessionOptions.KeepDatabaseAuditLog && _repository == null)
@@ -54,6 +63,11 @@ public class DistributedSessionService : ApplicationService, ISessionService
     {
         var sessionId = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        // 绝对上限在建立那一刻定死，任何续期都不会推动它（与数据库实现同口径）。
+        var absoluteExpiresAt = SessionLifetime.ComputeAbsoluteExpiry(now, _sessionOptions.AbsoluteLifetimeHours);
+        var effectiveExpiresAt = expiresAt.HasValue
+            ? SessionLifetime.ClampToAbsolute(expiresAt.Value, absoluteExpiresAt)
+            : absoluteExpiresAt;
 
         var sessionData = new SessionData
         {
@@ -64,7 +78,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
             UserAgent = userAgent,
             CreationTime = now,
             LastActivityTime = now,
-            ExpiresAt = expiresAt,
+            ExpiresAt = effectiveExpiresAt,
+            AbsoluteExpiresAt = absoluteExpiresAt,
             IsRevoked = false
         };
 
@@ -86,7 +101,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 UserAgent = userAgent,
                 CreationTime = now,
                 LastActivityTime = now,
-                ExpiresAt = expiresAt,
+                ExpiresAt = effectiveExpiresAt,
+                AbsoluteExpiresAt = absoluteExpiresAt,
                 IsRevoked = false
             };
             await _repository.InsertAsync(session);
@@ -105,14 +121,30 @@ public class DistributedSessionService : ApplicationService, ISessionService
         }
 
         // Redis 记录本身即缓存：TTL 过期返回 null，撤销则 IsRevoked=true。
-        var sessionData = await GetSessionAsync(sessionId);
-        if (sessionData == null || sessionData.IsRevoked)
-        {
-            return false;
-        }
-
-        return sessionData.ExpiresAt == null || sessionData.ExpiresAt > DateTime.UtcNow;
+        var sessionData = await GetSessionDataAsync(sessionId);
+        return sessionData != null && IsAlive(sessionData, DateTime.UtcNow);
     }
+
+    /// <summary>
+    /// <see cref="SessionData"/> → DTO。两处列表构造与 <see cref="GetSessionAsync"/> 共用，
+    /// 避免再出现「某一处漏填 ExpiresAt，于是那条路径上所有会话都被当成永不过期」那类偏差。
+    /// </summary>
+    private static UserSessionDto ToDto(SessionData sessionData) => new()
+    {
+        Id = sessionData.Id,
+        UserId = sessionData.UserId,
+        DeviceInfo = sessionData.DeviceInfo,
+        IpAddress = sessionData.IpAddress,
+        UserAgent = sessionData.UserAgent,
+        CreationTime = sessionData.CreationTime,
+        LastActivityTime = sessionData.LastActivityTime,
+        // 必须带上硬过期时间：调用方（LoginSessionCoordinator）据 ExpiresAt
+        // 判定会话是否仍计入并发数，漏填会让 Redis 模式下所有会话被视为"永不过期"。
+        ExpiresAt = sessionData.ExpiresAt,
+        AbsoluteExpiresAt = sessionData.AbsoluteExpiresAt,
+        IsRevoked = sessionData.IsRevoked,
+        RevokedAt = sessionData.RevokedAt
+    };
 
     /// <inheritdoc />
     public async Task<Result<IEnumerable<UserSessionDto>>> GetUserSessionsAsync(Guid userId, bool includeRevoked = false)
@@ -124,7 +156,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         }
 
         // 并行获取所有会话数据，减少总耗时
-        var sessionDataTasks = sessionIds.Select(sessionId => GetSessionAsync(sessionId));
+        var sessionDataTasks = sessionIds.Select(sessionId => GetSessionDataAsync(sessionId));
         var sessionDataResults = await Task.WhenAll(sessionDataTasks);
 
         var sessions = new List<UserSessionDto>();
@@ -145,21 +177,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 continue;
             }
 
-            sessions.Add(new UserSessionDto
-            {
-                Id = sessionData.Id,
-                UserId = sessionData.UserId,
-                DeviceInfo = sessionData.DeviceInfo,
-                IpAddress = sessionData.IpAddress,
-                UserAgent = sessionData.UserAgent,
-                CreationTime = sessionData.CreationTime,
-                LastActivityTime = sessionData.LastActivityTime,
-                // 必须带上硬过期时间：调用方（LoginSessionCoordinator）据 ExpiresAt
-                // 判定会话是否仍计入并发数，漏填会让 Redis 模式下所有会话被视为"永不过期"。
-                ExpiresAt = sessionData.ExpiresAt,
-                IsRevoked = sessionData.IsRevoked,
-                RevokedAt = sessionData.RevokedAt
-            });
+            sessions.Add(ToDto(sessionData));
         }
 
         // 批量移除过期的会话索引（后台执行，不阻塞返回）
@@ -224,7 +242,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RevokeSessionAsync(Guid sessionId)
     {
-        var sessionData = await GetSessionAsync(sessionId);
+        var sessionData = await GetSessionDataAsync(sessionId);
         if (sessionData == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -274,7 +292,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         }
 
         // 并行获取所有会话数据，提升性能
-        var sessionDataTasks = sessionsToRevoke.Select(sessionId => GetSessionAsync(sessionId));
+        var sessionDataTasks = sessionsToRevoke.Select(sessionId => GetSessionDataAsync(sessionId));
         var sessionDataResults = await Task.WhenAll(sessionDataTasks);
 
         // 批量更新Redis中的会话状态（并行执行）
@@ -325,7 +343,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> UpdateActivityTimeAsync(Guid sessionId)
     {
-        var sessionData = await GetSessionAsync(sessionId);
+        var sessionData = await GetSessionDataAsync(sessionId);
         if (sessionData == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -345,14 +363,15 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RenewSessionAsync(Guid sessionId, DateTime expiresAt)
     {
-        var sessionData = await GetSessionAsync(sessionId);
+        var sessionData = await GetSessionDataAsync(sessionId);
         if (sessionData == null || sessionData.IsRevoked)
         {
             return Ok();
         }
 
         sessionData.LastActivityTime = DateTime.UtcNow;
-        sessionData.ExpiresAt = expiresAt;
+        // ★ 续期不得越过绝对上限，否则滑动窗口可以被无限往后推（与数据库实现同口径）。
+        sessionData.ExpiresAt = SessionLifetime.ClampToAbsolute(expiresAt, sessionData.AbsoluteExpiresAt);
         // SetSessionAsync 会据 ExpiresAt 重设 Redis 绝对 TTL（滑动延长记录存活）。
         await SetSessionAsync(sessionData);
 
@@ -363,7 +382,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
             if (dbSession != null && !dbSession.IsRevoked)
             {
                 dbSession.LastActivityTime = sessionData.LastActivityTime;
-                dbSession.ExpiresAt = expiresAt;
+                dbSession.ExpiresAt = sessionData.ExpiresAt;
                 await _repository.UpdateAsync(dbSession);
             }
         }
@@ -373,6 +392,13 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
     /// <inheritdoc />
     public async Task<Result<int>> CleanExpiredSessionsAsync(TimeSpan inactiveThreshold)
+    {
+        var result = await CleanInactiveSessionsAsync(inactiveThreshold);
+        return result.Succeeded ? Ok(result.Data!.Count) : Fail<int>(result.Message ?? "Cleanup failed", result.Code ?? 500);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<IReadOnlyCollection<Guid>>> CleanInactiveSessionsAsync(TimeSpan inactiveThreshold)
     {
         // Redis 会话使用 TTL 自动过期，无法高效遍历所有会话
         // 如果启用了数据库审计日志，清理数据库中的过期记录
@@ -384,9 +410,9 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
                 .ToListAsync();
 
-            if (!expiredSessions.Any())
+            if (expiredSessions.Count == 0)
             {
-                return Ok(0);
+                return Ok<IReadOnlyCollection<Guid>>(Array.Empty<Guid>());
             }
 
             foreach (var session in expiredSessions)
@@ -395,15 +421,16 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 session.RevokedAt = DateTime.UtcNow;
             }
 
+            var ids = expiredSessions.Select(s => s.Id).ToArray();
             await _repository.UpdateManyAsync(expiredSessions);
 
-            LogInformation("Cleaned {Count} expired sessions from database (inactive since {CutoffTime})", expiredSessions.Count, cutoffTime);
-            return Ok(expiredSessions.Count);
+            LogInformation("Cleaned {Count} expired sessions from database (inactive since {CutoffTime})", ids.Length, cutoffTime);
+            return Ok<IReadOnlyCollection<Guid>>(ids);
         }
 
         // Redis 模式下没有数据库审计日志，会话由 Redis TTL 自动清理
         LogInformation("Redis sessions are automatically cleaned by TTL expiration. No manual cleanup needed.");
-        return Ok(0);
+        return Ok<IReadOnlyCollection<Guid>>(Array.Empty<Guid>());
     }
 
     /// <inheritdoc />
@@ -508,7 +535,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     private string GetSessionKey(Guid sessionId) => $"{_sessionOptions.RedisKeyPrefix}:{sessionId}";
     private string GetUserSessionsIndexKey(Guid userId) => $"{_sessionOptions.RedisKeyPrefix}:User:{userId}";
 
-    private async Task<SessionData?> GetSessionAsync(Guid sessionId)
+    private async Task<SessionData?> GetSessionDataAsync(Guid sessionId)
     {
         var key = GetSessionKey(sessionId);
         var json = await _cache.GetStringAsync(key);
@@ -711,7 +738,122 @@ public class DistributedSessionService : ApplicationService, ISessionService
         public DateTime CreationTime { get; set; }
         public DateTime LastActivityTime { get; set; }
         public DateTime? ExpiresAt { get; set; }
+
+        /// <summary>会话绝对过期时间（建立时定死，续期不推动）。null = 不设上限。</summary>
+        public DateTime? AbsoluteExpiresAt { get; set; }
+
         public bool IsRevoked { get; set; }
         public DateTime? RevokedAt { get; set; }
     }
+
+    // ------------------------------------------------------------------------
+    // 每请求校验：设备特征比对、来源地址处理、活动时间续期。
+    //
+    // ★ 这几段与 DatabaseSessionService 的对应实现逐条同构。两个会话后端给出不同的
+    //   安全强度是不可接受的，所以改动其中一个时必须同时看另一个。
+    // ------------------------------------------------------------------------
+
+    /// <inheritdoc />
+    public async Task<SessionValidationResult> ValidateAsync(Guid sessionId, SessionValidationContext context)
+    {
+        Check.NotNull(context);
+
+        if (sessionId == Guid.Empty)
+        {
+            return SessionValidationResult.Invalid;
+        }
+
+        var sessionData = await GetSessionDataAsync(sessionId);
+        var now = DateTime.UtcNow;
+
+        if (sessionData == null || !IsAlive(sessionData, now))
+        {
+            return SessionValidationResult.Invalid;
+        }
+
+        // ① 设备特征（与数据库实现逐条同构 —— 两个后端给出不同的安全强度是不可接受的）。
+        if (_sessionOptions.BindToUserAgent && !SessionBinding.Matches(sessionData.UserAgent, context.UserAgent))
+        {
+            LogWarning(
+                "Session {SessionId} rejected: user-agent fingerprint changed (bound at sign-in, differs now).",
+                sessionId);
+            return SessionValidationResult.BindingMismatch;
+        }
+
+        // ② 来源地址。
+        var ipChanged = _sessionOptions.IpChangeBehavior != SessionIpChangeBehavior.Ignore
+            && !string.IsNullOrEmpty(context.IpAddress)
+            && !string.IsNullOrEmpty(sessionData.IpAddress)
+            && !string.Equals(sessionData.IpAddress, context.IpAddress, StringComparison.OrdinalIgnoreCase);
+
+        if (ipChanged && _sessionOptions.IpChangeBehavior == SessionIpChangeBehavior.Revoke)
+        {
+            LogWarning("Session {SessionId} rejected: source address changed and policy is Revoke.", sessionId);
+            return SessionValidationResult.BindingMismatch;
+        }
+
+        await TouchAsync(sessionData, context, ipChanged, now);
+
+        return SessionValidationResult.Valid;
+    }
+
+    /// <inheritdoc />
+    public async Task<UserSessionDto?> GetSessionAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var sessionData = await GetSessionDataAsync(sessionId);
+        return sessionData == null ? null : ToDto(sessionData);
+    }
+
+    /// <summary>
+    /// 会话是不是还活着。判据与数据库实现共用 <see cref="SessionLifetime.IsAlive"/> ——
+    /// 两个后端给出不同的安全强度是不可接受的，而「各抄一遍、其中一份漏了一条」没有任何症状。
+    /// </summary>
+    private bool IsAlive(SessionData sessionData, DateTime now)
+        => SessionLifetime.IsAlive(
+            sessionData.IsRevoked,
+            sessionData.ExpiresAt,
+            sessionData.AbsoluteExpiresAt,
+            sessionData.LastActivityTime,
+            _identityOptions?.Value?.AccountSecurity?.SessionTimeoutMinutes ?? 0,
+            now);
+
+    /// <summary>
+    /// 续期活动时间（并在地址变化时更新地址、发一条事件）。按 <see cref="ActivityWriteThrottleSeconds"/> 节流。
+    /// </summary>
+    private async Task TouchAsync(SessionData sessionData, SessionValidationContext context, bool ipChanged, DateTime now)
+    {
+        var staleActivity = sessionData.LastActivityTime.AddSeconds(ActivityWriteThrottleSeconds) <= now;
+        if (!staleActivity && !ipChanged)
+        {
+            return;
+        }
+
+        var previousIp = sessionData.IpAddress;
+
+        sessionData.LastActivityTime = now;
+        if (ipChanged)
+        {
+            sessionData.IpAddress = context.IpAddress;
+        }
+
+        await SetSessionAsync(sessionData);
+
+        if (ipChanged && _eventBus != null)
+        {
+            await _eventBus.PublishAsync(new SessionIpChangedEvent
+            {
+                UserId = sessionData.UserId,
+                SessionId = sessionData.Id,
+                PreviousIpAddress = previousIp,
+                CurrentIpAddress = context.IpAddress,
+                ChangedTime = now
+            }, cancellationToken: default);
+        }
+    }
+
 }

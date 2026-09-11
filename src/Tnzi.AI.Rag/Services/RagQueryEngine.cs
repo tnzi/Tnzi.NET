@@ -11,14 +11,24 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
 {
     private readonly IRagRetriever _retriever;
     private readonly IAiUtility _aiUtility;
+    private readonly IRagAccessAuthorizer _authorizer;
+
+    /// <summary>
+    /// RAG 回答的输出上限。<c>IAiUtility</c> 的全局默认是为标题生成这类极短输出定的，
+    /// 拿它生成一段带引用的回答会被<b>静默截断</b>（不报错，只是话没说完），
+    /// 所以这里显式传，不依赖默认值。
+    /// </summary>
+    private const int AnswerMaxTokens = 2048;
 
     public RagQueryEngine(
         IServiceProvider serviceProvider,
         IRagRetriever retriever,
-        IAiUtility aiUtility) : base(serviceProvider)
+        IAiUtility aiUtility,
+        IRagAccessAuthorizer authorizer) : base(serviceProvider)
     {
         _retriever = Check.NotNull(retriever);
         _aiUtility = Check.NotNull(aiUtility);
+        _authorizer = Check.NotNull(authorizer);
     }
 
     /// <inheritdoc />
@@ -31,10 +41,18 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
             return Fail<RagQueryResult>("Query cannot be empty", 400);
         }
 
+        // 0. 知识库级授权：把请求想查的集合收敛成调用者确实被允许查的那部分。
+        //    普通用户永远拿不到 search-all（不带 id 的请求会被换成"允许的这批"）。
+        var authorized = await _authorizer.AuthorizeQueryAsync(request.KnowledgeBaseIds, ct);
+        if (!authorized.Succeeded)
+        {
+            return Fail<RagQueryResult>(authorized.Message ?? "Access denied", authorized.Code ?? 403, authorized.ErrorCode);
+        }
+
         // 1. 检索相关文档
         var retrievalOptions = new RagRetrievalOptions
         {
-            KnowledgeBaseIds = request.KnowledgeBaseIds,
+            KnowledgeBaseIds = authorized.Data!.ToList(),
             TopK = request.TopK,
             MinRelevance = request.MinRelevance
         };
@@ -56,7 +74,11 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
         var systemPrompt = BuildSystemPrompt(context);
 
         // 4. 调用 LLM 生成回答
-        var answer = await _aiUtility.ExecuteAsync(systemPrompt, request.Query, cancellationToken: ct);
+        var answer = await _aiUtility.ExecuteAsync(
+            systemPrompt,
+            request.Query,
+            new AiUtilityCallOptions { MaxTokens = AnswerMaxTokens },
+            ct);
 
         if (string.IsNullOrWhiteSpace(answer))
         {

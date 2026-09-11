@@ -28,6 +28,8 @@ public class CheckBatchComposer
     private readonly CheckIssuerResolver _issuerResolver;
     private readonly IFinanceDataProtector _protector;
     private readonly FinanceOptions _options;
+    private readonly FinanceCheckOptions _checkOptions;
+    private readonly ICheckStubLineProvider? _stubLineProvider;
     private readonly ILogger<CheckBatchComposer>? _logger;
 
     public CheckBatchComposer(
@@ -38,6 +40,8 @@ public class CheckBatchComposer
         CheckIssuerResolver issuerResolver,
         IFinanceDataProtector protector,
         IOptionsSnapshot<FinanceOptions> options,
+        IOptionsSnapshot<FinanceCheckOptions> checkOptions,
+        ICheckStubLineProvider? stubLineProvider = null,
         ILogger<CheckBatchComposer>? logger = null)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
@@ -47,6 +51,9 @@ public class CheckBatchComposer
         _issuerResolver = Check.NotNull(issuerResolver);
         _protector = Check.NotNull(protector);
         _options = Check.NotNull(options).Value;
+        _checkOptions = Check.NotNull(checkOptions).Value;
+        // 可选注入：消费应用不实现即没有存根附加行，存根按出厂样子排（与本机制引入前逐字相同）。
+        _stubLineProvider = stubLineProvider;
         _logger = logger;
     }
 
@@ -55,11 +62,16 @@ public class CheckBatchComposer
     /// 否则打出结构在但空路由（Transit 括号内空）/ 整条 MICR 被丢弃的不可流通票据（银行拒付/误路由）。
     /// 预印票纸（PrePrinted）MICR 已印在票纸上，跳过。
     /// </summary>
-    public Result ValidateBlankStockPrintable(BankAccount bank)
+    /// <param name="bank">出款银行账户档案（路由号与账号密文的来源）。</param>
+    /// <param name="stockType">
+    /// 本次生效的票纸类型；null = 用档案当前值。重新渲染一张已开支票时传<b>快照</b>里的票纸 ——
+    /// 否则档案改成预印之后，一张当初印在白纸上的票会跳过这道守卫，最终打出没有磁码的纸。
+    /// </param>
+    public Result ValidateBlankStockPrintable(BankAccount bank, CheckStockType? stockType = null)
     {
         Check.NotNull(bank);
 
-        if (bank.CheckStockType != CheckStockType.Blank)
+        if ((stockType ?? bank.CheckStockType) != CheckStockType.Blank)
             return Result.Success();
 
         var hasRouting = bank.Scheme switch
@@ -155,7 +167,13 @@ public class CheckBatchComposer
     }
 
     /// <summary>付款单 + 收款人档案 → 单张支票的渲染数据（打印与预览共用，保证票面一致）。</summary>
-    public static CheckRenderItem BuildRenderItem(long checkNumber, PaymentEntry payment, CheckPayeeInfo? payee, DateTime issueDate)
+    /// <remarks>
+    /// <c>stubLines</c> 是消费应用附加到本张存根的行（<see cref="LoadStubLinesAsync"/> 取得，
+    /// 已归一化）；省略 = 没有附加行，存根按出厂样子排。
+    /// </remarks>
+    public static CheckRenderItem BuildRenderItem(
+        long checkNumber, PaymentEntry payment, CheckPayeeInfo? payee, DateTime issueDate,
+        IReadOnlyList<CheckStubLine>? stubLines = null)
         => new()
         {
             CheckNumber = checkNumber,
@@ -167,7 +185,8 @@ public class CheckBatchComposer
             IssueDate = issueDate,
             Memo = payment.Memo,
             PaymentNumber = payment.Number,
-            Reference = payment.Reference
+            Reference = payment.Reference,
+            StubLines = stubLines == null ? [] : [.. stubLines]
         };
 
     /// <summary>按渲染器自报的内容类型/扩展名落地文件（HTML 或 PDF）。</summary>
@@ -184,17 +203,31 @@ public class CheckBatchComposer
             ? new List<string>()
             : address.Split(AddressLineSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    /// <summary>银行档案 + 各票数据 → 渲染请求（版式/偏移/MICR/出票方身份）。</summary>
-    public CheckRenderRequest BuildRenderRequest(BankAccount bank, List<CheckRenderItem> items)
+    /// <summary>银行档案 + 生效的打印设置 + 各票数据 → 渲染请求（版式/偏移/MICR/出票方身份）。</summary>
+    /// <param name="bank">出款银行账户档案（银行标识、路由号、账号密文的来源）。</param>
+    /// <param name="items">本次要画的每一张票。</param>
+    /// <param name="settings">
+    /// 本次生效的模板 / 版式 / 票纸 / 偏移；null = 档案当前值（打印、预览、重打、校准页的口径）。
+    /// 重新渲染一张已开支票时传开票时刻的快照，见 <see cref="CheckPrintSettings.ForIssuedCheck"/>。
+    /// </param>
+    /// <param name="useStoredAccountNumber">
+    /// 是否解密档案里的账号来拼 MICR。<b>样张必须传 false</b> —— 它会被下载被打印，
+    /// 而磁码行在白纸票纸下是真的印出来的，水印挡人眼挡不住读票机。
+    /// </param>
+    public CheckRenderRequest BuildRenderRequest(
+        BankAccount bank, List<CheckRenderItem> items, CheckPrintSettings? settings = null,
+        bool useStoredAccountNumber = true)
     {
         Check.NotNull(bank);
 
+        var effective = settings ?? CheckPrintSettings.FromBank(bank);
+
         var request = new CheckRenderRequest
         {
-            Layout = bank.CheckLayout,
-            StockType = bank.CheckStockType,
-            OffsetXMm = bank.OffsetXMm,
-            OffsetYMm = bank.OffsetYMm,
+            Layout = effective.Layout,
+            StockType = effective.StockType,
+            OffsetXMm = effective.OffsetXMm,
+            OffsetYMm = effective.OffsetYMm,
             Scheme = bank.Scheme,
             BankName = bank.BankName,
             AccountName = bank.Name,
@@ -202,13 +235,15 @@ public class CheckBatchComposer
             InstitutionNumber = bank.InstitutionNumber,
             TransitNumber = bank.TransitNumber,
             MicrFontPath = _options.CheckMicrFontPath,
-            TemplateName = bank.CheckTemplateName,
+            CheckNumberDigits = _checkOptions.CheckNumberDigits,
+            TemplateName = effective.TemplateName,
             Issuer = _issuerResolver.Resolve(),
             Checks = items
         };
 
         // 仅白纸打印需要账号明文拼装 MICR
-        if (bank.CheckStockType == CheckStockType.Blank && !string.IsNullOrWhiteSpace(bank.AccountNumberEncrypted) && _protector.IsConfigured)
+        if (useStoredAccountNumber && effective.StockType == CheckStockType.Blank
+            && !string.IsNullOrWhiteSpace(bank.AccountNumberEncrypted) && _protector.IsConfigured)
         {
             try
             {
@@ -222,6 +257,112 @@ public class CheckBatchComposer
         }
 
         return request;
+    }
+
+    /// <summary>
+    /// 版式样张的渲染请求：占位数据 + 中性（或所选档案的）银行标识，<b>零副作用</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 走的是与打印<b>同一个</b> <see cref="CheckRenderRequest"/> → 同一个渲染器 → 同一个模型工厂。
+    /// 样张若另画一套，它就不再是「所见即所印」，这个功能反而有害。
+    /// <para>
+    /// ★ 绑定档案时用它的真实银行名 / 路由号 / 档案名（样张才有参考价值），但
+    /// <b>永不取账号</b>：路由号本来就印在每一张寄出去的支票上，账号则是磁码行的实质内容。
+    /// 白纸票纸下改用全 0 的占位账号，磁码带画得出来，而那不是一份可流通的编码。
+    /// </para>
+    /// </remarks>
+    /// <param name="bank">要借用标识的银行档案；null = 用中性占位（未绑定任何档案）。</param>
+    /// <param name="settings">样张的模板 / 版式 / 票纸 / 偏移。</param>
+    /// <param name="items">占位支票（见 <see cref="CheckSpecimenSample.BuildItems"/>）。</param>
+    /// <param name="scheme">未绑定档案时用哪种路由号方案画银行区（绑定时以档案为准）。</param>
+    public CheckRenderRequest BuildSpecimenRequest(
+        BankAccount? bank, CheckPrintSettings settings, List<CheckRenderItem> items, BankNumberScheme scheme)
+    {
+        Check.NotNull(settings);
+
+        var request = bank != null
+            ? BuildRenderRequest(bank, items, settings, useStoredAccountNumber: false)
+            : new CheckRenderRequest
+            {
+                Layout = settings.Layout,
+                StockType = settings.StockType,
+                OffsetXMm = settings.OffsetXMm,
+                OffsetYMm = settings.OffsetYMm,
+                Scheme = scheme,
+                BankName = CheckSpecimenSample.BankName,
+                AccountName = CheckSpecimenSample.AccountName,
+                RoutingNumber = CheckSpecimenSample.RoutingNumber,
+                InstitutionNumber = CheckSpecimenSample.InstitutionNumber,
+                TransitNumber = CheckSpecimenSample.TransitNumber,
+                MicrFontPath = _options.CheckMicrFontPath,
+                CheckNumberDigits = _checkOptions.CheckNumberDigits,
+                TemplateName = settings.TemplateName,
+                // 出票方抬头/签名来自 System General + FinanceOptions，与银行档案无关：
+                // 即使不绑定档案，样张上的抬头也已经是这家公司自己的。
+                Issuer = _issuerResolver.Resolve(),
+                Checks = items
+            };
+
+        request.IsPreview = true;
+        request.PreviewLabel = CheckSpecimenSample.Label;
+        // 样张比预览多要一件事：在屏幕上把「票纸自带的」与「打印机现打的」分开。
+        // 预印元素的 noprint 只在 @media print 里生效，屏幕上照常显示 ——
+        // 不给这个标志，两种票纸的样张在缩略图尺寸下几乎一模一样。
+        request.IsSpecimen = true;
+
+        // 白纸票纸：磁码行由打印机现打，样张要让人看见那条带子占了哪一段，
+        // 故给占位账号——绑定档案时也是这个，绝不是它的真账号。
+        if (settings.StockType == CheckStockType.Blank)
+            request.AccountNumberPlain = CheckSpecimenSample.AccountNumber;
+
+        return request;
+    }
+
+    /// <summary>
+    /// 向消费应用批量索取存根附加行（未注册 <see cref="ICheckStubLineProvider"/> 时返回空）。
+    /// </summary>
+    /// <returns>付款单 id → 已归一化的附加行；查不到的 id 不出现在字典里。</returns>
+    /// <remarks>
+    /// ★ <b>提供者失败不得让打印失败</b>：调用点上支票号已经分配、登记簿行已经写下，
+    /// 而附加行是装饰性的（付款正确性完全不依赖它）。让一个消费应用的查询错误
+    /// 把整批付款回滚掉，代价方向是错的 —— 记一条 Warning 并按「没有附加行」继续。
+    /// 契约文档同时要求实现自己不要拿异常表达「没有数据」，这里是兜底不是许可。
+    /// </remarks>
+    public async Task<Dictionary<Guid, IReadOnlyList<CheckStubLine>>> LoadStubLinesAsync(
+        IEnumerable<Guid> paymentEntryIds, CancellationToken cancellationToken = default)
+    {
+        var empty = new Dictionary<Guid, IReadOnlyList<CheckStubLine>>();
+        if (_stubLineProvider == null)
+            return empty;
+
+        var ids = paymentEntryIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return empty;
+
+        IReadOnlyDictionary<Guid, IReadOnlyList<CheckStubLine>> supplied;
+        try
+        {
+            supplied = await _stubLineProvider.GetStubLinesAsync(ids, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "The registered ICheckStubLineProvider failed for {PaymentCount} payment(s); printing continues without stub lines.",
+                ids.Count);
+            return empty;
+        }
+
+        if (supplied == null)
+            return empty;
+
+        var normalized = new Dictionary<Guid, IReadOnlyList<CheckStubLine>>();
+        foreach (var (paymentEntryId, lines) in supplied)
+        {
+            var clean = CheckStubLineLimits.Normalize(lines);
+            if (clean.Count > 0)
+                normalized[paymentEntryId] = clean;
+        }
+        return normalized;
     }
 
     public async Task<Dictionary<Guid, CheckPayeeInfo>> LoadPayeesAsync(IEnumerable<Guid> partyIds, CancellationToken cancellationToken = default)

@@ -49,7 +49,8 @@ public class ImageEditor : IImageEditor
 
         ValidateRects(request);
 
-        using var image = await Image.LoadAsync<Rgba32>(new MemoryStream(source), cancellationToken);
+        // 经解码闸门：像素上限在读文件头时就判掉，不给"一份上传放倒一个进程"留口子
+        using var image = await ImageDecodeGuard.LoadAsync(source, cancellationToken: cancellationToken);
 
         // 顺序固定：遮挡 -> 模糊 -> 裁切 -> 缩放。全部坐标相对源图，因此换算一次即可，
         // 且缩放排在最后 —— 先缩放再遮挡会让遮挡落在插值过的像素上，边缘可能残留原始信息。

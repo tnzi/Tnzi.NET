@@ -169,8 +169,12 @@ public class S3CredentialResolutionTests
 
             // The SDK caches the first chain resolution for the life of the process,
             // so without this the variables above would be ignored whenever some
-            // earlier code had already resolved credentials.
+            // earlier code had already resolved credentials. The factory is marked
+            // obsolete in favour of DefaultAWSCredentialsIdentityResolver, which has
+            // no equivalent process-wide reset, so the deprecated call stays.
+#pragma warning disable CS0618
             FallbackCredentialsFactory.Reset();
+#pragma warning restore CS0618
 
             using var storage = new S3Storage(new S3StorageOptions
             {
@@ -191,7 +195,9 @@ public class S3CredentialResolutionTests
             Environment.SetEnvironmentVariable("AWS_SESSION_TOKEN", savedToken);
             Environment.SetEnvironmentVariable("AWS_PROFILE", savedProfile);
             // Leave no fake identity cached for anything that runs after this.
+#pragma warning disable CS0618
             FallbackCredentialsFactory.Reset();
+#pragma warning restore CS0618
         }
     }
 

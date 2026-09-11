@@ -39,6 +39,27 @@ public class OAuthCallbackResultDto
     /// 错误消息
     /// </summary>
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// 业务错误码，供前端按码分支。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>没有它，OAuth 登录就不可能支持两步验证。</strong>
+    /// 共享签发出口用<b>失败信封</b>承载挑战（403 + <c>2FA_REQUIRED</c> /
+    /// <c>IDENTITY_PENDING_ACTIONS_REQUIRED</c> + 临时令牌），而回调页此前把任何失败
+    /// 一律渲染成「OAuth callback failed」—— 于是开着 2FA 的账号在第三方登录这条路上
+    /// 要么被绕过、要么走不通，没有第三种可能。
+    /// </remarks>
+    public string? ErrorCode { get; set; }
+
+    /// <summary>
+    /// 失败信封携带的细节，原样透传给前端（2FA 挑战的临时令牌与可选方式、待办义务清单等）。
+    /// </summary>
+    /// <remarks>
+    /// 刻意保持 <c>object?</c> 与 <c>Result.ErrorDetails</c> 同型：这里的职责只是<b>不丢</b>，
+    /// 每加一种挑战就在这里补一个强类型字段，等于给自己排了一条注定会漏的队。
+    /// </remarks>
+    public object? ErrorDetails { get; set; }
 }
 
 /// <summary>

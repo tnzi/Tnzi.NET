@@ -10,7 +10,6 @@ namespace Tnzi.AI.Channels.Controllers.Admin;
 public class DefaultChannelAdminController : ApiAdminControllerBase
 {
     private readonly IEnumerable<IChannelAdapter>? _adapters;
-    private readonly IChannelMessageBus? _bus;
     private readonly ChannelsModuleOptions _options;
     private readonly GatewayOptions _gatewayOptions;
 
@@ -20,13 +19,11 @@ public class DefaultChannelAdminController : ApiAdminControllerBase
     public DefaultChannelAdminController(
         IOptions<ChannelsModuleOptions> options,
         IOptions<GatewayOptions> gatewayOptions,
-        IEnumerable<IChannelAdapter>? adapters = null,
-        IChannelMessageBus? bus = null)
+        IEnumerable<IChannelAdapter>? adapters = null)
     {
         _options = Check.NotNull(options).Value;
         _gatewayOptions = Check.NotNull(gatewayOptions).Value;
         _adapters = adapters;
-        _bus = bus;
     }
 
     /// <summary>

@@ -10,6 +10,8 @@ using Tnzi.Payment.Metadata;
 using Tnzi.Payment.Services;
 using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
+using Tnzi.Payment.Options;
+
 namespace Tnzi.Payment.Tests;
 
 /// <summary>
@@ -23,6 +25,14 @@ namespace Tnzi.Payment.Tests;
 /// </remarks>
 public class StatisticsServiceTests
 {
+
+    /// <summary>默认支付配置：对账导出上限保持出厂值，本组用例不受它影响。</summary>
+    private static IOptionsMonitor<PaymentOptions> DefaultPaymentOptions()
+    {
+        var mock = new Mock<IOptionsMonitor<PaymentOptions>>();
+        mock.Setup(x => x.CurrentValue).Returns(new PaymentOptions());
+        return mock.Object;
+    }
     private readonly Mock<IRepository<PaymentEntity, Guid>> _paymentRepositoryMock;
     private readonly Mock<IRepository<Refund, Guid>> _refundRepositoryMock;
     private readonly PaymentStatisticsService _service;
@@ -46,6 +56,7 @@ public class StatisticsServiceTests
         _service = new PaymentStatisticsService(
             _paymentRepositoryMock.Object,
             _refundRepositoryMock.Object,
+            DefaultPaymentOptions(),
             serviceProviderMock.Object
         );
     }
@@ -383,6 +394,86 @@ public class StatisticsServiceTests
 
     #region ExportReconciliationAsync Tests
 
+    /// <summary>
+    /// 导出把时间窗内的支付**全部读进内存**再拼成一个字符串放进 JSON 响应体。
+    /// 笔数没有上界时，一次「导出全年」就能放倒一个进程。
+    /// </summary>
+    [Fact]
+    public async Task ExportReconciliationAsync_StopsAtTheConfiguredRowLimit()
+    {
+        var now = DateTime.UtcNow;
+        var payments = Enumerable.Range(0, 5)
+            .Select(i => new PaymentEntity
+            {
+                Id = Guid.NewGuid(),
+                TradeNo = $"TRD{i:D3}",
+                BusinessOrderNo = $"ORD{i:D3}",
+                ChannelCode = "Stripe",
+                PaidAmount = 10m,
+                Currency = "USD",
+                Status = PaymentStatus.Succeeded,
+                CreationTime = now.AddMinutes(-i)
+            })
+            .ToList();
+
+        SetupPaymentQueryable(payments);
+        SetupRefundQueryable([]);
+
+        var result = await CreateServiceWithExportLimit(2).ExportReconciliationAsync(new ReconciliationQueryDto
+        {
+            StartTime = now.AddDays(-30),
+            EndTime = now.AddDays(1)
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.TotalRecords.ShouldBe(2);
+        // 截断必须如实报告：一份看起来完整、实际少了一半的对账单会被读成差异
+        result.Data.MatchedRecords.ShouldBe(5);
+        result.Data.Truncated.ShouldBeTrue();
+        // 汇总统计的恰好是 CSV 里那些行，文件与汇总永远自洽
+        result.Data.TotalRevenue.ShouldBe(20m);
+    }
+
+    [Fact]
+    public async Task ExportReconciliationAsync_WithinTheLimit_IsNotFlaggedAsTruncated()
+    {
+        var now = DateTime.UtcNow;
+        var payments = new List<PaymentEntity>
+        {
+            new() { Id = Guid.NewGuid(), TradeNo = "TRD001", BusinessOrderNo = "ORD001", ChannelCode = "Stripe", PaidAmount = 10m, Currency = "USD", Status = PaymentStatus.Succeeded, CreationTime = now }
+        };
+
+        SetupPaymentQueryable(payments);
+        SetupRefundQueryable([]);
+
+        var result = await CreateServiceWithExportLimit(100).ExportReconciliationAsync(new ReconciliationQueryDto
+        {
+            StartTime = now.AddDays(-30),
+            EndTime = now.AddDays(1)
+        });
+
+        result.Data!.Truncated.ShouldBeFalse();
+        result.Data.MatchedRecords.ShouldBe(1);
+        result.Data.TotalRecords.ShouldBe(1);
+    }
+
+    private PaymentStatisticsService CreateServiceWithExportLimit(int maxRows)
+    {
+        var options = new Mock<IOptionsMonitor<PaymentOptions>>();
+        options.Setup(x => x.CurrentValue).Returns(new PaymentOptions { ReconciliationExportMaxRows = maxRows });
+
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        return new PaymentStatisticsService(
+            _paymentRepositoryMock.Object,
+            _refundRepositoryMock.Object,
+            options.Object,
+            serviceProviderMock.Object);
+    }
+
     [Fact]
     public async Task ExportReconciliationAsync_WithNoData_ReturnsEmptyCsv()
     {
@@ -634,6 +725,7 @@ public class StatisticsServiceTests
         return new PaymentStatisticsService(
             _paymentRepositoryMock.Object,
             _refundRepositoryMock.Object,
+            DefaultPaymentOptions(),
             serviceProviderMock.Object,
             promotionAnalytics: promotionAnalytics);
     }

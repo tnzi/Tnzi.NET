@@ -82,6 +82,71 @@ public class RagModuleTests
 
     #endregion
 
+    #region Chunking strategy selection
+
+    // ★ MarkdownHeader / Hierarchical / Semantic 三个策略类此前一处都没有注册、也没有任何
+    // 引用：代码在，但除非消费方自己 new 一个注册进去，否则永远走不到 —— 而文档把它们
+    // 写成"可选"。AI:Rag:ChunkingStrategy 让它们真的可选。
+
+    [Fact]
+    public void Chunking_Default_IsFixedSize()
+    {
+        var services = ConfigureModule(vectorStoreProvider: null, hybridEnabled: false);
+
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IChunkingStrategy));
+
+        descriptor.ShouldNotBeNull();
+        descriptor.ImplementationType.ShouldBe(typeof(FixedSizeChunkingStrategy));
+    }
+
+    [Fact]
+    public void Chunking_MarkdownHeader_IsSelectable()
+    {
+        var services = ConfigureModule(
+            vectorStoreProvider: null, hybridEnabled: false, chunkingStrategy: "MarkdownHeader");
+
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IChunkingStrategy));
+
+        descriptor!.ImplementationType.ShouldBe(typeof(MarkdownHeaderChunkingStrategy));
+    }
+
+    [Fact]
+    public void Chunking_Hierarchical_IsSelectable()
+    {
+        var services = ConfigureModule(
+            vectorStoreProvider: null, hybridEnabled: false, chunkingStrategy: "Hierarchical");
+
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IChunkingStrategy));
+
+        descriptor!.ImplementationType.ShouldBe(typeof(HierarchicalChunkingStrategy));
+    }
+
+    [Fact]
+    public void Chunking_Semantic_RegistersTheAsyncStrategy_AndKeepsASyncFallback()
+    {
+        // Semantic 是 IAsyncChunkingStrategy（要调嵌入服务）；DocumentIngestionService
+        // 在它存在时优先用它，但同步契约仍需一个实现，否则构造函数解析不出来。
+        var services = ConfigureModule(
+            vectorStoreProvider: null, hybridEnabled: false, chunkingStrategy: "Semantic");
+
+        services.FirstOrDefault(d => d.ServiceType == typeof(IAsyncChunkingStrategy))!
+            .ImplementationType.ShouldBe(typeof(SemanticChunkingStrategy));
+        services.FirstOrDefault(d => d.ServiceType == typeof(IChunkingStrategy))!
+            .ImplementationType.ShouldBe(typeof(FixedSizeChunkingStrategy));
+    }
+
+    [Fact]
+    public void Chunking_UnknownValue_FallsBackToFixedSize()
+    {
+        var services = ConfigureModule(
+            vectorStoreProvider: null, hybridEnabled: false, chunkingStrategy: "NotAStrategy");
+
+        services.FirstOrDefault(d => d.ServiceType == typeof(IChunkingStrategy))!
+            .ImplementationType.ShouldBe(typeof(FixedSizeChunkingStrategy));
+    }
+
+    #endregion
+
     #region IVectorStore backend selection (Auto must override AIModule NoOp)
 
     [Fact]
@@ -200,7 +265,8 @@ public class RagModuleTests
         string? vectorStoreProvider,
         bool hybridEnabled,
         Action<IServiceCollection>? preRegister = null,
-        Action<IServiceCollection>? postRegister = null)
+        Action<IServiceCollection>? postRegister = null,
+        string? chunkingStrategy = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -214,6 +280,10 @@ public class RagModuleTests
         if (vectorStoreProvider is not null)
         {
             settings["AI:Rag:VectorStoreProvider"] = vectorStoreProvider;
+        }
+        if (chunkingStrategy is not null)
+        {
+            settings["AI:Rag:ChunkingStrategy"] = chunkingStrategy;
         }
 
         var configuration = new ConfigurationBuilder()

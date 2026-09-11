@@ -15,4 +15,11 @@
     <PackageReference Include="FirebaseAdmin" Version="3.6.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 令牌掩码与「哪些 FCM 错误码算令牌永久失效」都是 internal 的实现细节，
+         但它们各自守着一条外部看不见的不变量（不得泄露完整令牌 / 不得因一次消息
+         构造错误删光整批设备）。测试直接断言它们，好过绕一层公开面去间接推断。 -->
+    <InternalsVisibleTo Include="Tnzi.Notification.Push.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

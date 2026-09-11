@@ -66,8 +66,11 @@ export interface UseAccountSettingsReturn {
   resumeTwoFactor: () => Promise<boolean>;
 
   revokeSession: (sessionId: string) => Promise<boolean>;
-  /** Signs out everywhere, including the current tab. */
-  revokeAllSessions: () => Promise<boolean>;
+  /**
+   * Signs out every OTHER device; this tab stays signed in.
+   * Pass `true` for a true "sign out everywhere", which ends this session too.
+   */
+  revokeAllSessions: (includeCurrent?: boolean) => Promise<boolean>;
 
   /** Step 1 of changing the email: send a code to the NEW address. */
   sendEmailChangeCode: (newEmail: string) => Promise<boolean>;
@@ -257,8 +260,8 @@ export function useAccountSettings(
    * "sign out everywhere" and warns, rather than promising a distinction the
    * data cannot make.
    */
-  async function revokeAllSessions(): Promise<boolean> {
-    const ok = await write(() => api!.revokeAllSessions());
+  async function revokeAllSessions(includeCurrent = false): Promise<boolean> {
+    const ok = await write(() => api!.revokeAllSessions(includeCurrent));
     if (ok) await loadSessions();
     return ok;
   }

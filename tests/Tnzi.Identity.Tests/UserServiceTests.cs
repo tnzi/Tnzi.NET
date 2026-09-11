@@ -1,7 +1,7 @@
-
+﻿
 namespace Tnzi.Identity.Tests;
 
-public class UserServiceTests
+public partial class UserServiceTests
 {
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<RoleManager<Role>> _roleManagerMock;
@@ -9,8 +9,8 @@ public class UserServiceTests
     private readonly Mock<IOrganizationService> _organizationServiceMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<ICurrentUser> _currentUserMock;
-    private readonly Mock<IPasswordPolicyService> _passwordPolicyServiceMock;
     private readonly Mock<Tnzi.Caching.ICache> _cacheMock;
+    private readonly Mock<ISessionRevocationService> _sessionRevocationMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     private readonly UserService _userService;
@@ -38,8 +38,8 @@ public class UserServiceTests
         _organizationServiceMock = new Mock<IOrganizationService>();
         _eventBusMock = new Mock<IEventBus>();
         _currentUserMock = new Mock<ICurrentUser>();
-        _passwordPolicyServiceMock = new Mock<IPasswordPolicyService>();
         _cacheMock = new Mock<Tnzi.Caching.ICache>();
+        _sessionRevocationMock = new Mock<ISessionRevocationService>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
         var loggerFactory = new Mock<ILoggerFactory>();
@@ -54,8 +54,8 @@ public class UserServiceTests
             _organizationServiceMock.Object,
             _eventBusMock.Object,
             _currentUserMock.Object,
-            _passwordPolicyServiceMock.Object,
-            _cacheMock.Object
+            _cacheMock.Object,
+            sessionRevocation: _sessionRevocationMock.Object
         );
     }
 
@@ -126,6 +126,11 @@ public class UserServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
+        // ★ 邮箱现在经 SetEmailAsync 写入（而不是直接赋值）：那是 UserManager 里唯一
+        //   会顺带把 EmailConfirmed 清掉、并跑一遍唯一性校验的入口。
+        _userManagerMock.Setup(x => x.SetEmailAsync(user, input.Email))
+            .ReturnsAsync((User u, string e) => { u.Email = e; u.EmailConfirmed = false; return IdentityResult.Success; });
+
         _userManagerMock.Setup(x => x.UpdateAsync(user))
             .ReturnsAsync(IdentityResult.Success);
 
@@ -143,6 +148,67 @@ public class UserServiceTests
         Assert.NotNull(result.Data);
         Assert.Equal(input.Email, result.Data.Email);
         // Nickname 存储在 UserDetail 中，不在 User 实体上
+    }
+
+    /// <summary>
+    /// ★★★ 改地址必须清掉确认位。此前是 <c>user.Email = input.Email</c> 直接赋值，
+    /// 于是换完地址仍带着「已验证」的章 —— 而框架下游拿那一位当作
+    /// 「这个地址属于这个人」的断言（找回密码、邮箱 2FA、第三方按邮箱认领账号）。
+    /// 断言走的是 SetEmailAsync 而不是断言 EmailConfirmed 的值：后者在 mock 上
+    /// 由测试自己设定，证明不了生产代码走的是哪条路。
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_WhenEmailChanges_GoesThroughSetEmailAsync()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            UserName = "testuser",
+            Email = "old@example.com",
+            EmailConfirmed = true
+        };
+        var input = new UpdateUserDto { Email = "new@example.com" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.SetEmailAsync(user, input.Email))
+            .ReturnsAsync((User u, string e) => { u.Email = e; u.EmailConfirmed = false; return IdentityResult.Success; });
+        _userManagerMock.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string>());
+
+        var result = await _userService.UpdateAsync(userId, input);
+
+        Assert.True(result.Succeeded);
+        _userManagerMock.Verify(x => x.SetEmailAsync(user, "new@example.com"), Times.Once);
+        Assert.False(user.EmailConfirmed);
+    }
+
+    /// <summary>
+    /// 对照组：地址没变就不该动它 —— 否则每次保存资料都会把确认位清掉一次，
+    /// 用户会莫名其妙被反复要求验证邮箱。
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_WhenEmailUnchanged_DoesNotTouchIt()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            UserName = "testuser",
+            Email = "same@example.com",
+            EmailConfirmed = true
+        };
+        var input = new UpdateUserDto { Email = "same@example.com" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string>());
+
+        var result = await _userService.UpdateAsync(userId, input);
+
+        Assert.True(result.Succeeded);
+        _userManagerMock.Verify(x => x.SetEmailAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
+        Assert.True(user.EmailConfirmed);
     }
 
     [Fact]
@@ -180,6 +246,44 @@ public class UserServiceTests
 
         // Assert
         _userManagerMock.Verify(x => x.DeleteAsync(user), Times.Once);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(userId, SessionRevocationReason.AccountDeleted, null),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// ★★ 批量删除也必须撤销会话，逐个删除做的每一步这里都要做。
+    /// </summary>
+    /// <remarks>
+    /// access token 的每请求校验只看会话（<c>OnTokenValidated</c> 不查用户还在不在），
+    /// 所以漏掉这一步的后果是：批量删掉的账号在令牌剩余寿命里照常通过认证，
+    /// 而管理界面显示的是「已删除」。单个删除一直是对的，只有批量这条路漏了。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteManyAsync_RevokesEveryDeletedAccountsSessions()
+    {
+        var first = new User { Id = Guid.NewGuid(), UserName = "first" };
+        var second = new User { Id = Guid.NewGuid(), UserName = "second" };
+        var users = new List<User> { first, second };
+
+        var queryable = users.BuildMock();
+        _userRepositoryMock.As<IQueryable<User>>().Setup(q => q.Provider).Returns(queryable.Provider);
+        _userRepositoryMock.As<IQueryable<User>>().Setup(q => q.Expression).Returns(queryable.Expression);
+        _userRepositoryMock.As<IQueryable<User>>().Setup(q => q.ElementType).Returns(queryable.ElementType);
+        _userRepositoryMock.As<IQueryable<User>>().Setup(q => q.GetEnumerator()).Returns(() => queryable.GetEnumerator());
+
+        _userManagerMock.Setup(x => x.GetRolesAsync(It.IsAny<User>())).ReturnsAsync([]);
+        _userManagerMock.Setup(x => x.DeleteAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        var result = await _userService.DeleteManyAsync([first.Id, second.Id]);
+
+        Assert.True(result.Succeeded);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(first.Id, SessionRevocationReason.AccountDeleted, null),
+            Times.Once);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(second.Id, SessionRevocationReason.AccountDeleted, null),
+            Times.Once);
     }
 
     [Fact]
@@ -207,6 +311,43 @@ public class UserServiceTests
         // Assert
         _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, false), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, null), Times.Once);
+    }
+
+    /// <summary>
+    /// ★★★ 「启用」不能把一个还没接受邀请的账号放出来。
+    /// </summary>
+    /// <remarks>
+    /// 这道守卫看着多余，实则是本方法自身造成的：下面那句
+    /// <c>SetLockoutEnabledAsync(user, false)</c> 会让 <c>IsLockedOutAsync</c> 恒为 false，
+    /// 于是 <c>LockedAccountLoginGuard</c> 也不再拦任何东西 —— 一个没有密码、
+    /// 没有二次验证、角色却已预设好的账号就对全部登录路径敞开了，
+    /// 而验证码登录只需要收到一封邮件。让人进来的唯一途径必须是接受邀请本身。
+    /// </remarks>
+    [Fact]
+    public async Task EnableAsync_OnAnInvitedAccount_IsRejected_AndDoesNotTouchLockout()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            UserName = "newhire",
+            PendingActions = PendingUserActions.InvitationPending
+        };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
+            .ReturnsAsync(user);
+
+        // Act
+        var result = await _userService.EnableAsync(userId);
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_ACTIVATION_PENDING, result.ErrorCode);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(It.IsAny<User>(), It.IsAny<bool>()), Times.Never);
+        _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(It.IsAny<User>(), It.IsAny<DateTimeOffset?>()), Times.Never);
+        Assert.Equal(PendingUserActions.InvitationPending, user.PendingActions);
     }
 
     [Fact]
@@ -724,4 +865,60 @@ public class UserServiceTests
     // Note: FindByPhoneNumberAsync 测试需要 EF Core 的异步查询提供者，在单元测试中难以模拟
     // 建议使用集成测试或使用 EF Core InMemory 数据库进行测试
     // 这里暂时跳过这些测试
+}
+
+/// <summary>
+/// 账号状态变化必须把在线凭据一并作废（「推」的一侧）。
+/// </summary>
+/// <remarks>
+/// ★★ 此前停用一个账号只写了一个锁定时间。锁定判定挂在登录守卫上，只在签发<b>新</b>令牌时生效，
+/// 而已签出去的 access token 会用到过期、刷新令牌更是可以无限续期 ——
+/// 管理端显示「已停用」，被停用的一方照常在用，且没有任何迹象表明这一点。
+/// </remarks>
+public partial class UserServiceTests
+{
+    [Fact]
+    public async Task DisableAsync_RevokesEverySessionOfThatUser()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        var result = await _userService.DisableAsync(userId);
+
+        Assert.True(result.Succeeded);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(userId, SessionRevocationReason.AccountDisabled, null),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task LockAsync_RevokesEverySessionOfThatUser()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        var result = await _userService.LockAsync(userId);
+
+        Assert.True(result.Succeeded);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(userId, SessionRevocationReason.AccountLocked, null),
+            Times.Once);
+    }
+
+    /// <summary>对照组：解锁不撤销任何会话（解锁是放行，不是收权）。</summary>
+    [Fact]
+    public async Task UnlockAsync_RevokesNothing()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        await _userService.UnlockAsync(userId);
+
+        _sessionRevocationMock.Verify(
+            x => x.RevokeUserSessionsAsync(It.IsAny<Guid>(), It.IsAny<SessionRevocationReason>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
 }

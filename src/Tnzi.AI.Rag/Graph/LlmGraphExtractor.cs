@@ -16,6 +16,12 @@ public class LlmGraphExtractor : IGraphExtractor
     /// </summary>
     private const int MaxTextLength = 30_000;
 
+    /// <summary>
+    /// 图谱抽取一次调用的输出上限。抽取产出的是一整份 JSON，被截断就整份解析失败，
+    /// 所以绝不能用 <c>IAiUtility</c> 那个为极短输出定的全局默认。
+    /// </summary>
+    private const int ExtractionMaxTokens = 4096;
+
     private const string SystemPrompt = """
         You are a knowledge graph extraction engine. Given a text, extract entities and relationships.
 
@@ -80,7 +86,10 @@ public class LlmGraphExtractor : IGraphExtractor
         var response = await _aiUtility.ExecuteAsync(
             SystemPrompt,
             inputText,
-            cancellationToken: cancellationToken);
+            // 显式传上限，不依赖 IAiUtility 的全局默认（那个默认是给标题生成这类极短输出定的，
+            // 用它抽图谱会把 JSON 截断在半路 —— 解析失败，而失败的样子和"没有实体"一模一样）。
+            new AiUtilityCallOptions { MaxTokens = ExtractionMaxTokens },
+            cancellationToken);
 
         if (string.IsNullOrWhiteSpace(response))
         {
@@ -88,7 +97,26 @@ public class LlmGraphExtractor : IGraphExtractor
             return GraphExtractionResult.Empty;
         }
 
-        var (nodes, edges) = ParseResponse(response, knowledgeBaseId);
+        var (nodes, edges, parsed) = ParseResponse(response, knowledgeBaseId);
+
+        if (!parsed)
+        {
+            // ★ 解析失败绝不能和"确实没有实体"给出同一个结果：两者都是空集合，
+            // 但前者意味着这段文本的图谱从未被抽出来过，而调用方读到的是"抽完了，没东西"。
+            // 截断是最常见的成因，所以把长度与结尾一起报出来 —— 一个不以 '}' 收尾的
+            // 响应几乎一定是被 MaxTokens 砍断的。
+            var trimmed = response.TrimEnd();
+            _logger.LogWarning(
+                "Graph extraction response could not be parsed as JSON for knowledge base {KnowledgeBaseId}: " +
+                "{Length} chars, ends with '{Tail}' (looksTruncated={LooksTruncated}). " +
+                "No graph was extracted for this text.",
+                knowledgeBaseId,
+                response.Length,
+                trimmed.Length <= 40 ? trimmed : trimmed[^40..],
+                !trimmed.EndsWith('}'));
+
+            return GraphExtractionResult.Unparsable;
+        }
 
         if (nodes.Count == 0)
         {
@@ -132,7 +160,11 @@ public class LlmGraphExtractor : IGraphExtractor
     /// <summary>
     /// 解析 LLM JSON 响应为节点和边（边暂不设置 SourceNodeId/TargetNodeId，后续通过 name 映射）
     /// </summary>
-    internal (List<KnowledgeGraphNode> Nodes, List<RawEdge> Edges) ParseResponse(string json, Guid knowledgeBaseId)
+    /// <returns>
+    /// 节点、边，以及<b>是否解析成功</b>。第三项不能省：解析失败与"文本里确实没有实体"
+    /// 都产出空集合，少了它两者在调用方眼里完全一样。
+    /// </returns>
+    internal (List<KnowledgeGraphNode> Nodes, List<RawEdge> Edges, bool Parsed) ParseResponse(string json, Guid knowledgeBaseId)
     {
         var nodes = new List<KnowledgeGraphNode>();
         var edges = new List<RawEdge>();
@@ -192,9 +224,10 @@ public class LlmGraphExtractor : IGraphExtractor
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Failed to parse LLM graph extraction response as JSON");
+            return (nodes, edges, false);
         }
 
-        return (nodes, edges);
+        return (nodes, edges, true);
     }
 
     /// <summary>

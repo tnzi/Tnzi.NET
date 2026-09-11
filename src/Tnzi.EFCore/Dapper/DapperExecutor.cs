@@ -24,9 +24,8 @@ public class DapperExecutor<TEntity, TKey> : IDapperExecutor<TEntity, TKey>
 
         // 始终根据实体的 DbContext 创建 DapperService，确保多 DbContext 场景路由正确
         var databaseProvider = DapperDatabaseProviderFactory.CreateFromDbContext(dbContext, configuration);
-        var logger = serviceProvider.GetRequiredService<ILogger<DapperService>>();
 
-        _dapperService = new DapperService(dbContext, databaseProvider, logger);
+        _dapperService = new DapperService(dbContext, databaseProvider);
     }
 
     public Task<IEnumerable<TResult>> QueryAsync<TResult>(

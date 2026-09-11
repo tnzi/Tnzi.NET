@@ -15,6 +15,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tnzi.Notification.Tests, PublicKey=$(TnziPublicKey)" />
+    <!-- 推送令牌的掩码规则住在本模块（父模块要给 Type=Push 的收件人地址打掩码，
+         而它不能引用子模块）。规则只有一份，子模块与它的测试共用同一个类型。 -->
+    <InternalsVisibleTo Include="Tnzi.Notification.Push, PublicKey=$(TnziPublicKey)" />
+    <InternalsVisibleTo Include="Tnzi.Notification.Push.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
   <ItemGroup>

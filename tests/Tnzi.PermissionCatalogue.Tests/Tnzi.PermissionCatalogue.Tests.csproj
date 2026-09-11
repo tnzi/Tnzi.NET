@@ -54,6 +54,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Storage\Tnzi.Storage.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Audit\Tnzi.Audit.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Notification\Tnzi.Notification.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Notification.Push\Tnzi.Notification.Push.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Chat\Tnzi.Chat.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment\Tnzi.Payment.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" />

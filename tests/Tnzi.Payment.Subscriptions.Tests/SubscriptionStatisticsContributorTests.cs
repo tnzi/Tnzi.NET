@@ -18,6 +18,14 @@ namespace Tnzi.Payment.Subscriptions.Tests;
 /// </remarks>
 public class SubscriptionStatisticsContributorTests
 {
+
+    /// <summary>默认支付配置：本组用例不受其中任何一项影响。</summary>
+    private static IOptionsMonitor<PaymentOptions> DefaultPaymentOptions()
+    {
+        var mock = new Mock<IOptionsMonitor<PaymentOptions>>();
+        mock.Setup(x => x.CurrentValue).Returns(new PaymentOptions());
+        return mock.Object;
+    }
     private readonly Mock<IRepository<Subscription, Guid>> _subscriptionRepositoryMock = new();
     private readonly SubscriptionStatisticsContributor _contributor;
 
@@ -190,7 +198,7 @@ public class SubscriptionStatisticsContributorTests
     /// 活跃订阅数的口径与拆分前一致：<c>Active</c> 或 <c>Trial</c>，不按时间窗过滤。
     /// </summary>
     [Fact]
-    public async Task GetActiveSubscriptionCountAsync_CountsActiveAndTrial()
+    public async Task GetActiveSubscriptionCountAsync_CountsOnlyActive()
     {
         SetupSubscriptionQueryable(
         [
@@ -200,7 +208,33 @@ public class SubscriptionStatisticsContributorTests
             new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.PastDue, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
         ]);
 
-        (await _contributor.GetActiveSubscriptionCountAsync()).ShouldBe(2);
+        // 试用不计入「活跃」：指标端点的 ActiveSubscriptions 也是这个口径，
+        // 两边算法不同的话，同一张 KPI 卡片会在两个数字之间跳
+        (await _contributor.GetActiveSubscriptionCountAsync()).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// 总览的活跃订阅数与指标端点的 <c>ActiveSubscriptions</c> 必须是同一个数字。
+    /// </summary>
+    /// <remarks>
+    /// 这一条才是那个缺陷的形状：两处各自算得都不算错，只是算的不是同一件事，
+    /// 而它们并排显示在同一份看板上。分开断言两个数字都不会红，断言它们相等才会。
+    /// </remarks>
+    [Fact]
+    public async Task TheOverviewCountAndTheMetricsCount_AreTheSameNumber()
+    {
+        SetupSubscriptionQueryable(
+        [
+            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
+            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
+            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Trial, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
+        ]);
+
+        var overviewCount = await _contributor.GetActiveSubscriptionCountAsync();
+        var metrics = await _contributor.GetSubscriptionMetricsAsync();
+
+        overviewCount.ShouldBe(metrics!.ActiveSubscriptions);
+        metrics.TrialSubscriptions.ShouldBe(1);
     }
 
     /// <summary>
@@ -216,12 +250,14 @@ public class SubscriptionStatisticsContributorTests
         SetupSubscriptionQueryable(
         [
             new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
+            new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Active, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
             new() { Id = Guid.NewGuid(), Status = SubscriptionStatus.Trial, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe" },
         ]);
 
         var service = new PaymentStatisticsService(
             EmptyRepo<PaymentEntity>().Object,
             EmptyRepo<Refund>().Object,
+            DefaultPaymentOptions(),
             LoggingServiceProvider(),
             _contributor);
 
@@ -242,6 +278,7 @@ public class SubscriptionStatisticsContributorTests
         var service = new PaymentStatisticsService(
             EmptyRepo<PaymentEntity>().Object,
             EmptyRepo<Refund>().Object,
+            DefaultPaymentOptions(),
             LoggingServiceProvider(),
             _contributor);
 

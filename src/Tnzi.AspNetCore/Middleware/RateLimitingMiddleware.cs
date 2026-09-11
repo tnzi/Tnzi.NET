@@ -148,12 +148,10 @@ public class RateLimitingMiddleware
     /// </summary>
     private static async Task WriteRateLimitedAsync(HttpContext context, int retryAfterSeconds)
     {
-        context.Response.StatusCode = 429; // Too Many Requests
-        context.Response.ContentType = "application/json";
         context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
 
-        var errorResult = ApiResult.Error("Rate limit exceeded. Please try again later.", 429);
-        await context.Response.WriteAsync(JsonSerializer.Serialize(errorResult, TnziJsonDefaults.Options));
+        await MiddlewareResults.WriteErrorAsync(
+            context, StatusCodes.Status429TooManyRequests, "Rate limit exceeded. Please try again later.", "RATE_LIMITED");
     }
 
     /// <summary>

@@ -13,6 +13,55 @@ public class ImagingOptionsValidatorTests
         result.Succeeded.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// 容差必须有上界，否则「验证」形同虚设。
+    /// </summary>
+    /// <remarks>
+    /// ★ 此前只校验了 <c>Tolerance &lt; 0</c>：把容差配到与拼图块同宽（甚至比整张图还宽），
+    /// 校验一声不响地通过，而此后<b>任何</b>滑动位置都算验证成功 ——
+    /// 页面上还是那个验证码，日志里还是那些"验证通过"，它只是不再拦任何人。
+    /// </remarks>
+    [Fact]
+    public void SlidingTolerance_AtOrAboveThePieceSize_Fails()
+    {
+        var options = new ImagingOptions { SlidingCaptcha = { PieceSize = 50, Tolerance = 50 } };
+
+        _validator.Validate(null, options).Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SlidingTolerance_WiderThanTheWholeImage_Fails()
+    {
+        var options = new ImagingOptions { SlidingCaptcha = { Width = 300, Tolerance = 400 } };
+
+        _validator.Validate(null, options).Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SlidingTolerance_BelowThePieceSize_Succeeds()
+    {
+        var options = new ImagingOptions { SlidingCaptcha = { PieceSize = 50, Tolerance = 8 } };
+
+        _validator.Validate(null, options).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void MaxDecodePixels_Negative_Fails()
+    {
+        var options = new ImagingOptions { MaxDecodePixels = -1 };
+
+        _validator.Validate(null, options).Succeeded.ShouldBeFalse();
+    }
+
+    /// <summary>0 是「不限制」的显式写法，不是配置错误。</summary>
+    [Fact]
+    public void MaxDecodePixels_Zero_Succeeds()
+    {
+        var options = new ImagingOptions { MaxDecodePixels = 0 };
+
+        _validator.Validate(null, options).Succeeded.ShouldBeTrue();
+    }
+
     [Fact]
     public void FontSize_TooSmall_Fails()
     {

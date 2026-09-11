@@ -144,7 +144,7 @@ public class SynthesizeNodeTests
         nodeCtxMock.Setup(c => c.AgentFactory).Returns(mockFactory.Object);
         nodeCtxMock.Setup(c => c.AgentRepository).Returns((IRepository<Agent, Guid>?)null);
 
-        var node = new SynthesizeNode(nodeCtxMock.Object, Mock.Of<ILogger<SynthesizeNode>>());
+        var node = new SynthesizeNode(nodeCtxMock.Object);
         return (node, mockFactory);
     }
 

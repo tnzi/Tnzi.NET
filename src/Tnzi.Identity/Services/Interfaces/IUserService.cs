@@ -101,6 +101,26 @@ public interface IUserService
     Task<Result> ChangePhoneNumberAsync(Guid userId, string newPhoneNumber);
 
     /// <summary>
+    /// 由管理员直接把某个用户的邮箱 / 手机号标记为已确认。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>这是一个显式动作，不是 <c>UpdateAsync</c> 的副作用。</strong>
+    /// 改地址一律清确认位（见 <c>UpdateAsync</c>），因为「谁都能给自己盖一个已验证的章」
+    /// 正是要防的那件事。但企业场景里「HR 导入的地址就是算数的」是真实需求，堵死它
+    /// 只会逼出更糟的绕法（直接改库）。所以把它做成一个单独的、需要
+    /// <c>user.update</c> 权限、会进审计的动作 —— 谁在什么时候替谁盖了章，查得到。
+    /// </para>
+    /// <para>
+    /// 只置位、不改地址：要改地址请先 <c>UpdateAsync</c>，再决定要不要盖这个章。
+    /// </para>
+    /// </remarks>
+    /// <param name="userId">目标用户。</param>
+    /// <param name="confirmEmail">是否把邮箱标记为已确认（<c>null</c> = 不动）。</param>
+    /// <param name="confirmPhoneNumber">是否把手机号标记为已确认（<c>null</c> = 不动）。</param>
+    Task<Result> ConfirmContactAsync(Guid userId, bool? confirmEmail, bool? confirmPhoneNumber);
+
+    /// <summary>
     /// 根据手机号查找用户（仅返回已验证手机号的用户）
     /// </summary>
     /// <param name="phoneNumber">手机号</param>

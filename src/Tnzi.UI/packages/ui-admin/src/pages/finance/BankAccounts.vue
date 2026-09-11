@@ -84,6 +84,7 @@ function commonFields(d: Record<string, unknown>) {
     currency: upper(d.currency),
     checkStockType: (d.checkStockType as CheckStockType) ?? CheckStockType.PrePrinted,
     checkLayout: (d.checkLayout as CheckLayout) ?? CheckLayout.Voucher,
+    checkTemplateName: str(d.checkTemplateName),
     offsetXMm: num(d.offsetXMm, 0),
     offsetYMm: num(d.offsetYMm, 0),
     feedProviderKey: str(d.feedProviderKey),
@@ -148,6 +149,13 @@ async function loadCapabilities() {
 
 const fieldRenderers = {
   'finance-account': selectRenderer(() => sources.fundsAccountOptions.value, { placeholder: t('form.accountPlaceholder'), clearable: false }),
+  // `tag: true` so a deployment without the rendering module (catalogue endpoint
+  // answers 501 → empty list) can still type a template name it created itself,
+  // instead of facing an empty dropdown it cannot get past.
+  'finance-check-template': selectRenderer(() => sources.checkTemplateOptions.value, {
+    placeholder: t('form.checkTemplateNamePlaceholder'),
+    tag: true,
+  }),
   // Say "you cannot store one here" up front instead of letting the user type an
   // account number and eat a 400 on save.
   'finance-account-number': (ctx: FieldRenderContext) =>
@@ -171,6 +179,7 @@ watch(
   (open) => {
     if (open) {
       void sources.ensureFundsAccounts()
+      void sources.ensureCheckTemplates()
       void loadCapabilities()
     }
   },

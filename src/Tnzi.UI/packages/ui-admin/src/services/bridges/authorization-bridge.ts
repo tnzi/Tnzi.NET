@@ -37,7 +37,7 @@ import {
   type PermissionComparisonDto,
 } from '@tnzi/core/services/authorization'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, pageArray, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, pageArray, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminFunctionModuleApi>[0]
@@ -219,8 +219,8 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       const items = unwrap<FunctionModuleDto[]>(await fmApi.getList())
       return pageArray(items, query)
     },
-    create: async (data) => unwrap(await fmApi.create(data)) as FunctionModuleDto,
-    update: async (id, data) => unwrap(await fmApi.update(String(id), data)) as FunctionModuleDto,
+    create: async (data) => unwrapOk(await fmApi.create(data)) as FunctionModuleDto,
+    update: async (id, data) => unwrapOk(await fmApi.update(String(id), data)) as FunctionModuleDto,
     delete: async (ids) => {
       for (const id of ids) {
         ensureOk(await fmApi.delete(String(id)))
@@ -292,8 +292,8 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       const items = unwrap<ModuleFunctionDto[]>(await mfApi.getByModule(moduleId))
       return Array.isArray(items) ? items : []
     },
-    create: async (data) => unwrap(await mfApi.create(data)) as ModuleFunctionDto,
-    update: async (id, data) => unwrap(await mfApi.update(id, data)) as ModuleFunctionDto,
+    create: async (data) => unwrapOk(await mfApi.create(data)) as ModuleFunctionDto,
+    update: async (id, data) => unwrapOk(await mfApi.update(id, data)) as ModuleFunctionDto,
     delete: async (ids) => {
       for (const id of ids) {
         ensureOk(await mfApi.delete(id))
@@ -350,7 +350,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
         await rfApi.compareRolePermissions(roleAId, roleBId),
       ),
     clone: async (targetRoleId, sourceRoleId) =>
-      unwrap<number>(await rfApi.cloneRolePermissions(targetRoleId, sourceRoleId)),
+      unwrapOk<number>(await rfApi.cloneRolePermissions(targetRoleId, sourceRoleId)),
     superAdminRoles: async () =>
       unwrap<string[]>(await rfApi.getSuperAdminRoles()) ?? [],
   }
@@ -395,8 +395,8 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       const items = unwrap<EntityRoleDto[]>(await erApi.getByRole(roleId))
       return pageArray(Array.isArray(items) ? items : [], query)
     },
-    create: async (data) => unwrap(await erApi.create(data)) as EntityRoleDto,
-    update: async (id, data) => unwrap(await erApi.update(String(id), data)) as EntityRoleDto,
+    create: async (data) => unwrapOk(await erApi.create(data)) as EntityRoleDto,
+    update: async (id, data) => unwrapOk(await erApi.update(String(id), data)) as EntityRoleDto,
     delete: async (ids) => {
       for (const id of ids) {
         ensureOk(await erApi.delete(String(id)))

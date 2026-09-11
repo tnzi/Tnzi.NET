@@ -16,9 +16,12 @@
     "clean": "pnpm -r clean",
     "dev": "pnpm -r --parallel dev",
     "api:generics:check": "node ./tools/check-api-generics/check.mjs",
+    "icons:generate": "node ./tools/icons/generate.mjs",
+    "icons:check": "node ./tools/icons/generate.mjs --check",
     "preinstall": "npx only-allow pnpm",
     "release": "node tools/release.mjs",
     "release:status": "node tools/release.mjs --status",
+    "release:plan": "node tools/release.mjs --plan",
     "commitlint": "commitlint --edit",
     "prepare": "simple-git-hooks"
   },

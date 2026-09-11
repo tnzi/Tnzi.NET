@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Metadata;
+﻿namespace Tnzi.Identity.Metadata;
 
 /// <summary>
 /// Identity模块常量定义
@@ -37,6 +37,19 @@ public static class IdentityConstants
         public const string RefreshToken = "RefreshToken";
         public const string TempToken = "TempToken";
         public const string SetPassword = "SetPassword";
+
+        /// <summary>邀请接受令牌。每个用户至多一条（唯一索引使然），重发即作废上一枚。</summary>
+        public const string InvitationToken = "InvitationToken";
+
+        /// <summary>
+        /// 待办挑战的临时令牌（凭据已过关，但欠着改密之类的义务）。
+        /// </summary>
+        /// <remarks>
+        /// ★ 与 2FA 的 <see cref="TempToken"/> <b>刻意不共用</b>：两者的 key 都是
+        /// <c>(user, provider, name, Guid.Empty)</c>，共用会让一个覆盖另一个 ——
+        /// 而「先过 2FA、再被要求改密」是一条真实路径，那时两枚令牌必须同时活着。
+        /// </remarks>
+        public const string PendingActionToken = "PendingActionToken";
     }
 
     /// <summary>
@@ -50,6 +63,12 @@ public static class IdentityConstants
 
         /// <summary>Passkey（WebAuthn）。也是 passkey 注册令牌在 <c>AuthToken</c> 里的归属标记。</summary>
         public const string Passkey = "Passkey";
+
+        /// <summary>邀请。邀请接受令牌在 <c>AuthToken</c> 里的归属标记。</summary>
+        public const string Invitation = "Invitation";
+
+        /// <summary>待办挑战。它的临时令牌在 <c>AuthToken</c> 里的归属标记。</summary>
+        public const string PendingAction = "PendingAction";
     }
 
     /// <summary>

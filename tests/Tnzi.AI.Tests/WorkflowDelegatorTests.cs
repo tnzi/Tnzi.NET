@@ -145,8 +145,7 @@ public class WorkflowDelegatorTests
         var runStore = CreateRunStore(updated, updatedNodes);
         var runTracker = new RunTracker(runStore.Object, CreateTraceStore().Object, Mock.Of<ILogger<RunTracker>>());
 
-        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker,
-            Mock.Of<ILogger<WorkflowDelegator>>());
+        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var run = new AgentRun
         {
@@ -190,8 +189,7 @@ public class WorkflowDelegatorTests
         var runStore = CreateRunStore(updated, new List<AgentRunNode>());
         var runTracker = new RunTracker(runStore.Object, CreateTraceStore().Object, Mock.Of<ILogger<RunTracker>>());
 
-        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker,
-            Mock.Of<ILogger<WorkflowDelegator>>());
+        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var run = new AgentRun
         {
@@ -222,8 +220,7 @@ public class WorkflowDelegatorTests
         var workflowService = new Mock<IWorkflowService>();
         var runStore = CreateRunStore(new List<AgentRun>(), new List<AgentRunNode>());
         var runTracker = new RunTracker(runStore.Object, CreateTraceStore().Object, Mock.Of<ILogger<RunTracker>>());
-        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker,
-            Mock.Of<ILogger<WorkflowDelegator>>());
+        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var run = new AgentRun
         {
@@ -247,7 +244,7 @@ public class WorkflowDelegatorTests
         var runStore = CreateRunStore(new List<AgentRun>(), new List<AgentRunNode>());
         var runTracker = new RunTracker(runStore.Object, CreateTraceStore().Object, Mock.Of<ILogger<RunTracker>>());
         return new WorkflowDelegator(service ?? Mock.Of<IWorkflowService>(),
-            runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+            runStore.Object, runTracker);
     }
 
     private static Mock<IRunStore> CreateRunStore(List<AgentRun> updatedRuns, List<AgentRunNode> updatedNodes)

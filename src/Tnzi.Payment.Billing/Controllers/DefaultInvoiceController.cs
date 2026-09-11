@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Billing.Controllers;
+﻿namespace Tnzi.Payment.Billing.Controllers;
 
 /// <summary>
 /// 发票控制器基类
@@ -52,10 +52,31 @@ public class DefaultInvoiceController : ApiControllerBase
     }
 
     /// <summary>
-    /// 下载PDF
+    /// 下载发票文件。
     /// </summary>
+    /// <remarks>
+    /// 直接返回文件字节。此前这里返回的是一个字符串，而那个字符串正是本端点自己的路径 ——
+    /// 一条指向自己的链接，任何客户端顺着它走都只会再拿到同一个字符串。
+    /// 直接吐文件是唯一在两种落地方式下都成立的做法：只有 Storage 给得出 HTTP 可达的地址，
+    /// 而未加载 Storage 的宿主把产物写在本地磁盘上。要在邮件里放链接请用 <c>{id}/pdf-url</c>。
+    /// </remarks>
     [HttpGet("{id:guid}/pdf")]
-    public virtual async Task<ApiResult<string>> DownloadPdf(Guid id)
+    public virtual async Task<IActionResult> DownloadPdf(Guid id)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _invoiceService.GetPdfContentAsync(id, userId);
+
+        if (!result.Succeeded || result.Data == null)
+            return StatusCode(result.Code ?? 400, ApiResult.Error(result.Message ?? ErrorCodes.InvoiceDocumentUnavailable, result.Code ?? 400));
+
+        return File(result.Data.Content, result.Data.ContentType, result.Data.FileName);
+    }
+
+    /// <summary>
+    /// 获取发票文件的可分享地址（仅在产物由 Storage 承载时有值；本地回退时为空）。
+    /// </summary>
+    [HttpGet("{id:guid}/pdf-url")]
+    public virtual async Task<ApiResult<string>> GetPdfUrl(Guid id)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
         var result = await _invoiceService.GetPdfUrlAsync(id, userId);

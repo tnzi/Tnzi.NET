@@ -1,4 +1,4 @@
-
+﻿
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -24,6 +24,7 @@ public class AuthServiceTests
     // request's rolled-back UnitOfWork) - this mock backs that scope so tests can
     // assert the token is saved there, not on the ambient _authTokenServiceMock.
     private readonly Mock<IAuthTokenService> _scopedAuthTokenServiceMock;
+    private readonly Mock<ISessionRevocationService> _sessionRevocationMock;
 
     private readonly AuthService _authService;
 
@@ -91,11 +92,19 @@ public class AuthServiceTests
         _serviceProviderMock.Setup(x => x.GetService(typeof(IServiceScopeFactory)))
             .Returns(scopeFactory.Object);
 
+        _sessionRevocationMock = new Mock<ISessionRevocationService>();
+        _sessionRevocationMock
+            .Setup(x => x.RevokeSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionRevocationReason>()))
+            .ReturnsAsync(1);
+        _sessionRevocationMock
+            .Setup(x => x.RevokeUserSessionsAsync(It.IsAny<Guid>(), It.IsAny<SessionRevocationReason>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(1);
+
         // ★ 守卫链装的是**真实**的求值器 + 框架内置的 LockedAccountLoginGuard，不是 mock。
         // 账号锁定/停用的判定就住在这条链上，用 mock 顶替等于把被测对象换掉：
         // 那样测试只能证明「AuthService 会问求值器」，证明不了「被停用的账号进不来」。
         var loginGuardEvaluator = new LoginGuardEvaluator(
-            [new LockedAccountLoginGuard(_userManagerMock.Object)],
+            [new LockedAccountLoginGuard(_userManagerMock.Object), new PendingActionsLoginGuard()],
             new Mock<ILogger<LoginGuardEvaluator>>().Object);
 
         _authService = new AuthService(
@@ -111,7 +120,8 @@ public class AuthServiceTests
             _sessionServiceMock.Object,
             _loginSecurityServiceMock.Object,
             _twoFactorServiceMock.Object,
-            loginGuardEvaluator: loginGuardEvaluator
+            loginGuardEvaluator: loginGuardEvaluator,
+            sessionRevocation: _sessionRevocationMock.Object
         );
     }
 
@@ -510,11 +520,12 @@ public class AuthServiceTests
             Jwt = new JwtOptions { RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
         });
 
-        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(tokenEntry.Id))
-            .ReturnsAsync(true);
+        _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("new_refresh_token");
 
-        _authTokenServiceMock.Setup(x => x.SaveTokenAsync(userId, "JWT", "RefreshToken", It.IsAny<string>(), It.IsAny<DateTime?>()))
-            .ReturnsAsync(Guid.NewGuid());
+        // 轮换是一次条件更新（旧值作为抢占条件），不再是「标记已用 + upsert」两步。
+        _authTokenServiceMock
+            .Setup(x => x.RotateRefreshTokenAsync(tokenEntry.Id, refreshToken, It.IsAny<string>(), It.IsAny<DateTime?>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _authService.RefreshTokenAsync(refreshToken);
@@ -608,13 +619,13 @@ public class AuthServiceTests
         });
         _sessionServiceMock.Setup(x => x.IsSessionValidAsync(sessionId)).ReturnsAsync(true);
         _sessionServiceMock.Setup(x => x.RenewSessionAsync(sessionId, It.IsAny<DateTime>())).ReturnsAsync(Result.Success());
-        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(tokenEntry.Id)).ReturnsAsync(true);
         // The rotated access token + refresh token stay bound to the same session.
         _tokenServiceMock.Setup(x => x.GenerateToken(user, It.IsAny<IList<string>>(), null, sessionId))
             .Returns("rotated_access");
         _tokenServiceMock.Setup(x => x.GenerateRefreshToken()).Returns("rotated_refresh");
-        _authTokenServiceMock.Setup(x => x.SaveTokenAsync(userId, "JWT", "RefreshToken", It.IsAny<string>(), It.IsAny<DateTime?>(), sessionId))
-            .ReturnsAsync(Guid.NewGuid());
+        _authTokenServiceMock
+            .Setup(x => x.RotateRefreshTokenAsync(tokenEntry.Id, refreshToken, "rotated_refresh", It.IsAny<DateTime?>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _authService.RefreshTokenAsync(refreshToken);
@@ -1024,7 +1035,10 @@ public class AuthServiceTests
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
             Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
-            Otp = new OtpOptions { EnableEmail = true }
+            Otp = new OtpOptions { EnableEmail = true },
+            // 地址是未知的，所以快速注册必须开着才会真的发出去 —— 关着时这条路径
+            // 现在只回同一句话而不发信（见 SendCodeLoginCode_ForAnUnknownAddress_*）。
+            Registration = new RegistrationOptions { EnableQuickRegisterEmail = true }
         });
         _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "login")).ReturnsAsync(true);
         _userManagerMock.Setup(x => x.FindByEmailAsync("captcha@example.com")).ReturnsAsync((User?)null);
@@ -1172,4 +1186,304 @@ public class AuthServiceTests
             x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
             Times.Never);
     }
+
+    #region 待办义务挑战
+
+    /// <summary>
+    /// ★★★ 欠着义务时**不签发令牌**，而是发一个带临时令牌的挑战。
+    /// </summary>
+    /// <remarks>
+    /// 拦在建立会话之前：会话建起来、令牌签出去之后再拦是没有意义的，
+    /// 那时业务接口已经能访问，「强制」二字就没有了。
+    /// </remarks>
+    [Fact]
+    public async Task IssueTokenAsync_WhenObligationsAreOwed_ChallengesInsteadOfIssuing()
+    {
+        var user = OwingUser(PendingUserActions.ChangePassword);
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(false);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Password);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_PENDING_ACTIONS_REQUIRED, result.ErrorCode);
+        Assert.Null(result.Data);
+    }
+
+    /// <summary>
+    /// 挑战要把临时令牌与欠的事一起交给前端，否则那一步无从继续
+    /// （与 2FA 挑战丢掉 ErrorDetails 是同一类缺陷）。
+    /// </summary>
+    [Fact]
+    public async Task PendingActionChallenge_CarriesTempTokenAndActionNames()
+    {
+        var user = OwingUser(PendingUserActions.ChangePassword | PendingUserActions.EnrollTotp);
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(false);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Password);
+
+        var details = result.ErrorDetails!;
+        var tempToken = details.GetType().GetProperty("TempToken")!.GetValue(details) as string;
+        var actions = details.GetType().GetProperty("RequiredActions")!.GetValue(details) as IReadOnlyList<string>;
+
+        Assert.False(string.IsNullOrWhiteSpace(tempToken));
+        Assert.Equal(2, actions!.Count);
+        Assert.Contains(nameof(PendingUserActions.ChangePassword), actions);
+    }
+
+    /// <summary>
+    /// ★★ 阻断位不该被当成义务：那个人根本不该进来，给他一个改密表单是错的
+    /// （他还没有密码可改）。守卫在更早的地方就否决了。
+    /// </summary>
+    [Fact]
+    public async Task BlockingActions_AreRejectedByTheGuard_NotTurnedIntoAnObligationChallenge()
+    {
+        var user = OwingUser(PendingUserActions.InvitationPending);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Password);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_ACTIVATION_PENDING, result.ErrorCode);
+    }
+
+    /// <summary>
+    /// ★★★ 义务在 2FA <b>之后</b>才问 —— 这是安全属性不是体验偏好。
+    /// </summary>
+    /// <remarks>
+    /// 反过来的话，拿到泄露密码的人可以直接进入改密流程、<b>绕过两步验证</b>
+    /// 把密码改成自己的。所以开着 2FA 的账号即使欠着改密，也必须先看到 2FA 挑战。
+    /// </remarks>
+    [Fact]
+    public async Task TwoFactorChallenge_ComesBeforeTheObligationChallenge()
+    {
+        var user = OwingUser(PendingUserActions.ChangePassword);
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(true);
+        _twoFactorServiceMock
+            .Setup(x => x.GetEnabledTwoFactorTypesAsync(user))
+            .ReturnsAsync([TwoFactorType.Totp]);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Password);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_2FA_REQUIRED, result.ErrorCode);
+    }
+
+    /// <summary>
+    /// 对照组：什么都不欠时照常签发。没有它，一个「全都拒绝」的实现也能让上面几条通过。
+    /// </summary>
+    [Fact]
+    public async Task IssueTokenAsync_WithNothingOwed_IssuesNormally()
+    {
+        var user = OwingUser(PendingUserActions.None);
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(user)).ReturnsAsync(false);
+
+        var result = await _authService.IssueTokenAsync(user, LoginMethod.Password);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+    }
+
+    /// <summary>
+    /// ★★★ 账号不存在且快速注册关着时不发信，但回答与发了信逐字相同。
+    /// </summary>
+    /// <remarks>
+    /// 那枚码拿到 <c>CodeLoginAsync</c> 必然 404，所以发出去是纯支出：短信/邮件费用、
+    /// 发信人信誉，以及一封带着本部署品牌的验证码邮件落进一个与本站无关的邮箱。
+    /// 节流按地址分桶，换个地址就是新桶，挡不住这件事。
+    /// 回答必须与「真的发了」一字不差，否则这个匿名端点就成了账号枚举预言机 ——
+    /// 所以断言的是两次调用的 <c>Message</c> 相等，不是某个具体字符串。
+    /// </remarks>
+    [Fact]
+    public async Task SendCodeLoginCode_ForAnUnknownAddress_SendsNothingAndAnswersIdentically()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = true },
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = false },
+            Otp = new OtpOptions { EnableEmail = true },
+            Registration = new RegistrationOptions { EnableQuickRegisterEmail = false },
+        });
+
+        var known = new User { Id = Guid.NewGuid(), UserName = "known", Email = "known@example.com" };
+        _userManagerMock.Setup(x => x.FindByEmailAsync(known.Email)).ReturnsAsync(known);
+        _userManagerMock.Setup(x => x.FindByEmailAsync("nobody@example.com")).ReturnsAsync((User?)null);
+        _twoFactorServiceMock
+            .Setup(x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(Result<string>.Success("sent"));
+
+        var unknown = await _authService.SendCodeLoginCodeAsync(
+            new SendCodeLoginCodeDto { Email = "nobody@example.com", Type = TwoFactorType.Email });
+        var existing = await _authService.SendCodeLoginCodeAsync(
+            new SendCodeLoginCodeDto { Email = known.Email, Type = TwoFactorType.Email });
+
+        Assert.True(unknown.Succeeded);
+        Assert.True(existing.Succeeded);
+        Assert.Equal(existing.Message, unknown.Message);
+        Assert.Equal(existing.Code, unknown.Code);
+
+        // 只为存在的账号发过一次。
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync("nobody@example.com", It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(known.Email, TwoFactorType.Email, VerificationCodePurpose.CodeLogin, known.Id),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 对照组：快速注册开着时，未知地址就是一个待注册的新用户 —— 照发。
+    /// </summary>
+    [Fact]
+    public async Task SendCodeLoginCode_ForAnUnknownAddress_StillSendsWhenQuickRegistrationIsOn()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = true },
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = false },
+            Otp = new OtpOptions { EnableEmail = true },
+            Registration = new RegistrationOptions { EnableQuickRegisterEmail = true },
+        });
+
+        _userManagerMock.Setup(x => x.FindByEmailAsync("newcomer@example.com")).ReturnsAsync((User?)null);
+        _twoFactorServiceMock
+            .Setup(x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()))
+            .ReturnsAsync(Result<string>.Success("sent"));
+
+        var result = await _authService.SendCodeLoginCodeAsync(
+            new SendCodeLoginCodeDto { Email = "newcomer@example.com", Type = TwoFactorType.Email });
+
+        Assert.True(result.Succeeded);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync("newcomer@example.com", TwoFactorType.Email, VerificationCodePurpose.CodeLogin, null),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// ★ 关掉验证码登录的部署里，发码请求注定被拒 —— 那就不该先消费掉用户手里那张图形验证码。
+    /// </summary>
+    [Fact]
+    public async Task SendCodeLoginCode_WhenCodeLoginIsOff_RefusesBeforeSpendingTheCaptcha()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = new TnziSignInOptions { AllowCodeLogin = false },
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
+        });
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto
+        {
+            Email = "someone@example.com",
+            Type = TwoFactorType.Email,
+            CaptchaId = "captcha-id",
+            CaptchaCode = "1234",
+        });
+
+        Assert.False(result.Succeeded);
+        _captchaServiceMock.Verify(
+            x => x.VerifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★★★ 密码到期的义务必须活过 2FA 那一跳。
+    /// </summary>
+    /// <remarks>
+    /// 到期判定发生在密码校验里，而开着 2FA 的登录在那之后**提前返回挑战**；
+    /// 用户带着临时令牌回来时，服务端从库里取回的是一个全新实体。义务位只置在内存上，
+    /// 就随着第一个请求的实体一起消失了 —— 于是安全性最高的那批账号整体绕过密码到期策略，
+    /// 且没有任何症状。本测试刻意把「重新取回的用户」建成**另一个对象**，
+    /// 否则内存里的那次置位会顺着同一个引用溜进第二个请求，把测试变成假绿。
+    /// </remarks>
+    [Fact]
+    public async Task PasswordExpiry_OnATwoFactorAccount_IsStillOwedAfterTheChallenge()
+    {
+        var userId = Guid.NewGuid();
+        const string UserName = "expiring";
+        const string Password = "Password123!";
+        const string TempToken = "temp_token";
+
+        // 「库」：第一个请求写进去的义务位，第二个请求必须还读得到。
+        var storedActions = PendingUserActions.None;
+
+        User NewEntity() => new()
+        {
+            Id = userId,
+            UserName = UserName,
+            Email = "expiring@example.com",
+            EmailConfirmed = true,
+            PasswordHash = "hash",
+            PendingActions = storedActions,
+        };
+
+        var loginEntity = NewEntity();
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(false);
+        _captchaServiceMock.Setup(x => x.IsCaptchaRequiredAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.FindByNameAsync(UserName)).ReturnsAsync(loginEntity);
+        _signInManagerMock
+            .Setup(x => x.CheckPasswordSignInAsync(loginEntity, Password, It.IsAny<bool>()))
+            .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
+        _passwordPolicyServiceMock
+            .Setup(x => x.CheckPasswordExpirationAsync(userId))
+            .ReturnsAsync(new PasswordExpirationResult { IsExpired = true });
+        _userManagerMock.Setup(x => x.UpdateAsync(It.IsAny<User>()))
+            .ReturnsAsync((User u) =>
+            {
+                storedActions = u.PendingActions;
+                return IdentityResult.Success;
+            });
+
+        // 账号开着 2FA：密码这一步之后立刻挑战。
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(It.IsAny<User>())).ReturnsAsync(true);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(It.IsAny<User>()))
+            .ReturnsAsync([TwoFactorType.Totp]);
+        _userManagerMock.Setup(x => x.GetRolesAsync(It.IsAny<User>())).ReturnsAsync([]);
+
+        var login = await _authService.LoginAsync(new LoginDto { UserName = UserName, Password = Password });
+
+        Assert.False(login.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_2FA_REQUIRED, login.ErrorCode);
+
+        // 第二跳：临时令牌换令牌。用户是从库里**重新取回**的，不是上一段那个对象。
+        _authTokenServiceMock
+            .Setup(x => x.FindTokenByValueAsync(It.IsAny<string>(), It.IsAny<string>(), TempToken))
+            .ReturnsAsync(new AuthToken { Id = Guid.NewGuid(), UserId = userId, Value = TempToken });
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(NewEntity);
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeAsync(userId, It.IsAny<string>(), TwoFactorType.Totp, VerificationCodePurpose.TwoFactor))
+            .ReturnsAsync(Result.Success());
+        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>())).ReturnsAsync(true);
+
+        var verified = await _authService.VerifyTwoFactorAndLoginAsync(new VerifyTwoFactorDto
+        {
+            TempToken = TempToken,
+            Code = "123456",
+            Type = TwoFactorType.Totp,
+        });
+
+        Assert.False(verified.Succeeded);
+        Assert.Equal(403, verified.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_PENDING_ACTIONS_REQUIRED, verified.ErrorCode);
+
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    private User OwingUser(PendingUserActions actions)
+    {
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = "owing",
+            Email = "owing@example.com",
+            PendingActions = actions,
+        };
+
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync([]);
+        return user;
+    }
+
+    #endregion
 }

@@ -101,6 +101,16 @@ public interface ISubscriptionService
     Task<Result<int>> SendRenewalRemindersAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 结算已到生效日期的待生效计划变更（后台任务调用）。
+    /// </summary>
+    /// <remarks>
+    /// 覆盖的是**不走续费路径**的订阅（关掉自动续费、暂停中、逾期欠费）——
+    /// 走续费路径的那些由 <see cref="RenewExpiredSubscriptionsAsync"/> 在扣款**之前**逐条结算，
+    /// 因为降级必须先于按新价扣款生效，而扫描之间的先后不由本接口保证。
+    /// </remarks>
+    Task<Result<int>> ApplyDuePlanChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 支付完成回流：根据计费用途推进订阅状态机（激活/续费/试用转正/升级补差生效）。由支付完成事件处理器调用。
     /// </summary>
     Task<Result> ApplyPaymentCompletedAsync(SubscriptionPaymentContext context, CancellationToken cancellationToken = default);

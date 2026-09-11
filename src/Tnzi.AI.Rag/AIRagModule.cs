@@ -75,8 +75,31 @@ public class AIRagModule : TnziApplicationModule
         services.AddSingleton<IFileExtractorService, TableContentExtractor>();
         services.AddSingleton<IFileExtractorService, ImageContentExtractor>();
 
-        // 切块策略（默认使用固定大小）
-        services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();
+        // 切块策略。★ 三个非默认策略（MarkdownHeader / Hierarchical / Semantic）此前
+        // 一处都没有注册、也没有任何引用 —— 代码在，但除非消费方自己 new 一个注册进去，
+        // 否则永远走不到，而文档把它们写成"可选"。配置项 AI:Rag:ChunkingStrategy 让它们真的可选。
+        var chunkingStrategy = context.Configuration
+            .GetSection("AI:Rag")
+            .GetValue<string>("ChunkingStrategy") ?? "FixedSize";
+
+        switch (chunkingStrategy)
+        {
+            case "MarkdownHeader":
+                services.TryAddSingleton<IChunkingStrategy, MarkdownHeaderChunkingStrategy>();
+                break;
+            case "Hierarchical":
+                services.TryAddSingleton<IChunkingStrategy, HierarchicalChunkingStrategy>();
+                break;
+            case "Semantic":
+                // Semantic 是 IAsyncChunkingStrategy（要调嵌入服务），DocumentIngestionService
+                // 在它存在时优先用它；同步契约仍需一个实现作为回退。
+                services.TryAddSingleton<IAsyncChunkingStrategy, SemanticChunkingStrategy>();
+                services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();
+                break;
+            default:
+                services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();
+                break;
+        }
 
         // 重排序器（TryAdd: 用户可替换为商业 reranker，如 Cohere/Jina/bge-reranker）
         services.TryAddScoped<IReranker, NoOpReranker>();
@@ -105,6 +128,10 @@ public class AIRagModule : TnziApplicationModule
         services.AddScoped<IParentDocumentRetriever, ParentDocumentRetriever>();
 
         // RAG 检索器 + 查询引擎 + 聊天引擎（Query/Chat split）
+        // 知识库级授权（用户直连端点）。TryAdd：消费方可在更早 Configure 的模块里
+        // 注册自己的可见性模型来替换默认实现。
+        services.TryAddScoped<IRagAccessAuthorizer, DefaultRagAccessAuthorizer>();
+
         services.AddScoped<IRagRetriever, RagRetriever>();
         services.AddScoped<IRagQueryEngine, RagQueryEngine>();
         services.AddScoped<IRagChatEngine, RagChatEngine>();

@@ -21,7 +21,7 @@ defineProps<{
 
 const statusMap = {
   connected: { icon: 'lucide:plug', cls: 't-mcp-status--connected' },
-  disconnected: { icon: 'lucide:plug-off', cls: 't-mcp-status--disconnected' },
+  disconnected: { icon: 'lucide:unplug', cls: 't-mcp-status--disconnected' },
   error: { icon: 'lucide:alert-circle', cls: 't-mcp-status--error' },
 } as const;
 </script>

@@ -11,6 +11,7 @@ export * from './object';
 export * from './array';
 export * from './url';
 export * from './timing';
+export * from './flags';
 export * from './device-parser';
 export * from './download';
 export * from './print';

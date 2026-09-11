@@ -216,7 +216,19 @@ function handleRefresh(): void {
 </template>
 
 <style scoped>
-.t-widget-card {
+/* Keyed to `t-surface-card` - the marker the template puts on the card branch
+   only - rather than to `.t-widget-card`, which BOTH branches carry. A bare
+   widget is not a card surface, so it never matches here and has no chrome to
+   undo.
+
+   What this replaces was a subtractive `.t-widget-card--bare` reset, and it
+   lost twice over: at (0,2,0) once scoped, it was outranked by
+   `.t-widget-card:hover` three lines above it, and by ui-admin's
+   `:root .t-admin-content .t-widget-card` at (0,3,0). So `bare` - documented
+   as "render the body bare" - painted an opaque panel and grew a card shadow
+   on hover. Subtracting chrome loses that race to any rule that cares to
+   outrank it; not adding it in the first place cannot be outranked. */
+.t-widget-card.t-surface-card {
   background: var(--tnzi-surface-card-bg);
   border-radius: var(--tnzi-admin-radius-md, 8px);
   /* Card tier - the same pair every container on the page canvas takes.
@@ -225,13 +237,8 @@ function handleRefresh(): void {
   box-shadow: var(--tnzi-surface-card-shadow);
   transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
 }
-.t-widget-card:hover {
+.t-widget-card.t-surface-card:hover {
   box-shadow: var(--tnzi-surface-card-shadow-hover);
-}
-.t-widget-card--bare {
-  background: transparent;
-  border: none;
-  box-shadow: none;
 }
 .t-widget-card__header {
   display: flex;

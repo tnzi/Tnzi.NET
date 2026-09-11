@@ -27,7 +27,7 @@ public class AISettingDefinitionProviderTests
         Assert.Contains(g.Fields, f => f.Key == "AI:Utility:Model");
         Assert.Contains(g.Fields, f => f.Key == "AI:Utility:MaxTokens");
         Assert.Contains(g.Fields, f => f.Key == "AI:Utility:Temperature");
-        Assert.Equal("100", g.Fields.Single(f => f.Key == "AI:Utility:MaxTokens").DefaultValueAccessor!());
+        Assert.Equal("4096", g.Fields.Single(f => f.Key == "AI:Utility:MaxTokens").DefaultValueAccessor!());
         Assert.Equal("0.3", g.Fields.Single(f => f.Key == "AI:Utility:Temperature").DefaultValueAccessor!());
     }
 

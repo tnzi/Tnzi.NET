@@ -293,6 +293,24 @@ Omit `workbench` to fall back to the bundled
 `defaultWorkbenchWidgets()` (HeaderBanner + KPIs + business stats +
 activity timeline + tips, 12 tiles total).
 
+### Host chrome actions
+
+A high-frequency one-click tool that does not deserve a top-level menu entry can sit next to the built-in Settings gear:
+
+```ts
+defineAdminApp({
+  shell: {
+    actions: [{ key: 'quick-note', icon: 'mdi:note-plus-outline', label: 'Quick note', onClick: () => openQuickNote() }],
+  },
+})
+```
+
+Actions render wherever the Settings entry renders (sidebar footer in the sidebar layouts, start-menu footer in the desktop layout), so switching layout mode never makes them disappear. `show` / `active` are optional predicates.
+
+### Desktop layout mode
+
+The theme drawer offers a fifth layout, `desktop`: an icon grid (one tile per top-level module), floating windows with an in-window module nav, and a taskbar. Nothing to configure for the default experience. Per-route window sizing goes on the route: `meta.window = { preset: 'compact' | 'medium' | 'wide' | 'full' }` or `{ width, height }`; non-route panels (the built-in chat window is one) register through `registerDesktopPanel(key, component, { color })` and get the same taskbar / z-order / minimize handling as every other window. Below 768px the mode falls back to `vertical`.
+
 ## Subpath imports
 
 | Subpath | Exports |
@@ -304,6 +322,7 @@ activity timeline + tips, 12 tiles total).
 | `@tnzi/ui-admin/router` | `defaultAdminRoutes` (filtered/overridable via `defineAdminApp`) |
 | `@tnzi/ui-admin/pages` | 预置页面（`defaultAdminRoutes` 当前挂 102 个懒加载路由组件；以 `src/router/routes.ts` 为准，不在本表维护计数） |
 | `@tnzi/ui-admin/widgets` | `WidgetDef`, `TWorkbenchLayout`, `TWidgetCard`, `useWidget`, `useWidgetData`, 14 built-in widgets, `defaultWorkbenchWidgets()` |
+| `@tnzi/ui-admin/icons` | 框架会渲染的**全部** Iconify 名字 + `bundleTnziIcons` / `selectTnziIcons`（生成；含后端配置中心的分组图标，离线打包图标用） |
 
 ## Preset pages
 

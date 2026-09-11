@@ -1,4 +1,4 @@
-namespace Tnzi.Finance.Services;
+﻿namespace Tnzi.Finance.Services;
 
 /// <summary>
 /// 科目表服务
@@ -200,7 +200,7 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
     }
 
     public async Task<Result<List<AccountBalanceDto>>> GetBalancesAsync(
-        IEnumerable<Guid> accountIds, DateTime asOf, CancellationToken cancellationToken = default)
+        IEnumerable<Guid> accountIds, DateTime? asOf = null, CancellationToken cancellationToken = default)
     {
         Check.NotNull(accountIds);
 
@@ -212,7 +212,7 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
 
         // as-of 边界与报表一致（PostingDate < 次日）——未来日期的过账不进当日余额，
         // 科目表现金余额与同日资产负债表现金恒等
-        var asOfDate = asOf.ToUtcDate();
+        var asOfDate = (asOf ?? TimeProvider.GetUtcNow().UtcDateTime).ToUtcDate();
         var sums = await _balanceReader.SumCumulativeByAccountsAsync(ids, asOfDate.AddDays(1), cancellationToken);
 
         var balances = ids.Select(accountId =>

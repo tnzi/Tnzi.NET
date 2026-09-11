@@ -34,6 +34,28 @@ public class DefaultSigningController : ApiControllerBase
     public virtual async Task<ApiResult<SigningPacketDto>> Get(string token, CancellationToken cancellationToken)
         => (await Requests.GetByTokenAsync(token, cancellationToken)).ToApiResult();
 
+    /// <summary>
+    /// 取回正在签（或已签成）的那份 PDF。默认内联（给签署页的预览框），
+    /// <c>?download=true</c> 时按附件下载。
+    /// </summary>
+    /// <remarks>
+    /// 收件人凭令牌而不是凭 <c>files/{id}/download</c> 取字节：那条路对匿名一律 404，
+    /// 而令牌才是这个人的全部身份。判定仍在服务层（令牌校验写请求级授予），
+    /// 本方法只负责把结果按文件送出去。
+    /// </remarks>
+    [HttpGet("{token}/document")]
+    public virtual async Task<IActionResult> GetDocument(
+        string token, [FromQuery] bool download = false, CancellationToken cancellationToken = default)
+    {
+        var result = await Requests.GetDocumentByTokenAsync(token, cancellationToken);
+        if (!result.Succeeded || result.Data is null)
+            return new NotFoundResult();
+
+        return download
+            ? File(result.Data.Content, result.Data.ContentType, result.Data.FileName)
+            : File(result.Data.Content, result.Data.ContentType);
+    }
+
     /// <summary>提交本人负责的字段与签名。</summary>
     [HttpPost("{token}")]
     public virtual async Task<ApiResult<SigningPacketDto>> Submit(

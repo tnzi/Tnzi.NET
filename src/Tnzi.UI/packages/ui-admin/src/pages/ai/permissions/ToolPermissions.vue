@@ -99,6 +99,9 @@
               <NFormItem :label="t('form.shellCommand')">
                 <NInput v-model:value="evalCtx.shellCommand" :placeholder="t('form.optional')" />
               </NFormItem>
+              <NFormItem :label="t('form.evalUserId')">
+                <NInput v-model:value="evalCtx.userId" :placeholder="t('form.evalUserIdPlaceholder')" />
+              </NFormItem>
             </div>
             <div class="t-perm-page__switches">
               <label class="t-perm-page__switch">
@@ -168,7 +171,7 @@
 
         <!-- Empty state before the first evaluation runs. -->
         <div v-else class="t-perm-page__eval-placeholder">
-          <TSvgIcon icon="mdi:shield-search-outline" :size="40" />
+          <TSvgIcon icon="mdi:shield-search" :size="40" />
           <span>{{ t('eval.placeholder') }}</span>
         </div>
       </div>
@@ -345,6 +348,7 @@ const evalCtx = reactive<PermissionEvaluateRequestDto>({
   toolGroup: '',
   serverName: '',
   shellCommand: '',
+  userId: '',
   isSubAgent: false,
   isDestructive: false,
 })
@@ -358,6 +362,7 @@ async function runEvaluate(): Promise<void> {
       toolGroup: evalCtx.toolGroup || null,
       serverName: evalCtx.serverName || null,
       shellCommand: evalCtx.shellCommand || null,
+      userId: evalCtx.userId || null,
       isSubAgent: evalCtx.isSubAgent ?? false,
       isDestructive: evalCtx.isDestructive ?? false,
     }

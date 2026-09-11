@@ -118,6 +118,21 @@ public class SignalROptionsValidator : OptionsValidatorBase<SignalROptions>
             {
                 errors.Add("SignalR.RateLimit.BanDuration must be greater than zero when Enabled is true.");
             }
+
+            // 匿名分区的上限。配成 0 或负数会让每一条匿名连接都被拒 —— 那与
+            // AnonymousPolicy=Reject 是同一件事，但走的是"看起来像个数值调优"的路。
+            if (options.AnonymousPolicy == AnonymousHubRateLimitPolicy.Limit
+                && options.MaxConnectionsPerAnonymousPartition <= 0)
+            {
+                errors.Add("SignalR.RateLimit.MaxConnectionsPerAnonymousPartition must be greater than 0 when AnonymousPolicy is Limit. Use AnonymousPolicy=Reject to refuse anonymous connections outright.");
+            }
+
+            // 计数存活时间。<= 0 会让计数立刻过期，匿名连接数上限静默失效。
+            if (options.AnonymousPolicy == AnonymousHubRateLimitPolicy.Limit
+                && options.AnonymousConnectionCountTtl <= TimeSpan.Zero)
+            {
+                errors.Add("SignalR.RateLimit.AnonymousConnectionCountTtl must be greater than zero when AnonymousPolicy is Limit.");
+            }
         }
     }
 }

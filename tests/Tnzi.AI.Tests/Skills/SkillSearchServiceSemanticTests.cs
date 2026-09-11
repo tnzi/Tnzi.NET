@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Caching.Memory;
+
 
 namespace Tnzi.AI.Tests.Skills;
 
@@ -120,6 +122,53 @@ public class SkillSearchServiceSemanticTests
     // -------------------------------------------------------------------------
     // Tests
     // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchAsync_RepeatedQuery_GeneratesQueryEmbeddingOnce()
+    {
+        // 搜索端点是调用方能自由重复的那一半：关键词命中不足时，每来一次请求就对查询串
+        // 现算一次嵌入（计费调用）。候选嵌入一直有缓存，唯独查询串没有。
+        var embeddingMock = CreateHighSimilarityEmbeddingService();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new SkillSearchService(
+            logger: NullLogger<SkillSearchService>.Instance,
+            embeddingService: embeddingMock.Object,
+            embeddingCache: cache);
+
+        var candidates = BuildSemanticOnlyCandidates();
+
+        await service.SearchAsync(candidates, "xyz", maxResults: 5);
+        await service.SearchAsync(candidates, "xyz", maxResults: 5);
+        await service.SearchAsync(candidates, "xyz", maxResults: 5);
+
+        embeddingMock.Verify(
+            e => e.GenerateEmbeddingAsync("xyz", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAsync_DifferentQueries_EachGetsItsOwnEmbedding()
+    {
+        // 缓存按查询串摘要分键 —— 两个不同的查询绝不能共用一个向量。
+        var embeddingMock = CreateHighSimilarityEmbeddingService();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new SkillSearchService(
+            logger: NullLogger<SkillSearchService>.Instance,
+            embeddingService: embeddingMock.Object,
+            embeddingCache: cache);
+
+        var candidates = BuildSemanticOnlyCandidates();
+
+        await service.SearchAsync(candidates, "xyz", maxResults: 5);
+        await service.SearchAsync(candidates, "uvw", maxResults: 5);
+
+        embeddingMock.Verify(
+            e => e.GenerateEmbeddingAsync("xyz", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        embeddingMock.Verify(
+            e => e.GenerateEmbeddingAsync("uvw", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
 
     [Fact]
     public async Task SearchAsync_KeywordSufficient_NoSemanticFallback()

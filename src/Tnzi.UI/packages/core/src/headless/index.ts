@@ -39,3 +39,6 @@ export type { DataQueryStatus, DataQueryOptions } from './data-query';
 // 数据查询的组合式封装（生命周期 + 自动刷新）
 export { useDataQuery } from './useDataQuery';
 export type { UseDataQueryOptions, UseDataQueryReturn } from './useDataQuery';
+
+// 随作用域自动取消的防抖（关键词框、自动保存）
+export { useDebounced, DEFAULT_DEBOUNCE_MS } from './useDebounced';

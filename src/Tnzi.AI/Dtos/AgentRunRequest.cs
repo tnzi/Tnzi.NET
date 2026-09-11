@@ -55,6 +55,16 @@ public class AgentRunRequest
     /// <summary>根 Run ID（整条调用链共享）</summary>
     public Guid? RootRunId { get; init; }
 
+    /// <summary>
+    /// 子 Agent 名称（起子 Agent 时的类型名）。
+    /// </summary>
+    /// <remarks>
+    /// 后台起的子 Agent 在新作用域、新执行流里跑，父级的属性包不会流过去，
+    /// 名字只能随请求一起传。<c>AgentRuntime</c> 会连同 <see cref="ParentRunId"/> 一起
+    /// 翻译成执行上下文里的 <c>ContextPropertyKeys.IsSubAgent</c> / <c>SubAgentName</c>。
+    /// </remarks>
+    public string? SubAgentName { get; init; }
+
     /// <summary>当前用户 ID（用于配额检查等）</summary>
     public Guid? UserId { get; init; }
 

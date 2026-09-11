@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Tests;
+﻿namespace Tnzi.Identity.Tests;
 
 public class RoleServiceTests
 {
@@ -754,15 +754,24 @@ public class RoleServiceTests
         _roleManagerMock.Setup(x => x.FindByIdAsync(roleId.ToString()))
             .ReturnsAsync(role);
 
+        // ★ 含一个已软删的成员：计数经 User 表数，软删的幽灵行不该被算进去
+        //   （UserRole 是纯关联表，没有软删标记，直接数它会让「列表 2 人、计数 3 人」）。
+        var alive1 = new User { Id = Guid.NewGuid(), UserName = "a1" };
+        var alive2 = new User { Id = Guid.NewGuid(), UserName = "a2" };
+        var deleted = new User { Id = Guid.NewGuid(), UserName = "gone", IsDeleted = true };
+
         var userRoles = new List<UserRole>
         {
-            new UserRole { UserId = Guid.NewGuid(), RoleId = roleId },
-            new UserRole { UserId = Guid.NewGuid(), RoleId = roleId },
+            new UserRole { UserId = alive1.Id, RoleId = roleId },
+            new UserRole { UserId = alive2.Id, RoleId = roleId },
+            new UserRole { UserId = deleted.Id, RoleId = roleId },
             new UserRole { UserId = Guid.NewGuid(), RoleId = Guid.NewGuid() } // 其他角色
         };
 
         var userRolesMock = userRoles.BuildMockDbSet();
         _dbContextMock.Setup(x => x.Set<UserRole>()).Returns(userRolesMock.Object);
+        var usersMock = new List<User> { alive1, alive2, deleted }.BuildMockDbSet();
+        _dbContextMock.Setup(x => x.Set<User>()).Returns(usersMock.Object);
 
         // Act
         var result = await _roleService.GetDetailAsync(roleId);
@@ -806,15 +815,23 @@ public class RoleServiceTests
         _roleManagerMock.Setup(x => x.FindByIdAsync(roleId.ToString()))
             .ReturnsAsync(role);
 
+        // ★ 含一个已软删的成员，钉住「软删用户不计入角色人数」这条修复。
+        var alive1 = new User { Id = Guid.NewGuid(), UserName = "a1" };
+        var alive2 = new User { Id = Guid.NewGuid(), UserName = "a2" };
+        var deleted = new User { Id = Guid.NewGuid(), UserName = "gone", IsDeleted = true };
+
         var userRoles = new List<UserRole>
         {
-            new UserRole { UserId = Guid.NewGuid(), RoleId = roleId },
-            new UserRole { UserId = Guid.NewGuid(), RoleId = roleId },
+            new UserRole { UserId = alive1.Id, RoleId = roleId },
+            new UserRole { UserId = alive2.Id, RoleId = roleId },
+            new UserRole { UserId = deleted.Id, RoleId = roleId },
             new UserRole { UserId = Guid.NewGuid(), RoleId = Guid.NewGuid() }
         };
 
         var userRolesMock = userRoles.BuildMockDbSet();
         _dbContextMock.Setup(x => x.Set<UserRole>()).Returns(userRolesMock.Object);
+        var usersMock = new List<User> { alive1, alive2, deleted }.BuildMockDbSet();
+        _dbContextMock.Setup(x => x.Set<User>()).Returns(usersMock.Object);
 
         // Act
         var result = await _roleService.GetUserCountAsync(roleId);

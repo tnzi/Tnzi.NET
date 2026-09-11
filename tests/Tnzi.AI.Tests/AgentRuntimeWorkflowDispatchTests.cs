@@ -510,7 +510,7 @@ public class AgentRuntimeWorkflowDispatchTests
         var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
 
         var wfService = workflowService ?? Mock.Of<IWorkflowService>();
-        var workflowDelegator = new WorkflowDelegator(wfService, runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+        var workflowDelegator = new WorkflowDelegator(wfService, runStore.Object, runTracker);
 
         return new AgentRuntime(
             resolver ?? Mock.Of<IAgentResolver>(),

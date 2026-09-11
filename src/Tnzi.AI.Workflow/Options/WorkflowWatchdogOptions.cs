@@ -33,6 +33,32 @@ public class WorkflowWatchdogOptions
     public TimeSpan WaitingTimeout { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
+    /// 是否由本模块自带的后台循环驱动扫描（默认 true）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>此前没有任何调度者</b>：<c>ScanAsync</c> 在全仓零调用方，模块只把
+    /// <c>WorkflowWatchdogService</c> 注册成 Scoped 服务，文档把"由宿主接调度"写成一个取舍，
+    /// 却既没有接线示例也没有启动提示。结果是崩溃中断的执行实例永远停在 <c>Running</c>，
+    /// <c>AwaitingApproval</c> 永不过期 —— 而 <c>Enabled</c> 默认 true，看上去它一直在工作。
+    /// </para>
+    /// <para>
+    /// 要改用 Hangfire 之类的外部调度器时把这个关掉（而不是关 <see cref="Enabled"/>）：
+    /// <see cref="Enabled"/>=false 是"根本不做超时检测"，两件事不能共用一个开关。
+    /// </para>
+    /// <para>
+    /// 刻意不是 <c>[RuntimeSetting]</c>：它决定的是一个后台服务在启动时要不要跑，
+    /// 放进设置中心会让人以为改完立刻生效。
+    /// </para>
+    /// </remarks>
+    public bool UseBuiltInScheduler { get; set; } = true;
+
+    /// <summary>
+    /// 自带后台循环的扫描间隔（默认 5 分钟）。<see cref="UseBuiltInScheduler"/>=false 时无效。
+    /// </summary>
+    public TimeSpan ScanInterval { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
     /// 每次扫描最大处理数量（防止单次扫描积压过多）。默认 50。
     /// </summary>
     [RuntimeSetting(Label = "Max Batch Size", I18n = "admin.modules.system.settings.fields.workflowWatchdogMaxBatchSize",

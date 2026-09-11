@@ -15,7 +15,7 @@ public class ConversationMemberConfiguration : EntityTypeConfigurationBase<Conve
             .HasForeignKey(m => m.ConversationId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.Property(m => m.Remark).HasMaxLength(100);
-        builder.Property(m => m.Alias).HasMaxLength(100);
+        builder.Property(m => m.Remark).HasMaxLength(ChatFieldLimits.MemberNote);
+        builder.Property(m => m.Alias).HasMaxLength(ChatFieldLimits.MemberNote);
     }
 }

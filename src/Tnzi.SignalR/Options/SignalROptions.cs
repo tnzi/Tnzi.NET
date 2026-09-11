@@ -141,4 +141,53 @@ public class RateLimitOptions
     /// 违规封禁时长
     /// </summary>
     public TimeSpan BanDuration { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// 匿名（拿不到用户 id 的）连接如何处理，默认 <see cref="AnonymousHubRateLimitPolicy.Limit"/>
+    /// </summary>
+    public AnonymousHubRateLimitPolicy AnonymousPolicy { get; set; } = AnonymousHubRateLimitPolicy.Limit;
+
+    /// <summary>
+    /// 每个匿名分区（默认按客户端 IP）的最大连接数。
+    ///
+    /// 默认值比 <see cref="MaxConnectionsPerUser"/> 宽得多：一个 IP 背后可能是整个
+    /// NAT 网关或校园出口，按单用户的额度卡会误伤一整批正常客户端。
+    /// </summary>
+    public int MaxConnectionsPerAnonymousPartition { get; set; } = 20;
+
+    /// <summary>
+    /// 匿名连接计数的存活时间，默认 2 小时。
+    ///
+    /// 计数靠连接建立时 +1、断开时 -1 维护。进程非正常退出时那些 -1 永远不会发生，
+    /// 没有 TTL 的话该分区的计数会永久偏高，最终把一个正常的 IP 永久锁在门外。
+    /// TTL 让它自愈，代价是超过这个时长的长连接不再被计入 —— 那是**放宽**方向的
+    /// 失效，比永久误封可接受。
+    /// </summary>
+    public TimeSpan AnonymousConnectionCountTtl { get; set; } = TimeSpan.FromHours(2);
+}
+
+/// <summary>
+/// 匿名 Hub 连接的限流处置方式。
+///
+/// ★ 存在的理由：限流的分区键此前只有用户 id，取不到就整条放行 —— 匿名 Hub
+/// （<c>[AllowAnonymous]</c>、或认证失败但 Hub 本身不要求认证）既不计连接数、
+/// 不计消息速率，也不查封禁，而且没有任何告警或配置项能看出这一点。
+/// </summary>
+public enum AnonymousHubRateLimitPolicy
+{
+    /// <summary>
+    /// 按分区键（客户端 IP，取不到则退回连接 id）参与限流。默认值。
+    /// </summary>
+    Limit = 0,
+
+    /// <summary>
+    /// 直接拒绝匿名连接。适合所有 Hub 都要求认证的部署。
+    /// </summary>
+    Reject = 1,
+
+    /// <summary>
+    /// 匿名连接完全不受限流约束（本修复之前的行为）。
+    /// 只有在确知匿名 Hub 由别的机制兜住时才用。
+    /// </summary>
+    Allow = 2,
 }

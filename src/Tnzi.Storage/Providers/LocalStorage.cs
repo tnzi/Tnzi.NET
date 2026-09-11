@@ -86,9 +86,9 @@ public class LocalStorage : IFileStorage
         Check.NotNullOrEmpty(fileName);
         Check.NotNull(stream);
 
-        // 存储键只接受叶子文件名。调用方传入的名字可能来自客户端（分片上传会话的 FileName、
-        // 压缩包名、压缩包内条目名），带目录分隔符或盘符时 Path.Combine 会写到 base 目录之外，
-        // 因此统一取叶子名后再拼接。
+        // 存储键只接受叶子文件名。键本应由服务层经 StorageKeyHelper 生成（顺序 GUID + 扩展名），
+        // 但 provider 可由消费方注册、也就管不到别人的调用方：带目录分隔符或盘符的键会让
+        // Path.Combine 写到 base 目录之外，因此这里兜底统一取叶子名后再拼接。
         var safeFileName = Path.GetFileName(fileName);
         if (string.IsNullOrEmpty(safeFileName))
         {
@@ -266,7 +266,7 @@ public class LocalStorage : IFileStorage
         rangeFileStream.Seek(start, SeekOrigin.Begin);
 
         // 返回范围流（需要包装以限制读取长度）
-        var rangeStream = new RangeStream(rangeFileStream, start, end - start + 1);
+        var rangeStream = new RangeStream(rangeFileStream, end - start + 1);
         return Task.FromResult<(Stream, long, long, long)>((rangeStream, start, end, totalLength));
     }
 
@@ -327,14 +327,12 @@ public class LocalStorage : IFileStorage
 internal class RangeStream : Stream
 {
     private readonly Stream _baseStream;
-    private readonly long _start;
     private readonly long _length;
     private long _position;
 
-    public RangeStream(Stream baseStream, long start, long length)
+    public RangeStream(Stream baseStream, long length)
     {
         _baseStream = Check.NotNull(baseStream);
-        _start = start;
         _length = length;
         _position = 0;
     }

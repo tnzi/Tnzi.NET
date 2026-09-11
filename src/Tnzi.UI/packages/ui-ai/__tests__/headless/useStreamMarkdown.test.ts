@@ -42,6 +42,17 @@ describe('useStreamMarkdown', () => {
     expect(html.value).toContain('const x = 1;');
   });
 
+  it('escapes the fence language before it reaches the class attribute', () => {
+    const { html, append, finish } = useStreamMarkdown();
+    // Author-controlled info string with no whitespace, so `split(/\s+/)[0]`
+    // keeps the whole payload. The shiki path only sees allow-listed languages;
+    // the fallback path used to interpolate this raw into `class="language-…"`.
+    append('```js"onmouseover="alert(1)\nx\n```');
+    finish();
+    expect(html.value).not.toContain('onmouseover="alert(1)"');
+    expect(html.value).toContain('language-js&quot;onmouseover=&quot;alert(1)');
+  });
+
   it('should render inline code', () => {
     const { html, append, flush } = useStreamMarkdown();
     append('Use `console.log()` to debug');

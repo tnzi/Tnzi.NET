@@ -52,6 +52,20 @@ public class GatewayOptions
         Description = "Minimum interval between streamed reply updates pushed to IM platforms, in milliseconds. Rapid token deltas are coalesced to avoid flooding platform edit/rate limits. The first token and the final message are always delivered immediately. Takes effect on the next streamed reply.")]
     public int StreamingThrottleMs { get; set; } = 350;
 
+    /// <summary>
+    /// 单条入站 WebSocket 消息的重组上限（字节），默认 256 KiB。
+    /// <para>
+    /// 分片帧按 <c>EndOfMessage=false</c> 续传，服务端要把它们拼回一条消息才能解析 JSON。
+    /// 没有上限时，一条连接一直发续帧就能把服务端内存吃光。超限直接以
+    /// <c>MessageTooBig</c> 关闭连接（不是丢弃这一条：续帧流已经无法对齐到下一条消息边界）。
+    /// </para>
+    /// <para>
+    /// 刻意<b>不是</b> <c>[RuntimeSetting]</c>：它在连接接受时读取一次并随连接固定，
+    /// 热改对既有连接无效，放进设置中心会让人以为改完立刻生效。
+    /// </para>
+    /// </summary>
+    public int MaxInboundMessageBytes { get; set; } = 256 * 1024;
+
     /// <summary>JSON 配置中的绑定规则（数据库规则的补充）</summary>
     public List<SessionBindingRuleConfig>? BindingRules { get; set; }
 }

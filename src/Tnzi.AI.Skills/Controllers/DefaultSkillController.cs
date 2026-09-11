@@ -3,6 +3,14 @@ namespace Tnzi.AI.Skills.Controllers;
 /// <summary>
 /// 用户端技能控制器 - 提供技能浏览、激活、个人技能 CRUD 功能。
 /// </summary>
+/// <remarks>
+/// ★ <b>整个控制器都要求认证，读端点也不例外。</b> 三个读端点（列表 / 详情 / 搜索）
+/// 曾带 <c>[AllowAnonymous]</c>，意图是"锁写放读"，但读回来的是技能的<b>完整提示词正文</b>
+/// （<c>SkillDetailDto.Content</c>），而搜索端点在关键词命中不足时会对查询串<b>现算一次嵌入</b>
+/// （计费调用），既不过配额也不过预算。于是任何人无需登录就能读走全部 System/Tenant 技能正文，
+/// 并用一个 GET 驱动嵌入账单。要开放公共技能目录的宿主应当自己覆写本控制器并投影出裁剪过的
+/// 只读视图，而不是把框架默认放开。
+/// </remarks>
 [DefaultController]
 [Route("skills")]
 [ApiExplorerSettings(GroupName = "user")]
@@ -19,7 +27,6 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 获取当前用户/租户可用的所有技能
     /// </summary>
-    [AllowAnonymous]
     [HttpGet]
     public virtual async Task<ApiResult<List<SkillSummaryDto>>> GetAvailable()
     {
@@ -30,7 +37,6 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 按 slug 获取技能详情
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("{slug}")]
     public virtual async Task<ApiResult<SkillDetailDto>> GetBySlug(string slug)
     {
@@ -41,7 +47,6 @@ public class DefaultSkillController : ApiControllerBase
     /// <summary>
     /// 搜索技能
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("search")]
     public virtual async Task<ApiResult<List<SkillSummaryDto>>> Search([FromQuery] string query, [FromQuery][Range(1, 100)] int maxResults = 10)
     {

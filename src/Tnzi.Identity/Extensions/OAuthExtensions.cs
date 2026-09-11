@@ -55,6 +55,12 @@ public static class OAuthExtensions
                 options.CallbackPath = BuildCallbackPath("google");
                 options.SaveTokens = true;
                 options.UsePkce = true;
+
+                // ★★★ Google 的 userinfo 里带 email_verified，但处理器**默认不把它映射成 claim**。
+                // 没有这一行，IOAuthEmailVerificationPolicy 读不到它，于是所有 Google 登录
+                // 都会被判成「邮箱未验证」而拒绝自动关联 —— 一条静默的功能退化。
+                options.ClaimActions.MapJsonKey("email_verified", "email_verified", ClaimValueTypes.Boolean);
+
                 ConfigureCorrelationCookie(options.CorrelationCookie, "Google");
 
                 // 关键：设置 SignInScheme 为 Identity.External

@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Services;
+﻿namespace Tnzi.Payment.Services;
 
 /// <summary>
 /// 支付服务（partial）：渠道回调处理与支付状态推进。
@@ -89,11 +89,19 @@ public partial class PaymentService
         switch (callback.Status)
         {
             case PaymentStatus.Succeeded:
-                applied = await ApplySucceededAsync(payment, callback.PaidAmount, callback.ExternalTradeNo, channelResponse, cancellationToken);
+                applied = await ApplySucceededAsync(
+                    payment, callback.PaidAmount, callback.ExternalTradeNo, channelResponse, cancellationToken,
+                    paidCurrency: callback.Currency);
                 break;
 
+            // 渠道取消（Stripe payment_intent.canceled / PayPal VOIDED）与失败一样是终态：
+            // 钱没有收到，券要还回去，订阅状态机要拿到失败信号。此前它落在 default 分支里
+            // 被当成中间态忽略 —— 支付永远停在 Pending，占着的券要等过期扫描才归还，
+            // 而扫描按 ExpireTime 走，那可能是几天之后。
             case PaymentStatus.Failed:
-                applied = await ApplyFailedAsync(payment, callback.FailReason ?? "Unknown", channelResponse, cancellationToken);
+            case PaymentStatus.Cancelled:
+                applied = await ApplyFailedAsync(
+                    payment, callback.FailReason ?? "Unknown", channelResponse, cancellationToken, callback.Status);
                 break;
 
             default:
@@ -119,8 +127,20 @@ public partial class PaymentService
         string? externalTradeNo,
         string? channelResponse,
         CancellationToken cancellationToken,
-        DateTime? paidTime = null)
+        DateTime? paidTime = null,
+        string? paidCurrency = null)
     {
+        // 币种一致性校验：只比数值不比币种，就是把「收到 100 JPY」判成「收到 100 USD」——
+        // 差两个数量级，而这笔支付会被记成完全成功。渠道没报币种时跳过（自定义渠道 / 早期实现）：
+        // 一律拒绝会让经这类渠道的每一笔付款都卡住，代价远大于它挡下的那一类错配。
+        if (!string.IsNullOrWhiteSpace(paidCurrency)
+            && !string.Equals(paidCurrency, payment.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            Logger.LogWarning("Payment currency mismatch. TradeNo: {TradeNo}, Expected: {Expected}, Reported: {Reported}",
+                payment.TradeNo, payment.Currency, paidCurrency);
+            return Fail(ErrorCodes.PaymentAmountMismatch, 400);
+        }
+
         // 金额一致性校验：到账金额需覆盖应付金额（防止少付/篡改）。
         // 容差一个最小货币单位，避免渠道侧取整造成的误判。
         var tolerance = CurrencyInfo.FromMinorUnits(1, payment.Currency);
@@ -165,32 +185,39 @@ public partial class PaymentService
     }
 
     /// <summary>
-    /// 把一笔支付推进为失败：CAS 抢占 → 释放已核销的优惠券 → 发布失败事件
+    /// 把一笔支付推进为失败或取消：CAS 抢占 → 释放已核销的优惠券 → 发布失败事件。
     /// </summary>
+    /// <remarks>
+    /// 「取消」写的是 <c>Cancelled</c> 而不是 <c>Failed</c>（对账与报表要分得出这两件事），
+    /// 但发出去的仍是 <c>PaymentFailedEvent</c>：对下游而言两者是同一件事 ——
+    /// 钱没有收到，订阅要降级，券要还回去。
+    /// </remarks>
     private async Task<Result> ApplyFailedAsync(
         PaymentEntity payment,
         string failReason,
         string? channelResponse,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PaymentStatus terminalStatus = PaymentStatus.Failed)
     {
         var affected = await _paymentRepository.AsQueryable()
             .Where(p => p.Id == payment.Id
                 && (p.Status == PaymentStatus.Pending || p.Status == PaymentStatus.Processing))
             .ExecuteUpdateAsync(s => s
-                .SetProperty(p => p.Status, PaymentStatus.Failed)
+                .SetProperty(p => p.Status, terminalStatus)
                 .SetProperty(p => p.ChannelResponse, channelResponse), cancellationToken);
 
         if (affected == 0)
             return Ok();
 
-        payment.Status = PaymentStatus.Failed;
+        payment.Status = terminalStatus;
 
         await ReleaseCouponForPaymentAsync(payment, cancellationToken);
 
         if (EventBus != null)
             await EventBus.PublishAsync(BuildFailedEvent(payment, failReason));
 
-        Logger.LogWarning("Payment failed. TradeNo: {TradeNo}, Reason: {Reason}", payment.TradeNo, failReason);
+        Logger.LogWarning("Payment {Status}. TradeNo: {TradeNo}, Reason: {Reason}",
+            terminalStatus, payment.TradeNo, failReason);
 
         return Ok();
     }
@@ -220,6 +247,17 @@ public partial class PaymentService
             or PaymentStatus.Cancelled or PaymentStatus.Expired
             or PaymentStatus.Refunded or PaymentStatus.PartialRefunded;
 
+    /// <summary>
+    /// 这条事件是不是已经处理过了。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>去重是一层短路，不承载正确性</b>：状态推进走条件更新（CAS），终态支付一律不再被
+    /// 回调改写，所以同一条事件被处理两次不会产生第二次状态变更。缓存缺席 / 只在本进程有效
+    /// （框架默认就是进程内缓存，多实例下每个实例各存一份）都只意味着重复工作与更吵的日志，
+    /// 不意味着重复扣款或重复推进。这条区分写在这里，是为了下次有人想「把它做可靠」之前
+    /// 先知道它在保什么 —— 以及别把它当成唯一防线。缺席与作用范围由
+    /// <c>PaymentModule.OnApplicationInitializationAsync</c> 在启动期报出来。
+    /// </remarks>
     private async Task<bool> IsCallbackProcessedAsync(string? eventId, CancellationToken cancellationToken)
     {
         if (_cache == null || string.IsNullOrEmpty(eventId))

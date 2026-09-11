@@ -22,6 +22,11 @@ import type {
   NotificationPreferenceQueryDto,
   SetNotificationPreferenceDto,
   UnsubscribePreviewDto,
+  AnonymousDeviceRegistrationDto,
+  PushDeviceDto,
+  PushDeviceQueryDto,
+  RegisterPushDeviceDto,
+  UnregisterPushDeviceDto,
 } from './types';
 import type { TrendInterval } from './metadata';
 import type {
@@ -37,6 +42,17 @@ const PREFERENCES_BASE = '/admin/notification-preferences';
 const TEMPLATES_BASE = '/admin/notification-templates';
 const USER_BASE = '/notifications';
 const UNSUBSCRIBE_BASE = '/notifications/unsubscribe';
+const DEVICES_BASE = '/notifications/devices';
+
+/**
+ * Header that carries the anonymous device key.
+ *
+ * ★ A header, not a query string: query strings are copied verbatim into access
+ * logs and reverse-proxy logs, and this value is the device's ENTIRE credential
+ * - whoever holds it can re-point that device's push address.
+ */
+export const PUSH_DEVICE_KEY_HEADER = 'X-Device-Key';
+const ADMIN_DEVICES_BASE = '/admin/notification-devices';
 
 /**
  * Admin Notification Management API
@@ -267,5 +283,129 @@ export function useNotificationApi(client: HttpClient) {
     /** Batch delete notifications */
     batchDelete: (ids: string[]) =>
       client.post<void>(`${USER_BASE}/batch-delete`, ids),
+  };
+}
+
+
+/**
+ * Push device registry API (user side).
+ *
+ * Only available when the app loads the optional `Tnzi.Notification.Push`
+ * module - the table and these endpoints do not exist otherwise, by design:
+ * an email-only app should not carry a permanently empty device table.
+ *
+ * The framework deliberately does NOT ship the client-side Firebase
+ * integration: obtaining a token is three different native jobs on
+ * Android / iOS / Web, and bundling `firebase` into `@tnzi/mobile` would push
+ * it onto every mobile consumer. Get the token yourself, then post it here.
+ */
+export function usePushDeviceApi(client: HttpClient) {
+  return {
+    /** Register or refresh this device's push token. Call it on every app start. */
+    register: (data: RegisterPushDeviceDto) =>
+      client.post<PushDeviceDto>(`${DEVICES_BASE}`, data),
+
+    /** List the current user's registered devices. Tokens come back masked. */
+    getMine: () =>
+      client.get<PushDeviceDto[]>(`${DEVICES_BASE}`),
+
+    /**
+     * Unregister THIS device by its token - the sign-out call.
+     *
+     * ★ Sign-out is the reason this exists rather than `remove(id)`: at that
+     * moment the client holds a token and no row id, and the device list hands
+     * back a masked token it cannot search by. Idempotent - a token that is
+     * already gone still resolves.
+     */
+    unregister: (data: UnregisterPushDeviceDto) =>
+      client.post<void>(`${DEVICES_BASE}/unregister`, data),
+
+    /** Remove another of the current user's devices from the device list (by row id). */
+    remove: (id: string) =>
+      client.delete<void>(`${DEVICES_BASE}/${id}`),
+
+    /**
+     * Register or refresh this anonymous device - call it on EVERY app start.
+     *
+     * For apps with no sign-in at all: the device submits something, and the
+     * receipt has to come back to that same device. The alternative with zero
+     * stored identifiers is topic broadcast (server-side `SendToTopicAsync`),
+     * but topics carry no delivery record, no retry and no opt-out - this path
+     * exists for the case that needs those.
+     *
+     * Three lines on the client, with no branch:
+     * ```ts
+     * import { isSuccess } from '@tnzi/core/http'
+     *
+     * const key = await secureStorage.get('pushDeviceKey')      // may be absent
+     * const r = await devices.registerAnonymous({ token, platform }, key)
+     * if (isSuccess(r) && r.data.deviceKey) {
+     *   await secureStorage.set('pushDeviceKey', r.data.deviceKey)
+     * }
+     * ```
+     *
+     * ★ The server only accepts keys in the shape it issues (43 base64url
+     * characters). Do not substitute a platform identifier such as
+     * `identifierForVendor` to avoid storing one - it is refused with a 400,
+     * and it would turn this device's entire credential into a public value.
+     *
+     * ★ In a browser this sends a custom header, so the deployment must allow
+     * `X-Device-Key` through CORS (`AspNetCore:Cors:WithHeaders` or
+     * `AllowAnyHeader`). Native apps are unaffected.
+     * Then send `r.data.deviceId` with your business request; the server pushes
+     * the receipt back to this device by it.
+     *
+     * ★ Registration and refresh are the SAME call - passing a key decides
+     * which one it is. Splitting them would force the client to decide "is this
+     * a first launch", and its only evidence is "does secure storage have one":
+     * a failed read looks exactly like a first launch, and taking that branch
+     * issues a NEW identity that evicts the old one, silently breaking receipts
+     * for everything already submitted.
+     *
+     * ★ `deviceKey` comes back ONLY when it is issued. Persist it in the
+     * platform's secure storage immediately - there is no recovery endpoint,
+     * because such an endpoint would be a bypass around the key itself.
+     *
+     * ★ `deviceId` comes back every time, so there is no need to store it too.
+     */
+    registerAnonymous: (data: RegisterPushDeviceDto, deviceKey?: string) =>
+      client.post<AnonymousDeviceRegistrationDto>(
+        `${DEVICES_BASE}/anonymous`,
+        data,
+        deviceKey ? { headers: { [PUSH_DEVICE_KEY_HEADER]: deviceKey } } : undefined,
+      ),
+
+    /**
+     * Unregister this anonymous device.
+     *
+     * Idempotent: a key whose row is already gone still resolves. That also
+     * makes "wrong key" and "key is right but the row was retired" answer the
+     * same way - telling them apart would help someone probe which keys are
+     * real.
+     */
+    unregisterAnonymous: (deviceKey: string) =>
+      client.post<void>(`${DEVICES_BASE}/anonymous/unregister`, undefined, {
+        headers: { [PUSH_DEVICE_KEY_HEADER]: deviceKey },
+      }),
+  };
+}
+
+/**
+ * Push device registry API (admin side).
+ *
+ * Read and delete only. Registration is a client action - a row an operator
+ * typed in matches no real device, so pushes to it would fail forever with
+ * nobody knowing why. Requires `notification.pushDevice.view`, and
+ * `notification.pushDevice.delete` on top for removal.
+ */
+export function useAdminPushDeviceApi(client: HttpClient) {
+  return {
+    /** Paged device list. Tokens come back masked. */
+    getList: (query?: PushDeviceQueryDto) =>
+      client.get<PagedList<PushDeviceDto>>(`${ADMIN_DEVICES_BASE}`, { params: query }),
+
+    /** Delete one device. */
+    delete: (id: string) =>
+      client.delete<void>(`${ADMIN_DEVICES_BASE}/${id}`),
   };
 }

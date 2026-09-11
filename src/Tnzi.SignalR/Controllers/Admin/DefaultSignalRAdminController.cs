@@ -10,13 +10,23 @@ namespace Tnzi.SignalR.Controllers;
 public class DefaultSignalRAdminController : ApiAdminControllerBase
 {
     protected readonly IConnectionManager ConnectionManager;
+    protected readonly IHubConnectionAborter? ConnectionAborter;
 
     /// <summary>
     /// Initialize SignalR admin controller
     /// </summary>
-    public DefaultSignalRAdminController(IConnectionManager connectionManager)
+    /// <param name="connectionManager">Connection registry</param>
+    /// <param name="connectionAborter">
+    /// Live-transport aborter. Optional so that an application registering its
+    /// own controller against an older service graph keeps resolving; the
+    /// SignalR module always registers it.
+    /// </param>
+    public DefaultSignalRAdminController(
+        IConnectionManager connectionManager,
+        IHubConnectionAborter? connectionAborter = null)
     {
         ConnectionManager = Check.NotNull(connectionManager);
+        ConnectionAborter = connectionAborter;
     }
 
     /// <summary>
@@ -127,15 +137,25 @@ public class DefaultSignalRAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Drop all server-side connection tracking for a specific user.
-    /// Note: this clears the <see cref="IConnectionManager"/> registry only, it does not
-    /// abort the live transports - SignalR offers no server-side abort by user id, so an
-    /// already-established socket keeps receiving until the client disconnects.
+    /// Force-disconnect every realtime connection a user holds on this instance.
+    ///
+    /// Aborts the live transports first, then clears the <see cref="IConnectionManager"/>
+    /// registry. Aborting matters: clearing the registry alone leaves the sockets
+    /// connected and still receiving broadcasts - they merely vanish from the admin
+    /// views, while the freed connection count lets the same user open a full quota
+    /// of new ones on top of the ones still running.
+    ///
+    /// SignalR has no server-side "disconnect by user id", so the abort goes through
+    /// <see cref="IHubConnectionAborter"/>, an in-process registry that only knows the
+    /// connections attached to <em>this</em> instance. Behind a multi-instance
+    /// deployment this endpoint disconnects the caller's instance only.
     /// </summary>
     [HttpDelete("users/{userId:guid}/connections")]
     [ApiAuthorize(PermissionName = "system.signalr.execute")]
     public virtual async Task<ApiResult> DisconnectUser(Guid userId)
     {
+        var connectionIds = (await ConnectionManager.GetUserConnectionsAsync(userId)).ToList();
+        ConnectionAborter?.AbortRange(connectionIds);
         await ConnectionManager.RemoveUserConnectionsAsync(userId);
         return ApiResult.Ok();
     }

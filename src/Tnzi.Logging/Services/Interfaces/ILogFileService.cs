@@ -40,7 +40,14 @@ public interface ILogFileService
     /// enabled levels across the entire retention window.
     ///
     /// `maxResults` is clamped to `[1, 1000]` to bound response size; the
-    /// service stops scanning as soon as the cap is hit (returns <see cref="LogSearchResultDto.Truncated"/>).
+    /// service stops scanning as soon as the cap is hit.
+    ///
+    /// A scan that matches nothing would otherwise read the entire retention
+    /// window, so the scan is additionally bounded by the byte and time budgets
+    /// in <c>Logging:Search</c>. Whenever the scan stops early - cap reached,
+    /// budget exhausted, or caller cancelled - the result says so via
+    /// <see cref="LogSearchResultDto.TruncationReason"/>; "budget ran out" and
+    /// "nothing matched" must never look the same to the caller.
     /// </summary>
     Task<Result<LogSearchResultDto>> SearchAsync(
         string keyword,

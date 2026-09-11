@@ -30,71 +30,82 @@ public class RequestTrackingMiddleware
     ];
 
     /// <summary>
-    /// 查询串里默认要脱敏的参数名。它们都是**凭据**:
-    /// <c>access_token</c>(SignalR 传输携带的 JWT)、<c>sig</c>(文件签名访问令牌)、
-    /// <c>password</c>(分享链接口令)。原样落日志等于把凭据写进运维能读到的地方。
+    /// 请求体 / 响应体的脱敏器。无状态，共用一个实例。
     /// </summary>
-    private static readonly string[] DefaultSensitiveQueryKeys =
+    private static readonly RequestBodyRedactor BodyRedactor = new();
+
+    /// <summary>
+    /// 无论开关如何，这些路径下的请求体与响应体一律不采集。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>脱敏是按字段名做的，而认证端点上「哪个字段是凭据」并不总是猜得到。</strong>
+    /// 登录响应把令牌放在 <c>data.accessToken</c>（名单能盖住），但 OAuth 回调返回的是一整页
+    /// HTML、验证码相关端点返回的是图片的 base64、错误信封里还会带临时令牌的细节对象。
+    /// 与其逐个补名单，不如整条路径不采集 —— 这些端点的请求体与响应体<b>没有一个字段</b>
+    /// 是运维排障时非看不可的，而其中随便哪一个泄漏都等于账号失守。
+    /// </remarks>
+    private static readonly string[] BodyExcludedPathSegments =
     [
-        "access_token", "sig", "password"
+        "/auth/", "/connect/"
     ];
 
-    private const string RedactedValue = "***";
+    /// <summary>这条请求的体是否允许采集。</summary>
+    private static bool AllowsBodyCapture(HttpContext context)
+    {
+        var path = context.Request.Path.Value;
+        if (string.IsNullOrEmpty(path))
+        {
+            return true;
+        }
+
+        // 尾部补一个 '/'，让 "/api/auth" 这种不带尾斜杠的写法也命中 "/auth/"。
+        var probe = path.EndsWith('/') ? path : path + "/";
+        foreach (var segment in BodyExcludedPathSegments)
+        {
+            if (probe.Contains(segment, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 按敏感字段名脱敏一段 JSON 体；不是合法 JSON 时原样返回。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>此前这两个开关完全不脱敏。</strong>查询串有一套（见
+    /// <see cref="QueryStringRedactor.DefaultSensitiveKeys"/>），而请求体与响应体是
+    /// <c>RequestBody = requestBody</c> 直接赋值 —— 于是打开 <c>LogRequestBody</c>，
+    /// <c>POST auth/login</c> 的密码明文进日志；打开 <c>LogResponseBody</c>，
+    /// 登录响应里的访问令牌与刷新令牌进日志。两个开关都带 <c>[RuntimeSetting]</c>，
+    /// 在配置中心点一下就能打开，通常发生在排障当下、然后忘了关。
+    /// 名单与审计模块共用核心的那一份（<see cref="RequestBodyRedactor.DefaultSensitiveFields"/>）。
+    /// </remarks>
+    private static string? RedactBody(string? body)
+        => string.IsNullOrWhiteSpace(body)
+            ? body
+            : BodyRedactor.Redact(body, RequestBodyRedactor.DefaultSensitiveFields);
 
     /// <summary>
     /// 把敏感参数的值替换成 <c>***</c>,其余原样保留。
-    ///
-    /// 重建而不是正则替换:值可能被 URL 编码、可能含 <c>&amp;</c>,按已解析的 Query 集合
-    /// 重建才不会漏也不会误伤。没有命中任何敏感参数时返回原串(常见路径零分配)。
     /// </summary>
+    /// <remarks>
+    /// 名单与算法都在核心的 <see cref="QueryStringRedactor"/>：审计模块把同一条查询串存进
+    /// <c>Audit_Operation.Url</c>，两处各维护一份名单的结果是「审计表比请求日志多露出一个键」。
+    /// 部署自己给的名单<b>替换</b>默认名单，不是叠加。
+    /// </remarks>
     private static string? RedactQueryString(IQueryCollection query, string? raw, RequestTrackingOptions options)
     {
         if (string.IsNullOrEmpty(raw) || query.Count == 0)
             return raw;
 
-        var keys = options.SensitiveQueryKeys is { Count: > 0 }
+        IReadOnlyCollection<string> keys = options.SensitiveQueryKeys is { Count: > 0 }
             ? options.SensitiveQueryKeys
-            : (IReadOnlyList<string>)DefaultSensitiveQueryKeys;
+            : QueryStringRedactor.DefaultSensitiveKeys;
 
-        var hit = false;
-        foreach (var key in keys)
-        {
-            if (query.ContainsKey(key))
-            {
-                hit = true;
-                break;
-            }
-        }
-
-        if (!hit)
-            return raw;
-
-        var builder = new StringBuilder("?");
-        var first = true;
-        foreach (var pair in query)
-        {
-            var sensitive = false;
-            foreach (var key in keys)
-            {
-                if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    sensitive = true;
-                    break;
-                }
-            }
-
-            // 敏感参数不论原本有几个值，都只留一个 *** —— 值的个数本身也是信息。
-            var values = sensitive ? new[] { RedactedValue } : pair.Value.ToArray();
-            foreach (var value in values)
-            {
-                if (!first) builder.Append('&');
-                first = false;
-                builder.Append(Uri.EscapeDataString(pair.Key)).Append('=');
-                builder.Append(sensitive ? RedactedValue : Uri.EscapeDataString(value ?? string.Empty));
-            }
-        }
-
-        return builder.ToString();
+        return QueryStringRedactor.Redact(query, raw, keys);
     }
 
     public RequestTrackingMiddleware(
@@ -146,18 +157,24 @@ public class RequestTrackingMiddleware
         var logLevel = trackingOptions.LogLevel;
         var isSlow = false;
 
+        // 认证端点整条不采集体（见 BodyExcludedPathSegments）。
+        var allowsBodyCapture = AllowsBodyCapture(context);
+
         // 读取请求体（如果启用）
         string? requestBody = null;
-        if (trackingOptions.LogRequestBody)
+        if (trackingOptions.LogRequestBody && allowsBodyCapture)
         {
-            requestBody = await ReadRequestBodyAsync(context, trackingOptions.MaxRequestBodyLength);
+            // ★ 先脱敏再截断，与下面的响应体同序。反过来会把 JSON 截成非法串，
+            // 脱敏器于是原样返回 —— 只有超过 MaxRequestBodyLength 的请求泄漏凭据。
+            var rawBody = await ReadRequestBodyAsync(context);
+            requestBody = Truncate(RedactBody(rawBody) ?? string.Empty, trackingOptions.MaxRequestBodyLength);
         }
 
         // 启用响应缓冲（如果需要记录响应）
         MemoryStream? responseBuffer = null;
         Stream? originalResponseBody = null;
 
-        if (trackingOptions.LogResponseBody)
+        if (trackingOptions.LogResponseBody && allowsBodyCapture)
         {
             responseBuffer = new MemoryStream();
             originalResponseBody = context.Response.Body;
@@ -206,7 +223,8 @@ public class RequestTrackingMiddleware
                     responseBuffer.Position = 0;
                     using var reader = new StreamReader(responseBuffer, leaveOpen: true);
                     var responseBodyText = await reader.ReadToEndAsync();
-                    logEntry.ResponseBody = Truncate(responseBodyText, trackingOptions.MaxResponseBodyLength);
+                    // ★ 先截断再脱敏会把 JSON 截成非法串，脱敏器于是原样返回 —— 顺序不能反。
+                    logEntry.ResponseBody = Truncate(RedactBody(responseBodyText) ?? string.Empty, trackingOptions.MaxResponseBodyLength);
                 }
 
                 _logger.Log(logLevel, "{@RequestLog}", logEntry);
@@ -267,26 +285,30 @@ public class RequestTrackingMiddleware
     /// <summary>
     /// 获取或生成 RequestId
     /// </summary>
+    /// <remarks>
+    /// ★ 调用方给的标识<b>要过字形校验</b>才作数：它会被写回响应头，
+    /// 带换行的值会让 Kestrel 在写头时抛异常，而任意长的值会跟着每条日志走。
+    /// 校验不过就当作没给 —— 追踪照常，只是链路对不上。见 <see cref="RequestIdentifier"/>。
+    /// </remarks>
     private static string GetOrGenerateRequestId(HttpContext context)
     {
         // 优先从请求头获取
-        var requestId = context.Request.Headers["X-Request-Id"].FirstOrDefault()
-            ?? context.Request.Headers["X-Trace-Id"].FirstOrDefault()
-            ?? context.Request.Headers["X-Correlation-Id"].FirstOrDefault();
+        var requestId = RequestIdentifier.Accept(context.Request.Headers["X-Request-Id"].FirstOrDefault())
+            ?? RequestIdentifier.Accept(context.Request.Headers["X-Trace-Id"].FirstOrDefault())
+            ?? RequestIdentifier.Accept(context.Request.Headers["X-Correlation-Id"].FirstOrDefault());
 
-        // 如果不存在，生成新的 RequestId
-        if (string.IsNullOrEmpty(requestId))
-        {
-            requestId = Guid.NewGuid().ToString("N");
-        }
-
-        return requestId;
+        // 如果不存在（或不可用），生成新的 RequestId
+        return string.IsNullOrEmpty(requestId) ? Guid.NewGuid().ToString("N") : requestId;
     }
 
     /// <summary>
-    /// 读取请求体
+    /// 读取请求体（原文，不截断）。
     /// </summary>
-    private static async Task<string?> ReadRequestBodyAsync(HttpContext context, int maxLength)
+    /// <remarks>
+    /// ★ <strong>刻意不在这里截断。</strong>脱敏按 JSON 解析，
+    /// 而截断过的 JSON 是非法串、脱敏器只能原样返回。截断必须发生在脱敏之后。
+    /// </remarks>
+    private static async Task<string?> ReadRequestBodyAsync(HttpContext context)
     {
         if (!context.Request.Body.CanSeek)
         {
@@ -305,7 +327,7 @@ public class RequestTrackingMiddleware
         // 恢复流位置
         context.Request.Body.Position = 0;
 
-        return Truncate(body, maxLength);
+        return body;
     }
 
     /// <summary>

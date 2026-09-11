@@ -37,7 +37,12 @@ public class FinanceDocumentsModule : TnziCustomModule
         // 以具体类型注册，消费应用只需 AddScoped<ICheckDocumentRenderer, PdfSharpCheckRenderer>() 即可切换。
         context.Services.TryAddScoped<PdfSharpCheckRenderer>();
 
-        // 内置 CPA-006 支票模板的幂等播种（迁移之后执行，空库首启即可用；已存在则跳过不覆盖）。
+        // 版式目录：出厂内置版式 + 库里自建模板的合并清单，供管理端画版式选择器，
+        // 也供 CheckService 把「实际生效的模板名」钉进支票快照。契约在银行域，未加载本模块时
+        // 目录端点返回 501 引导（同渲染器缺席的处理）。
+        context.Services.TryAddScoped<ICheckTemplateCatalog, CheckTemplateCatalog>();
+
+        // 出厂支票版式的幂等播种（迁移之后执行，空库首启即可用；已存在则跳过不覆盖）。
         context.Services.AddTransient<IPostMigrationStartupTask, CheckTemplateSeeder>();
 
         return base.ConfigureServicesAsync(context);

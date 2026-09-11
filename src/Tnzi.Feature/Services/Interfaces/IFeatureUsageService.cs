@@ -7,7 +7,9 @@ namespace Tnzi.Feature.Services;
 public interface IFeatureUsageService
 {
     /// <summary>
-    /// Record a feature usage check (fire-and-forget, no Result wrapper)
+    /// Record a feature usage check. Enqueues the record for a background batch write and
+    /// returns immediately; it never touches the database on the caller's path and is a no-op
+    /// when <c>Feature:UsageTrackingEnabled</c> is false.
     /// </summary>
     /// <param name="featureName">Feature name that was checked</param>
     /// <param name="isEnabled">Whether the feature was enabled at check time</param>

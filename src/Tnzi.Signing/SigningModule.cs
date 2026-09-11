@@ -57,6 +57,11 @@ public class SigningModule : TnziApplicationModule
         // 本模块从不点名它们中的任何一个。
         context.Services.TryAddScoped<IMergeSourceRegistry, MergeSourceRegistry>();
 
+        // 向 Storage 登记「按引用放行」的判据：成品与完成证书是在匿名请求里存下的（CreatorId 为空），
+        // 不登记的话持 signing.request.view 的管理员必须另外拿到 storage.file.view 才下载得到。
+        // AddScoped 而不是 TryAdd：这是 IEnumerable<T> 注入的集合成员，不是可被整体替换的单件。
+        context.Services.AddScoped<IFileReferenceAccessResolver, SigningFileReferenceAccessResolver>();
+
         // 密封器（盖章 + 压平 + 哈希 + 落文件）。internal 语义，但走 DI 便于替换与测试。
         context.Services.TryAddScoped<SigningSealer>();
         context.Services.TryAddScoped<SigningCertificateBuilder>();

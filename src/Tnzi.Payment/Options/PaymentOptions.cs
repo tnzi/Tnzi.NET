@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Options;
+﻿namespace Tnzi.Payment.Options;
 
 /// <summary>
 /// 支付模块配置选项
@@ -64,6 +64,37 @@ public class PaymentOptions
         Type = SettingFieldType.String,
         Description = "Server-to-server webhook address reported to channels that require it")]
     public string? DefaultNotifyUrl { get; set; }
+
+    /// <summary>
+    /// 允许作为付款人回跳目标的主机名清单（精确匹配，大小写不敏感）。
+    /// </summary>
+    /// <remarks>
+    /// 调用方在建单 / 绑卡时给的 <c>ReturnUrl</c> / <c>CancelUrl</c> 会被原样交给支付渠道，
+    /// 作为付款完成后把**付款人的浏览器**送去的地方 —— 不限制就是一个开放重定向，
+    /// 且发生在渠道支付页之后：付款人刚输完卡号，落在仿冒的「订单完成」页上不会有任何怀疑。
+    /// <para>
+    /// <b>未配置时失败关闭</b>：任何调用方指定的回跳地址都会被拒（400），只有
+    /// <see cref="DefaultReturnUrl"/> 所在主机自动算作允许 —— 它已经是这台部署公开承认的落地页，
+    /// 逼运维把同一个主机名写两遍只会换来一次配漏。不指定回跳地址的调用一字不差。
+    /// </para>
+    /// <b>不支持通配符子域</b>：<c>*.example.com</c> 会把一个被接管的子域
+    /// （常见于过期的 CNAME）一起放进来，而多写几行主机名的成本是零。
+    /// </remarks>
+    public List<string> AllowedRedirectHosts { get; set; } = [];
+
+    /// <summary>
+    /// 对账导出单次最多导出的支付笔数，默认 50000。
+    /// </summary>
+    /// <remarks>
+    /// 上界是闸门不是调优项：导出把整段时间窗内的支付**全部读进内存**再拼成一个字符串放进
+    /// JSON 响应体，笔数没有上界，一次「导出全年」就能放倒一个进程。
+    /// 超出上界时导出**截断并如实报告**（<c>Truncated</c> + <c>MatchedRecords</c>），
+    /// 而不是安静地少给几行 —— 一份看起来完整的对账单少了一半，比一份明说被截断的糟得多。
+    /// </remarks>
+    [RuntimeSetting(Label = "Reconciliation Export Max Rows", I18n = "admin.modules.system.settings.fields.paymentReconciliationExportMaxRows",
+        Type = SettingFieldType.Int, Min = 1,
+        Description = "Maximum payments a single reconciliation export may contain")]
+    public int ReconciliationExportMaxRows { get; set; } = 50000;
 
     /// <summary>
     /// 每日最大退款金额

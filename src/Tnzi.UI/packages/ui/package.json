@@ -19,6 +19,14 @@
       "types": "./dist/stores/index.d.ts",
       "import": "./dist/stores.js"
     },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters.js"
+    },
+    "./theme": {
+      "types": "./dist/theme/index.d.ts",
+      "import": "./dist/theme.js"
+    },
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
       "import": "./dist/adapters/*.js"
@@ -34,6 +42,10 @@
     "./resolvers": {
       "types": "./dist/resolvers/index.d.ts",
       "import": "./dist/resolvers.js"
+    },
+    "./icons": {
+      "types": "./dist/icons/index.d.ts",
+      "import": "./dist/icons/index.js"
     },
     "./theme/presets/*": {
       "import": "./src/theme/presets/*.json"
@@ -71,6 +83,7 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
+    "@iconify/utils": "catalog:",
     "@tnzi/core": "workspace:*",
     "@vueuse/core": "catalog:",
     "colord": "^2.9.5",

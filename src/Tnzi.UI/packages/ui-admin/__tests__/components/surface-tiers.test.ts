@@ -87,6 +87,17 @@ function code(file: string): string {
     .replace(/^\s*\/\/.*$/gm, ' ')
 }
 
+/**
+ * Only the stylesheet half of a file. A `.vue` script section is full of
+ * braces, so a rule-shaped regex run over the whole file happily reports
+ * object literals as CSS selectors.
+ */
+function css(file: string): string {
+  const src = code(file)
+  if (file.endsWith('.css')) return src
+  return [...src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n')
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
@@ -192,5 +203,54 @@ describe('surface tiers', () => {
       }
     }
     expect(Object.fromEntries(missing)).toEqual({})
+  })
+
+  /**
+   * `TWidgetCard` renders two different things under one class: the NCard,
+   * and - when `bare` - a plain div that promises no chrome at all. Both carry
+   * `t-widget-card`; only the card carries `t-surface-card`. So the marker is
+   * the only thing in the DOM that distinguishes them, and any rule painting
+   * card chrome has to be keyed to it.
+   *
+   * Both properties were once keyed to `.t-widget-card` alone, and the
+   * component tried to buy them back with a subtractive
+   * `.t-widget-card--bare { background: transparent; border: none;
+   * box-shadow: none }`. It lost both races on specificity - to
+   * `.t-widget-card:hover` in its own file, and to `:root .t-admin-content
+   * .t-widget-card` in polish.css - so every bare widget sat on an opaque
+   * panel and grew a card shadow under the pointer.
+   *
+   * The symptom is why this is a gate and not a review note. A bare widget
+   * holding two cards did not look like a broken widget; it looked like two
+   * cards with no gutter, because the gutter was there and painted card
+   * colour. A consuming project spent three rounds on the card colour, the
+   * border, the shadow, the gutter width and the canvas colour before anyone
+   * asked what was painting the gap. Nothing about the word `bare` suggests
+   * opaque, so nobody suspects it.
+   *
+   * Asserted on selectors rather than computed values on purpose: the values
+   * were never wrong. Both rules painted exactly the tokens they were asked
+   * to paint, onto one element too many - so a gate pinned to today's token
+   * values would have been green throughout, and would go red on a consumer
+   * re-theming the card colour, which is legal.
+   */
+  it('no rule paints widget-card chrome without the t-surface-card marker', () => {
+    /** The card root itself - not `__header`, and not `--bare`. */
+    const CARD_ROOT = /\.t-widget-card(?![\w-])/
+    /** `border-radius` is geometry, not chrome, and deliberately not listed. */
+    const CHROME =
+      /(?:^|[;{\s])(?:background(?:-color|-image)?|border(?:-color|-style|-width)?|box-shadow)\s*:/
+    const offenders: string[] = []
+    for (const file of files) {
+      for (const [, selector, body] of css(file).matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+        if (!CARD_ROOT.test(selector) || selector.includes('t-surface-card')) continue
+        if (!CHROME.test(body)) continue
+        offenders.push(`${relative(file)}: ${selector.trim().replace(/\s+/g, ' ')}`)
+      }
+    }
+    expect(
+      offenders,
+      `Chrome keyed to a selector a bare widget also matches, so \`bare\` still paints a card. Add .t-surface-card: ${offenders.join(', ')}`,
+    ).toEqual([])
   })
 })

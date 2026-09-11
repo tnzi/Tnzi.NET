@@ -90,6 +90,10 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         if (session == null || session.IsCompleted || session.IsCancelled || !IsSessionOwner(session))
             return Fail<FileChunkDto>("Upload session is invalid or completed", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
+        // 过期判定排在归属判定**之后**：对外人说"过期了"就等于承认这个 id 上有过一个会话。
+        if (IsExpired(session))
+            return Fail<FileChunkDto>(SessionExpired, 400, ErrorCodes.FILE_OPERATION_ERROR);
+
         // 验证分块索引
         if (chunkIndex < 0 || chunkIndex >= session.TotalChunks)
             return Fail<FileChunkDto>($"ChunkIndex {chunkIndex} is out of range [0, {session.TotalChunks})", 400, ErrorCodes.VALIDATION_ERROR);
@@ -120,7 +124,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         // 保存分块到临时存储。长度在交给 provider **之前**取：上传之后这个流是否还可读
         // 由 provider 决定（见 IFileStorage.UploadAsync 的流所有权约定）。
         var chunkByteSize = memoryStream.Length;
-        var chunkFileName = $"chunk_{uploadSessionId}_{chunkIndex}";
+        var chunkFileName = StorageKeyHelper.ChunkKey(uploadSessionId, chunkIndex);
         var chunkPath = await _storage.UploadAsync(chunkFileName, memoryStream, "application/octet-stream");
 
         // 创建分块记录
@@ -161,6 +165,9 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         if (session == null || session.IsCompleted || session.IsCancelled || !IsSessionOwner(session))
             return Fail<FileRecord>("Upload session is invalid or completed", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
+        if (IsExpired(session))
+            return Fail<FileRecord>(SessionExpired, 400, ErrorCodes.FILE_OPERATION_ERROR);
+
         // 获取所有分块（按索引排序）
         var chunks = await _chunkRepository.AsQueryable()
             .Where(c => c.UploadSessionId == uploadSessionId)
@@ -169,6 +176,15 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
 
         if (chunks.Count != session.TotalChunks)
             return Fail<FileRecord>($"Not all chunks have been uploaded. Expected {session.TotalChunks}, got {chunks.Count}", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        // 合并之前先确认每一片的对象还在。清理任务先删物理分片再删会话行，中间失败会留下
+        // 「行在、分片不在」的会话；对象存储也可能自己弄丢对象。不先问一遍，下面的 DownloadAsync
+        // 会以 provider 的异常（500）收场，而客户端需要的是一个能据以重传那一片的 400。
+        foreach (var chunk in chunks)
+        {
+            if (string.IsNullOrEmpty(chunk.ChunkPath) || !await _storage.ExistsAsync(chunk.ChunkPath))
+                return Fail<FileRecord>($"Chunk {chunk.ChunkIndex} is no longer available. Upload it again before completing.", 400, ErrorCodes.FILE_OPERATION_ERROR);
+        }
 
         // 使用临时文件合并分块，避免大文件占用大量内存
         var tempFilePath = Path.GetTempFileName();
@@ -179,14 +195,11 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
             {
                 foreach (var chunk in chunks)
                 {
-                    if (string.IsNullOrEmpty(chunk.ChunkPath))
-                        throw new StorageException($"Chunk {chunk.ChunkIndex} path is empty.", null, ErrorCodes.FILE_OPERATION_ERROR);
-
                     // 回读分片并校验其完整性（受 EnableMd5Validation 控制）。
                     // 损坏的分片在合并时会被检测出来，避免静默合出坏文件。
                     if (_options.CurrentValue.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
                     {
-                        using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath);
+                        using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath!);
                         var actualChunkMd5 = await HashHelper.GetMd5Async(verifyStream);
                         if (!string.Equals(actualChunkMd5, chunk.Md5Hash, StringComparison.OrdinalIgnoreCase))
                         {
@@ -196,7 +209,7 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                         }
                     }
 
-                    using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath);
+                    using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath!);
                     await chunkStream.CopyToAsync(mergedStream, cancellationToken);
                 }
 
@@ -249,13 +262,18 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 if (content.CanSeek) content.Position = 0;
                 var storedSize = content.CanSeek ? content.Length : mergedSize;
 
-                // 保存合并后的文件
-                var filePath = await _storage.UploadAsync(session.FileName, content, contentType);
+                // ★ 存储键由服务端生成；session.FileName 是客户端建会话时给的名字，只做展示名。
+                //   这条路径此前直接拿它当键：文档把分片上传推荐给大文件，于是两个用户同一天
+                //   上传同名的 report.pdf，第二份在本地 provider 上把第一份截断覆盖、第一条记录的
+                //   MD5 与大小仍是旧值；在对象存储上（键即对象名、PutObject 默认覆盖）则是任何
+                //   已登录用户都能替换掉别人文件的字节（见 StorageKeyHelper）。
+                var storageKey = StorageKeyHelper.NewKey(extension);
+                var filePath = await _storage.UploadAsync(storageKey, content, contentType);
 
                 // 创建文件记录
                 var fileRecord = new FileRecord
                 {
-                    FileName = session.FileName,
+                    FileName = storageKey,
                     OriginalName = session.FileName,
                     Extension = extension,
                     Size = storedSize,
@@ -369,6 +387,20 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         => session.CreatorId.HasValue
            && CurrentUser?.Id is { } me
            && session.CreatorId.Value == me;
+
+    private const string SessionExpired = "Upload session has expired. Start a new upload.";
+
+    /// <summary>
+    /// 会话的有效期到了没。
+    /// </summary>
+    /// <remarks>
+    /// <c>InitiateChunkedUploadAsync</c> 给每个会话写 24 小时的 <c>ExpiresAt</c>，此前只有后台清理读它：
+    /// 收分块与合并落库两条写路径都不看，于是一个 30 天前开的会话照样能收分块、能合并出一条文件记录，
+    /// 直到受 <c>Storage:Cleanup:MaxFilesPerRun</c> 限速的清理任务轮到它 —— 有效期只是一个展示字段。
+    /// 现在两条写路径都拒绝过期会话；<b>取消刻意放行</b>（那是收尾动作，让客户端自己清残留分片，不必等后台任务），
+    /// 查进度也放行（只读，DTO 上本就带着 <c>ExpiresAt</c>）。
+    /// </remarks>
+    private static bool IsExpired(FileUploadSession session) => session.ExpiresAt <= DateTime.UtcNow;
 
     /// <summary>
     /// 投影为对外 DTO。除 <c>TenantId</c> 外与实体逐字段一致 —— 这两个端点此前直接把实体

@@ -301,31 +301,68 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         return caps;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ★ 判定本身在 <see cref="QuietHoursWindow"/> 里，与批量那条<b>共用同一份</b>：
+    /// 这个模块的规则曾经就是靠「同一条判定抄两遍」漂开的（界面显示的与实际发送的不一致）。
+    /// </remarks>
     public async Task<bool> IsInQuietHoursAsync(Guid userId, string channel, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(channel);
 
-        // 查渠道级全局偏好（静默时段不区分分类）
-        var preference = await _repository
+        var windows = await LoadQuietHoursAsync([userId], channel, cancellationToken);
+
+        return windows.TryGetValue(userId, out var window) && window.Contains(DateTime.UtcNow);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, (TimeOnly Start, TimeOnly End)>> GetQuietHoursAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(userIds);
+
+        var windows = await LoadQuietHoursAsync(userIds, channel.ToString(), cancellationToken);
+
+        return windows.ToDictionary(kv => kv.Key, kv => (kv.Value.Start, kv.Value.End));
+    }
+
+    /// <summary>
+    /// 取这一批人在该渠道上的静默时段。<b>两个公开方法唯一的取数处。</b>
+    /// </summary>
+    /// <remarks>
+    /// ★ 只看 <c>Category == null</c> 的渠道级行：「现在别吵我」是一句关于时间的话，
+    /// 按消息分类分别设一个免打扰时段表达不了任何用户真正想要的东西。
+    /// ★ 渠道按名字大小写不敏感匹配，与 <see cref="FilterEnabledUsersAsync"/> /
+    /// <see cref="GetFrequencyCapsAsync"/> 同款（偏好的渠道词汇比 <c>NotificationType</c> 宽）。
+    /// ★ 两个时刻缺任一即视为没设：只有开始没有结束的窗口算不出结束时刻，而延后必须
+    /// 写得出「什么时候再发」。
+    /// </remarks>
+    private async Task<Dictionary<Guid, QuietHoursWindow>> LoadQuietHoursAsync(
+        IEnumerable<Guid> userIds, string channel, CancellationToken cancellationToken)
+    {
+        var ids = userIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return [];
+
+        var channelName = channel.ToLower();
+
+        var rows = await _repository
             .AsQueryable()
             .AsNoTracking()
-            .Where(p => p.UserId == userId && p.Channel == channel && p.Category == null)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Where(p => ids.Contains(p.UserId)
+                        && p.Channel.ToLower() == channelName
+                        && p.Category == null
+                        && p.QuietHoursStart != null
+                        && p.QuietHoursEnd != null)
+            .Select(p => new { p.UserId, p.QuietHoursStart, p.QuietHoursEnd })
+            .ToListAsync(cancellationToken);
 
-        if (preference?.QuietHoursStart == null || preference.QuietHoursEnd == null)
-            return false;
-
-        var now = TimeOnly.FromDateTime(DateTime.UtcNow);
-        var start = preference.QuietHoursStart.Value;
-        var end = preference.QuietHoursEnd.Value;
-
-        // 处理跨午夜的情况 (e.g., 22:00 - 06:00)
-        if (start <= end)
+        var windows = new Dictionary<Guid, QuietHoursWindow>();
+        foreach (var row in rows)
         {
-            return now >= start && now <= end;
+            windows[row.UserId] = new QuietHoursWindow(row.QuietHoursStart!.Value, row.QuietHoursEnd!.Value);
         }
 
-        // 跨午夜：当前时间在 start 之后 或 在 end 之前
-        return now >= start || now <= end;
+        return windows;
     }
 }

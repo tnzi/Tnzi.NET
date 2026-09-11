@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Providers;
+﻿namespace Tnzi.Payment.Providers;
 
 /// <summary>
 /// 空支付渠道实现（用于测试）
@@ -93,11 +93,20 @@ public class NullProvider : IPaymentProvider
         // 回调金额一律按 invariant 解析：跟随服务器区域会把 "12.34" 在小数逗号区域解析成 1234
         decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount);
 
+        // 可选的 status 参数：让"渠道回报失败 / 取消"这两条终态也能被端到端走通。
+        // 不带它时仍然一律回成功，既有用例一字不差。
+        var status = parameters.TryGetValue("status", out var statusText)
+            && Enum.TryParse<PaymentStatus>(statusText, ignoreCase: true, out var parsed)
+            ? parsed
+            : PaymentStatus.Succeeded;
+
         return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
         {
             TradeNo = tradeNo ?? string.Empty,
-            Status = PaymentStatus.Succeeded,
+            Status = status,
             PaidAmount = amount,
+            Currency = parameters.TryGetValue("currency", out var currency) ? currency : null,
+            FailReason = status == PaymentStatus.Succeeded ? null : $"Null provider reported {status}",
             EventId = callbackEventId
         }));
     }

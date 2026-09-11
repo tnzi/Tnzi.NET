@@ -43,6 +43,7 @@ import {
   type LoginCallbacks,
   type LoginFeatures,
   type LoginThirdPartyProvider,
+  type PendingActionChallenge,
   type TwoFactorChallenge,
   type TwoFactorMethodName,
   type LoginCaptchaData,
@@ -188,6 +189,19 @@ const twoFactorMethod = ref<TwoFactorMethodName | undefined>(undefined);
 const captcha = ref<LoginCaptchaData | null>(null);
 const captchaCode = ref('');
 
+/**
+ * The account owes something before it can be used (forced password change,
+ * authenticator enrolment, email confirmation).
+ *
+ * ★ This shell has no module for discharging those - that flow lives in
+ * `@tnzi/ui-admin`'s `PendingActions` page, and a product built on this shell
+ * should route to its own equivalent. What matters here is that we do NOT
+ * pretend the sign-in succeeded: the backend answered with a challenge, not a
+ * token, so `authenticated` must not be emitted and the user must be told why.
+ * Silently swallowing it is how "a correct password with nowhere to go" happens.
+ */
+const pendingAction = ref<PendingActionChallenge | null>(null);
+
 const helpers = {
   setTwoFactorRequired: (next: TwoFactorChallenge) => {
     challenge.value = next;
@@ -197,6 +211,16 @@ const helpers = {
   },
   clearTwoFactor: () => {
     challenge.value = null;
+  },
+  setPendingActionRequired: (next: PendingActionChallenge) => {
+    pendingAction.value = next;
+    error.value = t(
+      'auth.errors.pendingActions',
+      'Your account must complete a required action before signing in: {actions}.',
+    ).replace('{actions}', next.requiredActions.join(', '));
+  },
+  clearPendingAction: () => {
+    pendingAction.value = null;
   },
   setCaptchaRequired: (next: LoginCaptchaData) => {
     captcha.value = next;
@@ -243,8 +267,9 @@ function onPasswordSubmit(): void {
       },
       helpers,
     );
-    // A pending two-factor challenge means the callback moved us on already.
-    if (step.value !== 'two-factor') emit('authenticated');
+    // A pending two-factor challenge means the callback moved us on already;
+    // a pending action means the account is not usable yet (see `pendingAction`).
+    if (step.value !== 'two-factor' && !pendingAction.value) emit('authenticated');
   });
 }
 
@@ -263,7 +288,7 @@ function onCodeSubmit(): void {
   }
   void run(async () => {
     await call({ account: account.value.trim(), code: code.value, type: accountType.value }, helpers);
-    if (step.value !== 'two-factor') emit('authenticated');
+    if (step.value !== 'two-factor' && !pendingAction.value) emit('authenticated');
   });
 }
 

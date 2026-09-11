@@ -40,6 +40,22 @@ public class ApiVersionOptions
     public string UrlParameterName { get; set; } = "v";
 
     /// <summary>
+    /// 受支持的 API 版本清单。为空表示不限制（仅做格式校验）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 配置之后，请求里的版本不在清单里就<b>当场 400</b>。这是这个清单存在的意义 ——
+    /// 一个不认识的版本号被当成默认版本静默处理，等于让客户端以为它在跟 v2 说话，
+    /// 而服务端按 v1 回答。
+    /// </para>
+    /// <para>
+    /// 不配置时保持宽松：版本只是被记进 <c>HttpContext.Items["ApiVersion"]</c> 供下游取用，
+    /// 框架自己不按它分支。
+    /// </para>
+    /// </remarks>
+    public string[]? SupportedVersions { get; set; }
+
+    /// <summary>
     /// 是否在响应头中返回 API 版本
     /// </summary>
     [RuntimeSetting(Label = "Report Version In Response Header", I18n = "admin.modules.system.settings.fields.apiVersionReportVersion",

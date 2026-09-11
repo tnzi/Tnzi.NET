@@ -145,6 +145,33 @@ public class BankAccountTests : FinanceIntegrationTestBase
         result.Message!.ShouldContain("CashEquivalent");
     }
 
+    /// <summary>
+    /// 出款方账号超过 CPA-005 的 12 位账号字段 → 录入即 400。
+    /// </summary>
+    /// <remarks>
+    /// 收款方账号被截断是一笔付款进了别人的户头；<b>出款方</b>账号被截断是整份报文
+    /// 从一个不存在的户头扣款。两侧都不能静默发生，所以两个服务共用同一张方案上限表。
+    /// </remarks>
+    [Fact]
+    public async Task Create_AccountNumberLongerThanTheEftField_Rejects400()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAccountLedgerIdAsync();
+
+        var result = await CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank,
+            Name = "Operating CAD",
+            Scheme = BankNumberScheme.CaEft,
+            InstitutionNumber = "001",
+            TransitNumber = "12345",
+            AccountNumber = new string('8', 13) // CPA-005 字段宽 12
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
+
     [Fact]
     public async Task SetNextCheckNumber_Updates()
     {

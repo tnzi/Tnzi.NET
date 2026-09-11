@@ -16,27 +16,48 @@ public partial class RabbitMQEventBus
     /// <summary>
     /// 订阅事件（每个订阅创建独立的 Channel，RabbitMQ 最佳实践）
     /// </summary>
-    public async Task SubscribeEventAsync<TEvent>() where TEvent : class, IEvent
+    public Task SubscribeEventAsync<TEvent>() where TEvent : class, IEvent
+        => SubscribeEventAsync(typeof(TEvent));
+
+    /// <summary>
+    /// 订阅事件（按运行时类型）。
+    /// </summary>
+    /// <remarks>
+    /// 泛型重载只是这个方法的一层门面。消费侧真正需要的类型信息只有「事件的具体类型」
+    /// 一项（反序列化目标、路由键、处理器接口的类型实参），泛型参数在原实现里除了约束
+    /// 之外一处也没用到 —— 做成非泛型之后，<see cref="DistributedEventSubscriptionInitializer"/>
+    /// 才能按启动时发现的 <see cref="Type"/> 逐个订阅，不必绕反射去拼泛型方法。
+    /// </remarks>
+    public async Task SubscribeEventAsync(Type eventType, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        Check.NotNull(eventType);
 
-        var eventType = typeof(TEvent);
+        if (!typeof(IEvent).IsAssignableFrom(eventType) || !eventType.IsClass || eventType.IsAbstract)
+        {
+            throw new ArgumentException(
+                $"Type '{eventType.FullName}' cannot be subscribed: it must be a non-abstract class implementing IEvent.",
+                nameof(eventType));
+        }
+
         var eventTypeName = eventType.FullName ?? eventType.Name;
         var queueName = $"Tnzi.Events.{eventTypeName}";
         var deadLetterQueueName = $"Tnzi.Events.DeadLetter.{eventTypeName}";
 
-        // TryAdd 作为并发锁定，防止重复订阅
+        // TryAdd 作为并发锁定，防止重复订阅。
+        // ★ 这不是异常情况：启动期的自动订阅与应用自己调用 Subscribe 会同时到达同一个类型，
+        // 所以只记 Debug —— 用 Warning 会让每个正常启动都刷出一片看起来出事了的日志。
         var subscription = new ConsumerSubscription(queueName);
         if (!_subscriptions.TryAdd(eventType, subscription))
         {
-            _logger.LogWarning("Event {EventType} is already subscribed", eventTypeName);
+            _logger.LogDebug("Event {EventType} is already subscribed; the request is a no-op", eventTypeName);
             return;
         }
 
         try
         {
             // 每个消费者创建独立的 Channel（消除 publish/consume 跨 Channel 锁竞争）
-            var channel = await _connection.CreateChannelAsync();
+            var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
             subscription.Channel = channel;
 
             // 声明交换机（幂等，确保消费者 Channel 可访问）
@@ -78,7 +99,7 @@ public partial class RabbitMQEventBus
                     {
                         // 使用 Span 避免额外数组分配
                         var json = Encoding.UTF8.GetString(ea.Body.Span);
-                        var @event = JsonSerializer.Deserialize<TEvent>(json, TnziJsonDefaults.Options);
+                        var @event = JsonSerializer.Deserialize(json, eventType, TnziJsonDefaults.Options) as IEvent;
 
                         if (@event == null)
                         {
@@ -92,7 +113,7 @@ public partial class RabbitMQEventBus
                         }
                         else
                         {
-                            var handlers = GetEventHandlers<TEvent>(eventType, handlerScope.ServiceProvider);
+                            var handlers = GetEventHandlers(eventType, handlerScope.ServiceProvider);
                             var tasks = new List<Task<bool>>();
                             foreach (var handler in handlers)
                             {
@@ -162,7 +183,7 @@ public partial class RabbitMQEventBus
             };
 
             // 开始消费（在消费者自己的 Channel 上）
-            await channel.BasicConsumeAsync(queueName, false, consumer);
+            await channel.BasicConsumeAsync(queueName, false, consumer, cancellationToken);
 
             _logger.LogInformation("Subscribed to event {EventType} on queue {QueueName} (dedicated channel)",
                 eventTypeName, queueName);
@@ -291,7 +312,7 @@ public partial class RabbitMQEventBus
     /// <summary>
     /// 获取事件的所有处理器（支持事件继承）
     /// </summary>
-    private IEnumerable<object> GetEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private static IEnumerable<object> GetEventHandlers(Type eventType, IServiceProvider serviceProvider)
     {
         var allHandlers = new List<object>();
         var handlerTypes = new HashSet<Type>();
@@ -309,7 +330,7 @@ public partial class RabbitMQEventBus
         }
 
         // 2. 获取基类事件的处理器（事件继承支持）
-        var baseEventHandlers = GetBaseEventHandlers<TEvent>(eventType, serviceProvider);
+        var baseEventHandlers = GetBaseEventHandlers(eventType, serviceProvider);
         foreach (var handler in baseEventHandlers)
         {
             if (handler != null && !handlerTypes.Contains(handler.GetType()))
@@ -325,7 +346,7 @@ public partial class RabbitMQEventBus
     /// <summary>
     /// 获取基类事件的处理器（支持事件继承）
     /// </summary>
-    private static IEnumerable<object> GetBaseEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private static IEnumerable<object> GetBaseEventHandlers(Type eventType, IServiceProvider serviceProvider)
     {
         var handlers = new List<object>();
 
@@ -366,12 +387,12 @@ public partial class RabbitMQEventBus
     /// 反过来（失败也 ACK）换来的"不重复"是以静默丢消息为代价的，不是一个可选项。
     /// </para>
     /// </remarks>
-    private async Task<bool> ExecuteHandlerWithErrorIsolationAsync<TEvent>(object handler, TEvent @event, Type eventType) where TEvent : class, IEvent
+    private async Task<bool> ExecuteHandlerWithErrorIsolationAsync(object handler, IEvent @event, Type eventType)
     {
         var handlerType = handler.GetType();
         try
         {
-            var metadata = EventHandlerInvoker.GetMetadata(handlerType);
+            var metadata = EventHandlerInvoker.GetMetadata(handlerType, eventType);
 
             // 检查条件处理器
             if (metadata.CanHandleDelegate != null)
@@ -391,8 +412,9 @@ public partial class RabbitMQEventBus
             else
             {
                 // 配置型问题（缺失 HandleAsync）：重投无益，记录告警但不计为可重试失败
-                _logger.LogWarning("Handler {HandlerType} does not have HandleAsync method with expected signature",
-                    handlerType.Name);
+                _logger.LogWarning(
+                    "Handler {HandlerType} does not have a HandleAsync accepting {EventType} with the expected signature",
+                    handlerType.Name, eventType.Name);
             }
 
             return true;

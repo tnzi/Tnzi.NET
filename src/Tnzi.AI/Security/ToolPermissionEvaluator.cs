@@ -141,6 +141,11 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
             return false;
         }
 
+        if (!MatchesUser(context, rule))
+        {
+            return false;
+        }
+
         if (!MatchesSubAgentContext(context, rule))
         {
             return false;
@@ -259,6 +264,20 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
         return candidatePath.Length > normalizedPrefix.Length
             && candidatePath.StartsWith(normalizedPrefix, StringComparison.OrdinalIgnoreCase)
             && candidatePath[normalizedPrefix.Length] == '\\';
+    }
+
+    /// <summary>
+    /// 用户绑定匹配。规则未绑用户（UserId 为空）时对所有调用者生效；绑了用户时必须与调用者一致 ——
+    /// 调用者未知（context.UserId 为空）也不匹配，不能因为不知道是谁就假定「就是那个人」。
+    /// </summary>
+    private static bool MatchesUser(ToolPermissionContext context, ToolPermissionRule rule)
+    {
+        if (rule.UserId == null)
+        {
+            return true;
+        }
+
+        return context.UserId.HasValue && context.UserId.Value == rule.UserId.Value;
     }
 
     private static bool MatchesSubAgentContext(ToolPermissionContext context, ToolPermissionRule rule)

@@ -96,8 +96,8 @@ public class AiReceiptExtractorTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain(resolved);
-        result.Message.ShouldContain("JPEG");
+        result.Message!.ShouldContain(resolved);
+        result.Message!.ShouldContain("JPEG");
         fixture.ModelCalls.ShouldBe(0);
     }
 
@@ -161,7 +161,7 @@ public class AiReceiptExtractorTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("1 MB");
+        result.Message!.ShouldContain("1 MB");
         fixture.StreamOpened.ShouldBeFalse();
     }
 
@@ -190,7 +190,7 @@ public class AiReceiptExtractorTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("1 MB");
+        result.Message!.ShouldContain("1 MB");
         fixture.ModelCalls.ShouldBe(0);
     }
 
@@ -234,7 +234,7 @@ public class AiReceiptExtractorTests
 
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
-        result.Message.ShouldContain("PDF");
+        result.Message!.ShouldContain("PDF");
         fixture.ModelCalls.ShouldBe(0);
     }
 
@@ -255,6 +255,137 @@ public class AiReceiptExtractorTests
 
     // ── 夹具 ──────────────────────────────────────────────────────────────────
 
+    // ── PDF：成功路径与提示词长度闸门 ─────────────────────────────────────────
+
+    /// <summary>
+    /// PDF 走文本路径：正文进提示词，原文回填 <c>RawText</c>。
+    /// </summary>
+    /// <remarks>
+    /// 此前十条测试全是拒绝路径 —— 一个从未被走通的成功路径，与「这条路径根本不通」
+    /// 在测试结果上完全一样。
+    /// </remarks>
+    [Fact]
+    public async Task Pdf_text_reaches_the_prompt_and_comes_back_as_raw_text()
+    {
+        var fixture = new Fixture
+        {
+            StoredContentType = "application/pdf",
+            FileName = "invoice.pdf",
+            ContentBytes = PdfWithText("ACME SUPPLIES TOTAL 123.45")
+        };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "invoice.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        fixture.ModelCalls.ShouldBe(1);
+        fixture.CapturedText!.ShouldContain("ACME SUPPLIES TOTAL 123.45");
+        result.Data!.RawText!.ShouldContain("ACME SUPPLIES TOTAL 123.45");
+    }
+
+    /// <summary>
+    /// ★ 正文超过上限 → 截断并注明，而不是把上百万字符原样拼进提示词。
+    /// </summary>
+    /// <remarks>
+    /// 字节大小有两道闸门，文本长度此前一道都没有。注明是必需的：模型看不见被截掉的部分，
+    /// 不告诉它就会拿倒数第二个数字凑一个看起来合理的总计。
+    /// </remarks>
+    [Fact]
+    public async Task Pdf_text_longer_than_the_limit_is_truncated_and_says_so()
+    {
+        const int limit = 1000;
+        var fixture = new Fixture
+        {
+            StoredContentType = "application/pdf",
+            FileName = "long.pdf",
+            MaxPdfTextChars = limit,
+            ContentBytes = PdfWithText(string.Join(" ", Enumerable.Repeat("LOREMIPSUM", 400)))
+        };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "long.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var sent = fixture.CapturedText!;
+        // 提示词 = 指令 + 正文；正文部分必须已被截到上限（留出注明那一段的余量）
+        sent.Length.ShouldBeLessThan(limit + 500);
+        sent.ShouldContain("Text truncated");
+        // 人核对时看到的与模型看到的是同一份东西
+        result.Data!.RawText!.ShouldContain("Text truncated");
+    }
+
+    /// <summary>对照：不超限时不加任何注明，正文逐字送出。</summary>
+    [Fact]
+    public async Task Pdf_text_within_the_limit_is_sent_verbatim()
+    {
+        var fixture = new Fixture
+        {
+            StoredContentType = "application/pdf",
+            FileName = "short.pdf",
+            MaxPdfTextChars = 1000,
+            ContentBytes = PdfWithText("SHORT RECEIPT 9.99")
+        };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "short.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        fixture.CapturedText!.ShouldNotContain("Text truncated");
+    }
+
+    /// <summary>
+    /// 只有已知的 PDF 内容类型才走 PdfPig。
+    /// </summary>
+    /// <remarks>
+    /// 判据原先是 <c>Contains("pdf")</c>，于是 <c>application/vnd.pdf-viewer</c> 这类东西
+    /// 也会被送进 PdfPig，报错落在读文件那一步、消息说的是「读不了这份 PDF」——
+    /// 而用户上传的根本不是 PDF。
+    /// </remarks>
+    [Fact]
+    public async Task A_content_type_that_merely_mentions_pdf_is_not_treated_as_one()
+    {
+        var fixture = new Fixture { StoredContentType = "application/vnd.pdf-viewer", FileName = "thing.bin" };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest
+        {
+            FileId = FileId,
+            FileName = "thing.bin",
+            ContentType = "application/vnd.pdf-viewer"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("Unsupported");
+        fixture.StreamOpened.ShouldBeFalse("拿不动的格式不该先把文件读进内存");
+    }
+
+    /// <summary>用 PdfPig 自己造一份带文字的最小 PDF（标准 14 号字体，无外部字体依赖）。</summary>
+    private static byte[] PdfWithText(string text)
+    {
+        var builder = new PdfDocumentBuilder();
+        var page = builder.AddPage(PageSize.A4);
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        var y = 780;
+        foreach (var chunk in Chunks(text, 90))
+        {
+            page.AddText(chunk, 10, new PdfPoint(30, y), font);
+            y -= 12;
+            if (y < 30)
+            {
+                page = builder.AddPage(PageSize.A4);
+                y = 780;
+            }
+        }
+        return builder.Build();
+    }
+
+    private static IEnumerable<string> Chunks(string value, int size)
+    {
+        for (var i = 0; i < value.Length; i += size)
+            yield return value.Substring(i, Math.Min(size, value.Length - i));
+    }
+
     private sealed class Fixture
     {
         public string StoredContentType { get; init; } = "image/jpeg";
@@ -262,11 +393,15 @@ public class AiReceiptExtractorTests
         public long ReportedSize { get; init; } = 1024;
         public byte[] ContentBytes { get; init; } = [1, 2, 3, 4];
         public int MaxFileSizeMb { get; init; } = 20;
+        public int MaxPdfTextChars { get; init; } = 20000;
         public string[] VisionContentTypes { get; init; } = ["image/jpeg", "image/png", "image/gif", "image/webp"];
         public bool FileMissing { get; init; }
 
         /// <summary>视觉路径实际递给模型的内容类型（null = 没走视觉路径）。</summary>
         public string? CapturedImageContentType { get; private set; }
+
+        /// <summary>实际递给模型的文本（PDF 路径）。</summary>
+        public string? CapturedText { get; private set; }
 
         /// <summary>模型被调用的次数（拒绝路径必须为 0）。</summary>
         public int ModelCalls { get; private set; }
@@ -300,11 +435,16 @@ public class AiReceiptExtractorTests
                 .Returns((IEnumerable<ChatMessage> messages, StructuredOutputOptions? _, CancellationToken __) =>
                 {
                     ModelCalls++;
-                    CapturedImageContentType = messages
+                    var list = messages.ToList();
+                    CapturedImageContentType = list
                         .SelectMany(m => m.Contents)
                         .OfType<DataContent>()
                         .Select(d => d.MediaType)
                         .FirstOrDefault();
+                    CapturedText = string.Concat(list
+                        .SelectMany(m => m.Contents)
+                        .OfType<TextContent>()
+                        .Select(t => t.Text));
                     return Task.FromResult(Result.Success(new ReceiptExtractionResult { Confidence = 0.9m }));
                 });
 
@@ -312,6 +452,7 @@ public class AiReceiptExtractorTests
             options.SetupGet(o => o.CurrentValue).Returns(new FinanceAiOptions
             {
                 MaxFileSizeMb = MaxFileSizeMb,
+                MaxPdfTextChars = MaxPdfTextChars,
                 VisionContentTypes = VisionContentTypes,
             });
 

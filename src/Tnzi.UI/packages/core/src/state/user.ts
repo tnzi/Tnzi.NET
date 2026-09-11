@@ -7,7 +7,7 @@
 import { reactive } from 'vue';
 import type { UserState, UserPreferences, RecentItem } from './types/user';
 import { defaultUserPreferences } from './types/user';
-import type { UserDto, UpdateUserDto } from '../services/identity/types';
+import type { UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useProfileApi } from '../services/identity/index';
 import type { StateDeps } from './types/deps';
 import { normalizeThemeMode } from '../types/theme';
@@ -185,7 +185,7 @@ export class UserStateManager {
     }
   }
 
-  async updateProfile(data: UpdateUserDto): Promise<UserDto> {
+  async updateProfile(data: UpdateProfileDto): Promise<UserDto> {
     this.isLoading = true;
 
     try {

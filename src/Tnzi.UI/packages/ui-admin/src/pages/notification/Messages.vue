@@ -395,6 +395,14 @@ const reportColumns: DataTableColumns<RecipientOutput> = [
     render: (row) => (row.sentTime ? formatDateTime(row.sentTime) : EMPTY_DASH),
   },
   {
+    // Quiet hours hold a recipient instead of dropping it. The instant stays on
+    // the row after delivery, so a Sent row with a value was delayed, not late.
+    key: 'deferredUntil',
+    title: () => t('report.columns.deferredUntil'),
+    width: 170,
+    render: (row) => (row.deferredUntil ? formatDateTime(row.deferredUntil) : EMPTY_DASH),
+  },
+  {
     key: 'failureReason',
     title: () => t('report.columns.failureReason'),
     minWidth: 220,

@@ -22,6 +22,11 @@
     "src/plugin/**/*",
     "src/locales/**/*",
     "src/styles/**/*",
+    // Generated icon manifest. It is not reachable from any other source file
+    // (nothing in the library imports it), so without this line vue-tsc leaves
+    // `dist/icons/index.d.ts` unwritten and the `./icons` subpath ships with a
+    // `types` entry pointing at a file that does not exist.
+    "src/icons/**/*",
     "src/index.ts",
     "src/env.d.ts",
     "src/pages/index.ts",
@@ -32,7 +37,11 @@
     // file. `**/*.test.ts` stays excluded below, so these must NOT be named
     // `*.test.ts`; `tsconfig.build.json` drops `**/__tests__/**` so they never
     // reach the emitted `.d.ts`.
-    "__tests__/types/**/*"
+    "__tests__/types/**/*",
+    // Test-support modules that are not themselves `*.test.ts`. Leaving these
+    // out is how the icon-bundling recipe shipped with two type errors in it:
+    // vitest transpiles without checking, so nothing looked at them.
+    "__tests__/icons/**/*"
   ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

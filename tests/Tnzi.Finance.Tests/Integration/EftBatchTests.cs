@@ -36,7 +36,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
         return result.Data!.Id;
     }
 
-    private async Task<Guid> CreateVendorWithBankAsync(string account = "1234567", string name = "Acme Supplies")
+    private async Task<Guid> CreateVendorWithBankAsync(string account = "1234567", string name = "Acme Supplies", string? routingNumber = "011401533")
     {
         var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = name }));
         vendor.Succeeded.ShouldBeTrue(vendor.Message);
@@ -46,7 +46,7 @@ public class EftBatchTests : FinanceIntegrationTestBase
             PartyType = FinancePartyType.Vendor,
             PartyId = vendor.Data!.Id,
             Scheme = BankNumberScheme.UsAba,
-            RoutingNumber = "011401533",
+            RoutingNumber = routingNumber,
             AccountNumber = account,
             IsDefault = true
         }));
@@ -345,6 +345,35 @@ public class EftBatchTests : FinanceIntegrationTestBase
 
         // 对照：这条路径合法正是因为文件从未交出去过。
         (await ReloadAsync<EftBatch>(batch1.Data!.Id))!.FirstDownloadedTime.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// 收款方档案没有完整路由号 → 装批当场拒绝，而不是等到生成文件。
+    /// </summary>
+    /// <remarks>
+    /// 档案允许只登记名称与账号（路由留空是合法的），但这样的档案<b>装不进 EFT 文件</b>：
+    /// 定宽写入器会把空路由补成全零，产出一份语法合法、指向不存在机构的报文。
+    /// 在装批时拒绝才点得出是哪一笔付款；留到生成阶段，操作员拿到的是一条与他当时
+    /// 在做的事已经对不上的报错。
+    /// </remarks>
+    [Fact]
+    public async Task CreateBatch_PayeeWithoutRouting_Rejects400()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync(account: "5550009", routingNumber: null);
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 300m);
+
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
+            PaymentEntryIds = new List<Guid> { payment }
+        });
+
+        batch.Succeeded.ShouldBeFalse("路由留空的档案装不进 EFT 文件");
+        batch.Code.ShouldBe(400);
+        batch.Message!.ShouldContain("routing");
     }
 
     // ── 文件已交出去之后的作废（重复付款）────────────────────────────────────────

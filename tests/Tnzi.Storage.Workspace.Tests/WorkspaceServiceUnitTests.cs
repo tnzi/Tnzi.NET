@@ -12,7 +12,6 @@ namespace Tnzi.Storage.Workspace.Tests;
 public class WorkspaceServiceUnitTests
 {
     private readonly Mock<IRepository<FileRecord, Guid>> _mockFileRepository;
-    private readonly Mock<IRepository<FileVersion, Guid>> _mockVersionRepository;
     private readonly Mock<IRepository<FileShare, Guid>> _mockShareRepository;
     private readonly Mock<IRepository<FileUploadSession, Guid>> _mockUploadSessionRepository;
     private readonly Mock<IRepository<FileChunk, Guid>> _mockChunkRepository;
@@ -23,7 +22,6 @@ public class WorkspaceServiceUnitTests
     public WorkspaceServiceUnitTests()
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
-        _mockVersionRepository = new Mock<IRepository<FileVersion, Guid>>();
         _mockShareRepository = new Mock<IRepository<FileShare, Guid>>();
         _mockUploadSessionRepository = new Mock<IRepository<FileUploadSession, Guid>>();
         _mockChunkRepository = new Mock<IRepository<FileChunk, Guid>>();
@@ -67,17 +65,6 @@ public class WorkspaceServiceUnitTests
             new FileAccessGrantContext(),
             new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object);
-    }
-
-    private FileVersionService CreateVersionService()
-    {
-        return new FileVersionService(
-            _mockVersionRepository.Object,
-            _mockFileRepository.Object,
-            _mockStorage.Object,
-            TestFileAccessAuthorizer.AllowAll(),
-            _mockServiceProvider.Object,
-            Guard());
     }
 
     private FileChunkUploadService CreateChunkUploadService()
@@ -179,7 +166,10 @@ public class WorkspaceServiceUnitTests
         var share = new FileShare
         {
             ShareToken = shareToken,
-            IsEnabled = true
+            IsEnabled = true,
+            // 撤销要求与创建同一份权利；这条用例测的是「撤销确实停用了链接」，
+            // 所以让当前用户就是创建者。谁不能撤销见 ShareManagementAuthorizationTests。
+            CreatorId = TestHelper.DefaultTestUserId
         };
 
         _mockShareRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileShare, bool>>>(), It.IsAny<CancellationToken>()))
@@ -303,10 +293,12 @@ public class WorkspaceServiceUnitTests
         Assert.True(result.Data.RequirePassword);
 
         // 口令哈希断言落在**落库的实体**上：对外 DTO 刻意不带 PasswordHash，
-        // 而这条用例要证明的是「确实算了一个 HMAC-SHA256 salt:hash 存进去」。
+        // 而这条用例要证明的是「确实算了一枚 PBKDF2 哈希存进去」（格式见 SharePasswordHasher）。
         Assert.NotNull(inserted);
         Assert.NotNull(inserted!.PasswordHash);
-        Assert.Contains(":", inserted.PasswordHash); // HMAC-SHA256 格式: salt:hash
+        Assert.StartsWith("pbkdf2$", inserted.PasswordHash);
+        Assert.True(SharePasswordHasher.Verify("secret123", inserted.PasswordHash, out var rehash));
+        Assert.False(rehash);
     }
 
     [Fact]
@@ -757,13 +749,6 @@ public class WorkspaceServiceUnitTests
     #endregion
 
     #region 辅助方法
-
-    private string CalculateMd5(byte[] data)
-    {
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        var hashBytes = md5.ComputeHash(data);
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
-    }
 
     /// <summary>
     /// 造一个「一定对不上」的口令哈希：真实实现用的是加盐 HMAC-SHA256 的 <c>salt:hash</c>，

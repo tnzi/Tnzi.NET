@@ -196,11 +196,17 @@ public class BillingModuleContractTests
             .GetCustomAttributes(typeof(DefaultControllerAttribute), inherit: false).ShouldNotBeEmpty();
     }
 
-    /// <summary>端点数量与拆分前一致：用户端 5 个，管理端 6 个。</summary>
+    /// <summary>用户端 6 个，管理端 6 个。</summary>
+    /// <remarks>
+    /// 用户端从拆分时的 5 个变成 6 个：下载发票文件拆成了「取字节」（<c>{id}/pdf</c>，直接吐文件）
+    /// 与「取可分享地址」（<c>{id}/pdf-url</c>，仅在产物由 Storage 承载时有值）两条。
+    /// 合成一条做不到 —— 未加载 Storage 的宿主把产物写在本地磁盘上，任何 URL 都指不到它，
+    /// 而此前那一条返回的正是它自己的路径。
+    /// </remarks>
     [Fact]
-    public void EndpointCounts_AreUnchanged()
+    public void EndpointCounts_AreAsDocumented()
     {
-        HttpEndpointCount<DefaultInvoiceController>().ShouldBe(5);
+        HttpEndpointCount<DefaultInvoiceController>().ShouldBe(6);
         HttpEndpointCount<DefaultInvoiceAdminController>().ShouldBe(6);
     }
 

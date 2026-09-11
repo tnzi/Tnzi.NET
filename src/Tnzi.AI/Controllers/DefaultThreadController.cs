@@ -105,8 +105,10 @@ public class DefaultThreadController : ApiControllerBase
     {
         await EnsureOwnershipAsync(threadId);
 
+        // 501 而不是 503：服务缺席是这个部署没装这块能力，不是暂时性故障。
+        // 503 会让监控与客户端一直重试一件永远不会好的事。
         if (SuggestionService == null)
-            return ApiResult<List<string>>.Error("Suggestion service not available.", 503);
+            return ApiResult<List<string>>.Error("Suggestion service is not available in this deployment.", 501);
 
         var suggestions = await SuggestionService.GenerateAsync(threadId, count, ct);
         return ApiResult<List<string>>.Ok(suggestions);

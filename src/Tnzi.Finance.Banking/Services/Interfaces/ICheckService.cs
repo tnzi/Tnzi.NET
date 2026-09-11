@@ -13,6 +13,51 @@ public interface ICheckService
     /// <summary>打印队列（可选按银行账户过滤）</summary>
     Task<Result<List<CheckQueueItemDto>>> GetQueueAsync(Guid? bankAccountId = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 可选版式清单（出厂内置版式 + 模板库里用户自建的模板）
+    /// </summary>
+    /// <remarks>
+    /// 供管理端画版式选择器：选中项写进 <c>BankAccount.CheckTemplateName</c>，
+    /// 或作为一次打印 / 预览的单次覆盖（<see cref="PrintChecksDto.TemplateName"/>）。
+    /// 未加载 <c>Tnzi.Finance.Documents</c>（内置版式随它分发）时返回 <b>501</b> 引导。
+    /// </remarks>
+    Task<Result<List<CheckTemplateDto>>> GetTemplatesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 某套版式的<b>样张</b>：用占位数据渲染一张，供选版式时比对手上的票纸。<b>零副作用</b>
+    /// （不分配支票号、不写登记簿、不动账，不需要任何真实付款单 / 收款人 / 银行账户）。
+    /// </summary>
+    /// <remarks>
+    /// 回答的是「给我看看这套版式长什么样」——在此之前这个问题只能靠跑一次真实付款预览，
+    /// 而那要求先有一张已过账、且挂着收款人的付款单。
+    /// <para>
+    /// ★ 走与打印<b>同一条渲染路径</b>（同一个 <see cref="ICheckDocumentRenderer"/>、同一个模型工厂），
+    /// 否则样张就不是「所见即所印」，这个功能反而有害。占位数据由框架自带
+    /// （见 <c>CheckSpecimenSample</c>），消费应用不必各编一套。
+    /// </para>
+    /// <para>
+    /// ★ 张数取自版式声明的「每页几张」：每页三张的版式画三张，否则看不出它是三联的。
+    /// 全票面打 <c>SPECIMEN - NOT NEGOTIABLE</c>（不是 "PREVIEW"：样张不是某笔付款的预览）。
+    /// </para>
+    /// <para>
+    /// ★ <b>永不接触银行档案里的账号</b>：样张会被下载被打印，而白纸票纸下磁码行是真的印出来的，
+    /// 水印挡人眼挡不住读票机。绑定档案只借银行名 / 路由号 / 档案名，账号一律用全 0 占位。
+    /// </para>
+    /// 未加载 <c>Tnzi.Finance.Documents</c> 返回 <b>501</b>（与目录端点同构）；
+    /// 目录里没有这个名字返回 <b>404</b>。
+    /// </remarks>
+    /// <param name="templateName">版式名（取自 <see cref="GetTemplatesAsync"/>）。</param>
+    /// <param name="stockType">看哪一种票纸：预印票纸只打可变数据，白纸整张打印含磁码带。</param>
+    /// <param name="bankAccountId">
+    /// 可选：借这个档案的银行标识与偏移，让样张贴近真实打印结果；null = 中性占位。
+    /// </param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    Task<Result<CheckFileDto>> GetTemplateSpecimenAsync(
+        string templateName,
+        CheckStockType stockType = CheckStockType.PrePrinted,
+        Guid? bankAccountId = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>分页查询支票登记簿</summary>
     Task<Result<IPagedList<BankCheckDto>>> GetPagedAsync(CheckQueryDto query, CancellationToken cancellationToken = default);
 

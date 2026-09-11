@@ -82,7 +82,7 @@
       <div v-if="field.type === 'Duration' && !error" class="t-settings-field__hint">
         {{ t('admin.modules.system.settings.durationHint') }}
       </div>
-      <div v-if="field.description" class="t-settings-field__hint">{{ field.description }}</div>
+      <div v-if="fieldDescription" class="t-settings-field__hint">{{ fieldDescription }}</div>
     </div>
   </div>
 </template>
@@ -111,6 +111,26 @@ const emit = defineEmits<{ 'update:value': [value: FieldValue]; preview: [] }>()
 const t = (key: string) => translatePageKey('', key)
 
 const fieldLabel = computed(() => resolveBackendLabel(props.field.i18nKey, props.field.label))
+
+/**
+ * The field's help text, translated when a locale entry exists.
+ *
+ * ★ The key is **derived** from the label's key by appending `Desc`, rather than
+ * carried as a second attribute on the backend. Two reasons:
+ *
+ * 1. Adding a translation then costs exactly one locale line - no C# change, no
+ *    redeploy of the backend. There are ~200 of these descriptions across the
+ *    framework; making each one need an attribute edit as well would guarantee
+ *    they stay untranslated.
+ * 2. The fallback is the backend's own text, which is what every deployment
+ *    renders today. So a missing entry is not a regression, it is the status quo -
+ *    and translations can land module by module.
+ */
+const fieldDescription = computed(() => {
+  const fallback = props.field.description ?? ''
+  const key = props.field.i18nKey
+  return key ? resolveBackendLabel(`${key}Desc`, fallback) : fallback
+})
 </script>
 
 <style scoped>

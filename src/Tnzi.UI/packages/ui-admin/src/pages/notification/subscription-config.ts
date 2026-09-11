@@ -37,6 +37,11 @@ export const notificationSubscriptionColumns: ColumnDef[] = [
   { key: 'maxFrequencyPerHour', title: 'columns.maxFrequencyPerHour',   visible: false },
 ]
 
+// Quiet hours defer, they do not drop: a recipient inside the window is held
+// until it ends and the delivery report shows the instant it was held until.
+// The schema has no help-text slot, so the placeholder carries that sentence.
+const QUIET_HOURS_HINT = 'HH:mm:ss (UTC). Deliveries inside the window are held until it ends, not dropped.'
+
 export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
   // `type: 'user'` is a custom field rendered by the page via a TUserSelector
   // fieldRenderer (remote user search) instead of a raw GUID text input.
@@ -55,7 +60,7 @@ export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
   ] },
   { key: 'category',  labelKey: 'form.category', label: 'Category (optional)', type: 'text' },
   { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
-  { key: 'quietHoursStart',     labelKey: 'form.quietHoursStart', label: 'Quiet Hours Start (HH:mm:ss UTC)', type: 'text' },
-  { key: 'quietHoursEnd',       labelKey: 'form.quietHoursEnd', label: 'Quiet Hours End (HH:mm:ss UTC)',   type: 'text' },
+  { key: 'quietHoursStart',     labelKey: 'form.quietHoursStart', label: 'Quiet Hours Start (HH:mm:ss UTC)', type: 'text', placeholder: QUIET_HOURS_HINT },
+  { key: 'quietHoursEnd',       labelKey: 'form.quietHoursEnd', label: 'Quiet Hours End (HH:mm:ss UTC)',   type: 'text', placeholder: QUIET_HOURS_HINT },
   { key: 'maxFrequencyPerHour', labelKey: 'form.maxFrequencyPerHour', label: 'Max Frequency / Hour',             type: 'number' },
 ]

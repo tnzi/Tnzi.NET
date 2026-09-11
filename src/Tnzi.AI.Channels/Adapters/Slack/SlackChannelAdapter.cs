@@ -170,19 +170,29 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     public async Task<WebhookProcessResult> ProcessWebhookAsync(
         string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
     {
-        // URL 验证 challenge（Slack Events API 首次验证）- 在验签前回显（Slack 规范允许）。
-        if (TryGetSlackChallenge(rawBody, out var challenge))
-        {
-            return WebhookProcessResult.Challenge(challenge!, "text/plain");
-        }
-
-        // 验签：配置了 SigningSecret 时强制校验 HMAC-SHA256 + 5 分钟时间窗。
+        // 验签先于一切，url_verification 也不例外（与 Discord 同形状）。
+        // ★ Slack 对 url_verification 请求同样签名，所以"先回显 challenge 再验签"不是规范要求
+        // 而是一个免验证的回显器：任何人都能拿它确认这个端点在线并让它回声任意字符串。
         if (!string.IsNullOrWhiteSpace(_options.SigningSecret))
         {
             if (!ValidateSlackSignature(rawBody, ToMutable(headers)))
             {
                 return WebhookProcessResult.Rejected("Invalid Slack signature");
             }
+        }
+        else
+        {
+            // 未配置 SigningSecret 无法验签 —— 拒绝，绝不放行（外部回调必须可验证）。
+            // ★ 此前这里没有 else 分支：漏配一个密钥，端点就从"验签的"变成"谁都能投递的"，
+            // 而日志、返回码、监控全部正常。Discord 的分支一直是对的，Slack/Feishu 不是。
+            _logger.LogWarning("Slack SigningSecret is not configured; rejecting unverifiable webhook");
+            return WebhookProcessResult.Rejected("Slack SigningSecret not configured");
+        }
+
+        // 验签通过后再回显 URL 验证 challenge（Slack Events API 首次验证）。
+        if (TryGetSlackChallenge(rawBody, out var challenge))
+        {
+            return WebhookProcessResult.Challenge(challenge!, "text/plain");
         }
 
         await HandleEventCoreAsync(rawBody, ct);

@@ -21,9 +21,7 @@ public class AgentNodeTests
 
     private AgentNode CreateNode()
     {
-        return new AgentNode(
-            BuildNodeServiceContext(),
-            Mock.Of<ILogger<AgentNode>>());
+        return new AgentNode(BuildNodeServiceContext());
     }
 
     private void SetupAgentFactory(string expectedResponse = "Agent response")

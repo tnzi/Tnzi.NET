@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 触发本次令牌签发的登录方式（供 <see cref="ILoginGuard"/> 按方式区别对待）。
@@ -25,6 +25,29 @@ public enum LoginMethod
 
     /// <summary>Passkey（WebAuthn）断言通过后的令牌签发</summary>
     Passkey = 6,
+
+    /// <summary>
+    /// 用刷新令牌换取新令牌。
+    /// </summary>
+    /// <remarks>
+    /// ★★ <b>刷新是一条签发路径</b>，它签发新的 access token 和新的刷新令牌，
+    /// 因此必须和其它签发路径一样过守卫链。此前它不过 —— 于是
+    /// <see cref="LockedAccountLoginGuard"/> 注释里写的那条规律在这里又应验了一次：
+    /// 「账号已停用」这道检查绑在登录动作上，而刷新不是登录，检查就这么消失了，
+    /// 且<b>没有任何东西会报错</b>。后果是管理员停用一个账号之后，
+    /// 手里还攥着刷新令牌的一方可以无限续期，永远进得来。
+    /// </remarks>
+    RefreshToken = 7,
+
+    /// <summary>
+    /// 接受邀请后的令牌签发（管理员开号 → 本人补齐信息 → 直接进入系统）。
+    /// </summary>
+    /// <remarks>
+    /// 这一步走守卫链而不是直接签发：账号刚从
+    /// <see cref="PendingUserActions.InvitationPending"/> 转出，此刻它与任何其它账号一样，
+    /// 该被停用就得被停用（管理员可能在邀请发出后又把人停掉了）。
+    /// </remarks>
+    Invitation = 8,
 }
 
 /// <summary>

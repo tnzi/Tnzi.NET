@@ -2,14 +2,21 @@
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// MCP 客户端工厂实现 - 按 McpServerConfig 创建 Stdio/HTTP 连接，缓存以 Server Name 为 key。
+/// MCP 客户端工厂实现 - 按 McpServerConfig 创建 Stdio/HTTP 连接，缓存以 <see cref="McpCacheKey"/>
+/// （租户键 + Server Name）为 key。
 /// 支持连接健康检查与断线自动重连（指数退避，最多 3 次重试）。
 /// 实现 IAsyncDisposable，应用关闭时由 Host 调用以释放所有缓存的连接（Stdio 子进程、Http 连接等）。
 /// </summary>
 /// <remarks>
+/// <para>
 /// 服务器配置来源由 <see cref="IMcpServerCatalog"/> 物化（部署配置 + DB 注册表合并），
 /// 本工厂只负责按给定 McpServerConfig 建连。信任边界：Stdio（本机子进程）配置只可能来自
 /// 部署配置（AI:Mcp options）- DB 注册表在 catalog/registry 两层均拒绝 stdio。
+/// </para>
+/// <para>
+/// 缓存分桶必须带租户维度：两个租户可以注册同名 server（唯一索引是 (TenantId, Name)），
+/// 只按名字缓存会让后来的租户命中前一个租户用其凭据建立的连接。见 <see cref="McpCacheKey"/>。
+/// </para>
 /// </remarks>
 public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 {
@@ -45,11 +52,13 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
     public async Task<IMcpClientAdapter> GetOrCreateClientAsync(McpServerConfig config, CancellationToken ct = default)
     {
         Check.NotNull(config);
-        var key = config.Name ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(key))
+        if (string.IsNullOrWhiteSpace(config.Name))
         {
             throw new InvalidOperationException("MCP server config Name is required.");
         }
+
+        // 分区键带租户维度：同名 server 属于不同租户时端点与凭据都不同，必须各自建连
+        var key = McpCacheKey.For(config);
 
         // 快速路径：缓存命中 + 健康检查节流（30s 内不重复检查）
         if (_cache.TryGetValue(key, out var cached))
@@ -60,7 +69,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
                 return cached;
             }
 
-            if (await IsClientHealthyAsync(cached, key, ct).ConfigureAwait(false))
+            if (await IsClientHealthyAsync(cached, config.Name, ct).ConfigureAwait(false))
             {
                 _lastHealthCheckTime[key] = DateTime.UtcNow;
                 return cached;
@@ -68,7 +77,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
 
             // 连接已断开，清除健康检查时间戳，进入锁区域处理重连
             _lastHealthCheckTime.TryRemove(key, out _);
-            _logger.LogWarning("MCP client for server '{ServerName}' is disconnected, attempting reconnection", key);
+            _logger.LogWarning("MCP client for server '{ServerName}' is disconnected, attempting reconnection", config.Name);
         }
 
         if (_disposed)
@@ -87,7 +96,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
             // 双重检查：在锁内再次验证缓存（可能已被其他线程重连）
             if (_cache.TryGetValue(key, out cached))
             {
-                if (await IsClientHealthyAsync(cached, key, ct).ConfigureAwait(false))
+                if (await IsClientHealthyAsync(cached, config.Name, ct).ConfigureAwait(false))
                 {
                     _lastHealthCheckTime[key] = DateTime.UtcNow;
                     return cached;
@@ -121,7 +130,13 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
         await _createLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await InvalidateCachedClientAsync(serverName).ConfigureAwait(false);
+            // 调用方（注册表 CRUD / 401 恢复）只带得出名字，本工厂是 Singleton 没有租户上下文，
+            // 因此失效全部租户桶里叫这个名字的连接。多失效一个只是重连一次；
+            // 漏失效一个是继续拿着已被改掉或作废的凭据往外打，且毫无症状。
+            foreach (var key in _cache.Keys.Where(k => McpCacheKey.MatchesServerName(k, serverName)).ToList())
+            {
+                await InvalidateCachedClientAsync(key).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -148,11 +163,13 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
     /// <summary>
     /// 从缓存中移除并释放客户端（不持有锁，调用方必须已持有 _createLock）。
     /// </summary>
-    private async Task InvalidateCachedClientAsync(string serverName)
+    /// <param name="cacheKey">分区键（<see cref="McpCacheKey"/>），不是裸服务器名</param>
+    private async Task InvalidateCachedClientAsync(string cacheKey)
     {
-        _lastHealthCheckTime.TryRemove(serverName, out _);
-        if (_cache.TryRemove(serverName, out var adapter))
+        _lastHealthCheckTime.TryRemove(cacheKey, out _);
+        if (_cache.TryRemove(cacheKey, out var adapter))
         {
+            var serverName = McpCacheKey.ServerName(cacheKey);
             try
             {
                 await adapter.DisposeAsync().ConfigureAwait(false);
@@ -433,7 +450,7 @@ public class McpClientFactory : IMcpClientFactory, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Error disposing MCP client adapter for server '{ServerName}'", key);
+                        _logger.LogWarning(ex, "Error disposing MCP client adapter for server '{ServerName}'", McpCacheKey.ServerName(key));
                     }
                 }
             }

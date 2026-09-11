@@ -1,4 +1,4 @@
-import { ref, toRaw, type Ref } from 'vue'
+import { computed, ref, shallowRef, toRaw, watchEffect, type ComputedRef, type Ref } from 'vue'
 
 export type FormModalMode = 'create' | 'edit' | 'view'
 
@@ -56,5 +56,62 @@ export function useFormModal<T = unknown>(): UseFormModalReturn<T> {
     open,
     close,
     confirm,
+  }
+}
+
+/**
+ * The `(mode, formData)` pair an overlay should RENDER - held stable across the
+ * close animation.
+ *
+ * {@link useFormModal.close} hides the overlay and clears `mode` / `formData`
+ * in the same tick, but the body is still on screen at that moment: NModal /
+ * NDrawer keep it mounted until their leave transition ends. Handing that body
+ * a null pair makes it repaint from nothing - selects lose their labels,
+ * repeated rows collapse, and a view overlay's footer grows a Confirm button as
+ * `mode !== 'view'` flips true - work whose result is thrown away microseconds
+ * later when the body unmounts. Measured on a 424-node form in a consuming app:
+ * roughly a third of the whole close cost, enough to drop a frame out of the
+ * close animation.
+ *
+ * So the chrome renders the last pair the state held WHILE OPEN and keeps it
+ * until the body is gone. Only the *rendering* is held: `visible` stays the
+ * single authority for "is it open" and the state itself still clears on close,
+ * so consumers watching `formData` for "nothing is being edited" (stopping a
+ * poll, resetting a dependent field) keep the signal they are written against.
+ *
+ * Nothing leaks into the next open: `open()` writes both refs before it flips
+ * `visible`, and the held pair is only consulted while `visible` is false.
+ *
+ * `state` is captured once, so pass the long-lived instance the page owns
+ * (`crud.formModal` / `detail.form`) rather than something that can be swapped
+ * for a different instance while the chrome stays mounted.
+ */
+export interface RetainedFormState<T> {
+  mode: ComputedRef<FormModalMode | null>
+  formData: ComputedRef<T | null>
+}
+
+export function useRetainedFormState<T>(state: UseFormModalReturn<T>): RetainedFormState<T> {
+  const heldMode = shallowRef<FormModalMode | null>(null)
+  const heldData = shallowRef<T | null>(null)
+
+  // `flush: 'sync'` because `close()` clears the refs in the same tick it hides
+  // the overlay - a deferred callback would run afterwards and capture exactly
+  // the nulls this exists to avoid. Capturing only while `visible` is true also
+  // makes it independent of the order of the assignments inside `close()`.
+  // Tracking is on the refs themselves, not their contents, so editing a field
+  // does not re-run this.
+  watchEffect(
+    () => {
+      if (!state.visible.value) return
+      heldMode.value = state.mode.value
+      heldData.value = state.formData.value
+    },
+    { flush: 'sync' },
+  )
+
+  return {
+    mode: computed(() => (state.visible.value ? state.mode.value : heldMode.value)),
+    formData: computed(() => (state.visible.value ? state.formData.value : heldData.value)),
   }
 }

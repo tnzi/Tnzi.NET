@@ -172,10 +172,41 @@ public interface ICache
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 读取缓存值，同时明确回答「键在不在」。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>凡是要区分「没缓存」与「缓存了默认值」的地方，一律用本方法，不要用
+    /// <c>GetAsync&lt;T&gt;() is not null</c>。</b> 对值类型 T，未命中时 <see cref="GetAsync{T}"/>
+    /// 返回 <c>default(T)</c>，而 <c>0 is not null</c> 恒为真 —— 于是「没命中」被读成「命中了 0」。
+    /// </para>
+    /// <para>
+    /// 默认实现是两次访问（取值 + 存在性），实现方可重写为单次查找。
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">值类型</typeparam>
+    /// <param name="key">缓存键</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>Found 表示键是否存在；不存在时 Value 为 <c>default(T)</c></returns>
+    async Task<(bool Found, T? Value)> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
+    {
+        var value = await GetAsync<T>(key, cancellationToken);
+        if (value is not null)
+            return (true, value);
+
+        // 值类型（或确实缓存了 null）时取值分不出「没有」与「默认值」，再问一次存在性
+        return (await ExistsAsync(key, cancellationToken), value);
+    }
+
+    /// <summary>
     /// 获取缓存值，如果不存在则使用工厂方法创建并缓存。
     /// 默认实现使用 per-key 锁防止缓存击穿（并发请求只执行一次 factory）。
     /// 具体实现可重写以提供更高效的原子操作。
     /// </summary>
+    /// <remarks>
+    /// 命中判定走 <see cref="TryGetAsync{T}"/> 而不是「取回来的值非 null」：后者对值类型恒为真，
+    /// 会让工厂永不被调用、缓存永不被写入，<c>GetOrAddAsync&lt;int&gt;</c> 恒返回 0 且不报任何错。
+    /// </remarks>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="factory">值不存在时的创建工厂</param>
@@ -184,19 +215,23 @@ public interface ICache
     /// <returns>缓存值或工厂创建的值</returns>
     async Task<T?> GetOrAddAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
-        var value = await GetAsync<T>(key, cancellationToken);
-        if (value is not null)
+        Check.NotNull(factory);
+
+        var (found, value) = await TryGetAsync<T>(key, cancellationToken);
+        if (found)
             return value;
 
         // Per-key 锁防止缓存击穿
         await using (await CacheStampedeGuard.Instance.LockAsync(key, cancellationToken))
         {
             // Double-check: 另一个线程可能已经填充了缓存
-            value = await GetAsync<T>(key, cancellationToken);
-            if (value is not null)
+            (found, value) = await TryGetAsync<T>(key, cancellationToken);
+            if (found)
                 return value;
 
             value = await factory();
+
+            // 工厂返回 null 不写缓存：缓存 null 会把一次「查不到」固化成整个过期周期的答案
             if (value is not null)
                 await SetAsync(key, value, expiration, cancellationToken);
         }

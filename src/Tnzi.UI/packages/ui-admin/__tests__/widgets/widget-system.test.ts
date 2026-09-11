@@ -78,6 +78,25 @@ describe('TWidgetCard', () => {
     })
     expect(wrapper.find('.t-widget-card--bare').exists()).toBe(true)
     expect(wrapper.find('.inner').text()).toBe('x')
+    // The linchpin the CSS side stands on. Both branches carry
+    // `t-widget-card`, so `t-surface-card` is the ONLY thing telling a
+    // stylesheet which of the two it is looking at - see the marker gate in
+    // `components/surface-tiers.test.ts`. Put it back on the bare branch and
+    // every card-chrome rule in both packages starts matching a bare widget
+    // again, silently.
+    expect(wrapper.find('.t-surface-card').exists()).toBe(false)
+  })
+
+  it('marks the non-bare card as a surface', () => {
+    // The other half: the admin background rule is keyed to the marker, so a
+    // card that stopped carrying it would lose `--tnzi-admin-card-bg` and
+    // quietly fall back to the ui-package default on every themed console.
+    const wrapper = mount(TWidgetCard, {
+      props: { id: 's', title: 'S' },
+      slots: { default: () => h('div', 'body') },
+      global: { provide: themeProvide() },
+    })
+    expect(wrapper.find('.t-widget-card.t-surface-card').exists()).toBe(true)
   })
 
   it('fires onRefresh-registered callbacks when refresh button is clicked', async () => {

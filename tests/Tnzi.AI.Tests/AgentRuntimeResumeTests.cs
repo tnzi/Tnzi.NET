@@ -55,7 +55,7 @@ public class AgentRuntimeResumeTests
                 Status = "Completed"
             }));
 
-        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var runtime = new AgentRuntime(
             Mock.Of<IAgentResolver>(),
@@ -124,7 +124,7 @@ public class AgentRuntimeResumeTests
         workflowService.Setup(x => x.RejectStepAsync("wf-exec-002", "approval-step", "not good enough", It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success());
 
-        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var runtime = new AgentRuntime(
             Mock.Of<IAgentResolver>(),
@@ -188,7 +188,7 @@ public class AgentRuntimeResumeTests
                 Status = "Completed"
             }));
 
-        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker, Mock.Of<ILogger<WorkflowDelegator>>());
+        var workflowDelegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
 
         var runtime = new AgentRuntime(
             Mock.Of<IAgentResolver>(),

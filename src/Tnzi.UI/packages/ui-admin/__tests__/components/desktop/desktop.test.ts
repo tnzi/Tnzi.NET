@@ -8,6 +8,11 @@ import TDesktopWindowHost from '../../../src/components/desktop/TDesktopWindowHo
 import TDesktopIcons from '../../../src/components/desktop/TDesktopIcons.vue'
 import TDesktopTaskbar from '../../../src/components/desktop/TDesktopTaskbar.vue'
 import TDesktopHost from '../../../src/components/desktop/TDesktopHost.vue'
+import TDesktopStartMenu from '../../../src/components/desktop/TDesktopStartMenu.vue'
+import {
+  ADMIN_SHELL_CONFIG_KEY,
+  type AdminChromeAction,
+} from '../../../src/plugin/shell-config'
 import { registerDesktopPanel, unregisterDesktopPanel } from '../../../src/headless/desktop-panels'
 import { useAdminDesktopStore } from '../../../src/stores/useAdminDesktopStore'
 import { useAdminRouteStore, type AdminMenuItem } from '../../../src/stores/useAdminRouteStore'
@@ -688,5 +693,57 @@ describe('TDesktopIcons selection', () => {
     expect(wrapper.find('.t-desktop-icons__item').classes()).not.toContain(
       't-desktop-icons__item--selected',
     )
+  })
+})
+
+/**
+ * The desktop is the layout mode with no sidebar, so it is where a host action
+ * disappears if only the sidebar footer was wired. The built-in Settings entry
+ * was re-homed here for exactly that reason; these lock the host's actions to
+ * the same strip so the two cannot drift apart again.
+ */
+describe('TDesktopStartMenu - host chrome actions', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  function mountStartMenu(actions: AdminChromeAction[]) {
+    return mount(TDesktopStartMenu, {
+      props: { show: true, brand: 'Acme' },
+      global: {
+        stubs: { ...stubs, TAvatar: true, teleport: true },
+        provide: { [ADMIN_SHELL_CONFIG_KEY as symbol]: { actions } },
+      },
+    })
+  }
+
+  it('renders host actions in the start-menu footer', () => {
+    const wrapper = mountStartMenu([
+      { key: 'inbox', icon: 'mdi:inbox', label: 'Inbox', onClick: () => undefined },
+    ])
+    const buttons = wrapper.findAll('.t-desktop-start__footer-btn')
+    expect(buttons.some((b) => b.attributes('title') === 'Inbox')).toBe(true)
+  })
+
+  it('closes the panel before running the action, so the panel is not left over what it opened', async () => {
+    const onClick = vi.fn()
+    const wrapper = mountStartMenu([
+      { key: 'inbox', icon: 'mdi:inbox', label: 'Inbox', onClick },
+    ])
+    const button = wrapper
+      .findAll('.t-desktop-start__footer-btn')
+      .find((b) => b.attributes('title') === 'Inbox')!
+    await button.trigger('click')
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('update:show')?.[0]).toEqual([false])
+  })
+
+  it('respects the action show predicate', () => {
+    const wrapper = mountStartMenu([
+      { key: 'inbox', icon: 'mdi:inbox', label: 'Inbox', show: () => false, onClick: () => undefined },
+    ])
+    expect(
+      wrapper.findAll('.t-desktop-start__footer-btn').some((b) => b.attributes('title') === 'Inbox'),
+    ).toBe(false)
   })
 })

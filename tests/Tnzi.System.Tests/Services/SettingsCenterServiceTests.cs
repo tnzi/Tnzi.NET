@@ -7,6 +7,7 @@ public class SettingsCenterServiceTests
     private readonly Mock<IRepository<Setting, Guid>> _repositoryMock = new();
     private readonly Mock<ISettingService> _settingServiceMock = new();
     private readonly Mock<IServiceProvider> _serviceProviderMock = new();
+    private readonly Mock<IPermissionChecker> _permissionCheckerMock = new();
     private readonly List<ISettingDefinitionProvider> _providers = new();
     private readonly List<ISettingGroupHandler> _handlers = new();
     private readonly IConfiguration _configuration;
@@ -16,6 +17,13 @@ public class SettingsCenterServiceTests
         var loggerFactoryMock = new Mock<ILoggerFactory>();
         loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        // 这一组测的是配置中心本身（聚合、校验、落库、回调），不是授权。给一个恒放行的
+        // 权限检查器，把授权那一维摘出去。★ 「没有权限检查器时会怎样」另有专门用例
+        // （GetDefinitions_WithoutPermissionChecker_WithholdsEverything）—— 那是安全不变量，
+        // 不能靠这一组的默认装配顺带覆盖。
+        _permissionCheckerMock.Setup(x => x.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IPermissionChecker))).Returns(_permissionCheckerMock.Object);
 
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:FromAppSettings"] = "from-config" })
@@ -31,6 +39,40 @@ public class SettingsCenterServiceTests
         _configuration,
         _providers,
         _handlers);
+
+    /// <summary>
+    /// ★★★ 没有 <see cref="IPermissionChecker"/> 时**一个组都不给**，写入也拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 这里此前是 fail-open（<c>return true</c>）。控制器刻意只挂裸 <c>[ApiAuthorize]</c>
+    /// 并把逐组判定交给服务层 —— 那是对的（聚合端点没有哪个类级码合适），
+    /// 但代价是<b>这两个方法就是它全部的授权</b>，放行掉等于让任何已登录用户
+    /// 读写全部模块的运行时配置。与 FileAccessAuthorizer / SignalR hub 过滤器同一口径：
+    /// 少加载一个可选包只能减少能力，不能放宽守卫。
+    /// </remarks>
+    [Fact]
+    public async Task GetDefinitions_WithoutPermissionChecker_WithholdsEverything()
+    {
+        _providers.Add(new FakeProvider(DemoGroup(new SettingFieldDefinition { Key = "Demo:X", Label = "X", Type = SettingFieldType.String })));
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IPermissionChecker))).Returns(null!);
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.ShouldBeEmpty();
+    }
+
+    /// <summary>对照组：有检查器且放行时，同一个组是看得到的 —— 否则上面那条恒真。</summary>
+    [Fact]
+    public async Task GetDefinitions_WithGrantingPermissionChecker_ReturnsGroup()
+    {
+        _providers.Add(new FakeProvider(DemoGroup(new SettingFieldDefinition { Key = "Demo:X", Label = "X", Type = SettingFieldType.String })));
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.ShouldNotBeEmpty();
+    }
 
     private sealed class FakeProvider(params SettingDefinitionGroup[] groups) : ISettingDefinitionProvider
     {

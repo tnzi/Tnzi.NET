@@ -41,7 +41,7 @@ import type {
   CreatePromotionDto,
   UpdatePromotionDto,
   PromotionQueryDto,
-  CouponValidationResultDto,
+  CouponValidationResponseDto,
   ValidateCouponDto,
   CalculateDiscountDto,
   DiscountCalculationResultDto,
@@ -252,9 +252,24 @@ export function useInvoiceApi(client: HttpClient) {
     getMy: () =>
       client.get<PagedList<InvoiceDto>>(`${INVOICE_BASE}/my`),
 
-    /** Download invoice PDF */
+    /**
+     * Download the invoice document as a file.
+     *
+     * The endpoint streams the bytes. It used to answer a string that was its
+     * own path (a link pointing at itself), so nothing could ever reach the file;
+     * streaming is the only shape that works whether the document lives in
+     * Storage or on the host's local disk.
+     */
     downloadPdf: (id: string) =>
-      client.get<string>(`${INVOICE_BASE}/${id}/pdf`),
+      client.download(`${INVOICE_BASE}/${id}/pdf`),
+
+    /**
+     * Shareable address of the invoice document, for e-mails and links. Empty
+     * when the document is not held by Storage (local-disk fallback): only
+     * Storage can hand out an HTTP-reachable address.
+     */
+    getPdfUrl: (id: string) =>
+      client.get<string>(`${INVOICE_BASE}/${id}/pdf-url`),
 
     /** Send invoice to email */
     send: (id: string, data?: SendInvoiceDto) =>
@@ -297,7 +312,7 @@ export function useCouponApi(client: HttpClient) {
 
     /** Validate coupon (typed, scope-aware) */
     validateCoupon: (data: ValidateCouponDto) =>
-      client.post<CouponValidationResultDto>(`${PROMOTION_BASE}/validate-coupon`, data),
+      client.post<CouponValidationResponseDto>(`${PROMOTION_BASE}/validate-coupon`, data),
 
     /** Calculate discount (typed, scope-aware) */
     calculateDiscount: (data: CalculateDiscountDto) =>

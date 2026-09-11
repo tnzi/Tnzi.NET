@@ -457,6 +457,20 @@ public partial class PayRunService : ApplicationService, IPayRunService
                     reversalIds.Add(reversed.Data!.Id);
                 }
 
+                // 付款凭证已被冲销，所以这些工资单上的钱并没有出去 —— 留着 Paid，
+                // 「本月已付」的任何一处呈现都会把它们算进去。
+                // ★ 两个凭证 id 刻意保留：它们指向的原始凭证仍在账上（带冲销链），
+                // 是「这张工资单当初落在哪张凭证上」的唯一线索，而 Payslip 没有
+                // 对应的 VoidJournalEntryId 可以承接它。与 Finance 核心各单据的作废
+                // 同口径：原始链接留着，作废信息另记。
+                var paid = await _payslipRepo.AsQueryable(true)
+                    .Where(p => p.PayRunId == run.Id && p.PaymentStatus == PayslipPaymentStatus.Paid)
+                    .ToListAsync(ct);
+                foreach (var payslip in paid)
+                    payslip.PaymentStatus = PayslipPaymentStatus.Unpaid;
+                if (paid.Count > 0)
+                    await _payslipRepo.UpdateManyAsync(paid, ct);
+
                 run.Status = PayRunStatus.Voided;
                 await _runRepo.UpdateAsync(run, ct);
                 await _runRepo.SaveChangesAsync(ct);

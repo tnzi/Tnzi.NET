@@ -237,13 +237,9 @@ public class WorkflowNodeErrorPolicyTests
         var dataList = data.ToList();
 
         var repo = new Mock<IRepository<WorkflowExecution, Guid>>();
-        repo.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Expression<Func<WorkflowExecution, bool>>? pred, CancellationToken _) =>
-            {
-                if (pred == null) return dataList;
-                var compiled = pred.Compile();
-                return dataList.Where(compiled).ToList();
-            });
+        // ScanAsync 改为在查询侧 Take（此前是拉回全部超时行再在内存里 Take），
+        // 因此这里也要按 IQueryable 建桩。
+        repo.Setup(r => r.AsQueryable()).Returns(() => dataList.BuildMock());
         repo.Setup(r => r.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowExecution, CancellationToken>((e, _) => updatedEntities.Add(e))
             .Returns(Task.CompletedTask);

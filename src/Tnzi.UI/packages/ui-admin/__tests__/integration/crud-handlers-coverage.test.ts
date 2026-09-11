@@ -404,10 +404,26 @@ vi.mock('../../src/services/bridges/storage-bridge', () => ({
     shares: { ...mkCrud(), byFile: vi.fn(async () => []), batchRevoke: vi.fn(async () => 1) },
   }),
 }))
+vi.mock('../../src/services/bridges/feature-bridge', () => ({
+  createFeatureBridge: () => ({
+    definitions: mkCrud(),
+    values: {
+      providers: vi.fn(async () => [{ name: 'Global', priority: 100, requiresKey: false, isActive: true }]),
+      all: vi.fn(async (_scope: unknown, q: { pageIndex: number; pageSize: number }) => ({
+        items: [{ id: 'v1', featureDefinitionId: 'd1', featureName: 'F.A', valueType: 'Boolean', effectiveValue: 'true', isExplicitlySet: true, effectiveSource: 'Explicit', canOverride: true, source: 'Database', isEnabled: true }],
+        totalCount: 1, pageIndex: q.pageIndex, pageSize: q.pageSize,
+      })),
+      set: vi.fn(async () => ({})),
+      clear: vi.fn(async () => undefined),
+    },
+    usage: {
+      mostUsed: vi.fn(async () => []), stats: vi.fn(async () => null), trend: vi.fn(async () => []), cleanup: vi.fn(async () => 0),
+    },
+  }),
+}))
 vi.mock('../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
     accessLogs: mkCrud(), dictionaries: mkCrud(), parameters: mkCrud(), scheduledJobs: mkCrud(),
-    features: mkCrud(),
     settingsCenter: {
       getDefinitions: vi.fn(async () => []),
       saveGroup: vi.fn(async () => ({ key: 'g', displayName: 'G', i18nKey: '', icon: '', moduleName: '', fields: [] })),
@@ -459,6 +475,7 @@ import AccessLogs from '../../src/pages/system/AccessLogs.vue'
 import Dictionaries from '../../src/pages/system/Dictionaries.vue'
 import Parameters from '../../src/pages/system/Parameters.vue'
 import ScheduledJobs from '../../src/pages/system/ScheduledJobs.vue'
+import FeatureValuesTab from '../../src/pages/system/features/FeatureValuesTab.vue'
 import SigningRequests from '../../src/pages/signing/Requests.vue'
 import SigningTemplates from '../../src/pages/signing/Templates.vue'
 import FunctionModules from '../../src/pages/authorization/FunctionModules.vue'
@@ -590,7 +607,7 @@ const PAGES: Array<[string, any]> = [
   ['Logs', Logs], ['Operations', Operations],
   ['AccessLogs', AccessLogs], ['Dictionaries', Dictionaries],
   ['Parameters', Parameters],
-  ['ScheduledJobs', ScheduledJobs],
+  ['ScheduledJobs', ScheduledJobs], ['FeatureValues', FeatureValuesTab],
   ['FunctionModules', FunctionModules], ['EntityRoles', EntityRoles],
   ['RoleFunctions', RoleFunctions], ['Permissions', Permissions],
   ['Files', Files], ['Chunks', Chunks], ['Versions', Versions],

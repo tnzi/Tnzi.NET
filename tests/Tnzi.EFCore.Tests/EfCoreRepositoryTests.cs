@@ -7,12 +7,10 @@ namespace Tnzi.EFCore.Tests;
 public class EfCoreRepositoryTests : EFCoreTestBase
 {
     private readonly IRepository<TestProduct, Guid> _productRepository;
-    private readonly IRepository<TestUser, Guid> _userRepository;
 
     public EfCoreRepositoryTests()
     {
         _productRepository = new EFCoreRepository<TestDbContext, TestProduct, Guid>(DbContext, null, ServiceProvider);
-        _userRepository = new EFCoreRepository<TestDbContext, TestUser, Guid>(DbContext, null, ServiceProvider);
     }
 
     #region 基本 CRUD 测试

@@ -43,6 +43,9 @@ bld/
 # Build sensitive/binary files
 build/nuget.exe
 build/*.txt
+# 例外：披露词表是 docs/ 门禁（DocsDisclosureTests）与发布门禁共用的数据源，必须进版本控制；
+# 它不在 mirror.ps1 的 build/ 投影清单里，所以仍不会进公开镜像。
+!build/disclosure-terms.txt
 
 # Visual Studio cache/options
 .vs/

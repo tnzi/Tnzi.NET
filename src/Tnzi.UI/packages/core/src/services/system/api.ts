@@ -6,6 +6,7 @@ import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type { ReorderRequest } from '../../types/api';
 import type {
+  SettingScope,
   SettingDto,
   CreateSettingDto,
   UpdateSettingDto,
@@ -20,6 +21,7 @@ import type {
   GlobalThemeSnapshotDto,
   SaveGlobalThemeSnapshotDto,
 } from './types';
+import type { ScheduledJobDto } from './types';
 import { type AccessLogTrendInterval, type TopEndpointSortBy } from './types';
 
 const ADMIN_SETTING_BASE = '/admin/settings';
@@ -30,10 +32,15 @@ const ADMIN_ACCESS_LOG_BASE = '/admin/access-logs';
  */
 export function useAdminSettingApi(client: HttpClient) {
   return {
-    /** Get all settings (optionally filtered by group) */
-    getList: (group?: string) =>
+    /**
+     * List settings. The backend scopes the answer to the caller's tenant; pass
+     * `scope` / `scopeId` to look at one scope explicitly (for example a single
+     * user's rows). Before 2026-09-04 the list returned every scope, including
+     * other tenants' and every user's settings.
+     */
+    getList: (group?: string, scope?: SettingScope, scopeId?: string) =>
       client.get<SettingDto[]>(ADMIN_SETTING_BASE, {
-        params: { group },
+        params: { group, scope, scopeId },
       }),
 
     /** Get setting by ID */
@@ -60,9 +67,11 @@ export function useAdminSettingApi(client: HttpClient) {
     getSystemInfo: () =>
       client.get<SystemInfoDto>(`${ADMIN_SETTING_BASE}/system-info`),
 
-    /** Get setting groups with counts */
-    getGroups: () =>
-      client.get<SettingGroupDto[]>(`${ADMIN_SETTING_BASE}/groups`),
+    /** Get setting groups with counts (same scoping as `getList`). */
+    getGroups: (scope?: SettingScope, scopeId?: string) =>
+      client.get<SettingGroupDto[]>(`${ADMIN_SETTING_BASE}/groups`, {
+        params: scope || scopeId ? { scope, scopeId } : undefined,
+      }),
 
     /**
      * Reorder settings inside one group (drag-and-drop).
@@ -203,5 +212,21 @@ export function useAdminAccessLogApi(client: HttpClient) {
     /** Batch delete access logs */
     batchDelete: (ids: string[]) =>
       client.delete<void>(`${ADMIN_ACCESS_LOG_BASE}/batch`, { body: ids }),
+  };
+}
+
+const ADMIN_SCHEDULED_JOB_BASE = '/admin/scheduled-jobs';
+
+/**
+ * Admin Scheduled Job API - recurring Hangfire jobs: list / inspect / run now /
+ * remove. Served by `Tnzi.Hangfire` (see the note on `ScheduledJobDto`).
+ */
+export function useAdminScheduledJobApi(client: HttpClient) {
+  return {
+    getList: () => client.get<ScheduledJobDto[]>(ADMIN_SCHEDULED_JOB_BASE),
+    get: (id: string) => client.get<ScheduledJobDto>(`${ADMIN_SCHEDULED_JOB_BASE}/${encodeURIComponent(id)}`),
+    /** Enqueue one run now, independent of the cron schedule. */
+    trigger: (id: string) => client.post<void>(`${ADMIN_SCHEDULED_JOB_BASE}/${encodeURIComponent(id)}/trigger`),
+    delete: (id: string) => client.delete<void>(`${ADMIN_SCHEDULED_JOB_BASE}/${encodeURIComponent(id)}`),
   };
 }

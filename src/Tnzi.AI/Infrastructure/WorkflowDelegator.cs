@@ -5,15 +5,13 @@ public class WorkflowDelegator : IWorkflowDelegator
     private readonly IWorkflowService _workflowService;
     private readonly IRunStore _runStore;
     private readonly IRunTracker _runTracker;
-    private readonly ILogger<WorkflowDelegator> _logger;
 
     public WorkflowDelegator(IWorkflowService workflowService, IRunStore runStore,
-        IRunTracker runTracker, ILogger<WorkflowDelegator> logger)
+        IRunTracker runTracker)
     {
         _workflowService = Check.NotNull(workflowService);
         _runStore = Check.NotNull(runStore);
         _runTracker = Check.NotNull(runTracker);
-        _logger = Check.NotNull(logger);
     }
 
     public async Task<AgentRunResult> ExecuteWorkflowAsync(AgentRunRequest request, CancellationToken ct)

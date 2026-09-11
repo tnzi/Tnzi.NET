@@ -199,6 +199,26 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
     expect(tables[0]?.attributes('data-rows')).toBe('2')
   })
 
+  it('renders an unmeasurable budget as a warning, never as within budget', async () => {
+    // BudgetStatus.Indeterminate (3): the budget is on but nothing recorded a
+    // cost, so the 0 USD aggregate is "cannot be measured", not "nothing spent".
+    getBudgetSummary.mockResolvedValueOnce({
+      periodStart: '2026-04-01T00:00:00Z',
+      periodEnd: '2026-04-30T23:59:59Z',
+      currentSpendUsd: 0,
+      budgetLimitUsd: 100,
+      usagePercentage: 0,
+      status: 3,
+      byAgent: [],
+    })
+    const wrapper = mount(Quotas, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Cannot be measured')
+    expect(wrapper.text()).not.toContain('Within Budget')
+    const progresses = wrapper.findAll('.n-progress-stub')
+    expect(progresses.some((p) => p.attributes('data-status') === 'warning')).toBe(true)
+  })
+
   it('create button opens form modal in create mode', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()

@@ -14,10 +14,23 @@ public class PushSender : IPushSender
     private static readonly object _firebaseInitLock = new object();
     private static volatile bool _firebaseInitialized = false;
 
-    public PushSender(NotificationOptions options, ILogger<PushSender> logger)
+    private readonly IPushDeviceService? _deviceService;
+
+    /// <summary>
+    /// 初始化一个 <see cref="PushSender"/>。
+    /// </summary>
+    /// <param name="options">通知配置。</param>
+    /// <param name="logger">日志。</param>
+    /// <param name="deviceService">
+    /// 设备注册表，用于在网关判定令牌永久失效时退役它。<b>可空</b>：
+    /// 只用主题广播、或自己管理令牌的应用不需要它，缺席时投递行为完全不变，
+    /// 只是死令牌不会被自动清理。
+    /// </param>
+    public PushSender(NotificationOptions options, ILogger<PushSender> logger, IPushDeviceService? deviceService = null)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
+        _deviceService = deviceService;
     }
 
     public async Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
@@ -26,6 +39,24 @@ public class PushSender : IPushSender
         {
             _logger.LogWarning("Push sender options not configured");
             return SendResult.CreateFailure("Push sender options not configured");
+        }
+
+        // ★ 主题地址填错了位置，就地说清楚，不要交给 FCM 去回一句「不是合法的注册令牌」。
+        // 这条守的是通知管线那个入口：RecipientChannelDispatcher 对 NotificationType.Push
+        // 一律走本方法（Recipient.Address 就是设备令牌），而主题投递刻意**不在**那条管线上
+        // —— 退订按地址、偏好与频次上限按人，主题三者都没有。于是「把主题名填进收件人地址
+        // 走一次群发」是可预见的误用，而它的远端症状指向的是令牌不合法，不是方法调错了。
+        // ★ 这两处是本文件里仅有的**不打掩码**的地方，因为 LooksLikeTopicAddress 已经
+        //   确定它以 /topics/ 开头 —— 那不是令牌，而调用方要看到自己填错的那个值。
+        if (FcmTopicName.LooksLikeTopicAddress(deviceToken))
+        {
+            _logger.LogWarning(
+                "Push delivery refused: {DeviceToken} is a topic address, not a device token.", deviceToken);
+            return SendResult.CreateFailure(
+                $"'{deviceToken}' is a topic address, not an FCM device token. "
+                + "Call IPushSender.SendToTopicAsync to broadcast to a topic's subscribers. "
+                + "Topic delivery is not available through the notification pipeline: "
+                + "opt-out is keyed by address and preferences by user, and a topic has neither.");
         }
 
         try
@@ -44,7 +75,7 @@ public class PushSender : IPushSender
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send push notification to {DeviceToken}", deviceToken);
+            _logger.LogError(ex, "Failed to send push notification to {DeviceToken}", PushTokenMask.Of(deviceToken));
             return SendResult.CreateFailure(ex.Message);
         }
     }
@@ -61,53 +92,7 @@ public class PushSender : IPushSender
 
         try
         {
-            // 线程安全地初始化Firebase Admin SDK（如果尚未初始化）
-            // 使用双重检查锁定模式确保线程安全
-            if (!_firebaseInitialized && FirebaseApp.DefaultInstance == null)
-            {
-                lock (_firebaseInitLock)
-                {
-                    // 双重检查，避免在锁内重复初始化
-                    if (!_firebaseInitialized && FirebaseApp.DefaultInstance == null)
-                    {
-                        // 走 CredentialFactory 而不是已弃用的 GoogleCredential.FromJson/FromFile：
-                        // 后者按 JSON 内容动态挑凭据类型，Google 因安全风险弃用了它。这里的配置项
-                        // 语义就是「服务账号 JSON」，显式指定 ServiceAccountCredential 也让配置放错时
-                        // 在启动阶段报清楚，而不是拿一个错误类型的凭据去调 FCM 才失败。
-                        if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJson))
-                        {
-                            // 从JSON字符串初始化
-                            FirebaseApp.Create(new AppOptions
-                            {
-                                Credential = CredentialFactory
-                                    .FromJson<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJson)
-                                    .ToGoogleCredential(),
-                                ProjectId = projectId
-                            });
-                        }
-                        else if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJsonPath))
-                        {
-                            // 从文件路径初始化
-                            FirebaseApp.Create(new AppOptions
-                            {
-                                Credential = CredentialFactory
-                                    .FromFile<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJsonPath)
-                                    .ToGoogleCredential(),
-                                ProjectId = projectId
-                            });
-                        }
-                        else
-                        {
-                            // 尝试使用默认凭据（例如环境变量GOOGLE_APPLICATION_CREDENTIALS）
-                            FirebaseApp.Create(new AppOptions
-                            {
-                                ProjectId = projectId
-                            });
-                        }
-                        _firebaseInitialized = true;
-                    }
-                }
-            }
+            EnsureFirebaseInitialized(projectId);
 
             var message = new FirebaseAdmin.Messaging.Message
             {
@@ -131,7 +116,175 @@ public class PushSender : IPushSender
             var response = await FirebaseMessaging.DefaultInstance.SendAsync(message, cancellationToken);
 
             _logger.LogInformation("Push notification sent via FCM to {DeviceToken}, Message ID: {MessageId}",
-                deviceToken, response);
+                PushTokenMask.Of(deviceToken), response);
+
+            if (!string.IsNullOrWhiteSpace(response))
+            {
+                return SendResult.CreateSuccess(response);
+            }
+            else
+            {
+                return SendResult.CreateFailure("FCM returned empty message ID");
+            }
+        }
+        catch (FirebaseMessagingException ex) when (IsTokenPermanentlyDead(ex))
+        {
+            // ★ 这是这张表唯一能得知令牌已死的时机。FCM 不会主动通知，卸载了 App 的
+            // 客户端也不会回来注销 —— 不在这里退役，注册表就只增不减，而 admin 的
+            // 「重试失败项」会对着一个永远不可能成功的令牌一直重试。
+            _logger.LogWarning(ex,
+                "FCM rejected the token as permanently invalid ({ErrorCode}); retiring the device. Token: {DeviceToken}",
+                ex.MessagingErrorCode, PushTokenMask.Of(deviceToken));
+
+            await RetireDeadTokenAsync(deviceToken);
+            return SendResult.CreateFailure(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            // 未知异常使用Error级别
+            _logger.LogError(ex, "Failed to send push notification via FCM to {DeviceToken}", PushTokenMask.Of(deviceToken));
+            return SendResult.CreateFailure(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 这个错误码是否意味着<b>这个令牌</b>永远不会再投递成功。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>只认这两个，刻意不含 <c>InvalidArgument</c>。</b>
+    /// <list type="bullet">
+    /// <item><c>Unregistered</c> —— 应用已卸载，或令牌已被轮换掉。</item>
+    /// <item><c>SenderIdMismatch</c> —— 令牌属于另一个 Firebase 项目，用本部署的凭据
+    ///   永远发不到它。</item>
+    /// </list>
+    /// <c>InvalidArgument</c> 看着也像「令牌不对」，但 FCM 同样用它表示<b>消息本身</b>
+    /// 不合法（字段越界、载荷过大之类）。按它退役等于:一次消息构造错误会把
+    /// <b>这一批全部收件人的设备</b>从注册表里删光，而日志上只是一串投递失败。
+    /// 少删是可恢复的（下次投递还会再判一次），多删不是。
+    /// </remarks>
+    internal static bool IsTokenPermanentlyDead(FirebaseMessagingException ex)
+        => ex.MessagingErrorCode is MessagingErrorCode.Unregistered or MessagingErrorCode.SenderIdMismatch;
+
+    /// <summary>
+    /// 退役一个已死的令牌。<b>失败不改变这次投递的结论</b>。
+    /// </summary>
+    /// <remarks>
+    /// 清理是收尾动作：它抛出来的异常会盖掉真正的失败原因（FCM 那一条），
+    /// 让调用方看到一个与推送无关的数据库错误。所以这里就地吞掉并记日志 ——
+    /// 这是「有真实补偿逻辑」的少数场景之一：补偿就是「这次没清掉，下次投递还会再判一次」。
+    /// </remarks>
+    private async Task RetireDeadTokenAsync(string deviceToken)
+    {
+        if (_deviceService == null)
+            return;
+
+        try
+        {
+            // ★ 刻意不传投递用的那个取消标记。RecipientChannelDispatcher 给每次投递套了
+            // Notification:SendTimeoutSeconds 的超时，那个期限约束的是**网关调用**；
+            // 而这里是一次本地清理。FCM 慢到快用完预算才回 Unregistered 时，
+            // 沿用同一个标记会让清理被取消 —— 而它恰好在「网关正不正常」这件事上
+            // 与失败相关，也就是说最需要退役的那些场景最容易退不掉，且只留一行日志。
+            await _deviceService.RetireAsync(deviceToken, CancellationToken.None);
+        }
+        catch (Exception cleanupEx)
+        {
+            _logger.LogError(cleanupEx,
+                "Could not retire the dead push token; it will be retried and re-detected on the next delivery.");
+        }
+    }
+
+    private async Task<SendResult> SendViaApnsAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning("Apple Push Notification Service (APNs) provider is not yet implemented. Push to {DeviceToken} was not sent.", PushTokenMask.Of(deviceToken));
+        return SendResult.CreateFailure(
+            "Apple Push Notification Service (APNs) provider is not yet implemented. " +
+            "Please install the APNs SDK and complete the implementation, " +
+            "or use a different push provider.");
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 结构与 <see cref="SendToAsync"/> 平行（先看配置、再按 provider 分派），只多一步：
+    /// <b>主题名先过字符集校验</b>。校验放在分派之前是刻意的 —— 主题名是<b>调用方</b>给的，
+    /// 而 provider 是<b>部署方</b>配的，先报调用方能自己改掉的那一个。
+    /// </remarks>
+    public async Task<SendResult> SendToTopicAsync(string topic, string title, string body, CancellationToken cancellationToken = default)
+    {
+        if (_options.PushSender == null)
+        {
+            _logger.LogWarning("Push sender options not configured");
+            return SendResult.CreateFailure("Push sender options not configured");
+        }
+
+        if (!FcmTopicName.TryValidate(topic, out var topicFailure))
+        {
+            _logger.LogWarning("Push topic delivery refused: {Reason}", topicFailure);
+            return SendResult.CreateFailure(topicFailure!);
+        }
+
+        try
+        {
+            switch (_options.PushSender.Provider.ToLower())
+            {
+                case "fcm":
+                case "firebase":
+                    return await SendViaFcmTopicAsync(topic, title, body, cancellationToken);
+                case "apns":
+                    // ★ 刻意不走 SendViaApnsAsync 那个存根。它说的是「装上 APNs SDK 再来」，
+                    // 而装上了也不会有主题广播：APNs 根本没有 FCM 这种客户端自助订阅的主题
+                    // （它的 apns-topic 是应用的 bundle id，是另一回事）。把人引向一条走不通的路，
+                    // 比直接说不支持更费时间。iOS 要收主题广播，正确做法就是配 fcm ——
+                    // FCM 自己会转投 APNs，消费方不需要也不应该为此直连 APNs。
+                    _logger.LogWarning(
+                        "Topic push delivery is not available for the apns provider. Topic {Topic} was not sent.", topic);
+                    return SendResult.CreateFailure(
+                        "Topic push delivery requires the fcm provider. "
+                        + "The apns provider addresses individual devices only; APNs has no client-subscribed topics. "
+                        + "Set Notification:PushSender:Provider to 'fcm' - FCM forwards to APNs for iOS devices.");
+                default:
+                    _logger.LogWarning("Unknown Push provider: {Provider}", _options.PushSender.Provider);
+                    return SendResult.CreateFailure($"Unknown Push provider: {_options.PushSender.Provider}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send push notification to topic {Topic}", topic);
+            return SendResult.CreateFailure(ex.Message);
+        }
+    }
+
+    private async Task<SendResult> SendViaFcmTopicAsync(string topic, string title, string body, CancellationToken cancellationToken)
+    {
+        if (_options.PushSender == null)
+            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
+
+        if (string.IsNullOrWhiteSpace(_options.PushSender.FirebaseProjectId))
+            throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
+
+        var projectId = _options.PushSender.FirebaseProjectId!;
+
+        try
+        {
+            EnsureFirebaseInitialized(projectId);
+
+            var message = new FirebaseAdmin.Messaging.Message
+            {
+                // Topic 与 Token 是 Message 上互斥的寻址字段（FCM 只接受其中一个）。
+                // 这里不设 Token —— 主题投递的全部意义就是后端手上一个设备标识符都没有。
+                // /topics/ 前缀由 SDK 自己剥掉（Message.FormattedTopic），这里原样传。
+                Topic = topic,
+                Notification = new FirebaseAdmin.Messaging.Notification
+                {
+                    Title = title,
+                    Body = body
+                }
+            };
+
+            var response = await FirebaseMessaging.DefaultInstance.SendAsync(message, cancellationToken);
+
+            _logger.LogInformation("Push notification sent via FCM to topic {Topic}, Message ID: {MessageId}",
+                topic, response);
 
             if (!string.IsNullOrWhiteSpace(response))
             {
@@ -144,18 +297,76 @@ public class PushSender : IPushSender
         }
         catch (Exception ex)
         {
-            // 未知异常使用Error级别
-            _logger.LogError(ex, "Failed to send push notification via FCM to {DeviceToken}", deviceToken);
+            _logger.LogError(ex, "Failed to send push notification via FCM to topic {Topic}", topic);
             return SendResult.CreateFailure(ex.Message);
         }
     }
 
-    private async Task<SendResult> SendViaApnsAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
+    /// <summary>
+    /// 进程内只引导一次 Firebase Admin SDK。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>两条投递路径必须共用这一处。</b><c>FirebaseApp</c> 是<b>进程级单例</b>：
+    /// 谁先 <c>Create</c>，之后所有 <c>FirebaseMessaging.DefaultInstance</c> 用的就是谁的凭据，
+    /// 而第二次 <c>Create</c> 既不报错也不会换掉第一份。按令牌发和按主题发若各引导一次，
+    /// 用的是哪份凭据就取决于哪条路径先被调到 —— 那是一个随请求时序变化、且没有任何日志的差异。
+    /// </para>
+    /// <para>
+    /// 双重检查锁定：<c>_firebaseInitialized</c> 是 <c>volatile</c>，同时还问
+    /// <c>FirebaseApp.DefaultInstance</c>，好让宿主或消费方已自行引导过的场景不被重复引导。
+    /// </para>
+    /// </remarks>
+    private void EnsureFirebaseInitialized(string projectId)
     {
-        _logger.LogWarning("Apple Push Notification Service (APNs) provider is not yet implemented. Push to {DeviceToken} was not sent.", deviceToken);
-        return SendResult.CreateFailure(
-            "Apple Push Notification Service (APNs) provider is not yet implemented. " +
-            "Please install the APNs SDK and complete the implementation, " +
-            "or use a different push provider.");
+        if (_options.PushSender == null)
+            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
+
+        if (_firebaseInitialized || FirebaseApp.DefaultInstance != null)
+            return;
+
+        lock (_firebaseInitLock)
+        {
+            // 双重检查，避免在锁内重复初始化
+            if (_firebaseInitialized || FirebaseApp.DefaultInstance != null)
+                return;
+
+            // 走 CredentialFactory 而不是已弃用的 GoogleCredential.FromJson/FromFile：
+            // 后者按 JSON 内容动态挑凭据类型，Google 因安全风险弃用了它。这里的配置项
+            // 语义就是「服务账号 JSON」，显式指定 ServiceAccountCredential 也让配置放错时
+            // 在启动阶段报清楚，而不是拿一个错误类型的凭据去调 FCM 才失败。
+            if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJson))
+            {
+                // 从JSON字符串初始化
+                FirebaseApp.Create(new AppOptions
+                {
+                    Credential = CredentialFactory
+                        .FromJson<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJson)
+                        .ToGoogleCredential(),
+                    ProjectId = projectId
+                });
+            }
+            else if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJsonPath))
+            {
+                // 从文件路径初始化
+                FirebaseApp.Create(new AppOptions
+                {
+                    Credential = CredentialFactory
+                        .FromFile<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJsonPath)
+                        .ToGoogleCredential(),
+                    ProjectId = projectId
+                });
+            }
+            else
+            {
+                // 尝试使用默认凭据（例如环境变量GOOGLE_APPLICATION_CREDENTIALS）
+                FirebaseApp.Create(new AppOptions
+                {
+                    ProjectId = projectId
+                });
+            }
+
+            _firebaseInitialized = true;
+        }
     }
 }

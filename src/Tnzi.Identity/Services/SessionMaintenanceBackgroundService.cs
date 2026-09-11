@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 会话维护后台服务：周期性清理过期认证令牌、撤销长期失活会话，
@@ -72,16 +72,27 @@ public class SessionMaintenanceBackgroundService : BackgroundService
             }
         }
 
-        // 2) 撤销长期失活会话（阈值取刷新令牌生命周期：活跃会话每次刷新都会续期，
-        //    超过该窗口未刷新的会话视为失活）。已过硬过期的会话本就被判定失效，此处一并收敛。
-        var sessionService = services.GetService<ISessionService>();
-        if (sessionService != null)
+        // 2) 撤销长期失活会话，并删掉绑定其上的刷新令牌。
+        //
+        //    ★ 阈值取「闲置超时」与「刷新令牌生命周期」里更短的那个。这两个数落在同一个字段
+        //    （LastActivityTime）上：闲置超时把会话**算**死在 N 分钟，而这里把它**写**成已撤销。
+        //    只按刷新令牌周期清扫时，一条早就用不了的会话在管理端列表、会话统计、
+        //    个人中心「当前活跃设备」里仍显示为活跃 —— 那几处查询只看 IsRevoked。
+        //
+        //    ★ 走撤销出口而不是 ISessionService.CleanExpiredSessionsAsync：后者只改会话行。
+        //    阈值等于刷新令牌周期时那样侥幸无害（会话失活时令牌也刚好过期，被上一步收走），
+        //    阈值一收窄就会造出「会话已撤销、刷新令牌还活着」的记录。
+        var revocation = services.GetService<ISessionRevocationService>();
+        if (revocation != null)
         {
-            var refreshDays = Math.Max(1, _identityOptions.CurrentValue.Jwt.RefreshTokenExpirationDays);
-            var result = await sessionService.CleanExpiredSessionsAsync(TimeSpan.FromDays(refreshDays));
-            if (result.Succeeded && result.Data > 0)
+            var options = _identityOptions.CurrentValue;
+            var threshold = SessionLifetime.ResolveInactiveThreshold(
+                options.AccountSecurity.SessionTimeoutMinutes, options.Jwt.RefreshTokenExpirationDays);
+
+            var revoked = await revocation.RevokeInactiveSessionsAsync(threshold);
+            if (revoked > 0)
             {
-                _logger.LogInformation("Session maintenance: revoked {Count} inactive sessions.", result.Data);
+                _logger.LogInformation("Session maintenance: revoked {Count} inactive sessions.", revoked);
             }
         }
     }

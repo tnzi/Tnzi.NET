@@ -102,6 +102,10 @@ public class SignalRModule : TnziFrameworkModule
         // 注册连接管理器
         services.AddSingleton<IConnectionManager, ConnectionManager>();
 
+        // connectionId -> HubCallerContext 登记表。SignalR 服务端没有"按用户断开"，
+        // 能中断一条连接的只有它自己的 HubCallerContext.Abort()，所以强制下线要靠这张表。
+        services.AddSingleton<IHubConnectionAborter, HubConnectionAborter>();
+
         // 当未加载 Authorization 模块时，提供 NullPermissionChecker，确保 HubAuthorizationFilter 可解析
         services.TryAddScoped<IPermissionChecker, NullPermissionChecker>();
 

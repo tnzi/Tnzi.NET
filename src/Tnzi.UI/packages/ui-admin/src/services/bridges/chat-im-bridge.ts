@@ -22,7 +22,7 @@ import type {
   UserPresenceDto,
   UserPresenceStatus,
 } from '@tnzi/core/services/chat'
-import { ensureOk, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 import { isFailed, getErrorMessage } from '@tnzi/core/http'
 import type { ApiResult } from '@tnzi/core'
 
@@ -69,7 +69,7 @@ export function createChatImBridge(deps: { client?: HttpClient; api?: ChatImApi 
     // in TChatHost's presence probe. The bridge owns the non-null-array invariant.
     listConversations: async () => unwrap(await api.getConversations()) ?? [],
     getUnreadCount: async () => unwrap(await api.getUnreadCount()),
-    getOrCreateDirect: async (userId) => unwrap(await api.getOrCreateDirect(userId)),
+    getOrCreateDirect: async (userId) => unwrapOk(await api.getOrCreateDirect(userId)),
     getConversation: async (id) => unwrap(await api.getConversation(id)),
     getMessages: async (id, params) => unwrap(await api.getMessages(id, params)),
     sendMessage: async (id, data) => {
@@ -86,7 +86,7 @@ export function createChatImBridge(deps: { client?: HttpClient; api?: ChatImApi 
     markRead: async (id) => { ensureOk(await api.markRead(id)) },
     mute: async (id, muted) => { ensureOk(await api.mute(id, muted)) },
     deleteMessage: async (messageId) => { ensureOk(await api.deleteMessage(messageId)) },
-    createGroup: async (data) => unwrap(await api.createGroup(data)),
+    createGroup: async (data) => unwrapOk(await api.createGroup(data)),
     addMembers: async (id, userIds) => { ensureOk(await api.addMembers(id, userIds)) },
     removeMember: async (id, userId) => { ensureOk(await api.removeMember(id, userId)) },
     renameGroup: async (id, title) => { ensureOk(await api.renameGroup(id, title)) },

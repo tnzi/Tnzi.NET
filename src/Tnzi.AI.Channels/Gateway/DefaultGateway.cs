@@ -205,6 +205,54 @@ public class DefaultGateway : IGateway
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<GatewaySession>> GetPeerSessionsAsync(string peerId, string? agentId = null)
+    {
+        Check.NotNullOrWhiteSpace(peerId);
+
+        IReadOnlyList<GatewaySession> sessions = _activeSessions.Values
+            .Where(s => OwnedBy(s, peerId))
+            .Where(s => agentId == null || s.AgentId?.ToString() == agentId)
+            .ToList()
+            .AsReadOnly();
+
+        return Task.FromResult(sessions);
+    }
+
+    /// <inheritdoc />
+    public Task<GatewaySession?> GetPeerSessionAsync(string peerId, string sessionKey)
+    {
+        Check.NotNullOrWhiteSpace(peerId);
+        Check.NotNullOrWhiteSpace(sessionKey);
+
+        _activeSessions.TryGetValue(sessionKey, out var session);
+        return Task.FromResult(session != null && OwnedBy(session, peerId) ? session : null);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> PrunePeerSessionAsync(string peerId, string sessionKey)
+    {
+        Check.NotNullOrWhiteSpace(peerId);
+        Check.NotNullOrWhiteSpace(sessionKey);
+
+        // 先确认归属再删：ConcurrentDictionary 的 TryRemove(key) 不看值，会删掉任何一条键匹配的行。
+        if (!_activeSessions.TryGetValue(sessionKey, out var session) || !OwnedBy(session, peerId))
+        {
+            return Task.FromResult(false);
+        }
+
+        return Task.FromResult(_activeSessions.TryRemove(sessionKey, out _));
+    }
+
+    /// <summary>
+    /// 会话归属判定：<see cref="GatewaySession.PeerId"/> 就是 <c>TrackSession</c> 写入的
+    /// <c>GatewayRequest.ChatId</c>，而已认证连接的 ChatId 由服务端强制为用户 id
+    /// （见 <c>GatewayWebSocketHandler.ResolveChatId</c>），因此它是可信的归属键。
+    /// 序数比较：peer 标识是标识符不是自然语言。
+    /// </summary>
+    private static bool OwnedBy(GatewaySession session, string peerId)
+        => string.Equals(session.PeerId, peerId, StringComparison.Ordinal);
+
     private SessionBinding ResolveBinding(GatewayRequest request)
     {
         var context = new SessionBindingContext

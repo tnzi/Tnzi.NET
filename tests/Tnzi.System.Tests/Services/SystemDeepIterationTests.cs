@@ -395,40 +395,6 @@ public class AccessLogTrendTests
 /// </summary>
 public class SettingGroupTests
 {
-    private readonly Mock<IRepository<Setting, Guid>> _settingRepositoryMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
-    private readonly Mock<IOptionsMonitor<ApplicationOptions>> _applicationOptionsMock;
-    private readonly Mock<ICache> _cacheMock;
-    private readonly SettingService _service;
-
-    public SettingGroupTests()
-    {
-        // Initialize Mapster
-        var config = new TypeAdapterConfig();
-        var mapper = new Mapper(config);
-        MapperExtensions.SetMapper(mapper);
-
-        _settingRepositoryMock = new Mock<IRepository<Setting, Guid>>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
-        _applicationOptionsMock = new Mock<IOptionsMonitor<ApplicationOptions>>();
-        _applicationOptionsMock.SetupGet(x => x.CurrentValue).Returns(new ApplicationOptions { AppName = "TestApp", SiteName = "TestSite" });
-        _cacheMock = new Mock<ICache>();
-
-        var loggerFactoryMock = new Mock<ILoggerFactory>();
-        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
-        _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
-
-        var encryptionOptions = Microsoft.Extensions.Options.Options.Create(new SettingEncryptionOptions());
-
-        _service = new SettingService(
-            _serviceProviderMock.Object,
-            _settingRepositoryMock.Object,
-            _applicationOptionsMock.Object,
-            encryptionOptions,
-            _cacheMock.Object,
-            Enumerable.Empty<ISettingProvider>(),
-            Enumerable.Empty<ISettingDefinitionProvider>());
-    }
 
     #region GetSettingGroupsAsync - DTO 契约测试
 
@@ -486,7 +452,7 @@ public class SettingGroupTests
     {
         // Arrange: 直接调用接口默认实现 (模拟未覆盖默认方法的场景)
         var mockService = new Mock<ISettingService>();
-        mockService.Setup(s => s.GetSettingGroupsAsync(It.IsAny<CancellationToken>()))
+        mockService.Setup(s => s.GetSettingGroupsAsync(It.IsAny<SettingScope?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .CallBase(); // 调用接口默认实现
 
         // Act

@@ -141,6 +141,9 @@ public partial class AIModule : TnziApplicationModule
         // 校验引擎运行时配置（启用了需要 LLM Provider 的功能时必须存在已启用的 Provider）
         ValidateProviderRuntimeConfiguration(serviceProvider, logger);
 
+        // 交叉校验预算与成本追踪（预算开着却产不出成本 = 一道恒判通过的闸门）
+        ValidateBudgetCostWiring(serviceProvider, logger);
+
         // 扫描并注册工具（在应用初始化阶段执行一次）
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
         var toolScanner = serviceProvider.GetRequiredService<IToolScanner>();

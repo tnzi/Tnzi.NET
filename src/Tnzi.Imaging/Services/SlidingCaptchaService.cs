@@ -89,9 +89,10 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     }
 
     /// <inheritdoc />
-    public async Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(string? clientId = null, CancellationToken cancellationToken = default)
+    public async Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(CancellationToken cancellationToken = default)
     {
         var baseOptions = _imagingOptions.Value.SlidingCaptcha;
+        var clientId = ResolveClientKey();
         long failureCount = 0;
 
         if (!string.IsNullOrEmpty(clientId) && _cache != null)
@@ -114,6 +115,40 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         };
 
         return await GeneratePuzzleAsync(adaptiveOptions, addNoise, clientId, cancellationToken);
+    }
+
+    /// <summary>
+    /// 派生失败计数的归属键。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 这个键决定"这次要出多难的题"，因此它<b>必须来自服务端</b>。此前它是
+    /// <c>[FromQuery] clientId</c>：不传或每次换一个随机值 → 失败计数永远是 0 →
+    /// 永远拿到最低难度，暴力破解方连一次难度上调都不会遇到；填别人的值 →
+    /// 把对方顶到最高难度。两种滥用都不需要任何凭据。
+    /// </para>
+    /// <para>
+    /// 用客户端 IP 而不是会话：验证码通常出现在<b>登录之前</b>，那时还没有会话可绑。
+    /// IP 会被 NAT 共享、也能被轮换，因此它是一个<b>难度启发式</b>而不是身份 ——
+    /// 它唯一的作用是让"连续失败"变难，这一点不要求全局唯一。
+    /// </para>
+    /// <para>
+    /// 取哈希前缀而不是原始 IP：这个值会进缓存键，而缓存可能是共享的 Redis，
+    /// 没必要把可识别的地址摊在那里。
+    /// </para>
+    /// </remarks>
+    private string? ResolveClientKey()
+    {
+        var ip = ScopedContext?.ClientIpAddress;
+        if (string.IsNullOrWhiteSpace(ip))
+        {
+            // 拿不到就按"没有失败历史"处理：宁可出一道简单的题，也不要把所有拿不到 IP 的
+            // 请求挤进同一个键 —— 那会让它们互相推高难度，把一次配置缺失变成一次拒绝服务。
+            return null;
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(ip));
+        return Convert.ToHexString(hash)[..16];
     }
 
     /// <summary>

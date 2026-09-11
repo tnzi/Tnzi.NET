@@ -34,9 +34,10 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
     {
         // Per-group authorization: only return groups the caller may VIEW. Each
         // settings group is guarded by its own `{group}.settings.{slug}.view`
-        // code (super-admin passes automatically via IPermissionChecker). When
-        // the Authorization module isn't loaded (PermissionChecker == null) the
-        // config center falls back to open - no fine-grained permission system.
+        // code (super-admin passes automatically via IPermissionChecker). With no
+        // IPermissionChecker registered (Authorization module not loaded) every
+        // group is withheld - see CanViewAsync for why that direction, not the
+        // other one.
         var visible = new List<SettingDefinitionGroup>();
         foreach (var group in CollectGroups())
         {
@@ -179,17 +180,35 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
         return Ok(dto);
     }
 
-    /// <summary>用户是否可查看该组（持有 view 码或超管）。Authorization 未加载时 fail-open。</summary>
+    /// <summary>
+    /// 用户是否可查看该组（持有 view 码或超管）。<b>无权限检查器时拒绝</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>这里此前是 fail-open（<c>return true</c>）。</strong>
+    /// 本控制器刻意只挂裸 <c>[ApiAuthorize]</c>、把逐组判定交给服务层
+    /// —— 那是对的，因为它是一个横跨多个模块配置组的聚合端点，没有哪一个类级码合适。
+    /// 但代价是：<b>服务层这两个方法就是它全部的授权</b>。放行掉等于让任何已登录用户
+    /// 读写全部模块的运行时配置。
+    /// <para>
+    /// 与框架其余「可选模块缺席」的口径对齐：<c>FileAccessAuthorizer</c>、
+    /// <c>FinanceFileReferenceAccessResolver</c>、SignalR 的 <c>HubAuthorizationFilter</c>
+    /// 在拿不到检查器时全部拒绝。少加载一个可选包只能减少能力，不能放宽守卫。
+    /// </para>
+    /// <para>
+    /// 未加载 Authorization 时的观感：配置中心列表为空、写入 403。这不是「坏了」，
+    /// 而是这台宿主没有权限系统可依据 —— 要用配置中心就加载 <c>Tnzi.Authorization</c>。
+    /// </para>
+    /// </remarks>
     private async Task<bool> CanViewAsync(SettingDefinitionGroup group)
     {
-        if (PermissionChecker == null) return true;
+        if (PermissionChecker == null) return false;
         return await PermissionChecker.IsGrantedAsync(SettingsPermissionNaming.ViewCode(group));
     }
 
-    /// <summary>用户是否可修改该组（持有 update 码或超管）。Authorization 未加载时 fail-open。</summary>
+    /// <summary>用户是否可修改该组（持有 update 码或超管）。理由同 <see cref="CanViewAsync"/>，无检查器时拒绝。</summary>
     private async Task<bool> CanEditAsync(SettingDefinitionGroup group)
     {
-        if (PermissionChecker == null) return true;
+        if (PermissionChecker == null) return false;
         return await PermissionChecker.IsGrantedAsync(SettingsPermissionNaming.UpdateCode(group));
     }
 

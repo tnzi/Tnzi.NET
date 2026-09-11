@@ -33,6 +33,9 @@ export default defineConfig({
         // aggregate `@tnzi/ui-admin/locales`; without this entry,
         // preserveModules tree-shakes the barrel and the subpath 404s.
         'locales/index': resolve(import.meta.dirname, 'src/locales/index.ts'),
+        // Generated icon manifest - see packages/ui/vite.config.ts for why it is
+        // a separate entry.
+        'icons/index': resolve(import.meta.dirname, 'src/icons/index.ts'),
       },
       name: 'TnziUiAdmin',
       formats: ['es'],
@@ -49,7 +52,7 @@ export default defineConfig({
         id === 'naive-ui' ||
         id === 'vueuc' ||
         id === 'css-render' ||
-        id === '@iconify/vue' ||
+        id.startsWith('@iconify/') ||
         id === 'vue-draggable-plus' ||
         id.startsWith('echarts') ||
         id.startsWith('@vueuse/') ||

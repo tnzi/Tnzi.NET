@@ -150,13 +150,18 @@ const innerStyle = computed<CSSProperties>(() => {
   flex-wrap: wrap;
   min-width: 0;
 }
+/* The section title tier, shared with `TPageHeader level="section"` via the
+   tokens in styles/variables.css. Stating it here as literals is what let the
+   two drift: this one had no phone step, so below 767px it met the page tier
+   head-on at 16px. */
 .t-detail-section__title {
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--tnzi-admin-title-section-size);
+  font-weight: var(--tnzi-admin-title-section-weight);
+  letter-spacing: var(--tnzi-admin-title-section-tracking);
   color: var(--tnzi-base-text);
   min-width: 0;
 }

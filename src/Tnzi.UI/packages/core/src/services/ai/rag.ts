@@ -46,6 +46,12 @@ export interface KnowledgeBaseDto {
   documentCount: number;
   chunkCount: number;
   isEnabled: boolean;
+  /**
+   * Whether authenticated users may query this knowledge base directly through
+   * the user-facing RAG endpoints (`/rag/query`, `/rag/chat`). Agent retrieval
+   * is governed by agent knowledge grants and is unaffected. Off by default.
+   */
+  isUserQueryable: boolean;
   creationTime: string;
 }
 
@@ -93,12 +99,16 @@ export interface KnowledgeBaseCreateParams {
   embeddingModel?: string;
   chunkSize?: number;
   chunkOverlap?: number;
+  /** Open the knowledge base to direct user queries (default false). */
+  isUserQueryable?: boolean;
 }
 
 export interface KnowledgeBaseUpdateParams {
   name?: string;
   description?: string;
   isEnabled?: boolean;
+  /** Open or close the knowledge base to direct user queries. */
+  isUserQueryable?: boolean;
 }
 
 export interface SearchTestParams {
@@ -144,9 +154,12 @@ export function useRagApi(client: HttpClient) {
     chat: (data: RagChatParams) =>
       client.post(`${base}/chat`, data),
 
-    /** Get SSE stream URL for RAG chat */
+    /**
+     * SSE stream URL for RAG chat. The backend route is `POST rag/chat/stream`;
+     * the old `${base}/stream` pointed at nothing.
+     */
     getStreamUrl: () =>
-      `${base}/stream`,
+      `${base}/chat/stream`,
   };
 }
 

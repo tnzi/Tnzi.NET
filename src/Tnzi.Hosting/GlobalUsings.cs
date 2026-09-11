@@ -18,6 +18,7 @@ global using Tnzi.AspNetCore.Mvc.Conventions;
 global using Tnzi.Audit;
 global using Tnzi.Authorization;
 global using Tnzi.EventBus;
+global using Tnzi.Exceptions;
 global using Tnzi.Feature;
 global using Tnzi.Finance;
 global using Tnzi.Finance.Ai;

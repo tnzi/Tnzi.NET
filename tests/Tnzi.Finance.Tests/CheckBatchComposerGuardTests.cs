@@ -88,6 +88,9 @@ public class CheckBatchComposerGuardTests
         var snapshot = new Mock<IOptionsSnapshot<FinanceOptions>>();
         snapshot.SetupGet(o => o.Value).Returns(options.Value);
 
+        var checkSnapshot = new Mock<IOptionsSnapshot<FinanceCheckOptions>>();
+        checkSnapshot.SetupGet(o => o.Value).Returns(new FinanceCheckOptions());
+
         var configuration = new ConfigurationBuilder().Build();
 
         return new CheckBatchComposer(
@@ -97,6 +100,7 @@ public class CheckBatchComposerGuardTests
             Mock.Of<IReadOnlyRepository<Vendor, Guid>>(),
             new CheckIssuerResolver(configuration, snapshot.Object),
             protector.Object,
-            snapshot.Object);
+            snapshot.Object,
+            checkSnapshot.Object);
     }
 }

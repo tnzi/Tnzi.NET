@@ -1,4 +1,4 @@
-
+using Microsoft.Extensions.Logging.Abstractions;
 namespace Tnzi.AspNetCore.Tests.Versioning;
 
 /// <summary>
@@ -24,7 +24,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
 
@@ -59,7 +59,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["X-Api-Version"] = "v2";
@@ -94,7 +94,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString("?api-version=v3");
@@ -129,7 +129,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         context.Request.Path = "/version/v4/users";
@@ -164,7 +164,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         // 不设置Header，应该使用默认版本
@@ -199,7 +199,7 @@ public class ApiVersionMiddlewareTests
         };
 
         var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
-        var middleware = new ApiVersionMiddleware(next, optionsMonitor);
+        var middleware = new ApiVersionMiddleware(next, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["X-Api-Version"] = "v2";

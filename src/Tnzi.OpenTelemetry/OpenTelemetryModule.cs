@@ -104,13 +104,10 @@ public class OpenTelemetryModule : TnziInfrastructureModule
                     tracing.AddHttpClientInstrumentation();
                 }
 
-                // EF Core 追踪
+                // EF Core 追踪。SQL 文本是否随 span 出进程由 RecordDbStatementText 决定（默认不出）。
                 if (config.InstrumentEntityFramework)
                 {
-                    tracing.AddEntityFrameworkCoreInstrumentation(options =>
-                    {
-                        options.SetDbStatementForText = true;
-                    });
+                    tracing.AddEntityFrameworkCoreInstrumentation(options => ApplyEntityFrameworkOptions(options, config));
                 }
 
                 // 配置导出器
@@ -257,13 +254,60 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     }
 
     /// <summary>
-    /// 应用 OTLP 导出器公共配置
+    /// 遥测有没有地方可去：OTLP 端点或控制台导出器至少配了一个。
     /// </summary>
-    private static void ApplyOtlpOptions(OtlpExporterOptions otlp, OpenTelemetryOptions config)
+    /// <remarks>
+    /// ★ 两个都没配时三处 <c>ConfigureOtlpExporter</c> 一个导出器都不加：全量采样、全部检测开着，
+    /// 每个 span 与指标被静默丢弃。<see cref="OpenTelemetryOptionsValidator"/> 据此在启动期告警。
+    /// </remarks>
+    public static bool HasExportTarget(OpenTelemetryOptions config)
+    {
+        Check.NotNull(config);
+        return !string.IsNullOrWhiteSpace(config.OtlpEndpoint) || config.ExportToConsole;
+    }
+
+    /// <summary>
+    /// 把 <see cref="OpenTelemetryOptions.OtlpHeaders"/> 拼成导出器要的 <c>k1=v1,k2=v2</c>；没有头时返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 值里的逗号与键里的等号无法转义，由验证器在启动期拒绝；这里只负责拼接。
+    /// </remarks>
+    public static string? ComposeOtlpHeaders(IReadOnlyDictionary<string, string> headers)
+    {
+        Check.NotNull(headers);
+        if (headers.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(',', headers.Select(h => $"{h.Key}={h.Value}"));
+    }
+
+    /// <summary>
+    /// EF Core 检测选项：SQL 文本默认<b>不</b>随 span 出进程。
+    /// </summary>
+    internal static void ApplyEntityFrameworkOptions(EntityFrameworkInstrumentationOptions options, OpenTelemetryOptions config)
+    {
+        options.SetDbStatementForText = config.RecordDbStatementText;
+    }
+
+    /// <summary>
+    /// 应用 OTLP 导出器公共配置：端点、协议、认证头、超时。
+    /// </summary>
+    internal static void ApplyOtlpOptions(OtlpExporterOptions otlp, OpenTelemetryOptions config)
     {
         otlp.Endpoint = new Uri(config.OtlpEndpoint!);
         otlp.Protocol = config.UseGrpc
             ? OtlpExportProtocol.Grpc
             : OtlpExportProtocol.HttpProtobuf;
+        otlp.TimeoutMilliseconds = config.OtlpTimeoutMilliseconds;
+
+        // 托管采集器（Authorization / x-api-key）的认证靠它；没有配头时保留导出器自己的默认值
+        //（它还会读 OTEL_EXPORTER_OTLP_HEADERS 环境变量），不要用 null 把那条路盖掉。
+        var headers = ComposeOtlpHeaders(config.OtlpHeaders);
+        if (headers != null)
+        {
+            otlp.Headers = headers;
+        }
     }
 }

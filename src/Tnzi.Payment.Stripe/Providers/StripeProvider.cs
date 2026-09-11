@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Stripe.Providers;
+﻿namespace Tnzi.Payment.Stripe.Providers;
 
 /// <summary>
 /// Stripe支付渠道实现
@@ -11,7 +11,6 @@ public class StripeProvider : IPaymentProvider
 {
     private readonly IOptions<StripeOptions> _options;
     private readonly ILogger<StripeProvider> _logger;
-    private StripeClient? _stripeClient;
 
     public string ChannelCode => PaymentConstants.StripeChannelCode;
     public string ChannelName => PaymentConstants.StripeChannelCode;
@@ -22,11 +21,11 @@ public class StripeProvider : IPaymentProvider
         _logger = Check.NotNull(logger);
     }
 
-    private StripeClient GetClient()
-    {
-        _stripeClient ??= StripeClientFactory.Create(_options.Value);
-        return _stripeClient;
-    }
+    /// <summary>
+    /// 取 Stripe 客户端。缓存在工厂里而不是本实例上：本类是 Scoped，
+    /// 存在实例字段上等于每个请求重建一次连接池。
+    /// </summary>
+    private StripeClient GetClient() => StripeClientFactory.Create(_options.Value);
 
     /// <summary>
     /// 幂等键：同一业务流水重放到 Stripe 时不会产生第二笔真实扣款/退款。
@@ -226,7 +225,9 @@ public class StripeProvider : IPaymentProvider
             {
                 TradeNo = tradeNo,
                 ExternalTradeNo = paymentIntent.Id,
-                Status = MapStripeStatus(paymentIntent.Status),
+                Status = MapCallbackStatus(stripeEvent.Type, paymentIntent.Status),
+                // 金额已按这个币种从最小单位换算回来；不把它带上，服务层就只能比数值
+                Currency = paymentIntent.Currency,
                 PaidAmount = paymentIntent.AmountReceived > 0
                     ? CurrencyInfo.FromMinorUnits(paymentIntent.AmountReceived, paymentIntent.Currency)
                     : CurrencyInfo.FromMinorUnits(paymentIntent.Amount, paymentIntent.Currency),
@@ -552,6 +553,29 @@ public class StripeProvider : IPaymentProvider
                 : PaymentMethodEnum.CreditCard,
             "paypal" => PaymentMethodEnum.PayPal,
             _ => PaymentMethodEnum.CreditCard
+        };
+    }
+
+    /// <summary>
+    /// Webhook 事件的支付状态：先看**事件类型**，再回落到 intent 状态。
+    /// </summary>
+    /// <remarks>
+    /// Stripe 的 PaymentIntent <b>没有 failed 这个状态</b> —— 一笔扣款失败之后，
+    /// intent 被退回 <c>requires_payment_method</c> 好让客户换一张卡重试。
+    /// 于是只看 intent 状态时，<c>payment_intent.payment_failed</c> 读出来是「处理中」：
+    /// 本地状态机拿不到终态，<c>PaymentFailedEvent</c> 永不发布，订阅不降级 PastDue，
+    /// 为这笔订单核销掉的优惠券要等过期扫描才归还。
+    /// 而 <c>requires_payment_method</c> 同时也是**新建 intent 的正常初始状态**，
+    /// 所以判据只能是事件类型，不能是 intent 状态 —— 与本文件里
+    /// <c>payment_method.detached</c> 的处理同形。
+    /// </remarks>
+    private static PaymentStatus MapCallbackStatus(string? eventType, string? intentStatus)
+    {
+        return eventType switch
+        {
+            "payment_intent.payment_failed" => PaymentStatus.Failed,
+            "payment_intent.canceled" => PaymentStatus.Cancelled,
+            _ => MapStripeStatus(intentStatus)
         };
     }
 

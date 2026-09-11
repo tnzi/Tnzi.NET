@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Tnzi.Finance.Documents.Metadata;
-using Tnzi.Finance.Documents.Services.Internal;
 using Tnzi.Template.Services;
 
 namespace Tnzi.Finance.Tests;
@@ -68,8 +67,12 @@ public class CheckTemplateRenderTests
 
         html.ShouldContain("blank-stock");
         html.ShouldContain("class=\"micr-line\"");
-        // CA CPA-006 磁码序：⑈支票号⑈ ⑆transit⑉institution⑆ 账号⑈，字形映射 A/B/C/D
-        html.ShouldContain("C1001C A12345D003A 000123456C");
+        // CA CPA-006 磁码序：⑈支票号⑈ ⑆transit⑉institution⑆ 账号⑈，字形映射 A/B/C/D。
+        // 串行号补零到默认位数（CheckNumberFormat.DefaultDigits）——CPA-006 §4.4.4 的串行号字段是变长的。
+        html.ShouldContain("C01001C A12345D003A 000123456C");
+        // ★ 票面上的号与磁码行里的串行号必须是同一串字。一个印在纸上、一个给读票机，
+        // 两处不一致时人眼与机器读到的是两张不同的支票，而两边看起来都完全正常。
+        html.ShouldContain(">01001<");
         // 白纸模式没有预印元素，noprint 标记不出现在票面元素上
         html.ShouldContain("class=\"abs cheque-no \"");
     }

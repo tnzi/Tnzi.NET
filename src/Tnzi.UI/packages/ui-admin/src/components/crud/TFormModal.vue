@@ -7,7 +7,7 @@
     :fullscreen="fullscreen"
     @update:show="onUpdateShow"
   >
-    <slot :form-data="state.formData.value" :mode="state.mode.value" />
+    <slot :form-data="rendered.formData.value" :mode="rendered.mode.value" />
     <template #footer>
       <slot name="footer">
         <div class="t-form-modal__footer">
@@ -15,7 +15,7 @@
             {{ t('admin.common.cancel') }}
           </NButton>
           <NButton
-            v-if="state.mode.value !== 'view'"
+            v-if="rendered.mode.value !== 'view'"
             type="primary"
             class="t-form-modal__confirm"
             @click="onConfirm"
@@ -32,7 +32,7 @@
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import { TModalShell } from '@tnzi/ui'
-import { useFormModal } from '../../headless/useFormModal'
+import { useFormModal, useRetainedFormState } from '../../headless/useFormModal'
 
 type FormState = ReturnType<typeof useFormModal<unknown>>
 
@@ -68,11 +68,16 @@ const props = withDefaults(defineProps<Props>(), {
   translate: undefined,
 })
 
+// What the chrome RENDERS - the last (mode, formData) pair the state held while
+// open, kept until the leave transition has taken the body off screen. Identical
+// to the live refs whenever the modal is open; see `useRetainedFormState`.
+const rendered = useRetainedFormState(props.state)
+
 // The form modal yields to a sibling view-drawer when the host opted in
 // (`skipViewMode`) and the open-state is a read-only `view`. One open-state,
 // chrome chosen by action: create/edit → this modal, view → the drawer.
 const show = computed(
-  () => props.state.visible.value && !(props.skipViewMode && props.state.mode.value === 'view'),
+  () => props.state.visible.value && !(props.skipViewMode && rendered.mode.value === 'view'),
 )
 
 const emit = defineEmits<{

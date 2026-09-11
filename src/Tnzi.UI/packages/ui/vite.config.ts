@@ -17,9 +17,18 @@ export default defineConfig({
         index: resolve(import.meta.dirname, 'src/index.ts'),
         components: resolve(import.meta.dirname, 'src/components/index.ts'),
         stores: resolve(import.meta.dirname, 'src/stores/index.ts'),
+        adapters: resolve(import.meta.dirname, 'src/adapters/index.ts'),
+        // Theme barrel (tokens, palette, naive bridge, UnoCSS preset). Consumers
+        // that build their own UnoCSS config need `presetTnzi` from here rather
+        // than a hand-kept copy.
+        theme: resolve(import.meta.dirname, 'src/theme/index.ts'),
         headless: resolve(import.meta.dirname, 'src/headless/index.ts'),
         resolvers: resolve(import.meta.dirname, 'src/resolvers/index.ts'),
         utils: resolve(import.meta.dirname, 'src/utils/index.ts'),
+        // Generated icon manifest. Its own entry (and its own dist folder, so the
+        // `.js` sits next to the `.d.ts` vue-tsc emits) because nothing in the
+        // library imports it - it exists purely for consumers that bundle icons.
+        'icons/index': resolve(import.meta.dirname, 'src/icons/index.ts'),
       },
       name: 'TnziUi',
       formats: ['es'],
@@ -39,7 +48,7 @@ export default defineConfig({
         || id.startsWith('echarts/')
         || id.startsWith('@vueuse/')
         || id.startsWith('@tnzi/core')
-        || id.startsWith('@iconify/vue'),
+        || id.startsWith('@iconify/'),
       output: {
         preserveModules: true,
         preserveModulesRoot: resolve(import.meta.dirname, 'src'),

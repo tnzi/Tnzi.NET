@@ -64,7 +64,9 @@ public class Signer : FullAuditedEntity<Guid>, IMultiTenant
     /// <summary>拒签原因</summary>
     public string? DeclineReason { get; set; }
 
-    /// <summary>捕获到的签名图（data URL，手绘或键入）。</summary>
+    /// <summary>
+    /// 捕获到的签名图（data URL，手绘或键入）。匿名可写，上限见 <see cref="Metadata.SigningLimits"/>。
+    /// </summary>
     public string? SignatureImage { get; set; }
 
     // ── 签署审计 ──────────────────────────────────────────────────────────
@@ -77,7 +79,10 @@ public class Signer : FullAuditedEntity<Guid>, IMultiTenant
     /// <summary>签署者 User-Agent</summary>
     public string? SignerUserAgent { get; set; }
 
-    /// <summary>签署者当时同意的条款原文（快照，不是指向某个会改的页面的链接）。</summary>
+    /// <summary>
+    /// 签署者当时同意的条款原文（快照，不是指向某个会改的页面的链接）。
+    /// 匿名可写，上限见 <see cref="Metadata.SigningLimits"/>。
+    /// </summary>
     public string? ConsentText { get; set; }
 
     /// <summary>所属请求</summary>

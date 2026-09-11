@@ -17,7 +17,6 @@ public class RagRetriever : ApplicationService, IRagRetriever
     private readonly IEmbeddingService _embeddingService;
     private readonly IVectorStore _vectorStore;
     private readonly IReranker _reranker;
-    private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
     private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly List<ISearchPostProcessor> _sortedProcessors;
     private readonly AIRagOptions _ragOptions;
@@ -31,7 +30,6 @@ public class RagRetriever : ApplicationService, IRagRetriever
         IEmbeddingService embeddingService,
         IVectorStore vectorStore,
         IReranker reranker,
-        IRepository<KnowledgeDocument, Guid> docRepository,
         IRepository<KnowledgeBase, Guid> kbRepository,
         IEnumerable<ISearchPostProcessor> postProcessors,
         IOptionsSnapshot<AIRagOptions> ragOptions,
@@ -43,7 +41,6 @@ public class RagRetriever : ApplicationService, IRagRetriever
         _embeddingService = Check.NotNull(embeddingService);
         _vectorStore = Check.NotNull(vectorStore);
         _reranker = Check.NotNull(reranker);
-        _docRepository = Check.NotNull(docRepository);
         _kbRepository = Check.NotNull(kbRepository);
         Check.NotNull(postProcessors);
         _sortedProcessors = postProcessors.OrderBy(p => p.Order).ToList();

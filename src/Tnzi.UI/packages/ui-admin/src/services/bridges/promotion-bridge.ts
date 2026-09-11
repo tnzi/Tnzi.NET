@@ -21,7 +21,7 @@ import {
   type CreatePromotionDto as CoreCreatePromotionDto,
   type UpdatePromotionDto as CoreUpdatePromotionDto,
 } from '@tnzi/core/services/payment'
-import { ensureOk, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 // Re-export under the original bridge names consumed by pages.
 export type PromotionDto = CorePromotionDto
@@ -110,7 +110,7 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
         priority: data.priority ?? undefined,
         firstSubscriptionOnly: data.firstSubscriptionOnly ?? undefined,
       }
-      return (unwrap<PromotionDto | null>(await api.create(body)) ?? ({} as PromotionDto))
+      return (unwrapOk<PromotionDto | null>(await api.create(body)) ?? ({} as PromotionDto))
     },
     update: async (id: string, data: Partial<PromotionDto>) => {
       // Whitelist onto UpdatePromotionDto - drops discountType / startTime /

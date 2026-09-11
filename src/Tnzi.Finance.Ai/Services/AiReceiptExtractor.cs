@@ -24,6 +24,10 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
     /// <summary>存储侧「不知道是什么」时给出的内容类型。</summary>
     private const string BinaryContentType = "application/octet-stream";
 
+    /// <summary>走 PdfPig 文本路径的内容类型（已归一化为小写）。</summary>
+    private static readonly HashSet<string> PdfContentTypes =
+        new(StringComparer.Ordinal) { "application/pdf", "application/x-pdf", "application/acrobat", "text/pdf" };
+
     private readonly IFileStorageService _storage;
     private readonly IStructuredOutputService _structuredOutput;
     private readonly IOptionsMonitor<FinanceAiOptions> _options;
@@ -59,7 +63,10 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
 
         var contentType = ResolveContentType(request, infoResult.Data);
         var isImage = contentType.StartsWith("image/", StringComparison.Ordinal);
-        var isPdf = contentType.Contains("pdf", StringComparison.Ordinal);
+        // 收窄到已知的 PDF 内容类型：Contains("pdf") 会把 "application/vnd.pdf-viewer"、
+        // "image/pdf-thumbnail" 这类东西一起放进 PdfPig，报错落在读文件那一步，
+        // 而消息说的是「读不了这份 PDF」—— 那不是用户上传的东西。
+        var isPdf = PdfContentTypes.Contains(contentType);
 
         // ★ 分支判定放在**下载之前**：拿不动的格式不该先把整个文件读进内存再拒绝。
         if (!isImage && !isPdf)
@@ -113,6 +120,8 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
         if (string.IsNullOrWhiteSpace(text))
             return Fail<ReceiptExtractionResult>("The PDF has no extractable text. Upload an image scan for vision extraction.", 400);
 
+        text = ClampPromptText(text, opts.MaxPdfTextChars);
+
         var pdfMessages = new List<ChatMessage>
         {
             new(ChatRole.User, $"{prompt}\n\nReceipt text:\n{text}")
@@ -121,6 +130,28 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
         if (pdfResult.Succeeded && pdfResult.Data != null)
             pdfResult.Data.RawText = text;
         return pdfResult;
+    }
+
+    /// <summary>
+    /// 把要拼进提示词的 PDF 正文截到上限，并在末尾注明截掉了多少。
+    /// </summary>
+    /// <remarks>
+    /// ★ 字节大小有两道闸门（元数据提前退出 + <see cref="ReadBoundedAsync"/>），
+    /// 而文本长度此前一道都没有：一份 20 MB 的纯文字 PDF 解出来是上百万字符，
+    /// 整份拼进提示词，换回的要么是与收据金额毫无关系的答案，要么是供应商侧的长度报错。
+    /// ★ 截断而不是拒绝：正文正常、后面附了几页条款的发票仍应当录得进来。
+    /// ★ 注明是必需的：模型看不见被截掉的部分，但它要知道自己看到的不是全文 ——
+    /// 否则「总计」在被截掉的那一页上时，它会拿倒数第二个数字凑一个看起来合理的答案。
+    /// 返回值同时用作 <c>RawText</c>，所以人核对时看到的与模型看到的是同一份东西。
+    /// </remarks>
+    private static string ClampPromptText(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+
+        var omitted = text.Length - maxChars;
+        return text[..maxChars]
+            + $"{Environment.NewLine}{Environment.NewLine}[Text truncated: {omitted} more characters were omitted. Extract only from the text above.]";
     }
 
     private static string TooLargeMessage(int maxFileSizeMb)

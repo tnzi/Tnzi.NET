@@ -78,6 +78,12 @@ public class PermissionEvaluateRequestDto
     /// <summary>是否破坏性工具</summary>
     public bool IsDestructive { get; set; }
 
+    /// <summary>
+    /// 以哪个用户的身份评估（User 级规则按它绑定）。留空表示调用者未知，
+    /// 此时绑定了用户的规则一律不匹配 —— 与运行时取不到调用者时的行为一致。
+    /// </summary>
+    public Guid? UserId { get; set; }
+
     /// <summary>工具参数</summary>
     public Dictionary<string, object?>? Arguments { get; set; }
 }

@@ -1,5 +1,4 @@
 using Tnzi.Data;
-using Tnzi.EFCore;
 
 namespace Tnzi.Audit.Tests.Integration;
 

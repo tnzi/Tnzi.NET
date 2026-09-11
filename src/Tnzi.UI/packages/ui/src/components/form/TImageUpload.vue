@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { NModal, NButton, NSpin, NSpace } from 'naive-ui'
 import type CropperJs from 'cropperjs'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 
 // ---------------------------------------------------------------------------
 // Props / Emits
@@ -32,6 +33,8 @@ interface Props {
   /** Accessible label + tooltip for the remove control. */
   removeLabel?: string
 }
+
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: null,
@@ -361,8 +364,8 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
           />
         </div>
         <NSpace justify="end" class="t-image-upload__cropper-actions">
-          <NButton @click="cancelCrop">Cancel</NButton>
-          <NButton type="primary" @click="confirmCrop">Confirm</NButton>
+          <NButton @click="cancelCrop">{{ t('common.cancel') }}</NButton>
+          <NButton type="primary" @click="confirmCrop">{{ t('common.confirm') }}</NButton>
         </NSpace>
       </div>
     </NModal>

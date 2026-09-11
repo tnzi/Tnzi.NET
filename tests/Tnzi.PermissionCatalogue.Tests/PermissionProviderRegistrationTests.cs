@@ -53,6 +53,8 @@ using Tnzi.Localization;
 using Tnzi.Modules;
 using Tnzi.Notification.Permissions;
 using Tnzi.Notification;
+using Tnzi.Notification.Push.Permissions;
+using Tnzi.Notification.Push;
 using Tnzi.Payment.Permissions;
 using Tnzi.Payment;
 using Tnzi.Payment.Billing.Permissions;
@@ -108,6 +110,7 @@ public class PermissionProviderRegistrationTests
         { typeof(StorageModule), typeof(StoragePermissions) },
         { typeof(AuditModule), typeof(AuditPermissions) },
         { typeof(NotificationModule), typeof(NotificationPermissions) },
+        { typeof(NotificationPushModule), typeof(NotificationPushPermissions) },
         { typeof(ChatModule), typeof(ChatPermissions) },
         { typeof(PaymentModule), typeof(PaymentPermissions) },
         { typeof(PaymentBillingModule), typeof(PaymentBillingPermissions) },
@@ -145,13 +148,13 @@ public class PermissionProviderRegistrationTests
 
     [Theory]
     [MemberData(nameof(ModulesWithCatalogues))]
-    public void Module_registers_its_permission_definition_provider(Type moduleType, Type providerType)
+    public async Task Module_registers_its_permission_definition_provider(Type moduleType, Type providerType)
     {
         var services = new ServiceCollection();
         var context = new ServiceConfigurationContext(services, new ConfigurationBuilder().Build());
 
         var module = (ITnziModule)Activator.CreateInstance(moduleType)!;
-        module.ConfigureServicesAsync(context).GetAwaiter().GetResult();
+        await module.ConfigureServicesAsync(context);
 
         var registered = services
             .Where(d => d.ServiceType == typeof(IPermissionDefinitionProvider))

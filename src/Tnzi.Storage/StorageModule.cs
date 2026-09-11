@@ -72,6 +72,11 @@ public class StorageModule : TnziApplicationModule
         // "归属 + 权限码 + 显式公开" 策略。
         services.TryAddScoped<IFileAccessAuthorizer, FileAccessAuthorizer>();
 
+        // 反方向的那一问：业务模块把一个文件 id 写进自己的记录之前，问一句
+        // 「这个人本来就读得到它吗」。契约在核心（Tnzi/Storage/），所以 Chat 这类
+        // 拥有业务记录的模块不必引用本程序集就能问。
+        services.TryAddScoped<IFileReadAccessProbe, FileReadAccessProbe>();
+
         // 访问令牌签名器(单例:密钥构造时解析一次)。让私密文件能被 <img src> 渲染 ——
         // 浏览器发起的资源请求带不了 Authorization 头。
         services.TryAddSingleton<IFileUrlSigner, FileUrlSigner>();

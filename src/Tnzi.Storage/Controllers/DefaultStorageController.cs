@@ -233,8 +233,28 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 根据 ID 预览文件
+    /// 根据 ID 预览文件（内联交给浏览器渲染）。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>只有可展示的类型才内联</b>（<see cref="FileTypeHelper.IsInlineRenderable"/>：位图 / 视频 / 音频 /
+    /// PDF / 纯文本），其余一律带文件名 ⇒ <c>Content-Disposition: attachment</c>，与 <see cref="Download"/> 同形。
+    /// <c>FileRecord.ContentType</c> 是按<b>上传者给的文件名</b>算出来的（<c>.html → text/html</c>），
+    /// 而本端点匿名可达、还被缓存一年：不加这道闸，任何已登录用户传一个 <c>payload.html</c>
+    /// 并标 <c>isPublic</c>，再把预览链接发出去，脚本就跑在 API 的源上。
+    /// </para>
+    /// <para>
+    /// 附件分支<b>保留声明的类型</b>而不是改成 <c>application/octet-stream</c>：<c>&lt;img src&gt;</c> 里的 .svg
+    /// 仍要渲染得出来（子资源加载不理会 Content-Disposition，而 <c>&lt;img&gt;</c> 是脚本不执行的上下文），
+    /// 换成 octet-stream 会让 nosniff 下的图片加载被浏览器整个拒掉。<c>Content-Security-Policy: sandbox</c>
+    /// 是纵深：万一某个上下文仍把它当文档打开，脚本禁用、源不透明。
+    /// </para>
+    /// <para>
+    /// <c>nosniff</c> 对两个分支都加：声明的类型就是最终类型，纯文本才不会被嗅探成 HTML。
+    /// 这不是授权判定（那仍只在 <see cref="IFileAccessAuthorizer"/>），是响应形态；
+    /// 消费方整体替换本控制器时请沿用 <see cref="FileTypeHelper.IsInlineRenderable"/>。
+    /// </para>
+    /// </remarks>
     [HttpGet("{id:guid}/preview")]
     [AllowAnonymous]
     public virtual async Task<IActionResult> Preview(Guid id)
@@ -244,7 +264,7 @@ public class DefaultStorageController : ApiControllerBase
         {
             return new NotFoundResult();
         }
-        var record = recordResult.Data;
+        var record = recordResult.Data!;
 
         var streamResult = await FileStorageService.GetAsync(id);
         if (!streamResult.Succeeded)
@@ -253,8 +273,17 @@ public class DefaultStorageController : ApiControllerBase
         }
         var stream = streamResult.Data!;
 
+        var contentType = record.ContentType ?? "application/octet-stream";
+        Response.Headers.XContentTypeOptions = "nosniff";
         Response.Headers.CacheControl = "public, max-age=31536000";
-        return File(stream, record!.ContentType ?? "application/octet-stream");
+
+        if (!FileTypeHelper.IsInlineRenderable(contentType))
+        {
+            Response.Headers.ContentSecurityPolicy = "sandbox";
+            return File(stream, contentType, record.OriginalName ?? record.FileName);
+        }
+
+        return File(stream, contentType);
     }
 
     /// <summary>
@@ -488,7 +517,8 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取分享信息(管理视角,含令牌与计数)
+    /// 获取分享信息(管理视角,含令牌与计数)。只对分享的创建者 / 对文件有变更权的人可见,其余 404;
+    /// 收件人看的是 <c>share/{token}/info</c>。
     /// </summary>
     [HttpGet("share/{token}")]
     [ApiExplorerSettings(IgnoreApi = true)]
@@ -502,7 +532,7 @@ public class DefaultStorageController : ApiControllerBase
     }
 
     /// <summary>
-    /// 撤销分享
+    /// 撤销分享。要求与创建同一份权利(创建者,或对文件有变更权),判定在服务层;否则 404。
     /// </summary>
     [HttpDelete("share/{token}")]
     [ApiExplorerSettings(IgnoreApi = true)]

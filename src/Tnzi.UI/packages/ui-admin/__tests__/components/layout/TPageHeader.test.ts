@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { defineComponent, h, provide } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
+import { TITLE_LEVEL, type TTitleLevel } from '../../../src/components/layout/title-level'
 import TPageHeader from '../../../src/components/layout/TPageHeader.vue'
 import TRowActions from '../../../src/components/crud/TRowActions.vue'
 import type { RowAction } from '../../../src/headless/row-actions'
@@ -181,5 +183,68 @@ describe('TPageHeader', () => {
     const w = await mountHeaderWithRouter({ translate: (k: string) => (k.endsWith('.title') ? 'Users' : k) })
     await w.vm.$nextTick()
     expect(w.find('.t-page-header__title').text()).toBe('Users')
+  })
+
+  /* Title tier. The sizes themselves are asserted against the stylesheet in
+     title-tier.test.ts (happy-dom applies no scoped CSS); what a mount can see
+     is which tier this header decided it is rendering at. */
+  describe('title level', () => {
+    /** Stands in for the container that owns the slot (TDetailLayout's panel). */
+    function mountInProvider(level: TTitleLevel, props = {}) {
+      const Host = defineComponent({
+        setup(_, { slots }) {
+          provide(TITLE_LEVEL, level)
+          return () => h('div', slots.default?.())
+        },
+      })
+      return mount(Host, {
+        slots: { default: () => h(TPageHeader, props) },
+        global: { stubs },
+      })
+    }
+
+    it('renders at the page tier by default', () => {
+      const w = mountHeader({ title: 'X' })
+      expect(w.find('.t-page-header').classes()).not.toContain('t-page-header--section')
+    })
+
+    it('renders at the section tier when asked', () => {
+      const w = mountHeader({ title: 'X', level: 'section' })
+      expect(w.find('.t-page-header').classes()).toContain('t-page-header--section')
+    })
+
+    it('inherits the tier from the enclosing container, with no prop', () => {
+      const w = mountInProvider('section', { title: 'X' })
+      expect(w.find('.t-page-header').classes()).toContain('t-page-header--section')
+    })
+
+    it('lets an explicit prop beat the inherited tier', () => {
+      // This is how TDetailLayout keeps its OWN header at the page tier while
+      // providing the section tier to everything it renders below.
+      const w = mountInProvider('section', { title: 'X', level: 'page' })
+      expect(w.find('.t-page-header').classes()).not.toContain('t-page-header--section')
+    })
+
+    it('shrinks the title icon to match the section tier', () => {
+      // A 20px icon beside a 16px title reads as the page tier regardless of
+      // what the text does.
+      // Read the prop, not an attribute: the stub declares TSvgIcon's props,
+      // so `size` is consumed rather than rendered onto the element.
+      const size = (level?: TTitleLevel) =>
+        Number(mountHeader({ title: 'X', icon: 'mdi:cog', level }).findComponent('.t-page-header__icon').props('size'))
+      expect(size()).toBeGreaterThan(size('section'))
+    })
+
+    it('draws the back arrow at the same size as the route icon it replaces', () => {
+      // Navigating a list into a record swaps one leading glyph for the other.
+      // Two sizes read as two different controls in the same spot - the arrow
+      // used to be 18px beside a 20px icon - so both come from one source.
+      const iconSize = (level?: TTitleLevel) =>
+        Number(mountHeader({ title: 'X', icon: 'mdi:cog', level }).findComponent('.t-page-header__icon').props('size'))
+      const backSize = (level?: TTitleLevel) =>
+        Number(mountHeader({ title: 'X', back: true, level }).findComponent('.t-page-header__back svg, .t-page-header__back').props('size'))
+      expect(backSize()).toBe(iconSize())
+      expect(backSize('section')).toBe(iconSize('section'))
+    })
   })
 })

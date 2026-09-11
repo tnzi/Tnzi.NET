@@ -91,6 +91,9 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             ExistingRunId = run.Id,
             ParentRunId = prepared.ParentRunId,
             RootRunId = prepared.RootRunId ?? run.Id,
+            // 后台运行在新作用域、新执行流里跑，拿不到调用方的属性包，
+            // 子 Agent 名字只能随请求一起传（AgentRuntime 据此打上 IsSubAgent / SubAgentName）
+            SubAgentName = input.SubAgentType,
             UserId = prepared.Request.UserId,
             ReasoningEffort = prepared.Request.ReasoningEffort,
             Attachments = prepared.Request.Attachments,

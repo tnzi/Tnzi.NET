@@ -1,4 +1,4 @@
-using Tnzi.Identity;
+﻿using Tnzi.Identity;
 using Tnzi.Identity.Services;
 
 namespace Tnzi.Architecture.Tests;
@@ -48,6 +48,38 @@ public class BuiltInLoginGuardTests
             + "is empty on a default deployment, and every sign-in path whose credential check happens "
             + "outside SignInManager (verification-code login, OAuth, passkey) stops rejecting "
             + "locked-out / disabled accounts - silently.");
+    }
+
+    /// <summary>
+    /// 邀请未接受的判定同样必须是注册进容器的内置守卫。
+    /// </summary>
+    /// <remarks>
+    /// ★ 它<b>不能</b>由上面那条锁定守卫代劳：邀请创建的账号确实同时被置上了锁定，
+    /// 但 <c>UserService.EnableAsync</c> 会执行 <c>SetLockoutEnabledAsync(user, false)</c>，
+    /// 而 <c>UserManager.IsLockedOutAsync</c> 内含 <c>LockoutEnabled</c> 前置判断 ——
+    /// 管理员对一个未接受邀请的账号点一下「启用」，锁定守卫就恒放行了，
+    /// 而那个账号没有密码、没有二次验证、角色却已按管理员的意思预设好。
+    /// 少了这行注册，验证码登录只需要收到一封邮件就能带着预设角色进来。
+    /// </remarks>
+    [Fact]
+    public void IdentityModule_RegistersThePendingActivationGuard()
+    {
+        var graph = ArchitectureModuleGraph.Load();
+        AssertFixtureIsSound(graph);
+
+        Assert.True(
+            graph.ServiceMap.TryGetValue(typeof(IdentityModule), out var identityServices),
+            "IdentityModule registered no services at all - the fixture, not the guard, is what broke.");
+
+        var registered = identityServices!.Any(d =>
+            d.ServiceType == typeof(ILoginGuard)
+            && d.ImplementationType == typeof(PendingActionsLoginGuard));
+
+        Assert.True(registered,
+            "IdentityModule no longer registers PendingActionsLoginGuard. Without it an invited-but-not-yet-"
+            + "accepted account - which has no password and no second factor, but does have its roles already "
+            + "assigned - can be signed in through any path that does not go through SignInManager. "
+            + "Verification-code login is the shortest one: receiving a single email is enough.");
     }
 
     // 「排在消费方守卫之前」那条断言在 Tnzi.Identity.Tests 里（那边能方便地构造 UserManager），

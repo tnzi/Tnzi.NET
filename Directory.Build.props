@@ -2,9 +2,23 @@
   <PropertyGroup>
     <!-- 禁用卫星程序集生成，避免在 bin 目录下生成各种语言目录 -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <!-- 使用最新的运行时补丁版本 -->
-    <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
-    <!-- 允许向前滚动到更高版本的运行时 -->
+    <!--
+      运行时地板。框架依赖部署（本仓每一个可执行产物的发布形态）写进 runtimeconfig.json 的
+      framework.version 是「最低要求」，不是「优先使用」；RollForward=LatestMajor 让进程在
+      运行时挑主机上已装的最高版本 —— 只向前滚，永不向后。
+
+      ★ TargetLatestRuntimePatch 必须是 false。它为 true 时，SDK 把构建机当时装着的最新补丁号
+      （例如 10.0.11）写成这个地板：补丁号低于它的主机一律 500.31「Failed to load ASP.NET Core
+      runtime」，而同一台主机上别的 .NET 10 应用照常运行。部署出去的 MCP 服务器就是这样挂了
+      几周的 —— 两次本地构建之间装了一个补丁，输出就变了，谁在哪天发布决定了生产主机得装到
+      哪个补丁。此前这里写的是 true，注释还写着「使用最新的运行时补丁版本」，与属性的实际语义
+      相反（那件事 RollForward 已经在做，这个属性只负责抬高地板）。
+
+      false 是框架依赖部署的 SDK 默认值：地板落在 10.0.0，运行时照样用主机上最新的。
+      自包含发布不在本仓的发布形态里；真要做时用 RuntimeFrameworkVersion 显式钉运行时包。
+      tests/Tnzi.Architecture.Tests/RuntimeFloorConventionTests 守着这一行不被改回去。
+    -->
+    <TargetLatestRuntimePatch>false</TargetLatestRuntimePatch>
     <RollForward>LatestMajor</RollForward>
     <!-- 同时也加上这个，双重保险 -->
     <ResourceLanguages>en</ResourceLanguages>

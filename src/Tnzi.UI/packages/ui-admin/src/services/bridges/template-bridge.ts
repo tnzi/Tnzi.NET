@@ -32,7 +32,7 @@ import {
   type LayoutQueryDto,
 } from '@tnzi/core/services/template'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminTemplateApi>[0]
 
@@ -131,10 +131,10 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
       return unwrap<TemplateEntityDto>(await ta.getById(id))
     },
     create: async (data: Partial<TemplateInfoDto>) => {
-      return unwrap<TemplateInfoDto>(await ta.create(data as never))
+      return unwrapOk<TemplateInfoDto>(await ta.create(data as never))
     },
     update: async (id: string, data: Partial<TemplateInfoDto>) => {
-      return unwrap<TemplateInfoDto>(await ta.update(id, data as never))
+      return unwrapOk<TemplateInfoDto>(await ta.update(id, data as never))
     },
     delete: async (ids: string[]) => {
       if (ids.length === 1 && ids[0]) {
@@ -155,7 +155,7 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
       // Backend clone requires newName; auto-generate based on original template name
       const entity = unwrap<TemplateEntityDto>(await ta.getById(id))
       const newName = `${entity.templateName}-copy`
-      return unwrap<TemplateEntityDto>(await ta.clone(id, newName))
+      return unwrapOk<TemplateEntityDto>(await ta.clone(id, newName))
     },
   }
 
@@ -177,10 +177,10 @@ export function createTemplateBridge(deps: TemplateBridgeDeps = {}): TemplateBri
   const layouts: BridgeCrudContract<LayoutInfoDto> = {
     fetch: fetchLayouts,
     create: async (data: Partial<LayoutInfoDto>) => {
-      return unwrap<LayoutInfoDto>(await la.create(data as never))
+      return unwrapOk<LayoutInfoDto>(await la.create(data as never))
     },
     update: async (id: string, data: Partial<LayoutInfoDto>) => {
-      return unwrap<LayoutInfoDto>(await la.update(id, data as never))
+      return unwrapOk<LayoutInfoDto>(await la.update(id, data as never))
     },
     delete: async (ids: string[]) => {
       if (ids.length === 1 && ids[0]) {

@@ -185,7 +185,11 @@ describe('storage-bridge', () => {
       storageApi: mockStorageApi() as never,
     })
     const result = await bridge.chunks.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
-    expect(mockClient.get).toHaveBeenCalledWith(expect.stringContaining('/admin/storage/audit/chunks'))
+    // Through @tnzi/core's useAdminStorageAuditApi: path + params object, not a
+    // hand-built query string (the contract gate only sees api.ts paths).
+    expect(mockClient.get).toHaveBeenCalledWith('/admin/storage/audit/chunks', {
+      params: { pageIndex: 1, pageSize: 20, uploadSessionId: undefined },
+    })
     expect(result.items).toHaveLength(1)
     expect(result.items[0].uploadSessionId).toBe('s1')
   })
@@ -210,7 +214,9 @@ describe('storage-bridge', () => {
       storageApi: mockStorageApi() as never,
     })
     const result = await bridge.versions.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: { fileId: 'f1' } })
-    expect(mockClient.get).toHaveBeenCalledWith(expect.stringContaining('fileId=f1'))
+    expect(mockClient.get).toHaveBeenCalledWith('/admin/storage/audit/versions', {
+      params: { pageIndex: 1, pageSize: 20, fileId: 'f1', currentOnly: undefined },
+    })
     expect(result.items[0].fileId).toBe('f1')
   })
 

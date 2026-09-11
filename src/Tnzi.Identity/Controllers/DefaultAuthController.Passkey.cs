@@ -1,4 +1,4 @@
-using TokenResult = Tnzi.Identity.Services.TokenResult;
+﻿using TokenResult = Tnzi.Identity.Services.TokenResult;
 
 namespace Tnzi.Identity.Controllers;
 

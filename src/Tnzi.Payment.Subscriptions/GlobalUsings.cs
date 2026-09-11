@@ -1,4 +1,4 @@
-// System
+﻿// System
 global using System;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations;
@@ -42,6 +42,7 @@ global using Tnzi.Utilities;
 // 续费提醒 / 扣款失败告警。这条依赖是续费域自己的，父模块里它的使用者本来就只有订阅服务。
 global using Tnzi.Notification;
 global using Tnzi.Notification.Dtos;
+global using Tnzi.Notification.Metadata;
 global using Tnzi.Notification.Services;
 
 // Payment 核心：支付服务与渠道工厂、绑卡服务、支付事件、错误码与常量、支付侧选项。

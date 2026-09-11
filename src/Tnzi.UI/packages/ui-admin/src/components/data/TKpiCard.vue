@@ -18,8 +18,8 @@
     :class="{ 't-stat-card--clickable': clickable }"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable ? 0 : undefined"
-    @click="clickable && handleClick()"
-    @keydown.enter="clickable && handleClick()"
+    @click="onActivate"
+    @keydown="onKeydown"
   >
     <div class="t-stat-card__inner">
       <span v-if="icon" class="t-stat-card__icon" :class="`t-stat-card__icon--${tone}`">
@@ -74,15 +74,15 @@ export interface TKpiCardProps {
   animated?: boolean
   /**
    * Vue-router target. When set the whole card becomes a click target (cursor +
-   * hover lift + `role="button"`) and navigates on click - so a KPI can act as a
-   * drill-in link ("Active files → /admin/matters") without hand-rolling a
-   * clickable card. Also emits `click` for router-less handling.
+   * hover lift + `role="button"` + Enter/Space) and navigates on activation - so
+   * a KPI can act as a drill-in link ("Active files → /admin/matters") without
+   * hand-rolling a clickable card. Also emits `click` for router-less handling.
    */
   to?: RouteLocationRaw
   /**
-   * Force the interactive affordance (cursor + hover lift + `click` emit) without
-   * a router target - for consumers wiring their own `@click`. Ignored when `to`
-   * is set (that already implies interactive).
+   * Force the interactive affordance (cursor + hover lift + Enter/Space + `click`
+   * emit) without a router target - for consumers wiring their own `@click`.
+   * Ignored when `to` is set (that already implies interactive).
    */
   interactive?: boolean
 }
@@ -114,9 +114,19 @@ defineSlots<{
 const router = useRouter()
 const clickable = computed(() => props.to != null || props.interactive)
 
-function handleClick(): void {
+function onActivate(): void {
+  if (!clickable.value) return
   emit('click')
   if (props.to != null && router) void router.push(props.to)
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (!clickable.value) return
+  if (event.key === 'Enter' || event.key === ' ') {
+    // Space would otherwise scroll the page; both keys "activate" the card.
+    event.preventDefault()
+    onActivate()
+  }
 }
 
 /**

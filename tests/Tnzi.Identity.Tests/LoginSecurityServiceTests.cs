@@ -6,7 +6,6 @@ public class LoginSecurityServiceTests
 {
     private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IRepository<LoginLog, Guid>> _loginLogRepositoryMock;
-    private readonly Mock<ILogger<LoginSecurityService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     private readonly LoginSecurityService _loginSecurityService;
@@ -23,7 +22,6 @@ public class LoginSecurityServiceTests
         });
 
         _loginLogRepositoryMock = new Mock<IRepository<LoginLog, Guid>>();
-        _loggerMock = new Mock<ILogger<LoginSecurityService>>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
         var loggerFactory = new Mock<ILoggerFactory>();

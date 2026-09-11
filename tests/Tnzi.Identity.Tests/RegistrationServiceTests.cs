@@ -11,7 +11,7 @@ public class RegistrationServiceTests
     private readonly Mock<ICaptchaService> _captchaServiceMock;
     private readonly Mock<ITwoFactorService> _twoFactorServiceMock;
     private readonly Mock<IAuthTokenService> _authTokenServiceMock;
-    private readonly Mock<IPasswordPolicyService> _passwordPolicyServiceMock;
+    private readonly Mock<IPasswordService> _passwordServiceMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     private readonly RegistrationService _registrationService;
@@ -26,6 +26,7 @@ public class RegistrationServiceTests
         {
             Registration = new RegistrationOptions
             {
+                EnableSelfRegistration = true, // 默认 false（deny-by-default），这些用例测的是开着时的行为
                 EnableQuickRegisterEmail = true,
                 EnableQuickRegisterSms = true,
                 DefaultUserNameFromEmail = true,
@@ -42,7 +43,10 @@ public class RegistrationServiceTests
         _captchaServiceMock = new Mock<ICaptchaService>();
         _twoFactorServiceMock = new Mock<ITwoFactorService>();
         _authTokenServiceMock = new Mock<IAuthTokenService>();
-        _passwordPolicyServiceMock = new Mock<IPasswordPolicyService>();
+        _passwordServiceMock = new Mock<IPasswordService>();
+        _passwordServiceMock
+            .Setup(x => x.ForceSetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(Result.Success());
         _serviceProviderMock = new Mock<IServiceProvider>();
 
         var loggerFactory = new Mock<ILoggerFactory>();
@@ -57,7 +61,7 @@ public class RegistrationServiceTests
             _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             _authTokenServiceMock.Object,
-            _passwordPolicyServiceMock.Object
+            passwordService: _passwordServiceMock.Object
         );
     }
 
@@ -121,13 +125,71 @@ public class RegistrationServiceTests
         Assert.False(result.Succeeded);
     }
 
+    /// <summary>
+    /// ★★★ 关掉自助注册之后，端点必须自己拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 此前 <c>POST auth/register</c> <b>没有任何开关</b>：<c>RegistrationOptions</c> 只有两个
+    /// quick-register 标志，而 <c>GET auth/config</c> 的 <c>enableRegistration</c> 只由那两个推导 ——
+    /// 于是出厂状态是「配置说注册关着、登录页把入口藏起来、而端点照样给任何人开户」。
+    /// 前端隐藏入口是体验，端点匿名可达，门必须在服务层。
+    /// </remarks>
+    [Fact]
+    public async Task RegisterAsync_WhenSelfRegistrationDisabled_IsRejected()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Registration = new RegistrationOptions { EnableSelfRegistration = false },
+            Captcha = new CaptchaOptions(),
+        });
+
+        var result = await _registrationService.RegisterAsync(new RegisterDto
+        {
+            UserName = "testuser",
+            Email = "test@example.com",
+            Password = "Password123!",
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        // 账号一个都不该被建出来 —— 只返回失败但仍然 CreateAsync 了，等于没挡住。
+        _userManagerMock.Verify(
+            x => x.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★★ 邮箱确认重发：账号不存在 / 已确认 / 已发送，三种结果同一句话。
+    /// 此前分别是 404 / 400 / 200，于是任何人都能拿这个匿名端点枚举出哪些邮箱注册过、
+    /// 并顺带读出每一个的确认状态。
+    /// </summary>
+    [Fact]
+    public async Task ResendEmailConfirmation_AnswersUniformly()
+    {
+        _userManagerMock.Setup(x => x.FindByEmailAsync("nobody@example.com")).ReturnsAsync((User?)null);
+        _userManagerMock.Setup(x => x.FindByEmailAsync("confirmed@example.com"))
+            .ReturnsAsync(new User { Id = Guid.NewGuid(), Email = "confirmed@example.com", EmailConfirmed = true });
+        _userManagerMock.Setup(x => x.FindByEmailAsync("pending@example.com"))
+            .ReturnsAsync(new User { Id = Guid.NewGuid(), Email = "pending@example.com", EmailConfirmed = false });
+
+        var unknown = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "nobody@example.com" });
+        var confirmed = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "confirmed@example.com" });
+        var pending = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "pending@example.com" });
+
+        Assert.True(unknown.Succeeded);
+        Assert.True(confirmed.Succeeded);
+        Assert.True(pending.Succeeded);
+        // 连消息文本都必须一致：状态码相同而文案不同，一样是预言机。
+        Assert.Equal(pending.Data, unknown.Data);
+        Assert.Equal(pending.Data, confirmed.Data);
+    }
+
     [Fact]
     public async Task RegisterAsync_WithCaptchaEnabled_ValidatesCaptcha()
     {
         // Arrange
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
-            Registration = new RegistrationOptions(),
+            Registration = new RegistrationOptions { EnableSelfRegistration = true },
             Captcha = new CaptchaOptions
             {
                 EnableCaptchaOnRegister = true
@@ -142,7 +204,7 @@ public class RegistrationServiceTests
             _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             _authTokenServiceMock.Object,
-            _passwordPolicyServiceMock.Object
+            passwordService: _passwordServiceMock.Object
         );
 
         var input = new RegisterDto
@@ -303,14 +365,8 @@ public class RegistrationServiceTests
         _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("Identity", "SetPassword", input.Token))
             .ReturnsAsync(new AuthToken { UserId = userId, Value = input.Token, ExpiresAt = DateTime.UtcNow.AddMinutes(30) });
 
-        _passwordPolicyServiceMock.Setup(x => x.ValidatePasswordStrength(input.Password))
-            .Returns((string?)null);
-
         _userManagerMock.Setup(x => x.HasPasswordAsync(user))
             .ReturnsAsync(true);
-
-        _userManagerMock.Setup(x => x.ResetPasswordAsync(user, input.Token, input.Password))
-            .ReturnsAsync(IdentityResult.Success);
 
         _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>()))
             .ReturnsAsync(true);
@@ -323,5 +379,180 @@ public class RegistrationServiceTests
 
         // Assert
         Assert.True(result.Succeeded);
+    }
+
+    /// <summary>
+    /// ★★★ 注册后自动登录时，会话建立失败必须当场返回，不能沿用一个空会话继续签发。
+    /// </summary>
+    /// <remarks>
+    /// 没有会话就没有 <c>session_id</c> claim，而每请求的会话强制校验是按这个 claim 触发的：
+    /// 这样签出来的令牌踢不掉、「登出全部设备」对它无效、多设备策略也管不着它，
+    /// 而且外观与一次正常注册完全相同。<c>AuthService</c> 的四个签发出口在这一步失败时
+    /// 一律 <c>return Fail</c>，这条路径此前是唯一的例外。
+    /// </remarks>
+    [Fact]
+    public async Task RegisterAsync_WhenTheSessionCannotBeEstablished_IssuesNothing()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Registration = new RegistrationOptions
+            {
+                EnableSelfRegistration = true,
+                DefaultUserNameFromEmail = true,
+                RequireConfirmedEmail = false, // 走到自动登录那一段
+            },
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = false },
+            Otp = new OtpOptions(),
+        });
+
+        var coordinator = new Mock<ILoginSessionCoordinator>();
+        coordinator.Setup(x => x.EstablishAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(Result<Guid>.Failure("Maximum number of concurrent sessions reached", 403));
+
+        var tokenService = new Mock<ITokenService>();
+
+        var service = new RegistrationService(
+            _userManagerMock.Object,
+            _identityOptionsMock.Object,
+            _serviceProviderMock.Object,
+            _eventBusMock.Object,
+            _captchaServiceMock.Object,
+            _twoFactorServiceMock.Object,
+            _authTokenServiceMock.Object,
+            tokenService: tokenService.Object,
+            loginSessionCoordinator: coordinator.Object,
+            passwordService: _passwordServiceMock.Object);
+
+        _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.GetRolesAsync(It.IsAny<User>())).ReturnsAsync([]);
+
+        var result = await service.RegisterAsync(new RegisterDto
+        {
+            Email = "no-session@example.com",
+            Password = "Password123!",
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        tokenService.Verify(
+            x => x.GenerateToken(It.IsAny<User>(), It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// ★★★ 设置密码必须走共享出口 <c>ForceSetPasswordAsync</c>，不能自己写一遍。
+    /// </summary>
+    /// <remarks>
+    /// 手写的那份缺三样：密码历史查重（设回上一个密码会被接受）、历史写入
+    /// （下一次查重因此也查不到，缺陷自我延续）、以及会话撤销
+    /// （账号失陷后按提示改了密码，攻击者手里的令牌原样有效）。
+    /// 这与 09-01 修掉的第七条改密路径逐字同形，修法也相同：委托，不复制。
+    /// </remarks>
+    [Fact]
+    public async Task SetPasswordAsync_GoesThroughTheSharedPasswordExit()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "existing" };
+        var input = new SetPasswordDto { UserId = userId, Token = "temp_token", Password = "Password123!" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("Identity", "SetPassword", input.Token))
+            .ReturnsAsync(new AuthToken { UserId = userId, Value = input.Token, ExpiresAt = DateTime.UtcNow.AddMinutes(30) });
+        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>())).ReturnsAsync(true);
+
+        // 账号已有密码 = 这是一次替换，既有会话必须一并作废。
+        _userManagerMock.Setup(x => x.HasPasswordAsync(user)).ReturnsAsync(true);
+
+        var result = await _registrationService.SetPasswordAsync(input);
+
+        Assert.True(result.Succeeded);
+        _passwordServiceMock.Verify(
+            x => x.ForceSetPasswordAsync(user, input.Password, true),
+            Times.Once);
+        _userManagerMock.Verify(
+            x => x.AddPasswordAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
+        _userManagerMock.Verify(
+            x => x.ResetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★ 快速注册的账号设**第一个**密码时不撤会话：没有旧凭据要作废，
+    /// 而唯一在线的那条会话正是本人刚凭验证码换来的 —— 撤掉等于设完密码当场被登出。
+    /// </summary>
+    [Fact]
+    public async Task SetPasswordAsync_OnAnAccountWithoutOne_KeepsTheSessionItWasJustGiven()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "fresh" };
+        var input = new SetPasswordDto { UserId = userId, Token = "temp_token", Password = "Password123!" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("Identity", "SetPassword", input.Token))
+            .ReturnsAsync(new AuthToken { UserId = userId, Value = input.Token, ExpiresAt = DateTime.UtcNow.AddMinutes(30) });
+        _authTokenServiceMock.Setup(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>())).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.HasPasswordAsync(user)).ReturnsAsync(false);
+
+        var result = await _registrationService.SetPasswordAsync(input);
+
+        Assert.True(result.Succeeded);
+        _passwordServiceMock.Verify(
+            x => x.ForceSetPasswordAsync(user, input.Password, false),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// ★★ 设不上密码就不能消费令牌 —— 否则一个不合强度要求的密码会把令牌一起赔掉，
+    /// 而这个端点的令牌是一次性的：用户拿不回第二次机会。
+    /// </summary>
+    [Fact]
+    public async Task SetPasswordAsync_WhenTheChangeFails_KeepsTheTokenUsable()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "fresh" };
+        var input = new SetPasswordDto { UserId = userId, Token = "temp_token", Password = "weak" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync("Identity", "SetPassword", input.Token))
+            .ReturnsAsync(new AuthToken { UserId = userId, Value = input.Token, ExpiresAt = DateTime.UtcNow.AddMinutes(30) });
+        _userManagerMock.Setup(x => x.HasPasswordAsync(user)).ReturnsAsync(false);
+        _passwordServiceMock
+            .Setup(x => x.ForceSetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(Result.Failure("Password is too weak", 400, ErrorCodes.VALIDATION_ERROR));
+
+        var result = await _registrationService.SetPasswordAsync(input);
+
+        Assert.False(result.Succeeded);
+        _authTokenServiceMock.Verify(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★★ 这个端点匿名可达，令牌校验是它<b>唯一</b>的身份证明。
+    /// 令牌服务缺席时必须失败，绝不能放行：那等于任何人拿一个 userId 就能给别人设密码。
+    /// </summary>
+    [Fact]
+    public async Task SetPasswordAsync_WithoutATokenService_RefusesInsteadOfSkippingTheCheck()
+    {
+        var userId = Guid.NewGuid();
+        var service = new RegistrationService(
+            _userManagerMock.Object,
+            _identityOptionsMock.Object,
+            _serviceProviderMock.Object,
+            _eventBusMock.Object,
+            _captchaServiceMock.Object,
+            _twoFactorServiceMock.Object,
+            authTokenService: null,
+            passwordService: _passwordServiceMock.Object);
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
+            .ReturnsAsync(new User { Id = userId, UserName = "victim" });
+
+        var result = await service.SetPasswordAsync(
+            new SetPasswordDto { UserId = userId, Token = "anything", Password = "Password123!" });
+
+        Assert.False(result.Succeeded);
+        _passwordServiceMock.Verify(
+            x => x.ForceSetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Never);
     }
 }

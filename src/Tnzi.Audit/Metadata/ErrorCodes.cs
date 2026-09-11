@@ -14,4 +14,9 @@ public static class ErrorCodes
     /// Failed to delete expired audit data.
     /// </summary>
     public const string AuditDeleteExpiredFailed = "AUDIT_DELETE_EXPIRED_FAILED";
+
+    /// <summary>
+    /// An export matched more rows than <c>Audit:ExportMaxRows</c> allows; it was refused rather than truncated.
+    /// </summary>
+    public const string AuditExportTooLarge = "AUDIT_EXPORT_TOO_LARGE";
 }

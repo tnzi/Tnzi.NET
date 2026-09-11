@@ -8,7 +8,6 @@ public class PasswordPolicyServiceTests
     private readonly Mock<IRepository<PasswordHistory, Guid>> _repositoryMock;
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
-    private readonly Mock<ILogger<PasswordPolicyService>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
     private readonly PasswordPolicyService _passwordPolicyService;
@@ -34,7 +33,6 @@ public class PasswordPolicyServiceTests
                 PasswordExpirationDays = 90
             }
         });
-        _loggerMock = new Mock<ILogger<PasswordPolicyService>>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
         var loggerFactory = new Mock<ILoggerFactory>();

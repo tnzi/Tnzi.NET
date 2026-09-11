@@ -12,7 +12,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly ICaptchaService? _captchaService;
     private readonly ITwoFactorService? _twoFactorService;
     private readonly IAuthTokenService? _authTokenService;
-    private readonly IPasswordPolicyService? _passwordPolicyService;
+    private readonly IPasswordService? _passwordService;
     private readonly IUserDetailService? _userDetailService;
     private readonly ITokenService? _tokenService;
     private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
@@ -30,13 +30,13 @@ public class RegistrationService : ApplicationService, IRegistrationService
         ICaptchaService? captchaService = null,
         ITwoFactorService? twoFactorService = null,
         IAuthTokenService? authTokenService = null,
-        IPasswordPolicyService? passwordPolicyService = null,
         IUserDetailService? userDetailService = null,
         ITokenService? tokenService = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         ILoginSessionCoordinator? loginSessionCoordinator = null,
-        ILoginGuardEvaluator? loginGuardEvaluator = null)
+        ILoginGuardEvaluator? loginGuardEvaluator = null,
+        IPasswordService? passwordService = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -45,7 +45,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
         _captchaService = captchaService;
         _twoFactorService = twoFactorService;
         _authTokenService = authTokenService;
-        _passwordPolicyService = passwordPolicyService;
+        _passwordService = passwordService;
         _userDetailService = userDetailService;
         _tokenService = tokenService;
         _loginSessionCoordinator = loginSessionCoordinator;
@@ -59,6 +59,13 @@ public class RegistrationService : ApplicationService, IRegistrationService
         var registrationOptions = IdentityOptions.Registration;
         var captchaOptions = IdentityOptions.Captcha;
         var jwtOptions = IdentityOptions.Jwt;
+
+        // ★★★ 端点自己的门，第一句就判。前端按 /auth/config 隐藏注册入口只是体验，
+        // 而这个端点匿名可达 —— 不在这里挡住，「关掉注册」就只是把按钮藏起来。
+        if (!registrationOptions.EnableSelfRegistration)
+        {
+            return Fail<TokenResult>("Self-registration is not enabled", 400);
+        }
 
         // 验证码校验（如果启用）
         if (captchaOptions.EnableCaptchaOnRegister)
@@ -144,15 +151,28 @@ public class RegistrationService : ApplicationService, IRegistrationService
             }
         }
 
-        // 注册后自动登录：建立登录会话（首登录无既有会话，策略平凡通过）
+        // 注册后自动登录：建立登录会话（首登录无既有会话，策略平凡通过）。
+        // ★★ 失败必须当场返回，不能当作「那就不带会话吧」继续。没有会话就没有
+        //    session_id claim，而每请求的会话强制校验是按这个 claim 触发的 ——
+        //    于是这条路签出来的令牌不受任何会话约束：踢不掉、「登出全部设备」对它无效、
+        //    多设备策略也管不着它，而且外观与一次正常注册完全相同。
+        //    AuthService 的四个签发出口在这一步失败时一律 return Fail，这里跟它们一致。
+        //    协调器没注册（纯单元测试 / 精简部署）是另一回事：那时全局没有会话机制，
+        //    退回无 session_id 的旧行为是一致的；这里区分的是「有机制但这一次没建起来」。
         var sessionId = Guid.Empty;
         if (_loginSessionCoordinator != null)
         {
             var sessionResult = await _loginSessionCoordinator.EstablishAsync(user.Id);
-            if (sessionResult.Succeeded)
+            if (!sessionResult.Succeeded)
             {
-                sessionId = sessionResult.Data;
+                return Fail<TokenResult>(
+                    sessionResult.Message ?? "Login rejected",
+                    sessionResult.Code ?? 403,
+                    sessionResult.ErrorCode,
+                    sessionResult.ErrorDetails);
             }
+
+            sessionId = sessionResult.Data;
         }
 
         var roles = await GetRolesWithTenantContextAsync(user);
@@ -442,60 +462,56 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
     public async Task<Result<string>> SetPasswordAsync(SetPasswordDto input)
     {
+        Check.NotNull(input);
+
         var user = await _userManager.FindByGuidAsync(input.UserId);
         if (user == null)
         {
             return Fail<string>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // 验证令牌
-        if (_authTokenService != null)
+        // ★★ 令牌校验不再是「有服务才做」。这个端点匿名可达，而校验是它**唯一**的身份证明：
+        //    服务缺席时放行等于任何人拿一个 userId 就能给别人设密码。
+        //    此前有密码的账号还有 ResetPasswordAsync 里那道 Identity 令牌校验兜着，
+        //    而没有密码的账号（正是这个端点的主要对象）走 AddPasswordAsync，一道门都没有。
+        if (_authTokenService == null)
         {
-            var tokenEntry = await _authTokenService.FindTokenByValueAsync(IdentityConstants.TokenProvider.Identity, IdentityConstants.TokenName.SetPassword, input.Token);
-            if (tokenEntry == null || tokenEntry.UserId != input.UserId)
-            {
-                return Fail<string>("Invalid or expired token", 400);
-            }
-
-            if (tokenEntry.ExpiresAt.HasValue && tokenEntry.ExpiresAt.Value < DateTime.UtcNow)
-            {
-                return Fail<string>("Token has expired", 400);
-            }
-
-            // 标记令牌已使用
-            await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
+            return Fail<string>("Token service is not available", 500);
         }
 
-        // 验证密码强度
-        if (_passwordPolicyService != null)
+        var tokenEntry = await _authTokenService.FindTokenByValueAsync(IdentityConstants.TokenProvider.Identity, IdentityConstants.TokenName.SetPassword, input.Token);
+        if (tokenEntry == null || tokenEntry.UserId != input.UserId)
         {
-            var strengthError = _passwordPolicyService.ValidatePasswordStrength(input.Password);
-            if (strengthError != null)
-            {
-                return Fail<string>(strengthError, 400);
-            }
+            return Fail<string>("Invalid or expired token", 400);
         }
 
-        // 检查用户是否已有密码
+        if (tokenEntry.ExpiresAt.HasValue && tokenEntry.ExpiresAt.Value < DateTime.UtcNow)
+        {
+            return Fail<string>("Token has expired", 400);
+        }
+
+        if (_passwordService == null)
+        {
+            return Fail<string>("Password service is not available", 500);
+        }
+
+        // 此前没有密码 = 快速注册的账号在设第一个密码。没有旧凭据要作废，
+        // 而唯一在线的会话正是本人刚凭验证码换来的那一条，撤掉它等于设完密码当场被登出。
         var hasPassword = await _userManager.HasPasswordAsync(user);
 
-        IdentityResult result;
-        if (hasPassword)
+        // ★★★ 走共享出口。此前这里是第六条改密路径，手写了「校验强度 + 写密码」，
+        //   漏掉密码历史查重、历史写入与会话撤销 —— 与 09-01 修掉的第七条
+        //   （ResetPasswordByCodeAsync）逐字同形：设回上一个密码会被接受，
+        //   而账号失陷后按提示改了密码，攻击者手里的令牌原样有效。
+        var set = await _passwordService.ForceSetPasswordAsync(user, input.Password, revokeExistingSessions: hasPassword);
+        if (!set.Succeeded)
         {
-            // 用户已有密码，使用重置密码流程
-            result = await _userManager.ResetPasswordAsync(user, input.Token, input.Password);
-        }
-        else
-        {
-            // 用户没有密码（快速注册用户），使用添加密码
-            result = await _userManager.AddPasswordAsync(user, input.Password);
+            return Fail<string>(set.Message ?? "Failed to set password", set.Code ?? 400, set.ErrorCode);
         }
 
-        if (!result.Succeeded)
-        {
-            return Fail<string>(
-                result.FormatErrors(), 400);
-        }
+        // ★ 令牌在密码真的设上之后才消费。此前是先烧后设，于是一个不合强度要求的密码
+        //   会把令牌一起赔掉，用户拿不回第二次机会。
+        await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
 
         // 密码设置成功，发布事件
         if (_eventBus != null)
@@ -593,6 +609,10 @@ public class RegistrationService : ApplicationService, IRegistrationService
         return Result.Success();
     }
 
+    /// <summary>邮箱确认重发的统一回答：账号存不存在、有没有邮箱、确认没确认，一律同一句。</summary>
+    private const string ConfirmationResentMessage =
+        "If the account exists and needs confirmation, an email has been sent.";
+
     /// <inheritdoc />
     public async Task<Result<string>> ResendEmailConfirmationAsync(ResendEmailConfirmationDto input)
     {
@@ -608,19 +628,27 @@ public class RegistrationService : ApplicationService, IRegistrationService
             user = await _userManager.FindByEmailAsync(input.Email);
         }
 
+        // ★★★ 三种结果一律同一句话。这是一个匿名端点，此前它会分别回答
+        // 「查无此人」(404) /「已确认」(400) /「已发送」(200) —— 于是任何人都能拿它
+        // 枚举出哪些邮箱注册过、并且顺带读出每一个的确认状态。
+        // 同模块的 PasswordService.ForgotPasswordAsync 早就是统一回答，只有这一条漏了。
+        // 真实分支记服务端日志，运维照样查得到。
         if (user == null)
         {
-            return Fail<string>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+            LogInformation("Email confirmation resend requested for an unknown account; answering uniformly.");
+            return Result<string>.Success(ConfirmationResentMessage);
         }
 
         if (string.IsNullOrWhiteSpace(user.Email))
         {
-            return Fail<string>("User has no email address", 400, ErrorCodes.IDENTITY_EMAIL_NOT_SET);
+            LogInformation("Email confirmation resend skipped for user {UserId}: no email address.", user.Id);
+            return Result<string>.Success(ConfirmationResentMessage);
         }
 
         if (user.EmailConfirmed)
         {
-            return Fail<string>("Email is already confirmed", 400, ErrorCodes.IDENTITY_EMAIL_ALREADY_CONFIRMED);
+            LogInformation("Email confirmation resend skipped for user {UserId}: already confirmed.", user.Id);
+            return Result<string>.Success(ConfirmationResentMessage);
         }
 
         // 发布邮箱确认邮件重发事件（触发发送确认邮件，其中包含确认链接）
@@ -635,7 +663,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
             }, cancellationToken: default);
         }
 
-        return Result<string>.Success("Email confirmation sent");
+        return Result<string>.Success(ConfirmationResentMessage);
     }
 
     #region Private Methods

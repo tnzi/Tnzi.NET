@@ -30,8 +30,13 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
 
     public async Task<Result> RetryAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
+        // ★★ 必须带跟踪加载。此前走的是默认的 AsNoTracking：下面改的是**子实体**
+        // （每个 Recipient 的 Status / FailureReason），而 UpdateAsync 只把根实体
+        // 置为 Modified，整个图是 Attach 进来的 Unchanged —— 收件人那些改动一个都不落库。
+        // 症状是「重试报告成功，而库里那些人仍然是 Failed」，随后 SendAsync 照样会挑到
+        // 它们（它认 Pending/Failed），所以看起来还工作，只是 RetryCount 与状态机对不上。
         var notification = await _notificationRepository
-            .AsQueryable()
+            .AsQueryable(withTracking: true)
             .Include(n => n.Recipients)
             .Include(n => n.Attachments)
             .FirstOrDefaultAsync(n => n.Id == messageId, cancellationToken);
@@ -93,6 +98,21 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
         return Ok("Notification retry initiated");
     }
 
+    /// <summary>
+    /// 批量重试失败的消息。<b>一次最多接手 <see cref="DispatchOptions.RecoveryBatchSize"/> 条</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★★ <b>闸门不是性能优化。</b>每条 <see cref="RetryAsync"/> 各发一次带 Include 的查询、
+    /// 各入一次队；不设上限时一次点击就能把整张历史失败表灌进发送管线 —— 而这是本模块
+    /// 唯一一个「一次操作触发无上界发送量」的入口。恢复扫描早就有这道闸门
+    /// （<c>RecoveryBatchSize</c>），这条一直没有，两者面对的是同一件事（一批要重发的消息），
+    /// 所以共用同一个上限而不是新开一个配置项。
+    /// <para>
+    /// ★ 上限与<b>实际总数</b>一起报回去，并按最早创建的先处理：截断如果不说出来，
+    /// 管理员会以为剩下的已经处理完了，而只有「再点一次」才能推进 —— 无声的截断
+    /// 与「全部处理完了」在界面上长得一模一样。
+    /// </para>
+    /// </remarks>
     public async Task<Result> RetryFailedAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
     {
         var query = _notificationRepository
@@ -105,12 +125,17 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
         if (endDate.HasValue)
             query = query.Where(n => n.CreationTime <= endDate.Value);
 
+        var totalCount = await query.CountAsync(cancellationToken);
+        if (totalCount == 0)
+            return Ok("No failed notifications to retry");
+
+        var batchSize = Math.Max(1, Options.Dispatch.RecoveryBatchSize);
+
         var failedIds = await query
+            .OrderBy(n => n.CreationTime)
+            .Take(batchSize)
             .Select(n => n.Id)
             .ToListAsync(cancellationToken);
-
-        if (failedIds.Count == 0)
-            return Ok("No failed notifications to retry");
 
         var successCount = 0;
         var errorCount = 0;
@@ -124,7 +149,12 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
                 errorCount++;
         }
 
-        return Ok($"Retry batch completed: {successCount} initiated, {errorCount} failed");
+        var remaining = totalCount - failedIds.Count;
+        var message = $"Retry batch completed: {successCount} initiated, {errorCount} failed";
+        if (remaining > 0)
+            message += $". {remaining} more failed notification(s) were left for a following run (batch limit {batchSize}).";
+
+        return Ok(message);
     }
 
     private int CalculateRetryDelay(int retryCount)

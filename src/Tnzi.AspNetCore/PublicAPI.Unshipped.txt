@@ -132,3 +132,29 @@ virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpd
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.Update(TKey id, TUpdateDto input, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Models.ApiResult<TDto>!>!
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.UpdatePermission.get -> string!
 virtual Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.ViewPermission.get -> string!
+Tnzi.AspNetCore.Http.ForwardedHeadersOptionsBuilder
+Tnzi.AspNetCore.Options.AspNetCoreOptions.TrustedProxies.get -> Tnzi.AspNetCore.Options.TrustedProxyOptions!
+Tnzi.AspNetCore.Options.AspNetCoreOptions.TrustedProxies.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions
+Tnzi.AspNetCore.Options.TrustedProxyOptions.ForwardLimit.get -> int?
+Tnzi.AspNetCore.Options.TrustedProxyOptions.ForwardLimit.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions.ForwardedForHeaderName.get -> string?
+Tnzi.AspNetCore.Options.TrustedProxyOptions.ForwardedForHeaderName.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions.KnownNetworks.get -> string![]?
+Tnzi.AspNetCore.Options.TrustedProxyOptions.KnownNetworks.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions.KnownProxies.get -> string![]?
+Tnzi.AspNetCore.Options.TrustedProxyOptions.KnownProxies.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions.TrustAllProxies.get -> bool
+Tnzi.AspNetCore.Options.TrustedProxyOptions.TrustAllProxies.set -> void
+Tnzi.AspNetCore.Options.TrustedProxyOptions.TrustedProxyOptions() -> void
+static Tnzi.AspNetCore.Http.ForwardedHeadersOptionsBuilder.Build(Tnzi.AspNetCore.Options.AspNetCoreOptions! options) -> Microsoft.AspNetCore.Builder.ForwardedHeadersOptions!
+static Tnzi.AspNetCore.Http.ForwardedHeadersOptionsBuilder.ParseNetwork(string! cidr) -> System.Net.IPNetwork
+Tnzi.AspNetCore.Http.HostHttpCrypto.IsResponseEncryptionNegotiated.get -> bool
+Tnzi.AspNetCore.Http.IHostHttpCrypto.IsResponseEncryptionNegotiated.get -> bool
+*REMOVED*Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware.SPANotFoundMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware.SPANotFoundMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options, Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.SPANotFoundMiddleware!>! logger) -> void
+override Tnzi.AspNetCore.Options.AspNetCoreOptionsValidator.CollectWarnings(Tnzi.AspNetCore.Options.AspNetCoreOptions! options, System.Collections.Generic.List<string!>! warnings) -> void
+*REMOVED*Tnzi.AspNetCore.Versioning.ApiVersionMiddleware.ApiVersionMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options) -> void
+Tnzi.AspNetCore.Versioning.ApiVersionMiddleware.ApiVersionMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Versioning.ApiVersionMiddleware!>! logger) -> void
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.SupportedVersions.get -> string![]?
+Tnzi.AspNetCore.Versioning.ApiVersionOptions.SupportedVersions.set -> void

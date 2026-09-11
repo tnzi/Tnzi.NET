@@ -13,6 +13,10 @@ function mockClient() {
     post: vi.fn(async () => ({ success: true, code: 200, data: null })),
     put: vi.fn(async () => ({ success: true, code: 200, data: null })),
     delete: vi.fn(async () => ({ success: true, code: 200, data: undefined })),
+    resolveUrl: vi.fn((url: string, params?: Record<string, unknown>) => {
+      const query = params ? `?${new URLSearchParams(params as Record<string, string>)}` : ''
+      return `https://api.example/api${url}${query}`
+    }),
   }
 }
 
@@ -72,6 +76,25 @@ describe('useSigningRecipientApi', () => {
     const c = mockClient()
     await useSigningRecipientApi(c as never).decline('tok-abc')
     expect(c.post).toHaveBeenCalledWith('/signing/tok-abc/decline', { reason: null })
+  })
+
+  /**
+   * The recipient is anonymous, so `/files/{id}/download` would 404 for them.
+   * The document URL therefore lives under the signing route, where the token
+   * is verified and turned into a request-scoped read grant.
+   */
+  it('builds the document URL under the signing route, addressed by the token', () => {
+    const c = mockClient()
+    const url = useSigningRecipientApi(c as never).getDocumentUrl('a/b+c')
+    expect(c.resolveUrl).toHaveBeenCalledWith('/signing/a%2Fb%2Bc/document', undefined)
+    expect(url).toBe('https://api.example/api/signing/a%2Fb%2Bc/document')
+  })
+
+  it('adds download=true only when asked, so the default stays inline', () => {
+    const c = mockClient()
+    const url = useSigningRecipientApi(c as never).getDocumentUrl('tok-abc', { download: true })
+    expect(c.resolveUrl).toHaveBeenCalledWith('/signing/tok-abc/document', { download: true })
+    expect(url).toBe('https://api.example/api/signing/tok-abc/document?download=true')
   })
 })
 

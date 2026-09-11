@@ -35,9 +35,8 @@ public static class DapperExtensions
         // 如果 DI 容器中没有，则创建新实例（向后兼容）
         var configuration = serviceProvider.GetService<IConfiguration>();
         var databaseProvider = Providers.DapperDatabaseProviderFactory.CreateFromDbContext(dbContext, configuration);
-        var logger = serviceProvider.GetRequiredService<ILogger<DapperService>>();
         
-        return new DapperService(dbContext, databaseProvider, logger);
+        return new DapperService(dbContext, databaseProvider);
     }
 
     /// <summary>

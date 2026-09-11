@@ -7,12 +7,80 @@ public class RoleService : ApplicationService, IRoleService
 {
     private readonly RoleManager<Role> _roleManager;
     private readonly DbContext _dbContext;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
-    public RoleService(RoleManager<Role> roleManager, DbContext dbContext, IServiceProvider serviceProvider)
+    /// <summary>
+    /// 初始化一个 <see cref="RoleService"/> 类型的新实例。
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="functionAuthorization"/> 是可选的：契约住在核心
+    /// （<c>Tnzi.Security.Authorization</c>），实现随 <c>Tnzi.Authorization</c> 走 ——
+    /// 与 <c>UserService</c> 持有它的方式逐字相同，不引入 Identity → Authorization 的反向引用。
+    /// 未加载授权模块时护栏整体跳过：那时系统里根本没有权限与超管的概念。
+    /// </remarks>
+    public RoleService(
+        RoleManager<Role> roleManager,
+        DbContext dbContext,
+        IServiceProvider serviceProvider,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
         _roleManager = Check.NotNull(roleManager);
         _dbContext = Check.NotNull(dbContext);
+        _functionAuthorization = functionAuthorization;
+    }
+
+    /// <summary>
+    /// 目标角色名是否落在 <c>Authorization:SuperAdminRoles</c> 上。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ <strong>这道检查补的是一个顺序漏洞。</strong>成员变更那条路径早有委托护栏
+    /// （<c>CanManageRoleAsync</c>：只能操作「权限集被自己包含」且非超管配置的角色），
+    /// 但它读的是角色<b>当时的名字</b>。于是把顺序倒过来就能绕开：
+    /// <list type="number">
+    /// <item>建一个零权限的普通角色 —— 空集被任何人包含，护栏平凡通过；</item>
+    /// <item>把自己加进去 —— 同上，通过；</item>
+    /// <item>把它<b>改名</b>成配置里的超管角色名 —— 改名此前没有任何守卫。</item>
+    /// </list>
+    /// 第三步之后 <c>IsSuperAdminAsync</c>（按角色名匹配、无缓存）立刻为真，
+    /// 于是一个只有 <c>role.update</c> 的人拿到了全系统旁路。
+    /// <para>
+    /// ★ 唯一让这条路径此前没被走通的，是<b>数据库的角色名唯一约束</b>：
+    /// 出厂配置会播种出那个角色，于是改名撞重名而失败。但那是一次巧合的兜底 ——
+    /// 把 <c>SeedBuiltInAdminRoles</c> 关掉、或者配一个应用自己不会创建的名字，
+    /// 兜底就没了。安全边界不该押在一个恰好存在的唯一索引上。
+    /// </para>
+    /// </remarks>
+    private bool IsProtectedRoleName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || _functionAuthorization == null)
+        {
+            return false;
+        }
+
+        return _functionAuthorization.GetSuperAdminRoleNames()
+            .Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 角色定义写路径的委托护栏：非超管调用者只能改 / 删自己支配得了的角色。
+    /// </summary>
+    /// <remarks>
+    /// 与 <c>UserService.GetRoleMembershipViolationAsync</c> 同一判据、同一降级方式
+    /// （无授权模块或无用户上下文时整体跳过）。此前只有成员变更受管辖，
+    /// 而「改掉一个角色的定义」与「把人放进这个角色」是同一量级的权力。
+    /// </remarks>
+    private async Task<string?> GetRoleManagementViolationAsync(Guid roleId, string roleName)
+    {
+        if (_functionAuthorization == null) return null;
+
+        var actorId = CurrentUser?.Id;
+        if (actorId == null || actorId == Guid.Empty) return null;
+        if (await _functionAuthorization.IsSuperAdminAsync(actorId.Value)) return null;
+
+        return await _functionAuthorization.CanManageRoleAsync(actorId.Value, roleId)
+            ? null
+            : $"You cannot manage role '{roleName}': its permission set is not contained in yours, or it is a super-admin role.";
     }
 
     public async Task<Result<IEnumerable<RoleDto>>> GetAllAsync()
@@ -67,9 +135,10 @@ public class RoleService : ApplicationService, IRoleService
 
         var detail = role.MapTo<RoleDetailDto>();
 
-        // 查询角色下的用户数量
-        detail.UserCount = await _dbContext.Set<UserRole>()
-            .CountAsync(ur => ur.RoleId == id);
+        // 查询角色下的用户数量（同 GetUserCountAsync：经 User 表数，排除软删的幽灵行）
+        detail.UserCount = await _dbContext.Set<User>()
+            .CountAsync(u => !u.IsDeleted
+                && _dbContext.Set<UserRole>().Any(ur => ur.RoleId == id && ur.UserId == u.Id));
 
         return Ok(detail);
     }
@@ -98,6 +167,16 @@ public class RoleService : ApplicationService, IRoleService
 
     public async Task<Result<RoleDto>> CreateAsync(CreateRoleDto input)
     {
+        // ★ 不允许凭空造出一个「超管角色名」。它此前只被数据库的重名约束挡着，
+        //   而那道约束只在该角色恰好已被播种时才存在（见 IsProtectedRoleName）。
+        if (IsProtectedRoleName(input.Name))
+        {
+            return Fail<RoleDto>(
+                $"Role name '{input.Name}' is reserved for super administrators and cannot be created here.",
+                403,
+                ErrorCodes.FORBIDDEN);
+        }
+
         // 检查重名
         if (await _roleManager.RoleExistsAsync(input.Name))
         {
@@ -145,6 +224,23 @@ public class RoleService : ApplicationService, IRoleService
         if (role.IsSystem && !string.Equals(role.Name, input.Name, StringComparison.OrdinalIgnoreCase))
         {
             return Fail<RoleDto>("System role cannot be renamed", 403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+        }
+
+        // ★★★ 改名不得把一个普通角色变成超管角色。这是「先入组、再改名」那条提权路径的封堵点，
+        //     判据与角色当前是否存在无关（见 IsProtectedRoleName 的注释）。
+        if (!IsProtectedRoleName(role.Name) && IsProtectedRoleName(input.Name))
+        {
+            return Fail<RoleDto>(
+                $"Role name '{input.Name}' is reserved for super administrators; renaming into it is not allowed.",
+                403,
+                ErrorCodes.FORBIDDEN);
+        }
+
+        // ★ 与成员变更同受委托约束：能改一个角色的定义，和能往里放人是同一量级的权力。
+        var violation = await GetRoleManagementViolationAsync(role.Id, role.Name ?? input.Name);
+        if (violation != null)
+        {
+            return Fail<RoleDto>(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
         // Capture rename diagnostic - populated on the published event only
@@ -199,6 +295,14 @@ public class RoleService : ApplicationService, IRoleService
         if (role.IsSystem)
         {
             return Fail("System role cannot be deleted", 403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+        }
+
+        // ★ 删除同受委托约束：把一个自己支配不了的角色删掉，是变相的越权削权
+        //   （与 UserService.RemoveRolesAsync 上那条注释同源）。
+        var violation = await GetRoleManagementViolationAsync(role.Id, role.Name ?? string.Empty);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
         var roleName = role.Name ?? string.Empty;
@@ -313,8 +417,12 @@ public class RoleService : ApplicationService, IRoleService
             return Fail<int>("Role not found", 404, ErrorCodes.IDENTITY_ROLE_NOT_FOUND);
         }
 
-        var count = await _dbContext.Set<UserRole>()
-            .CountAsync(ur => ur.RoleId == roleId);
+        // ★ 必须回到 User 表数：UserRole 是纯关联表，没有软删标记，直接数它会把
+        //   已被软删的用户一起算进去（同一处的 GetUsersInRoleAsync 早就过滤了 !IsDeleted，
+        //   于是「列表 3 个人」配「计数 5 个人」）。这是既有缺陷，与邀请无关。
+        var count = await _dbContext.Set<User>()
+            .CountAsync(u => !u.IsDeleted
+                && _dbContext.Set<UserRole>().Any(ur => ur.RoleId == roleId && ur.UserId == u.Id));
 
         return Ok(count);
     }

@@ -17,6 +17,7 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.Property(p => p.DiscountAmount).HasMoneyPrecision();
         builder.Property(p => p.TaxAmount).HasMoneyPrecision();
         builder.Property(p => p.PayableAmount).HasMoneyPrecision();
+        builder.Property(p => p.ReservedRefundAmount).HasMoneyPrecision();
         builder.Property(p => p.CustomerName).HasMaxLength(256);
         builder.Property(p => p.CustomerEmail).HasMaxLength(256);
         // ChannelResponse和ExtraData存储JSON数据，不指定类型以保持数据库兼容性

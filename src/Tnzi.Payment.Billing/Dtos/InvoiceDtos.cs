@@ -1,4 +1,4 @@
-namespace Tnzi.Payment.Billing.Dtos;
+﻿namespace Tnzi.Payment.Billing.Dtos;
 
 /// <summary>
 /// 创建发票 DTO
@@ -343,4 +343,24 @@ public class SendEmailDto
     public string Subject { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
     public bool IsHtml { get; set; }
+}
+
+/// <summary>
+/// 发票产物的字节（PDF 或 HTML）。
+/// </summary>
+/// <remarks>
+/// 存在的理由是「取地址」与「取内容」是两件事：只有 Storage 给得出 HTTP 可达的地址，
+/// 而未加载 Storage 的宿主把产物写在本地磁盘上，任何地址都指不到它。
+/// 下载端点因此直接吐字节，两种落地方式下都能用。
+/// </remarks>
+public class InvoiceDocumentDto
+{
+    /// <summary>文件内容</summary>
+    public byte[] Content { get; set; } = [];
+
+    /// <summary>内容类型（<c>application/pdf</c> 或 <c>text/html</c>）</summary>
+    public string ContentType { get; set; } = "application/pdf";
+
+    /// <summary>建议的下载文件名</summary>
+    public string FileName { get; set; } = string.Empty;
 }

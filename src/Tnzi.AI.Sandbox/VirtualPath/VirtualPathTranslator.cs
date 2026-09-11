@@ -22,10 +22,13 @@ public class VirtualPathTranslator : IVirtualPathTranslator
 
         var relativePart = virtualPath[VirtualPrefix.Length..];
         var threadDir = GetThreadDirectory(threadId);
-        var physicalPath = Path.GetFullPath(Path.Combine(threadDir, relativePart));
 
-        // Resolved path must be within thread directory (case-insensitive on Windows)
-        var normalizedThreadDir = Path.GetFullPath(threadDir);
+        // ★ 必须解析符号链接后再判定：Path.GetFullPath 只做字面规范化，
+        // 于是 agent 在线程目录里放一个 `ln -s /etc x` 之后，/mnt/workspace/x/passwd
+        // 字面上完全待在界内，实际却落到宿主的 /etc 上。
+        var physicalPath = RealPathResolver.Resolve(Path.Combine(threadDir, relativePart));
+        var normalizedThreadDir = RealPathResolver.Resolve(threadDir);
+
         if (!physicalPath.StartsWith(normalizedThreadDir + Path.DirectorySeparatorChar, PathComparison)
             && !string.Equals(physicalPath, normalizedThreadDir, PathComparison))
         {
@@ -39,8 +42,8 @@ public class VirtualPathTranslator : IVirtualPathTranslator
     {
         Check.NotNullOrWhiteSpace(physicalPath);
 
-        var threadDir = Path.GetFullPath(GetThreadDirectory(threadId));
-        var normalizedPhysical = Path.GetFullPath(physicalPath);
+        var threadDir = RealPathResolver.Resolve(GetThreadDirectory(threadId));
+        var normalizedPhysical = RealPathResolver.Resolve(physicalPath);
 
         if (!normalizedPhysical.StartsWith(threadDir + Path.DirectorySeparatorChar, PathComparison)
             && !string.Equals(normalizedPhysical, threadDir, PathComparison))

@@ -107,11 +107,17 @@ export function useAdminAuditApi(client: HttpClient) {
         params: { topN, startDate, endDate },
       }),
 
-    /** Export audit operations as CSV (Blob download; backend emits UTF-8 BOM) */
+    /**
+     * Export audit operations as CSV (Blob download; backend emits UTF-8 BOM).
+     * Refused with 400 `AUDIT_EXPORT_TOO_LARGE` when the filter matches more
+     * rows than `Audit:ExportMaxRows` (default 10000) - the message says how
+     * many matched and asks to narrow the filter. Exports are never silently
+     * truncated, so a file you do receive is the whole result.
+     */
     exportCsv: (query: AuditOperationQueryDto) =>
       client.download(`${ADMIN_BASE}/export/csv`, { method: 'POST', body: query }),
 
-    /** Export audit operations as JSON (Blob download) */
+    /** Export audit operations as JSON (Blob download); same row limit as `exportCsv`. */
     exportJson: (query: AuditOperationQueryDto) =>
       client.download(`${ADMIN_BASE}/export/json`, { method: 'POST', body: query }),
   };

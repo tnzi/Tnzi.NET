@@ -31,6 +31,46 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         _cache = cache;
     }
 
+    /// <summary>
+    /// 验证失败计数的缓存键。<paramref name="scope"/> 是「针对谁」——
+    /// 有收件地址的方式用地址，TOTP 用用户 ID。
+    /// </summary>
+    /// <remarks>
+    /// ★ 三个 helper 存在的理由是「两条验证路径必须受同一道闸门管辖」。
+    /// 此前 TOTP 与 SMS/Email 各写各的（准确说 TOTP 一行都没写），
+    /// 而两者给出不同的爆破成本是不可接受的 —— 用户看到的是同一个「两步验证」。
+    /// </remarks>
+    private static string FailureCacheKey(string scope, TwoFactorType type, VerificationCodePurpose purpose)
+        => $"2FA_Verify_Fail_Count:{scope}:{(int)type}:{(int)purpose}";
+
+    /// <summary>是否已达失败上限。无缓存时恒为 false（见下方注释）。</summary>
+    private async Task<bool> IsFailureLockedOutAsync(string cacheKey)
+    {
+        // ⚠ 无 ICache 时不设限。ICache 由核心 CachingModule 无条件注册，所以这一支
+        // 实际不发生；但要注意默认实现是**进程内**内存缓存 —— 多实例部署未加载 Redis 时，
+        // 上限是「每实例 5 次」而不是「全局 5 次」。这一条写进 docs/modules/identity.md。
+        if (_cache == null) return false;
+        return await _cache.GetCounterAsync(cacheKey) >= MaxTwoFactorFailureAttempts;
+    }
+
+    /// <summary>记一次验证失败。</summary>
+    private async Task RecordFailureAsync(string cacheKey)
+    {
+        if (_cache == null) return;
+        await _cache.IncrementAsync(cacheKey, 1, TwoFactorFailureCacheExpiration);
+    }
+
+    /// <summary>验证成功，清掉失败记录。</summary>
+    private async Task ClearFailuresAsync(string cacheKey)
+    {
+        if (_cache == null) return;
+        await _cache.RemoveAsync(cacheKey);
+    }
+
+    /// <summary>达到失败上限时的统一回答（429，与发码节流同码）。</summary>
+    private Result TooManyAttempts()
+        => Fail("Too many failed attempts. Please try again later.", 429, ErrorCodes.VALIDATION_ERROR);
+
     public async Task<Result> SendSmsCodeAsync(Guid userId, string phoneNumber, VerificationCodePurpose purpose)
     {
         // 验证用户存在
@@ -70,9 +110,28 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         // purpose 对它无从约束，这是 TOTP 的固有性质。需要按用途隔离的场景请用 SMS/Email。
         if (type == TwoFactorType.Totp)
         {
+            // ★★★ 失败计数必须在这一支里自己做。此前这里直接 return，把下面
+            // VerifyCodeByAddressAndMarkUsedAsync 的那道 5 次/15 分钟的闸门整个跳过了 ——
+            // 而 TOTP 恰恰是唯一一种**没有发码动作**、因而也没有任何别的节流的方式：
+            // 一枚 10 分钟的 2FA 临时令牌配上无限次尝试，六位数字的搜索空间是够得着的
+            // （运行时按 ±2 个时间步验证，任一时刻有 5 枚码同时有效）。
+            // 键按 userId 而不是 address：TOTP 不绑任何联系地址。
+            var totpFailureKey = FailureCacheKey(userId.ToString("N"), type, purpose);
+            if (await IsFailureLockedOutAsync(totpFailureKey))
+            {
+                return TooManyAttempts();
+            }
+
             var isValid = await _userManager.VerifyTwoFactorTokenAsync(
                 user, _userManager.Options.Tokens.AuthenticatorTokenProvider, code);
-            return isValid ? Ok() : Fail("Invalid TOTP code", 400, ErrorCodes.VALIDATION_ERROR);
+            if (!isValid)
+            {
+                await RecordFailureAsync(totpFailureKey);
+                return Fail("Invalid TOTP code", 400, ErrorCodes.VALIDATION_ERROR);
+            }
+
+            await ClearFailuresAsync(totpFailureKey);
+            return Ok();
         }
 
         // SMS/Email 验证：查数据库

@@ -93,6 +93,27 @@ public static class SubscriptionScheduledScans
             => SubscriptionService.ExpireOverdueSubscriptionsAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 结算已到生效日期的待生效计划变更。
+    /// </summary>
+    /// <remarks>
+    /// 覆盖的是**不走续费路径**的订阅（关掉自动续费、暂停中、逾期欠费）。
+    /// 走续费路径的那些由 <c>RenewExpiredSubscriptionsAsync</c> 在扣款**之前**逐条结算 ——
+    /// 降级必须先于按新价扣款生效，而这里的扫描之间没有任何顺序保证：
+    /// 把「先结算再扣款」交给扫描注册顺序，等于把一条资金正确性依赖挂在一行 DI 注册的位置上。
+    /// </remarks>
+    public sealed class ApplyDuePlanChanges : SubscriptionScanBase
+    {
+        public ApplyDuePlanChanges(ISubscriptionService subscriptionService) : base(subscriptionService) { }
+
+        /// <inheritdoc />
+        public override string Name => "apply due plan changes";
+
+        /// <inheritdoc />
+        public override Task<Result<int>> RunAsync(CancellationToken cancellationToken = default)
+            => SubscriptionService.ApplyDuePlanChangesAsync(cancellationToken);
+    }
+
     /// <summary>续费提醒：在扣款前 N 天通知用户，尤其是尚未绑卡的。</summary>
     public sealed class SendRenewalReminders : SubscriptionScanBase
     {

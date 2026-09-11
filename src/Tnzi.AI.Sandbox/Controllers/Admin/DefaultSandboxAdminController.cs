@@ -28,14 +28,28 @@ public class DefaultSandboxAdminController : ApiAdminControllerBase
     public virtual ApiResult<SandboxStatusDto> GetStatus()
     {
         var opts = _options.Value;
+
+        // ★ 按<b>当前生效的 provider</b> 投影，而不是恒读 Local。此前 Provider 字段答
+        // "docker"，下面三行命令/模式黑名单却始终来自 Local 配置 —— 于是管理端展示的
+        // 是一份根本没在执行的规则，看上去还完全正常。
+        var (deniedCommands, deniedPatterns) = _provider.Name switch
+        {
+            "docker" => (opts.Docker.DeniedCommands, opts.Docker.DeniedPatterns),
+            _ => (opts.Local.DeniedCommands, opts.Local.DeniedPatterns)
+        };
+
         var dto = new SandboxStatusDto
         {
             Enabled = opts.Enabled,
             Provider = _provider.Name,
             DataRoot = opts.DataRoot,
-            DeniedCommands = opts.Local.DeniedCommands.AsReadOnly(),
-            DeniedPatterns = opts.Local.DeniedPatterns.AsReadOnly(),
-            EnvironmentBlacklist = opts.Local.EnvironmentBlacklist.AsReadOnly()
+            DeniedCommands = deniedCommands.AsReadOnly(),
+            DeniedPatterns = deniedPatterns.AsReadOnly(),
+            // 环境变量黑名单只有本地 provider 有（容器里根本不继承宿主环境），
+            // 其它 provider 下如实返回空表，而不是端出一份不适用的清单。
+            EnvironmentBlacklist = _provider.Name == "local"
+                ? opts.Local.EnvironmentBlacklist.AsReadOnly()
+                : Array.Empty<string>()
         };
 
         return ApiResult<SandboxStatusDto>.Ok(dto);

@@ -79,16 +79,42 @@ export default [
     // whatever change happens to land next rather than for the one that grew
     // the shell. The growth is accounted for: the desktop vibrancy setter in
     // the theme store plus the theme drawer's system-override note.
-    limit: '200 kB',
+    //
+    // 200 -> 205 on 2026-09-02, measured at 202.26 kB. Attributed by building
+    // BOTH ways rather than by guessing: reverting that day's five changed
+    // source files to HEAD and rebuilding still measured 201.87 kB, i.e. the
+    // budget was ALREADY red and the breadcrumb / page-header work accounts for
+    // 390 B of it. The 1.87 kB of drift predates it and belongs to whatever
+    // landed since 2026-08-22 without re-measuring - the recurring failure this
+    // file keeps recording. (Both builds also carried unrelated uncommitted work
+    // sitting in the same tree, so the drift figure is an upper bound on what is
+    // actually on main.) Headroom is back to ~1.3%.
+    limit: '205 kB',
     gzip: true,
   },
   {
     // One of these, not both. They were static imports until 0.2.72+, which is
     // how ~107 kB gzip of dictionary ended up mandatory for every consumer
     // regardless of the language it rendered.
+    // 57 -> 68 kB (2026-08-31). Attributed, not guessed: 242 -> 247 kB of source
+    // across six ordinary feature commits since the last ratchet, then +28 kB in
+    // one - commit 310a6545, whose 210 added lines are 204 `*Desc` keys (the
+    // settings-centre field descriptions). Descriptions are whole sentences, so
+    // they cost ~5x a label per line.
+    //
+    // Headroom is deliberate. The note below this one says a limit sitting ~200 B
+    // under the line is a tripwire, not a budget: it fires for whichever change
+    // lands next rather than the one that filled it. ~4 kB absorbs several
+    // ordinary features' worth of copy (six of them came to ~1.5 kB gzip here)
+    // while still firing on another batch the size of that one.
+    //
+    // Worth knowing if this needs to come down: en's 204 descriptions duplicate
+    // the English the backend already sends as the fallback. They exist because
+    // zh-cn's type is derived from en's, so en has to be complete. Breaking that
+    // coupling would return ~10 kB gzip to English consumers.
     name: 'locale pack - en (fetched only when the active locale is en)',
     path: 'dist/locales/en.js',
-    limit: '57 kB',
+    limit: '68 kB',
     gzip: true,
   },
   {
@@ -98,9 +124,12 @@ export default [
     // whichever change happens to land next, not for the one that filled it.
     // A dictionary grows with the product; the number to watch is the step,
     // and a step this size is one setting's worth of copy.
+    // 67 -> 81 kB (2026-08-31), same cause as en above: the 204 settings-centre
+    // descriptions (+26 kB of source in commit 310a6545). zh-cn carries more
+    // bytes per entry than en because CJK is 3 bytes per character in UTF-8.
     name: 'locale pack - zh-cn (fetched only when the active locale is zh-cn)',
     path: 'dist/locales/zh-cn.js',
-    limit: '67 kB',
+    limit: '81 kB',
     gzip: true,
   },
   {
@@ -197,7 +226,12 @@ export default [
     // esbuild inlines dynamic imports with splitting off - so genuinely-new
     // code always shows up here even when no user downloads it up front. That
     // is the point of keeping it: it is the only budget nothing can hide from.
-    limit: '610 kB',
+    // 610 -> 635 kB (2026-08-31). Both locale packs are counted here, so this
+    // moved for the same reason they did; the rest is the published icon
+    // manifest (`@tnzi/*/icons`, 3.19 kB gzip), which no consumer downloads
+    // unless it opts into bundling icons - but this budget counts `import()`
+    // too, which is exactly what it is for.
+    limit: '635 kB',
     gzip: true,
   },
 ]

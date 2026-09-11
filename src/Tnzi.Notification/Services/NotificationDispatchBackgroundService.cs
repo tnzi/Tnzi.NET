@@ -7,10 +7,14 @@ namespace Tnzi.Notification.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>它补的是哪个洞。</b>收件人状态本来就逐行持久化，所以进程在群发中途退出并<b>不丢数据</b> ——
-/// 但也没有任何东西会把它接着发完：消息停在 <see cref="NotificationStatus.Sending"/>，剩下的收件人
-/// 停在 <see cref="NotificationStatus.Pending"/>，除非有人手工去点重试。对一次一千人的群发来说，
-/// 这等于"发了一半，而且没人知道发到哪了"。
+/// <b>它补的是哪个洞。</b>进程在群发中途退出时没有任何东西会把它接着发完：消息停在
+/// <see cref="NotificationStatus.Sending"/>，剩下的收件人停在 <see cref="NotificationStatus.Pending"/>，
+/// 除非有人手工去点重试。对一次一千人的群发来说，这等于"发了一半，而且没人知道发到哪了"。
+/// </para>
+/// <para>
+/// ★★ <b>「已经发到哪了」由 <c>SendAsync</c> 循环内的分片落库保证</b>（见 <c>SendProgress</c>）。
+/// 这一点曾经只是一句注释：整批收件人状态由循环结束后<b>一次</b> <c>SaveChangesAsync</c> 落库，
+/// 于是崩溃时库里所有人都还是 <c>Pending</c>，续发把整份名单重发一遍。现在最多重发最后一片。
 /// </para>
 /// <para>
 /// <b>幂等靠既有发送路径本身。</b>续发调的就是 <see cref="INotificationService.SendAsync"/>，它只挑
@@ -20,7 +24,8 @@ namespace Tnzi.Notification.Services;
 /// <para>
 /// <b>只接手真正卡住的。</b>正在正常发送中的消息同样处于 <c>Sending</c>，所以判据是
 /// <c>LastModificationTime</c> 超过 <see cref="DispatchOptions.StuckAfterMinutes"/> 仍未推进，
-/// 而不是"看见 Sending 就抢"。
+/// 而不是"看见 Sending 就抢"。★ 这个判据只有在<b>正在飞的批次会推进那个时间戳</b>时才成立 ——
+/// 心跳由 <c>SendProgress</c> 在收件人循环内落库时顺带完成。
 /// </para>
 /// <para>
 /// ★★ <b>第二遍扫描：到期却没人发的定时消息。</b><see cref="INotificationService.CreateAndSendAsync"/>
@@ -31,6 +36,11 @@ namespace Tnzi.Notification.Services;
 /// 这比"消息不见了"更容易被当真。
 /// </para>
 /// <para>
+/// ★★ <b>第三遍扫描：静默时段已经结束的收件人。</b>用户设的免打扰表达的是<b>时机</b>，
+/// 所以落在那个窗口里的收件人被<b>延后</b>（<c>Recipient.DeferredUntil</c>）而不是丢弃。
+/// 这一遍把到期的那些接着发完 —— 没有它，「延后」在收件人看来与「到点丢掉」一模一样。
+/// </para>
+/// <para>
 /// <b>两道防重发</b>：① 交给 <c>SendAsync</c> 之前先做一次条件更新
 /// （<c>Scheduled → Sending</c>，影响行数必须为 1），于是两个实例同时扫到也只有一个发得出去；
 /// ★★ 这一道**同时**挡住本进程那个定时器 —— 前提是 <c>SendAsync</c> 在进入收件人循环之前
@@ -39,8 +49,9 @@ namespace Tnzi.Notification.Services;
 /// 库里那行会一直写着 <c>Scheduled</c>。② 宽限期（<see cref="DispatchOptions.StuckAfterMinutes"/>）
 /// 剩下的作用是别去抢刚刚到点、工作项还在队列里排着的消息 —— 它是节流不是正确性保证。
 /// <para>
-/// 卡住批次那一遍没有条件认领这层保护（状态本来就是 <c>Sending</c>，条件更新分不出谁在发），
-/// 那是既有形态，要根治得给消息加租约列。
+/// ★★ 卡住批次那一遍<b>也有</b>条件认领（<see cref="TryClaimStalledAsync"/>）：状态本来就是
+/// <c>Sending</c>，分不出谁在发，所以租约用的是 <c>LastModificationTime</c> 本身 ——
+/// 条件更新把它推到现在、条件里带着「它现在仍然早于 cutoff」。不加列，租约自动到期。
 /// </para>
 /// </para>
 /// <para>
@@ -127,31 +138,18 @@ public class NotificationDispatchBackgroundService : BackgroundService
         var cutoff = DateTime.UtcNow.AddMinutes(-Math.Max(1, dispatch.StuckAfterMinutes));
         var batchSize = Math.Max(1, dispatch.RecoveryBatchSize);
 
-        // 被中断的批次：停在 Sending 且超过阈值没有推进。
-        // 用 LastModificationTime，缺失时回退 CreationTime（消息创建后一次都没写过）。
-        var stuck = await repository.AsQueryable()
-            .Where(m => m.Status == NotificationStatus.Sending
-                        && (m.LastModificationTime ?? m.CreationTime) < cutoff)
-            .OrderBy(m => m.CreationTime)
-            .Take(batchSize)
-            .Select(m => m.Id)
-            .ToListAsync(cancellationToken);
-
-        if (stuck.Count > 0)
-        {
-            _logger.LogInformation(
-                "Resuming {Count} interrupted notification batch(es) that stalled before {Cutoff:u}.",
-                stuck.Count, cutoff);
-        }
+        var stuck = await ClaimStalledAsync(repository, cutoff, batchSize, cancellationToken);
 
         var due = await ClaimDueScheduledAsync(repository, cutoff, batchSize, cancellationToken);
 
-        if (stuck.Count == 0 && due.Count == 0)
+        var deferred = await ClaimDueDeferredAsync(repository, batchSize, cancellationToken);
+
+        if (stuck.Count == 0 && due.Count == 0 && deferred.Count == 0)
             return;
 
         var pacer = new SendPacer(dispatch.RatePerMinute);
 
-        foreach (var messageId in stuck.Concat(due))
+        foreach (var messageId in stuck.Concat(due).Concat(deferred))
         {
             if (cancellationToken.IsCancellationRequested) return;
 
@@ -177,6 +175,140 @@ public class NotificationDispatchBackgroundService : BackgroundService
                 _logger.LogError(ex, "Resuming notification {MessageId} threw.", messageId);
             }
         }
+    }
+
+    /// <summary>
+    /// 认领停在 <see cref="NotificationStatus.Sending"/> 却超过阈值没有推进的批次。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ <b>这一遍此前没有认领，只有 SELECT。</b>两个实例同一分钟扫到同一条卡住的批次
+    /// 会各调一次 <c>SendAsync</c>，而它们看到的收件人是同一批 —— 那是一次重复投递，
+    /// 也是本模块最贵的失败形态。定时消息那一遍靠「<c>Scheduled → Sending</c> 只能成功一次」
+    /// 挡住这件事，卡住批次这一遍没有对应的状态跃迁可用（状态本来就是 <c>Sending</c>）。
+    /// </para>
+    /// <para>
+    /// ★ <b>租约就用 <c>LastModificationTime</c> 本身</b>，不加列（加列 = 每个消费方一次迁移）。
+    /// 认领 = 一次条件更新：把时间戳推到现在，条件里带着「它现在仍然早于 cutoff」。
+    /// 谁先 UPDATE 谁拿到；后到的那次条件已不成立，影响 0 行，安静跳过。
+    /// 认领方随后若崩掉，时间戳停在认领那一刻，再过一个
+    /// <see cref="DispatchOptions.StuckAfterMinutes"/> 它会重新可认领 —— 租约自动到期，
+    /// 不需要额外的释放动作。
+    /// </para>
+    /// <para>
+    /// ★ 这道租约与 <c>SendAsync</c> 循环内的心跳（见 <c>SendProgress</c>）是一对：
+    /// 心跳保证<b>正在飞</b>的批次不会走到 cutoff 之前，租约保证<b>真的卡住</b>的批次
+    /// 只被一个扫描接手。少任何一半都还是重复投递。
+    /// </para>
+    /// </remarks>
+    internal async Task<List<Guid>> ClaimStalledAsync(
+        IRepository<Message, Guid> repository, DateTime cutoff, int batchSize, CancellationToken cancellationToken)
+    {
+        // 被中断的批次：停在 Sending 且超过阈值没有推进。
+        // 用 LastModificationTime，缺失时回退 CreationTime（消息创建后一次都没写过）。
+        var candidates = await repository.AsQueryable()
+            .Where(m => m.Status == NotificationStatus.Sending
+                        && (m.LastModificationTime ?? m.CreationTime) < cutoff)
+            .OrderBy(m => m.CreationTime)
+            .Take(batchSize)
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+            return [];
+
+        var claimed = new List<Guid>(candidates.Count);
+        foreach (var id in candidates)
+        {
+            if (await TryClaimStalledAsync(repository, id, cutoff, cancellationToken))
+                claimed.Add(id);
+        }
+
+        if (claimed.Count > 0)
+        {
+            _logger.LogInformation(
+                "Resuming {Count} interrupted notification batch(es) that stalled before {Cutoff:u}.",
+                claimed.Count, cutoff);
+        }
+
+        return claimed;
+    }
+
+    /// <summary>
+    /// 把一条卡住的批次的租约抢过来：影响行数为 1 即认领成功。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>cutoff 条件必须留在 UPDATE 里</b>，与 <see cref="TryClaimScheduledAsync"/> 同理：
+    /// 上一步的 SELECT 只说明「刚才它是卡住的」，两个实例都会得到这个结论。
+    /// </remarks>
+    internal static async Task<bool> TryClaimStalledAsync(
+        IRepository<Message, Guid> repository, Guid id, DateTime cutoff, CancellationToken cancellationToken)
+    {
+        var affected = await repository.AsQueryable()
+            .Where(m => m.Id == id
+                        && m.Status == NotificationStatus.Sending
+                        && (m.LastModificationTime ?? m.CreationTime) < cutoff)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.LastModificationTime, DateTime.UtcNow),
+                cancellationToken);
+
+        return affected == 1;
+    }
+
+    /// <summary>
+    /// 认领「静默时段已经结束、该把那些人发出去了」的消息。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ 这是<b>静默时段之所以是延后而不是丢弃</b>的那一半实现。收件人被标成
+    /// <see cref="NotificationStatus.Scheduled"/> 并写下 <see cref="Recipient.DeferredUntil"/>，
+    /// 消息本身也回到 <c>Scheduled</c>；这一遍找的就是「有收件人的延后时刻已经到了」的消息。
+    /// 没有它，那些人会永远排在那里 —— 而这与「到点丢掉」在收件人看来一模一样。
+    /// </para>
+    /// <para>
+    /// ★ <b>这里用「现在」而不是 cutoff。</b>另外两遍的宽限期防的是与本进程那个定时器抢
+    /// （定时器到点只是入队，真正开发的时刻取决于积压）；延后的时刻是我们自己算出来的
+    /// 绝对时刻，没有任何定时器在等它，多等 15 分钟只是让免打扰白白延长。
+    /// </para>
+    /// <para>
+    /// ★ 认领复用 <see cref="TryClaimScheduledAsync"/>（<c>Scheduled → Sending</c>）：
+    /// 这一遍和到期定时消息那一遍抢的是同一种状态跃迁，所以两遍同时扫到同一条也只有
+    /// 一个发得出去。
+    /// </para>
+    /// </remarks>
+    internal async Task<List<Guid>> ClaimDueDeferredAsync(
+        IRepository<Message, Guid> repository, int batchSize, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+
+        var candidates = await repository.AsQueryable()
+            .Where(m => m.Status == NotificationStatus.Scheduled
+                        && m.Recipients.Any(r => r.Status == NotificationStatus.Scheduled
+                                                 && r.DeferredUntil != null
+                                                 && r.DeferredUntil <= now))
+            .OrderBy(m => m.CreationTime)
+            .Take(batchSize)
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
+
+        if (candidates.Count == 0)
+            return [];
+
+        var claimed = new List<Guid>(candidates.Count);
+        foreach (var id in candidates)
+        {
+            if (await TryClaimScheduledAsync(repository, id, cancellationToken))
+                claimed.Add(id);
+        }
+
+        if (claimed.Count > 0)
+        {
+            _logger.LogInformation(
+                "Resuming {Count} notification(s) whose recipients were deferred by their quiet hours, now elapsed.",
+                claimed.Count);
+        }
+
+        return claimed;
     }
 
     /// <summary>

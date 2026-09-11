@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Dtos;
+﻿namespace Tnzi.Identity.Dtos;
 
 /// <summary>
 /// 启用2FA请求DTO
@@ -194,7 +194,7 @@ public class CodeLoginDto
 /// <summary>
 /// 验证码登录结果DTO
 /// </summary>
-public class CodeLoginResultDto
+public class CodeLoginResultDto : IRefreshTokenCarrier
 {
     /// <summary>
     /// 访问令牌
@@ -240,6 +240,15 @@ public class CodeLoginResultDto
     /// 是否为新注册用户
     /// </summary>
     public bool IsNewUser { get; set; }
+
+    /// <inheritdoc />
+    string? IRefreshTokenCarrier.ReadRefreshToken() => RefreshToken;
+
+    /// <inheritdoc />
+    int? IRefreshTokenCarrier.ReadRefreshTokenLifetimeSeconds() => RefreshTokenExpiresIn;
+
+    /// <inheritdoc />
+    void IRefreshTokenCarrier.ClearRefreshToken() => RefreshToken = null;
 }
 
 #endregion

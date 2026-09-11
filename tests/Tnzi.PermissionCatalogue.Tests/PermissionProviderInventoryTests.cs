@@ -45,8 +45,7 @@ public class PermissionProviderInventoryTests
     [Fact]
     public void EveryProviderInSource_IsDeclaredInThePact()
     {
-        var repoRoot = RepoRoot.Locate();
-        var declaredInSource = ScanProviderClassNames(Path.Combine(repoRoot, "src"));
+        var declaredInSource = ScanProviderClassNames();
 
         // 下界而不是 ShouldNotBeEmpty：正则一旦退化成匹配不到东西，
         // 「扫到的都在 pact 里」照样成立，整条门禁会安静失效。
@@ -69,18 +68,17 @@ public class PermissionProviderInventoryTests
     }
 
     /// <summary>扫描 <c>src</c> 下所有实现 <c>IPermissionDefinitionProvider</c> 的具体类名。</summary>
-    private static HashSet<string> ScanProviderClassNames(string srcDir)
+    /// <remarks>
+    /// ★ 走 <see cref="RepoScan"/> 而不是 <c>SearchOption.AllDirectories</c>：<c>src/</c> 底下的
+    /// <c>src/Tnzi.UI</c> 是 pnpm 工作区，裸递归会跟着 junction 走进无穷路径，
+    /// 整个测试宿主卡死且一条结果都打不出来。bin/obj 的剔除也一并交给它。
+    /// </remarks>
+    private static HashSet<string> ScanProviderClassNames()
     {
         var found = new HashSet<string>(StringComparer.Ordinal);
-        if (!Directory.Exists(srcDir))
-            return found;
 
-        foreach (var file in Directory.EnumerateFiles(srcDir, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in RepoScan.EnumerateFiles("src", "*.cs"))
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                continue;
-
             var text = File.ReadAllText(file);
             if (!text.Contains("IPermissionDefinitionProvider", StringComparison.Ordinal))
                 continue;

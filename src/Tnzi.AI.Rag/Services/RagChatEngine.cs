@@ -11,14 +11,17 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
 {
     private readonly IRagRetriever _retriever;
     private readonly IAgentRuntime _agentRuntime;
+    private readonly IRagAccessAuthorizer _authorizer;
 
     public RagChatEngine(
         IServiceProvider serviceProvider,
         IRagRetriever retriever,
-        IAgentRuntime agentRuntime) : base(serviceProvider)
+        IAgentRuntime agentRuntime,
+        IRagAccessAuthorizer authorizer) : base(serviceProvider)
     {
         _retriever = Check.NotNull(retriever);
         _agentRuntime = Check.NotNull(agentRuntime);
+        _authorizer = Check.NotNull(authorizer);
     }
 
     /// <inheritdoc />
@@ -31,8 +34,15 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
             return Fail<RagChatResult>("Query cannot be empty", 400);
         }
 
+        // 0. 知识库级授权（与 RagQueryEngine 同一处判定）
+        var authorized = await _authorizer.AuthorizeQueryAsync(request.KnowledgeBaseIds, ct);
+        if (!authorized.Succeeded)
+        {
+            return Fail<RagChatResult>(authorized.Message ?? "Access denied", authorized.Code ?? 403, authorized.ErrorCode);
+        }
+
         // 1. 检索相关文档
-        var retrievalResults = await RetrieveContextAsync(request, ct);
+        var retrievalResults = await RetrieveContextAsync(request, authorized.Data!, ct);
 
         // 2. 构建增强的用户消息（RAG 上下文 + 原始问题）
         var augmentedMessage = BuildAugmentedMessage(request.Query, retrievalResults);
@@ -85,8 +95,21 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
             yield break;
         }
 
+        // 0. 知识库级授权（与非流式路径同一处判定 —— 流式端点少了它就是同一个洞的另一扇门）
+        var authorized = await _authorizer.AuthorizeQueryAsync(request.KnowledgeBaseIds, ct);
+        if (!authorized.Succeeded)
+        {
+            yield return new StreamEvent
+            {
+                IsError = true,
+                IsDone = true,
+                ErrorMessage = authorized.Message ?? "Access denied"
+            };
+            yield break;
+        }
+
         // 1. 检索相关文档（在流式开始前完成）
-        var retrievalResults = await RetrieveContextAsync(request, ct);
+        var retrievalResults = await RetrieveContextAsync(request, authorized.Data!, ct);
 
         // 2. 构建增强的用户消息
         var augmentedMessage = BuildAugmentedMessage(request.Query, retrievalResults);
@@ -133,11 +156,12 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
     /// <summary>
     /// 执行 RAG 检索
     /// </summary>
-    private async Task<List<RetrievalResult>> RetrieveContextAsync(RagQueryRequest request, CancellationToken ct)
+    private async Task<List<RetrievalResult>> RetrieveContextAsync(
+        RagQueryRequest request, IReadOnlyList<Guid> authorizedKnowledgeBaseIds, CancellationToken ct)
     {
         var options = new RagRetrievalOptions
         {
-            KnowledgeBaseIds = request.KnowledgeBaseIds,
+            KnowledgeBaseIds = authorizedKnowledgeBaseIds.ToList(),
             TopK = request.TopK,
             MinRelevance = request.MinRelevance
         };

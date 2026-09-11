@@ -1,7 +1,7 @@
 namespace Tnzi.System.Services;
 
 /// <summary>
-/// 配置服务实现
+/// 配置服务实现（作用域可见性在 <c>SettingService.Scope.cs</c>）
 /// </summary>
 public class SettingService : ApplicationService, ISettingService
 {
@@ -17,6 +17,7 @@ public class SettingService : ApplicationService, ISettingService
     private readonly ITnziApplication? _tnziApplication;
     private readonly IHostEnvironment? _hostEnvironment;
     private readonly IDistributedEventBus? _distributedEventBus;
+    private readonly ICurrentTenant? _currentTenant;
 
     /// <summary>
     /// 缓存条目，用于区分"不存在"和"值为null"
@@ -34,9 +35,11 @@ public class SettingService : ApplicationService, ISettingService
         ISettingEncryptor? settingEncryptor = null,
         ITnziApplication? tnziApplication = null,
         IHostEnvironment? hostEnvironment = null,
-        IDistributedEventBus? distributedEventBus = null)
+        IDistributedEventBus? distributedEventBus = null,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
+        _currentTenant = currentTenant;
         _settingRepository = Check.NotNull(settingRepository);
         _applicationOptions = Check.NotNull(applicationOptions);
         _encryptionOptions = Check.NotNull(encryptionOptions).Value;
@@ -70,43 +73,74 @@ public class SettingService : ApplicationService, ISettingService
             return Ok<string?>(defaultValue);
 
         var cacheKey = $"Setting:{key}";
+        SettingCacheEntry entry;
         try
         {
-            // 优先从缓存读取
+            // 优先从缓存读取（缓存存密文，读取时解密）
             var cached = await _cache.GetAsync<SettingCacheEntry>(cacheKey);
             if (cached != null)
             {
-                if (!cached.Exists)
-                    return Ok<string?>(defaultValue);
-
-                // Decrypt after reading from cache (cache stores ciphertext)
-                var cachedValue = cached.IsEncrypted && cached.Value != null
-                    ? DecryptValue(cached.Value)
-                    : cached.Value;
-                return Ok<string?>(cachedValue);
+                entry = cached;
             }
+            else
+            {
+                var setting = await _settingRepository
+                    .AsQueryable()
+                    .AsNoTracking()
+                    .Where(s => s.Scope == SettingScope.Global)
+                    .FirstOrDefaultAsync(s => s.Key == key);
 
-            var setting = await _settingRepository
-                .AsQueryable()
-                .AsNoTracking()
-                .Where(s => s.Scope == SettingScope.Global)
-                .FirstOrDefaultAsync(s => s.Key == key);
+                entry = new SettingCacheEntry(setting?.Value, setting != null, setting?.IsEncrypted ?? false);
 
-            var exists = setting != null;
-            var isEncrypted = exists && setting!.IsEncrypted;
-            var rawValue = setting?.Value;
-
-            // 写入缓存，有效期 1 小时（缓存密文，读取时解密）
-            await _cache.SetAsync(cacheKey, new SettingCacheEntry(rawValue, exists, isEncrypted), TimeSpan.FromHours(1));
-
-            // 解密后返回
-            var value = isEncrypted && rawValue != null ? DecryptValue(rawValue) : rawValue;
-            return Ok<string?>(exists ? value : defaultValue);
+                // 写入缓存，有效期 1 小时
+                await _cache.SetAsync(cacheKey, entry, TimeSpan.FromHours(1));
+            }
         }
         catch (Exception)
         {
+            // 「读不到」（库 / 缓存故障）沿用回默认值的既定取舍：设置读取不该让业务请求整体失败。
             LogWarning("Failed to get setting {Key} from database/cache, returning default value", key);
             return Ok<string?>(defaultValue);
+        }
+
+        if (!entry.Exists)
+            return Ok<string?>(defaultValue);
+
+        if (!entry.IsEncrypted || entry.Value == null)
+            return Ok<string?>(entry.Value);
+
+        // ★「读到了但解不开」不是「读不到」：密钥轮换、密文被明文覆盖、加密被关掉，这三种情况下
+        // 回默认值会让调用方拿到与「这个键没配」一模一样的答案，只剩一条没人看的 Warning。
+        return DecryptOrFail(key, entry.Value);
+    }
+
+    /// <summary>
+    /// 解密一条加密设置；解不开时返回<b>失败</b>的 Result 而不是默认值。
+    /// </summary>
+    private Result<string?> DecryptOrFail(string key, string cipherText)
+    {
+        if (_settingEncryptor == null)
+        {
+            LogError(
+                "Setting {Key} is stored encrypted but setting encryption is not configured (System:Encryption); the value cannot be read.",
+                key);
+            return Fail<string?>(
+                $"Setting '{key}' is encrypted but setting encryption is not configured",
+                500,
+                ErrorCodes.CONFIGURATION_MISSING);
+        }
+
+        try
+        {
+            return Ok<string?>(_settingEncryptor.Decrypt(cipherText));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Setting {Key} could not be decrypted (wrong key or corrupted ciphertext).", key);
+            return Fail<string?>(
+                $"Setting '{key}' is encrypted but could not be decrypted (wrong key or corrupted ciphertext)",
+                500,
+                ErrorCodes.CONFIGURATION_INVALID);
         }
     }
 
@@ -114,7 +148,13 @@ public class SettingService : ApplicationService, ISettingService
     public async Task<Result<T?>> GetSettingAsync<T>(string key, T? defaultValue = default) where T : struct
     {
         var result = await GetSettingAsync(key);
-        if (!result.Succeeded || string.IsNullOrWhiteSpace(result.Data))
+        if (!result.Succeeded)
+        {
+            // 解密失败必须一路向上传，不能在这一层又被折叠成默认值。
+            return Fail<T?>(result.Message ?? $"Failed to read setting '{key}'", result.Code ?? 500, result.ErrorCode);
+        }
+
+        if (string.IsNullOrWhiteSpace(result.Data))
             return Ok<T?>(defaultValue);
 
         try
@@ -181,9 +221,13 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <inheritdoc />
-    public async Task<Result<IEnumerable<SettingDto>>> GetSettingsAsync(string? group = null)
+    public async Task<Result<IEnumerable<SettingDto>>> GetSettingsAsync(string? group = null, SettingScope? scope = null, string? scopeId = null)
     {
-        var query = _settingRepository.AsQueryable().AsNoTracking();
+        var scopeFilter = BuildScopeFilter(scope, scopeId);
+        if (!scopeFilter.Succeeded)
+            return Fail<IEnumerable<SettingDto>>(scopeFilter.Message ?? "Invalid scope", scopeFilter.Code ?? 400, scopeFilter.ErrorCode);
+
+        var query = _settingRepository.AsQueryable().AsNoTracking().Where(scopeFilter.Data!);
 
         if (!string.IsNullOrWhiteSpace(group))
         {
@@ -212,7 +256,7 @@ public class SettingService : ApplicationService, ISettingService
     public async Task<Result<SettingDto>> GetSettingByIdAsync(Guid id)
     {
         var setting = await _settingRepository.GetAsync(id);
-        if (setting == null)
+        if (setting == null || !CanAccess(setting))
             return Fail<SettingDto>("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var dto = setting.MapTo<SettingDto>();
@@ -269,7 +313,7 @@ public class SettingService : ApplicationService, ISettingService
         Check.NotNull(input);
 
         var setting = await _settingRepository.GetAsync(id);
-        if (setting == null)
+        if (setting == null || !CanAccess(setting))
             return Fail<SettingDto>("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         if (setting.IsSystem)
@@ -304,7 +348,7 @@ public class SettingService : ApplicationService, ISettingService
     public async Task<Result> DeleteSettingAsync(Guid id)
     {
         var setting = await _settingRepository.GetAsync(id);
-        if (setting == null)
+        if (setting == null || !CanAccess(setting))
             return Fail("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         if (setting.IsSystem)
@@ -330,6 +374,10 @@ public class SettingService : ApplicationService, ISettingService
         var settings = await _settingRepository
             .Where(s => idList.Contains(s.Id))
             .ToListAsync();
+
+        // 别的租户的行对本调用者等同于不存在：与单条删除同一口径，绝不静默删一部分。
+        if (settings.Any(s => !CanAccess(s)))
+            return Fail("One or more settings were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         // 在进入事务前校验：存在系统配置则返回 Fail
         var systemSettings = settings.Where(s => s.IsSystem).ToList();
@@ -408,6 +456,20 @@ public class SettingService : ApplicationService, ISettingService
     {
         if (string.IsNullOrWhiteSpace(key))
             return Fail("Key cannot be null or empty", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // 与 Create / Update 同一道收口：受配置中心管理的 Global 键必须经 schema 校验写入。
+        if (IsManagedBySettingsCenter(key, scope))
+            return Fail($"Setting key '{key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // 与另外两条写路径同一道防护：明文盖掉密文而 IsEncrypted 仍为 true，之后每次读取都拿明文去解密。
+        // 在事务外先查一次并返回失败的 Result，而不是在事务里抛异常。
+        var existing = await _settingRepository.AsQueryable()
+            .AsNoTracking()
+            .Where(s => s.Key == key && s.Scope == scope && s.ScopeId == scopeId)
+            .Select(s => new { s.IsEncrypted })
+            .FirstOrDefaultAsync();
+        if (existing is { IsEncrypted: true })
+            return Fail("Cannot update an encrypted setting here; use the encrypted setting endpoint instead", 400, ErrorCodes.VALIDATION_ERROR);
 
         await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
@@ -563,10 +625,16 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <inheritdoc />
-    public async Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(CancellationToken cancellationToken = default)
+    public async Task<Result<List<SettingGroupDto>>> GetSettingGroupsAsync(SettingScope? scope = null, string? scopeId = null, CancellationToken cancellationToken = default)
     {
+        // 与 GetSettingsAsync 同一条作用域口径：计数必须与列表对得上。
+        var scopeFilter = BuildScopeFilter(scope, scopeId);
+        if (!scopeFilter.Succeeded)
+            return Fail<List<SettingGroupDto>>(scopeFilter.Message ?? "Invalid scope", scopeFilter.Code ?? 400, scopeFilter.ErrorCode);
+
         var groups = await _settingRepository.AsQueryable()
             .AsNoTracking()
+            .Where(scopeFilter.Data!)
             .GroupBy(s => s.Group ?? "General")
             .Select(g => new SettingGroupDto
             {
@@ -665,4 +733,77 @@ public class SettingService : ApplicationService, ISettingService
         LogInformation("Reordered {Count} setting(s) in group {Group}", result.Data, group);
         return Ok();
     }
+
+    // ------------------------------------------------------------------------
+    // <see cref="SettingService"/> 的作用域可见性：管理端读路径按调用者的租户收口。
+    // ------------------------------------------------------------------------
+
+    /// <summary>
+    /// 调用者所属租户（字符串形式，与 <see cref="Setting.ScopeId"/> 同口径）；宿主 / 单租户部署为 null。
+    /// 与 <c>TenantSettingProvider</c> 同源：先看 <see cref="ICurrentTenant"/>，退回当前用户的租户。
+    /// </summary>
+    private string? CallerTenantId => (_currentTenant?.Id ?? CurrentUser?.TenantId)?.ToString();
+
+    /// <summary>
+    /// 管理端读路径的作用域谓词。★ 租户归属由<b>身份</b>决定，不由客户端参数决定：
+    /// 租户内的调用者请求别的租户返回 403 而不是静默改写成本租户。
+    /// </summary>
+    /// <remarks>
+    /// <c>Setting</c> 不实现 <c>IMultiTenant</c>（租户归属在 <c>ScopeId</c>，Global 行没有租户），
+    /// 全局租户过滤器管不到它；此前列表只按分组过滤，多租户部署里租户 A 的管理员拿到了租户 B 的
+    /// 全部 Tenant 行与所有用户的 User 行。User 行没有租户列，租户内的调用者列不出「全部用户」，
+    /// 只能一次指定一个明确的人。
+    /// </remarks>
+    private Result<Expression<Func<Setting, bool>>> BuildScopeFilter(SettingScope? scope, string? scopeId)
+    {
+        var tenantId = CallerTenantId;
+
+        switch (scope)
+        {
+            case null:
+                return Ok<Expression<Func<Setting, bool>>>(tenantId == null
+                    ? s => s.Scope == SettingScope.Global
+                    : s => s.Scope == SettingScope.Global || (s.Scope == SettingScope.Tenant && s.ScopeId == tenantId));
+
+            case SettingScope.Global:
+                return Ok<Expression<Func<Setting, bool>>>(s => s.Scope == SettingScope.Global);
+
+            case SettingScope.Tenant:
+                if (tenantId != null)
+                {
+                    if (scopeId != null && !string.Equals(scopeId, tenantId, StringComparison.OrdinalIgnoreCase))
+                        return Fail<Expression<Func<Setting, bool>>>("Settings of another tenant are not accessible", 403, ErrorCodes.FORBIDDEN);
+
+                    return Ok<Expression<Func<Setting, bool>>>(s => s.Scope == SettingScope.Tenant && s.ScopeId == tenantId);
+                }
+
+                return Ok<Expression<Func<Setting, bool>>>(scopeId == null
+                    ? s => s.Scope == SettingScope.Tenant
+                    : s => s.Scope == SettingScope.Tenant && s.ScopeId == scopeId);
+
+            case SettingScope.User:
+                if (tenantId != null && scopeId == null)
+                    return Fail<Expression<Func<Setting, bool>>>("scopeId (user id) is required to list user-scoped settings", 400, ErrorCodes.VALIDATION_ERROR);
+
+                return Ok<Expression<Func<Setting, bool>>>(scopeId == null
+                    ? s => s.Scope == SettingScope.User
+                    : s => s.Scope == SettingScope.User && s.ScopeId == scopeId);
+
+            default:
+                return Fail<Expression<Func<Setting, bool>>>($"Unknown setting scope '{scope}'", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+    }
+
+    /// <summary>
+    /// 按 id 的读 / 改 / 删是否对调用者可见：别的租户的 Tenant 行等同于不存在（404，不泄露存在性）。
+    /// </summary>
+    private bool CanAccess(Setting setting)
+    {
+        if (setting.Scope != SettingScope.Tenant)
+            return true;
+
+        var tenantId = CallerTenantId;
+        return tenantId == null || string.Equals(setting.ScopeId, tenantId, StringComparison.OrdinalIgnoreCase);
+    }
+
 }

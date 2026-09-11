@@ -45,6 +45,10 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 avatarUrl = result.UserInfo.AvatarUrl
             } : null,
             errorMessage = result.ErrorMessage,
+            // ★ 错误码与细节原样带出：登录挑战（2FA / 待办义务）就住在这两个字段里，
+            // 前端按 errorCode 分支、从 errorDetails 取临时令牌，与 JSON 端点上的处理逐字相同。
+            errorCode = result.ErrorCode,
+            errorDetails = result.ErrorDetails,
             returnUrl = returnUrl
         };
         // 使用 System.Text.Json 序列化为 JSON，然后作为 JavaScript 对象字面量嵌入
@@ -133,8 +137,14 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                     }}, 200);
                 }} else {{
                     console.log('No opener window, attempting redirect');
-                    // 如果没有父窗口，尝试重定向（使用 URL fragment 传递 token，避免泄露到服务器日志和 Referer 头）
-                    if (jsonData.returnUrl) {{
+                    // ★ 只有成功才跳转。失败时跳过去等于把一个「登录没成功、而且原因你看不到」
+                    // 的页面丢给用户 —— 挑战（2FA / 待办义务）只能经 postMessage 交给打开它的窗口，
+                    // 没有 opener 时唯一诚实的做法是当场把原因说出来。
+                    if (!jsonData.success) {{
+                        document.body.innerHTML = '<div class=""container""><div class=""message"" style=""color: #ff4d4f;""></div></div>';
+                        document.querySelector('.message').textContent =
+                            jsonData.errorMessage || '登录未完成，请回到登录页重试。';
+                    }} else if (jsonData.returnUrl) {{
                         var url = new URL(jsonData.returnUrl, window.location.origin);
                         if (jsonData.success && jsonData.accessToken) {{
                             var params = new URLSearchParams();

@@ -71,6 +71,20 @@ public class RecipientOutput
     public Guid? UserId { get; set; }
     public bool IsRead { get; set; }
     public DateTime? ReadTime { get; set; }
+
+    /// <summary>
+    /// 因收件人本人的静默时段而延后到这一刻再投递（UTC）。<see langword="null"/> = 没有被延后。
+    /// </summary>
+    /// <remarks>
+    /// ★ 投递报告要分得清「还没送到因为失败了」与「还没送到因为对方设了免打扰」。
+    /// 后者不写 <see cref="FailureReason"/>（那不是一次失败），线索就在这一列。
+    /// <para>
+    /// ★★ <b>要与 <see cref="Status"/> 一起读。</b>这一列在收件人真的发出去之后<b>仍然保留</b>，
+    /// 作为「这一条曾被推迟到几点」的记录 —— 所以它有值不代表还在等。
+    /// 「仍在等」的判据是 <c>Status == Scheduled</c> 且这一列尚未到期。
+    /// </para>
+    /// </remarks>
+    public DateTime? DeferredUntil { get; set; }
 }
 
 /// <summary>

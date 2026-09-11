@@ -4,6 +4,24 @@ namespace Tnzi.Identity.Entities;
 /// 一次性验证码实体。承载登录 2FA、免密验证码登录、找回密码、快速注册、换绑联系方式、
 /// 敏感操作二次确认等多个流程的码 —— 由 <see cref="Purpose"/> 区分，**不同用途之间不可互换**。
 /// </summary>
+/// <remarks>
+/// ★★★ <strong>类级 <see cref="AuditIgnoreAttribute"/>：整个实体不进实体级审计。</strong>
+/// 属性级豁免在这里不够 —— <see cref="Code"/> 是一枚活的凭据，而
+/// <see cref="Address"/> + <see cref="Purpose"/> 合起来是「谁正在收哪种码」的情报。
+/// <para>
+/// 不能指望 <c>AuditOptions.SensitiveFields</c> 兜住：那是按属性名<b>精确匹配</b>的跨实体名单，
+/// 收录 <c>"Code"</c> 会掩掉全仓所有叫 Code 的业务字段（科目代码、货币代码、模块编码……），
+/// 所以通用名进不了名单 —— 拦截器自己的注释写着这一条。少了本特性的后果是：
+/// 每次发码都把明文验证码连同收件地址写进 <c>Audit_PropertyEntry</c>，
+/// 于是一个只读的 <c>audit.operation.view</c> 就足以给任意账号发一枚找回密码的码、
+/// 再从审计明细里读出来 —— 只读权限直接升级为账号接管。
+/// </para>
+/// <para>
+/// 本实体的生命周期本来就有专门的 <c>LogInformation</c>（发出 / 验证 / 标记已用），
+/// 退出实体级审计不损失任何可追溯性。守卫：<c>CredentialAuditIgnoreTests</c>。
+/// </para>
+/// </remarks>
+[AuditIgnore]
 public class TwoFactorCode : EntityBase<Guid>, IHasCreationTime
 {
     /// <summary>

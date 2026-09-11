@@ -47,7 +47,7 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         }
 
         var functions = await _moduleFunctionRepository
-            .Where(f => functionIds.Contains(f.Id) && f.IsEnabled)
+            .Where(f => functionIds.Contains(f.Id) && f.IsEnabled && !f.IsRetired)
             .OrderBy(f => f.Order)
             .ToListAsync();
         return Ok((IEnumerable<ModuleFunction>)functions);
@@ -56,9 +56,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<Guid>>> GetUserFunctionIdsAsync(Guid userId)
     {
+        // 与角色侧同规：只返回指向生效功能的行。休眠行（退役 / 禁用功能）不进矩阵，
+        // 也就不能出现在矩阵回写的集合里，否则同一判据的写路径会把整次保存拒掉。
         var functionIds = await _userFunctionRepository
             .Where(uf => uf.UserId == userId && uf.IsEnabled && uf.IsGranted)
-            .Select(uf => uf.FunctionId)
+            .Join(LiveFunctions(), uf => uf.FunctionId, f => f.Id, (uf, _) => uf.FunctionId)
             .ToListAsync();
         return Ok((IEnumerable<Guid>)functionIds);
     }
@@ -68,7 +70,7 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     {
         var functionIds = await _userFunctionRepository
             .Where(uf => uf.UserId == userId && uf.IsEnabled && !uf.IsGranted)
-            .Select(uf => uf.FunctionId)
+            .Join(LiveFunctions(), uf => uf.FunctionId, f => f.Id, (uf, _) => uf.FunctionId)
             .ToListAsync();
         return Ok((IEnumerable<Guid>)functionIds);
     }
@@ -88,17 +90,8 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
             return Fail(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
-        // 验证功能是否存在且启用
-        var existingFunctions = await _moduleFunctionRepository
-            .Where(f => functionIdList.Contains(f.Id) && f.IsEnabled)
-            .Select(f => f.Id)
-            .ToListAsync();
-
-        var missingFunctions = functionIdList.Except(existingFunctions).ToList();
-        if (missingFunctions.Count > 0)
-        {
-            return Fail($"Functions not found: {string.Join(", ", missingFunctions)}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
-        }
+        var missing = await FindMissingFunctionsAsync(functionIdList);
+        if (missing != null) return missing;
 
         // 已有 allow 行跳过；既有 deny 行被显式授予翻转（后写者赢——
         // 唯一索引 (UserId, FunctionId) 不允许 allow/deny 并存）。
@@ -183,12 +176,16 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var missing = await FindMissingFunctionsAsync(functionIdList);
         if (missing != null) return missing;
 
+        // 休眠 allow 行（退役 / 禁用功能）在覆盖范围之外：矩阵渲染不到它们，也就没有资格删它们。
+        var dormantIds = await GetDormantFunctionIdsAsync(userId);
+
         // 原子操作：同一 UnitOfWork 中覆盖 allow 集，避免权限窗口期。
         // deny 行不整体清除（deny 集由 SetUserDeniedFunctionsAsync 管理），
         // 但落在新 allow 集内的 deny 行被翻转删除（显式授予 = 后写者赢）。
         var result = await ExecuteInUnitOfWorkAsync(async _ =>
         {
-            await _userFunctionRepository.DeleteAsync(uf => uf.UserId == userId && uf.IsGranted);
+            await _userFunctionRepository.DeleteAsync(uf =>
+                uf.UserId == userId && uf.IsGranted && !dormantIds.Contains(uf.FunctionId));
 
             if (functionIdList.Count > 0)
             {
@@ -234,12 +231,16 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var missing = await FindMissingFunctionsAsync(functionIdList);
         if (missing != null) return missing;
 
+        // 切片声明的是「消费方看得见的范围」，而休眠行在任何矩阵里都不可见 ——
+        // 即便切片把那个 id 报了进来，也不能借这次写入把它删掉。
+        var dormantIds = await GetDormantFunctionIdsAsync(userId);
+
         // 与 SetUserFunctionsAsync 逐字同构,唯一差别是 allow 的删除被 scope 夹住——
         // 切片外的 allow 行与 deny 行都碰不到,这正是本方法存在的理由。
         var result = await ExecuteInUnitOfWorkAsync(async _ =>
         {
             await _userFunctionRepository.DeleteAsync(uf =>
-                uf.UserId == userId && uf.IsGranted && scope.Contains(uf.FunctionId));
+                uf.UserId == userId && uf.IsGranted && scope.Contains(uf.FunctionId) && !dormantIds.Contains(uf.FunctionId));
 
             if (functionIdList.Count > 0)
             {
@@ -287,11 +288,13 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var missing = await FindMissingFunctionsAsync(functionIdList);
         if (missing != null) return missing;
 
-        // 与 SetUserDeniedFunctionsAsync 同构,deny 的删除被 scope 夹住。
+        var dormantIds = await GetDormantFunctionIdsAsync(userId);
+
+        // 与 SetUserDeniedFunctionsAsync 同构,deny 的删除被 scope 夹住（休眠行同样除外）。
         var result = await ExecuteInUnitOfWorkAsync(async _ =>
         {
             await _userFunctionRepository.DeleteAsync(uf =>
-                uf.UserId == userId && !uf.IsGranted && scope.Contains(uf.FunctionId));
+                uf.UserId == userId && !uf.IsGranted && scope.Contains(uf.FunctionId) && !dormantIds.Contains(uf.FunctionId));
 
             if (functionIdList.Count > 0)
             {
@@ -338,11 +341,14 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var missing = await FindMissingFunctionsAsync(functionIdList);
         if (missing != null) return missing;
 
-        // 原子操作：覆盖 deny 集。落在新 deny 集内的 allow 行被翻转删除
+        var dormantIds = await GetDormantFunctionIdsAsync(userId);
+
+        // 原子操作：覆盖 deny 集（休眠 deny 行除外）。落在新 deny 集内的 allow 行被翻转删除
         // （显式拒绝 = 后写者赢）；其余 allow 行不受影响。
         var result = await ExecuteInUnitOfWorkAsync(async _ =>
         {
-            await _userFunctionRepository.DeleteAsync(uf => uf.UserId == userId && !uf.IsGranted);
+            await _userFunctionRepository.DeleteAsync(uf =>
+                uf.UserId == userId && !uf.IsGranted && !dormantIds.Contains(uf.FunctionId));
 
             if (functionIdList.Count > 0)
             {
@@ -391,22 +397,29 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         return Ok("Cleared all functions for user");
     }
 
-    /// <summary>校验功能 ID 均存在且启用；越界时返回 404 Result，否则 null。</summary>
+    /// <summary>
+    /// 校验功能 ID 均存在且<b>当前生效</b>（启用且未退役）；越界时返回 404 Result，否则 null。
+    /// </summary>
+    /// <remarks>
+    /// 与权限解析同一判据。此前只查 <c>IsEnabled</c>：给用户直授一个退役码会 200、行落库、
+    /// 读回可见、矩阵显示已勾选，而 <c>CheckPermissionAsync</c> 永远答 false —— 写了没人读。
+    /// </remarks>
     private async Task<Result?> FindMissingFunctionsAsync(IReadOnlyCollection<Guid> functionIdList)
     {
-        if (functionIdList.Count == 0) return null;
-
-        var idList = functionIdList.ToList();
-        var existingFunctions = await _moduleFunctionRepository
-            .Where(f => idList.Contains(f.Id) && f.IsEnabled)
-            .Select(f => f.Id)
-            .ToListAsync();
-
-        var missingFunctions = idList.Except(existingFunctions).ToList();
-        return missingFunctions.Count > 0
-            ? Fail($"Functions not found: {string.Join(", ", missingFunctions)}", 404, ErrorCodes.RESOURCE_NOT_FOUND)
+        var notGrantable = await FunctionLiveness.DescribeNotGrantableAsync(_moduleFunctionRepository, functionIdList);
+        return notGrantable != null
+            ? Fail(notGrantable, 404, ErrorCodes.RESOURCE_NOT_FOUND)
             : null;
     }
+
+    /// <summary>当前生效的功能（启用且未退役）—— 读路径与写路径共用的那一份判据。</summary>
+    private IQueryable<ModuleFunction> LiveFunctions()
+        => _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
+
+    /// <summary>该用户的直授行里，指向退役 / 已禁用功能的那些 —— 覆盖写入的禁区。</summary>
+    private Task<List<Guid>> GetDormantFunctionIdsAsync(Guid userId)
+        => FunctionLiveness.GetDormantFunctionIdsAsync(
+            _moduleFunctionRepository, _userFunctionRepository.Where(uf => uf.UserId == userId), uf => uf.FunctionId);
 
     /// <summary>
     /// 用户直授写路径的委托护栏，与角色路径同构（权限集包含支配）。
@@ -433,10 +446,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
             await _functionAuthorizationService.GetUserPermissionNamesAsync(grantorId.Value),
             StringComparer.OrdinalIgnoreCase);
 
-        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled);
+        // 支配集只算生效的码：退役码在谁的有效集里都没有，算进来会让目标身上一条休眠直授
+        // 把每个非超管授权者都锁在外面（角色侧 GetRoleGrantedCodesAsync 同规）。
         var targetCodes = await _userFunctionRepository
             .Where(uf => uf.UserId == targetUserId && uf.IsEnabled)
-            .Join(enabledFunctions, uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code)
+            .Join(LiveFunctions(), uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code)
             .Distinct()
             .ToListAsync();
         if (!targetCodes.All(grantorCodes.Contains))

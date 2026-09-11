@@ -128,6 +128,18 @@ public class McpServerConfig
     /// 配置后自动通过 client_credentials 流获取访问令牌并注入 Authorization 头。
     /// </summary>
     public McpOAuthConfig? OAuth { get; set; }
+
+    /// <summary>
+    /// 运行时租户分区键 — <b>不来自配置绑定</b>，由 <c>IMcpServerCatalog</c> 物化 DB 注册表条目时
+    /// 按该行自身的 <c>TenantId</c> 填充。
+    /// </summary>
+    /// <remarks>
+    /// 多租户下 <c>McpServerRegistration</c> 的唯一索引是 (TenantId, Name)：两个租户可以注册同名 server
+    /// 而端点与凭据各不相同。连接缓存与工具缓存必须按这个键分桶，否则先跑的租户建立的连接（携带其凭据）
+    /// 会被后来的租户命中。部署配置（<c>AI:Mcp:Servers</c>）条目留 null —— 那是进程级的同一份凭据，
+    /// 所有租户共用一条连接。
+    /// </remarks>
+    public string? TenantKey { get; set; }
 }
 
 /// <summary>

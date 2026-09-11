@@ -6,44 +6,39 @@ namespace Tnzi.Identity.Services;
 public class OAuthService : ApplicationService, IOAuthService
 {
     private readonly UserManager<User> _userManager;
-    private readonly SignInManager<User> _signInManager;
-    private readonly ITokenService _tokenService;
     private readonly IUserLoginService _userLoginService;
-    private readonly IAuthTokenService? _authTokenService;
-    private readonly IEventBus? _eventBus;
     private readonly IUserDetailService? _userDetailService;
-    private readonly IdentityOptions _identityOptions;
-    private readonly ILoginSessionCoordinator? _loginSessionCoordinator;
-    private readonly ILoginGuardEvaluator? _loginGuardEvaluator;
+    private readonly IAuthService _authService;
+    private readonly IOAuthEmailVerificationPolicy _emailVerificationPolicy;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
+    /// <summary>
+    /// 初始化一个 <see cref="OAuthService"/> 类型的新实例。
+    /// </summary>
+    /// <remarks>
+    /// ★ <strong>这里刻意<b>没有</b> <c>ITokenService</c> / <c>IAuthTokenService</c> /
+    /// <c>ILoginSessionCoordinator</c> / <c>ILoginGuardEvaluator</c> / <c>IEventBus</c>。</strong>
+    /// 它们曾经都在，因为本服务自己走完了整条签发流程 —— 而那份手抄件漏掉了 2FA 与义务位。
+    /// 签发现在整体交给 <see cref="IAuthService.IssueTokenAsync"/>，把这些依赖留在构造函数里
+    /// 只会诱使下一个人再抄一遍。
+    /// </remarks>
     public OAuthService(
         UserManager<User> userManager,
-        SignInManager<User> signInManager,
-        ITokenService tokenService,
         IUserLoginService userLoginService,
         IServiceProvider serviceProvider,
-        IOptions<IdentityOptions> identityOptions,
-        IAuthTokenService? authTokenService = null,
-        IEventBus? eventBus = null,
+        IAuthService authService,
+        IOAuthEmailVerificationPolicy emailVerificationPolicy,
         IUserDetailService? userDetailService = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        ILoginSessionCoordinator? loginSessionCoordinator = null,
-        ILoginGuardEvaluator? loginGuardEvaluator = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
-        _signInManager = Check.NotNull(signInManager);
-        _tokenService = Check.NotNull(tokenService);
         _userLoginService = Check.NotNull(userLoginService);
-        _identityOptions = Check.NotNull(identityOptions).Value;
-        _authTokenService = authTokenService;
-        _eventBus = eventBus;
+        _authService = Check.NotNull(authService);
+        _emailVerificationPolicy = Check.NotNull(emailVerificationPolicy);
         _userDetailService = userDetailService;
-        _loginSessionCoordinator = loginSessionCoordinator;
-        _loginGuardEvaluator = loginGuardEvaluator;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
@@ -104,16 +99,22 @@ public class OAuthService : ApplicationService, IOAuthService
             return result;
         }
 
+        // ★★★ 邮箱经提供商证实过，才谈得上「用它去认领账号」。
+        // 有些提供商的资料邮箱是用户自己填的、从不校验，于是不做这一判定的话，
+        // 「拿受害者的邮箱去第三方注册一个号，再用它登录」就是一条完整的接管路径 ——
+        // 不需要密码，也不经过两步验证。判定可替换，默认实现宁可答「不知道」。
+        var emailVerified = _emailVerificationPolicy.IsEmailVerified(provider, principal, email);
+
         // 用户不存在，检查邮箱是否已注册
         User? userByEmail = null;
-        if (!string.IsNullOrEmpty(email))
+        if (!string.IsNullOrEmpty(email) && emailVerified)
         {
             userByEmail = await _userManager.FindByEmailAsync(email);
         }
 
         if (userByEmail != null)
         {
-            // 邮箱已注册，关联OAuth账户
+            // 邮箱已注册且地址已被证实，关联OAuth账户
             var linkResult = await LinkOAuthAccountAsync(userByEmail.Id, provider, providerKey, displayName);
             if (!linkResult.Succeeded)
             {
@@ -127,6 +128,23 @@ public class OAuthService : ApplicationService, IOAuthService
                 LogInformation("OAuth login successful for user {UserName} via {Provider} (linked account)", userByEmail.UserName ?? string.Empty, provider);
             }
             return result;
+        }
+
+        // ★ 地址没被证实，但本地确实有人用着它 —— 这时**既不认领也不新建**：
+        //   新建会撞上 RequireUniqueEmail 而以一个看不懂的 400 收场，而认领正是要防的那件事。
+        //   出路是让本人用常规方式登录一次，再从个人中心主动绑定（linked-accounts 端点已存在）：
+        //   那时「他是不是账号主人」已经被证明过了，绑定就是安全的。
+        if (!emailVerified && !string.IsNullOrEmpty(email) && await _userManager.FindByEmailAsync(email) != null)
+        {
+            LogWarning(
+                "OAuth callback from {Provider} carried an unverified email that matches an existing account; "
+                + "refusing to auto-link. The user must sign in normally and link from their profile.",
+                provider);
+
+            return Fail<OAuthCallbackResultDto>(
+                "This email is already registered. Sign in with your existing method, then link this provider from your profile.",
+                409,
+                ErrorCodes.IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED);
         }
 
         // 用户不存在且邮箱未注册，自动创建无密码账户
@@ -158,7 +176,10 @@ public class OAuthService : ApplicationService, IOAuthService
         {
             UserName = finalUserName,
             Email = email,
-            EmailConfirmed = !string.IsNullOrEmpty(email), // OAuth 提供的邮箱视为已验证
+            // ★ 只有提供商真的证实过，才置确认位。此前这里是「邮箱非空即已确认」——
+            // 于是一个自己填的地址会在本地拿到 EmailConfirmed = true，
+            // 而框架把那一位当作对外的断言（找回密码、邮箱 2FA、消费应用按域名授权都读它）。
+            EmailConfirmed = emailVerified,
             TenantId = ResolveNewUserTenantId(),
         };
 
@@ -285,61 +306,29 @@ public class OAuthService : ApplicationService, IOAuthService
     /// </summary>
     private async Task<Result<OAuthCallbackResultDto>> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
     {
-        // 凭据之外的准入策略（IP 白名单 / 设备 / 时段）。第三方登录同样要过：
-        // 否则 OAuth 就成了绕开这些策略的旁路。
-        if (_loginGuardEvaluator is { HasGuards: true })
+        // ★★★ 整段签发交给共享出口。此前这里是 IssueTokenAsync 后半段的**手抄件**：
+        // 守卫链、会话协调器、令牌、登录事件都抄了，唯独漏掉两件 ——
+        //   ① 2FA 判定（GetTwoFactorEnabledAsync 从头到尾没出现过）⇒ 开着 TOTP 的账号
+        //      只要有一个已关联的第三方身份，就能不过第二因子登进来；
+        //   ② 义务位（GetOwedObligations）⇒ 管理员设的临时密码、到期密码、
+        //      「必须先绑验证器」在这条路上一律作废。
+        // 这与验证码登录上修过的是同一个形态（抄了共享出口的后半段、精确地漏掉其中一步），
+        // 而修法也一样：不要再抄一遍，改成调它。
+        //
+        // 代价是挑战以**失败信封**返回（403 + 错误码 + 临时令牌），调用方必须把
+        // ErrorCode / ErrorDetails 原样带给前端 —— 见 OAuthCallbackResultDto 上的注释。
+        var issued = await _authService.IssueTokenAsync(user, LoginMethod.OAuth);
+        if (!issued.Succeeded)
         {
-            var guardResult = await _loginGuardEvaluator.EvaluateAsync(new LoginGuardContext(
-                user, LoginMethod.OAuth, ScopedContext?.ClientIpAddress, ScopedContext?.UserAgent));
-            if (!guardResult.Allowed)
-            {
-                return Fail<OAuthCallbackResultDto>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
-            }
+            return Fail<OAuthCallbackResultDto>(
+                issued.Message ?? "Login rejected",
+                issued.Code ?? 403,
+                issued.ErrorCode,
+                issued.ErrorDetails);
         }
 
-        // 建立登录会话（Reject 达上限则拒绝本次登录）
-        var sessionId = Guid.Empty;
-        if (_loginSessionCoordinator != null)
-        {
-            var sessionResult = await _loginSessionCoordinator.EstablishAsync(user.Id);
-            if (!sessionResult.Succeeded)
-            {
-                return Fail<OAuthCallbackResultDto>(sessionResult.Message ?? "Login rejected", sessionResult.Code ?? 403, sessionResult.ErrorCode);
-            }
-            sessionId = sessionResult.Data;
-        }
-
-        var roles = await GetRolesWithTenantContextAsync(user);
-        var tokenResult = _tokenService.GenerateTokenResult(user, roles, sessionId: sessionId == Guid.Empty ? null : sessionId);
-        var refreshTokenExpiresAt = DateTime.UtcNow.AddDays(_identityOptions.Jwt.RefreshTokenExpirationDays);
-
-        // 保存RefreshToken（核心业务逻辑，必须同步执行；按会话绑定）
-        if (_authTokenService != null)
-        {
-            await _authTokenService.SaveTokenAsync(
-                user.Id,
-                IdentityConstants.TokenProvider.JWT,
-                IdentityConstants.TokenName.RefreshToken,
-                tokenResult.RefreshToken,
-                refreshTokenExpiresAt,
-                sessionId);
-        }
-
-        // 发布登录事件（由事件处理器处理日志记录）
-        if (_eventBus != null)
-        {
-            var ipAddress = ScopedContext?.ClientIpAddress;
-            var userAgent = ScopedContext?.UserAgent;
-            await _eventBus.PublishAsync(new UserLoggedInEvent
-            {
-                UserId = user.Id,
-                UserName = user.UserName ?? string.Empty,
-                LoginTime = DateTime.UtcNow,
-                IpAddress = ipAddress,
-                UserAgent = userAgent,
-                LoginProvider = provider
-            }, cancellationToken: default);
-        }
+        var tokenResult = issued.Data!;
+        LogInformation("OAuth sign-in issued via the shared token exit for user {UserId} ({Provider}).", user.Id, provider);
 
         return Ok(new OAuthCallbackResultDto
         {
@@ -351,19 +340,6 @@ public class OAuthService : ApplicationService, IOAuthService
     }
 
     #endregion
-
-    private async Task<IList<string>> GetRolesWithTenantContextAsync(User user)
-    {
-        if (_multiTenancyEnabled && user.TenantId.HasValue && _currentTenant != null)
-        {
-            using (_currentTenant.Change(user.TenantId.Value))
-            {
-                return await _userManager.GetRolesAsync(user);
-            }
-        }
-
-        return await _userManager.GetRolesAsync(user);
-    }
 
     private Guid? ResolveNewUserTenantId()
     {

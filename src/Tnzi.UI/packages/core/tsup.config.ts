@@ -14,6 +14,9 @@ export default defineConfig({
         "constants/index": "src/constants/index.ts",
         "errors/index": "src/errors/index.ts",
 
+        // 生成的图标清单：消费方要离线打包图标时读它，库自身不引用。
+        "icons/index": "src/icons/index.ts",
+
         // 适配器
         "adapters/index": "src/adapters/index.ts",
         "adapters/i18n/index": "src/adapters/i18n/index.ts",
@@ -51,6 +54,7 @@ export default defineConfig({
         "services/logging/index": "src/services/logging/index.ts",
         "services/diagnostics/index": "src/services/diagnostics/index.ts",
         "services/performance/index": "src/services/performance/index.ts",
+        "services/feature/index": "src/services/feature/index.ts",
         "services/signalr/index": "src/services/signalr/index.ts",
         "services/localization/index": "src/services/localization/index.ts",
     },

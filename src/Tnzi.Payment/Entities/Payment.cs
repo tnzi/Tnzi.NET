@@ -139,6 +139,29 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     public Guid? InvoiceId { get; set; }
 
     /// <summary>
+    /// 已被退款单占用的额度：待审批 / 审批通过 / 退款中 / 已成功的退款金额之和。
+    /// 退款被拒绝、取消或失败后释放。
+    /// </summary>
+    /// <remarks>
+    /// 存在的理由只有一个：**并发超退**。超退守卫此前是「先对退款表求和、再插入新退款」，
+    /// 两步之间没有任何互斥，两笔并发的 60 元退款各自读到 sum=0 都判定通过，
+    /// 于是一笔 100 元的支付被退了 120 —— 线下渠道当场记成功，那是真实资损。
+    /// 求和读不到别人未提交的行，所以无论怎么调整读的位置都堵不上；
+    /// 唯一能原子判定的形态是在**一行**上做条件自增
+    /// （<c>WHERE ReservedRefundAmount + 金额 &lt;= PaidAmount</c>），与优惠券总量核销同形。
+    /// <para>
+    /// ★ 释放一律**按退款行重算**而不是做减法：同一笔退款可能被重复判为失败（渠道重投、
+    /// 对账扫描与执行路径撞上），做减法会把额度还两次，从此这笔支付可以退出超过它收到的钱。
+    /// </para>
+    /// <para>
+    /// ★ 既有部署迁移后本列为 0，而退款表里可能已有历史行。求和那一道校验**刻意保留**
+    /// 正是为此：它在非并发路径上仍然正确，于是「没有回填」的最坏后果只是这些支付上的
+    /// 并发防线退回到迁移前的水平，而不是凭空多出一整份可退额度。回填语句见模块文档。
+    /// </para>
+    /// </remarks>
+    public decimal ReservedRefundAmount { get; set; }
+
+    /// <summary>
     /// 退款记录集合
     /// </summary>
     public virtual ICollection<Refund> Refunds { get; set; } = new List<Refund>();

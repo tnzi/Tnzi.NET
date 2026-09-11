@@ -84,6 +84,8 @@ public class RequestTrackingOptions
     /// SignalR 的 `access_token`、文件签名令牌 `sig`、分享链接口令 `password`。
     /// 此前只能靠**整条路径**排除(`/hubs/*` 正是为此),代价是那条路径的日志全丢。
     /// 按参数名脱敏更精确:请求照常留痕,只是值变成 `***`。
+    /// 默认名单是核心的 <see cref="Tnzi.Security.QueryStringRedactor.DefaultSensitiveKeys"/>,
+    /// 与审计模块的 <c>Audit:SensitiveQueryKeys</c> 同源。
     /// </summary>
     public List<string>? SensitiveQueryKeys { get; set; }
 }

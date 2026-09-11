@@ -390,3 +390,47 @@ public enum UserRolesChangeType
     UserDeleted,
 }
 
+
+/// <summary>
+/// 已向某人发出邀请（首次发出与重发都会触发）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// ★ <strong>框架不替你发这封信。</strong>与 <see cref="PasswordResetRequestedEvent"/> 同一惯例：
+/// 邀请邮件的措辞、模板、抬头、从哪个邮箱发出、走邮件还是走企业微信，
+/// 都是消费应用的事。订阅这个事件，用 <see cref="AcceptUrl"/> 自己发。
+/// </para>
+/// <para>
+/// ★★ <see cref="AcceptUrl"/> 里含着令牌明文，而库里只有它的哈希 ——
+/// <strong>这个事件是拿到它的最后机会</strong>。因此处理器不要把它写进日志或审计。
+/// </para>
+/// </remarks>
+public class UserInvitedEvent : EventBase
+{
+    /// <summary>被邀请的账号。</summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>登录用户名。邀请信里要原样告诉本人，他此后用它登录。</summary>
+    public string UserName { get; set; } = string.Empty;
+
+    /// <summary>收件邮箱，可能为空（只有手机号时）。</summary>
+    public string? Email { get; set; }
+
+    /// <summary>收件手机号，可能为空。</summary>
+    public string? PhoneNumber { get; set; }
+
+    /// <summary>接受邀请的完整链接（含令牌明文）。</summary>
+    public string AcceptUrl { get; set; } = string.Empty;
+
+    /// <summary>链接失效时刻（UTC）。信里通常要写明。</summary>
+    public DateTime ExpiresAt { get; set; }
+
+    /// <summary>发出邀请的管理员。</summary>
+    public Guid? InvitedBy { get; set; }
+
+    /// <summary>是否为重发（首次发出为 false）。文案通常要区分。</summary>
+    public bool IsResend { get; set; }
+
+    /// <summary>站点名，取自 <c>App:SiteName</c>，供邮件模板使用。</summary>
+    public string? SiteName { get; set; }
+}

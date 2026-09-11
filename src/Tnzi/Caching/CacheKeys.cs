@@ -75,5 +75,24 @@ public static class CacheKeys
         /// 用户封禁状态 (SignalR:Ban:{userId})
         /// </summary>
         public static string UserBan(Guid userId) => $"SignalR:Ban:{userId}";
+
+        /// <summary>
+        /// 匿名分区的消息速率计数 (SignalR:Anon:MessageRate:{partitionKey})
+        /// </summary>
+        /// <remarks>
+        /// 匿名连接没有用户 id，按分区键（默认客户端 IP）限流。键空间与按用户的那三个
+        /// 分开，避免一个恰好长得像 GUID 的分区键与真实用户撞到同一个计数上。
+        /// </remarks>
+        public static string AnonymousMessageRateCount(string partitionKey) => $"SignalR:Anon:MessageRate:{partitionKey}";
+
+        /// <summary>
+        /// 匿名分区的封禁状态 (SignalR:Anon:Ban:{partitionKey})
+        /// </summary>
+        public static string AnonymousBan(string partitionKey) => $"SignalR:Anon:Ban:{partitionKey}";
+
+        /// <summary>
+        /// 匿名分区的在线连接数 (SignalR:Anon:Connections:{partitionKey})
+        /// </summary>
+        public static string AnonymousConnectionCount(string partitionKey) => $"SignalR:Anon:Connections:{partitionKey}";
     }
 }

@@ -163,7 +163,30 @@ public class RefundReconciliationTests : PaymentIntegrationTestBase
         var refund = await LoadRefundAsync("PAY-ASYNC-3");
         refund.Status.ShouldBe(RefundStatus.Failed);
 
-        (await ReloadAsync<PaymentEntity>(paymentId))!.Status.ShouldBe(PaymentStatus.Succeeded);
+        var reloaded = (await ReloadAsync<PaymentEntity>(paymentId))!;
+        reloaded.Status.ShouldBe(PaymentStatus.Succeeded);
+        // 失败的退款不再占用可退额度，否则这笔支付从此退不出钱来，而没有任何提示说明为什么
+        reloaded.ReservedRefundAmount.ShouldBe(0m);
+    }
+
+    /// <summary>
+    /// 退款失败之后必须能重新发起 —— 额度没还回去的话，这笔支付会永久卡在
+    /// 「渠道那次没退成，本地也不让再退」的死角。
+    /// </summary>
+    [Fact]
+    public async Task AfterAFailedRefund_TheSamePaymentCanBeRefundedAgain()
+    {
+        await SeedSucceededPaymentAsync("PAY-ASYNC-4", 100m);
+        await InScopeAsync<IRefundService, Result<RefundDto>>(
+            svc => svc.CreateRefundAsync(new CreateRefundDto { TradeNo = "PAY-ASYNC-4", RefundAmount = 100m, Reason = "async" }));
+
+        _asyncProvider.SettledStatus = RefundStatus.Failed;
+        await InScopeAsync<IRefundService, Result<int>>(svc => svc.ReconcilePendingRefundsAsync());
+
+        var retried = await InScopeAsync<IRefundService, Result<RefundDto>>(
+            svc => svc.CreateRefundAsync(new CreateRefundDto { TradeNo = "PAY-ASYNC-4", RefundAmount = 100m, Reason = "retry" }));
+
+        retried.Succeeded.ShouldBeTrue();
     }
 
     private async Task<Refund> LoadRefundAsync(string tradeNo)

@@ -179,27 +179,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
     }
 
     private static void SetSubAgentContext(ExecutionStrategyContext context, string childName)
-    {
-        var accessor = context.ExecutionContextAccessor;
-        if (accessor == null)
-        {
-            return;
-        }
-
-        // Capture parent session rules before overwriting context
-        var permissionEvaluator = context.ServiceProvider.GetService<IToolPermissionEvaluator>();
-        if (permissionEvaluator != null)
-        {
-            var sessionRules = permissionEvaluator.GetSessionRules();
-            if (sessionRules.Count > 0)
-            {
-                accessor.Properties[ContextPropertyKeys.ParentSessionRules] = sessionRules;
-            }
-        }
-
-        accessor.Properties[ContextPropertyKeys.IsSubAgent] = true;
-        accessor.Properties[ContextPropertyKeys.SubAgentName] = childName;
-    }
+        => SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, childName);
 
     private static void EmitFailedEvent(ExecutionStrategyContext context, string childName, string error)
     {

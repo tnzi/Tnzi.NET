@@ -155,9 +155,13 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
             return;
         }
 
-        // 减少深度到 0（最外层提交）
-        Interlocked.Decrement(ref _transactionDepth);
-
+        // ★ 事务深度**不能**在这里递减。最终提交里的 SaveChangesAsync 往往就是这个事务的
+        // 第一次保存 —— 事务内只做仓储写入、中途不 flush 是最常见的形状（仓储检测到事务后
+        // 一律缓冲）。深度提前归零会让 IsEnabledTransaction 两侧皆假，那次保存于是不开物理
+        // 事务而跑在自动提交模式下：主实体已经落库，随后同一次 SaveChanges 里的文件引用
+        // 处理若失败，回滚时 _transaction 为 null 无事可回滚，
+        // 「实体与文件引用要么全成功、要么全失败」的承诺当场落空。
+        // 递减推迟到提交成功之后；失败路径由 RollbackTransactionAsync 把深度清零。
         try
         {
             // 确保所有待处理的更改都已保存
@@ -174,6 +178,9 @@ public class EFCoreUnitOfWork<TDbContext> : IUnitOfWork, IAsyncDisposable
                 await _transaction.CommitAsync(cancellationToken);
                 _hasCommitted = true;
             }
+
+            // 提交完成，退出最外层事务
+            Interlocked.Decrement(ref _transactionDepth);
         }
         catch (Exception ex)
         {

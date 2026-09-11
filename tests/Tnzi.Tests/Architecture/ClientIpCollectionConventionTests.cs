@@ -25,21 +25,33 @@ namespace Tnzi.Tests.Architecture;
 public class ClientIpCollectionConventionTests
 {
     /// <summary>
-    /// 直接读取来源地址的三种写法。
+    /// 直接读取连接地址的写法。
     /// </summary>
-    /// <remarks>
-    /// 两个代理头同样在列：只堵 <c>RemoteIpAddress</c> 等于门禁只关了一半，
-    /// 而代理头恰好是生产环境实际取到值的那条路径。
-    /// </remarks>
-    private static readonly Regex DirectAddressRead = new(
-        """Connection\??\.RemoteIpAddress|Headers\s*\[\s*"X-Forwarded-For"|Headers\s*\[\s*"X-Real-IP" """.TrimEnd(),
+    private static readonly Regex ConnectionAddressRead = new(
+        """Connection\??\.RemoteIpAddress""",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         TimeSpan.FromSeconds(1));
 
     /// <summary>
-    /// 唯一允许直接读的文件：<c>GetClientIp()</c> 自己就实现在这里。
+    /// 从<b>调用方可控</b>的代理头取地址的写法。
     /// </summary>
-    private static readonly string[] AllowedFiles = ["HttpContextExtensions.cs"];
+    /// <remarks>
+    /// ★★★ 这一条<b>没有允许列表</b>，<c>GetClientIp()</c> 自己也不例外。
+    /// 转发头是调用方随便写的：每次请求换一个值，限流分区键就每次落进新桶，
+    /// 于是「限流开着」而匿名端点一次都拦不住。哪一跳有资格改写地址，
+    /// 是一次<b>部署声明</b>（<c>AspNetCore:TrustedProxies</c>）而不是请求自称的事 ——
+    /// 声明交给 <c>UseForwardedHeaders</c> 兑现，它按受信代理从右往左消费并写进连接地址。
+    /// 代码里任何一处自己解析这两个头，都在那道声明外面重开一个后门。
+    /// </remarks>
+    private static readonly Regex ForwardedHeaderRead = new(
+        """Headers\s*\[\s*"X-Forwarded-For"|Headers\s*\[\s*"X-Real-IP" """.TrimEnd(),
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// 唯一允许直接读连接地址的文件：<c>GetClientIp()</c> 自己就实现在这里。
+    /// </summary>
+    private static readonly string[] ConnectionReadAllowedFiles = ["HttpContextExtensions.cs"];
 
     [Fact]
     public void SourceAddress_IsOnlyReadThroughGetClientIp()
@@ -49,18 +61,18 @@ public class ClientIpCollectionConventionTests
         var scanned = 0;
         var offenders = new List<string>();
 
-        foreach (var file in EnumerateFrameworkSources(repoRoot))
+        foreach (var file in RepoScan.EnumerateFiles("src", "*.cs"))
         {
             scanned++;
 
-            if (AllowedFiles.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase))
+            if (ConnectionReadAllowedFiles.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var content = File.ReadAllText(file);
+            var content = StripComments(File.ReadAllText(file));
             // 完全限定：Moq.Match 与 System.Text.RegularExpressions.Match 在本项目里同时可见。
-            foreach (var match in DirectAddressRead.Matches(content).Cast<System.Text.RegularExpressions.Match>())
+            foreach (var match in ConnectionAddressRead.Matches(content).Cast<System.Text.RegularExpressions.Match>())
             {
                 offenders.Add($"{Path.GetRelativePath(repoRoot, file)}: {match.Value.Trim()}");
             }
@@ -75,44 +87,87 @@ public class ClientIpCollectionConventionTests
     }
 
     [Fact]
+    public void ProxyHeaders_AreNeverParsedByHand()
+    {
+        var repoRoot = RepoRoot.Locate();
+
+        var scanned = 0;
+        var offenders = new List<string>();
+
+        foreach (var file in RepoScan.EnumerateFiles("src", "*.cs"))
+        {
+            scanned++;
+
+            var content = StripComments(File.ReadAllText(file));
+            foreach (var match in ForwardedHeaderRead.Matches(content).Cast<System.Text.RegularExpressions.Match>())
+            {
+                offenders.Add($"{Path.GetRelativePath(repoRoot, file)}: {match.Value.Trim()}");
+            }
+        }
+
+        Assert.True(scanned > 100, $"the source scan found suspiciously few files ({scanned})");
+
+        Assert.True(offenders.Count == 0,
+            "X-Forwarded-For / X-Real-IP are caller-controlled: trust must be declared through "
+            + "AspNetCore:TrustedProxies and applied by UseForwardedHeaders, never parsed by hand. "
+            + "Read Connection.RemoteIpAddress through GetClientIp() instead: " + string.Join(", ", offenders));
+    }
+
+    [Fact]
     public void TheDetector_ActuallyFlagsADirectRead()
     {
-        // 上面的扫描如今应当零命中，单靠它分不出「干净」与「检测器坏了」。
-        Assert.Matches(DirectAddressRead, """Ip = context.Connection.RemoteIpAddress?.ToString(),""");
-        Assert.Matches(DirectAddressRead, """var ip = httpContext?.Connection?.RemoteIpAddress?.ToString();""");
-        Assert.Matches(DirectAddressRead, """var fwd = request.Headers["X-Forwarded-For"].FirstOrDefault();""");
-        Assert.Matches(DirectAddressRead, """var real = request.Headers["X-Real-IP"].FirstOrDefault();""");
+        // 上面两条扫描如今应当零命中，单靠它们分不出「干净」与「检测器坏了」。
+        Assert.Matches(ConnectionAddressRead, """Ip = context.Connection.RemoteIpAddress?.ToString(),""");
+        Assert.Matches(ConnectionAddressRead, """var ip = httpContext?.Connection?.RemoteIpAddress?.ToString();""");
+        Assert.Matches(ForwardedHeaderRead, """var fwd = request.Headers["X-Forwarded-For"].FirstOrDefault();""");
+        Assert.Matches(ForwardedHeaderRead, """var real = request.Headers["X-Real-IP"].FirstOrDefault();""");
 
-        Assert.DoesNotMatch(DirectAddressRead, """Ip = context.Request.GetClientIp(),""");
-        Assert.DoesNotMatch(DirectAddressRead, """var ua = request.Headers["User-Agent"].ToString();""");
+        Assert.DoesNotMatch(ConnectionAddressRead, """Ip = context.Request.GetClientIp(),""");
+        Assert.DoesNotMatch(ForwardedHeaderRead, """var ua = request.Headers["User-Agent"].ToString();""");
+    }
+
+    [Fact]
+    public void TheScannerIgnoresProse()
+    {
+        // 门禁扫的是代码，不是注释 —— 而这两条规则的**理由**恰恰要在注释里
+        // 把被禁的写法原样写出来才说得清。少了这一步，写清楚为什么会让门禁变红，
+        // 于是下一个人删掉的是解释而不是违规。
+        const string prose = """
+            /// 刻意不读 Headers["X-Forwarded-For"]，也不直接读 Connection.RemoteIpAddress。
+            var ip = context.Request.GetClientIp();
+            """;
+
+        var stripped = StripComments(prose);
+
+        Assert.DoesNotMatch(ConnectionAddressRead, stripped);
+        Assert.DoesNotMatch(ForwardedHeaderRead, stripped);
+
+        // 反面：同一段里真的读一次，仍然抓得到。
+        Assert.Matches(
+            ConnectionAddressRead,
+            StripComments(prose + "\nvar real = context.Connection.RemoteIpAddress;"));
     }
 
     /// <summary>
-    /// 逐项目枚举框架 C# 源码。
+    /// 去掉行注释（含 <c>///</c> 文档注释）后再匹配。
     /// </summary>
     /// <remarks>
-    /// 刻意不对 <c>src/</c> 整体 <c>AllDirectories</c>：<c>src/Tnzi.UI</c> 下有前端 monorepo 的
-    /// <c>node_modules</c>，递归进去会把测试宿主拖垮。
+    /// 只切 <c>//</c> 到行尾，不做完整词法分析：一行里 <c>//</c> 之后的东西不会执行，
+    /// 所以漏判的唯一形态是「同一行先出现一个含 <c>//</c> 的字符串字面量、之后才读地址」，
+    /// 而那种写法不存在于本仓。
     /// </remarks>
-    private static IEnumerable<string> EnumerateFrameworkSources(string repoRoot)
+    private static string StripComments(string content)
     {
-        var srcRoot = Path.Combine(repoRoot, "src");
-
-        foreach (var projectDirectory in Directory.EnumerateDirectories(srcRoot))
+        var lines = content.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
         {
-            if (string.Equals(Path.GetFileName(projectDirectory), "Tnzi.UI", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            foreach (var file in Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories))
+            var commentStart = lines[i].IndexOf("//", StringComparison.Ordinal);
+            if (commentStart >= 0)
             {
-                if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                    || file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                yield return file;
+                lines[i] = lines[i][..commentStart];
             }
         }
+
+        return string.Join('\n', lines);
     }
 }

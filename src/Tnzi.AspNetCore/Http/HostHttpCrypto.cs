@@ -35,32 +35,40 @@ public class HostHttpCrypto : IHostHttpCrypto
         }
     }
 
+    /// <inheritdoc />
+    public bool IsResponseEncryptionNegotiated => _encryptor != null;
+
     /// <summary>
     /// 将收到的客户端请求进行解密
     /// </summary>
     /// <param name="request">加密的请求</param>
     /// <returns>解密后的请求</returns>
+    /// <remarks>
+    /// ★ <strong>协商先于解密。</strong>客户端公钥不论请求是什么方法都要读进来：
+    /// GET 没有请求体可解密，但它的<b>响应</b>照样要加密。此前这里对 GET 整条早退，
+    /// 于是 GET 成了唯一一条明文出口，而客户端处理器对每个成功响应都会尝试解密 ——
+    /// 那个 GET 只会以 500 收场。
+    /// </remarks>
     public async Task<HttpRequest> DecryptRequest(HttpRequest request)
     {
         Check.NotNull(request);
 
-        if (_privateKey == null || request.Method == HttpMethods.Get || request.Body == null)
+        if (_privateKey == null)
         {
             return request;
         }
 
         string? clientPublicKey = request.Headers.GetOrDefault(HttpHeaderNames.ClientPublicKey);
-        if (clientPublicKey != null)
+        if (!string.IsNullOrEmpty(clientPublicKey))
         {
             _encryptor = new TransmissionEncryptor(_privateKey, clientPublicKey);
+            _logger.LogDebug("Use the incoming client public key and server private key to create a server communication encryptor");
         }
 
-        if (_encryptor == null)
+        if (_encryptor == null || request.Method == HttpMethods.Get || request.Body == null)
         {
             return request;
         }
-
-        _logger.LogDebug("Use the incoming client public key and server private key to create a server communication encryptor");
 
         try
         {
@@ -92,13 +100,18 @@ public class HostHttpCrypto : IHostHttpCrypto
     /// <summary>
     /// 加密发往客户端的响应
     /// </summary>
-    /// <param name="response">未加密的响应</param>
+    /// <param name="response">未加密的响应（<c>Body</c> 必须是可读可定位的缓冲流，见 <see cref="IHostHttpCrypto.EncryptResponse"/>）</param>
     /// <returns>加密后的响应</returns>
+    /// <remarks>
+    /// 失败响应刻意<b>不</b>加密：客户端要在「解密失败」与「业务失败」之间分得清，
+    /// 而请求被拒时最可能出问题的恰恰是密钥本身。这条与客户端
+    /// <c>ClientHttpCrypto.DecryptResponse</c> 的早退条件是同一条。
+    /// </remarks>
     public async Task<HttpResponse> EncryptResponse(HttpResponse response)
     {
         Check.NotNull(response);
 
-        if (_encryptor == null || !response.IsSuccessStatusCode())
+        if (_encryptor == null || !response.IsSuccessStatusCode() || !response.Body.CanRead)
         {
             return response;
         }

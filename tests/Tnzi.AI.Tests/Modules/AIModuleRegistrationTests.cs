@@ -184,7 +184,6 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(SubAgentLimitMiddleware))]
     [InlineData(typeof(SummarizationMiddleware))]
     [InlineData(typeof(FileUploadMiddleware))]
-    [InlineData(typeof(ViewImageMiddleware))]
     [InlineData(typeof(TodoMiddleware))]
     [InlineData(typeof(ClarificationMiddleware))]
     public void RegistersMiddleware_BothConcreteAndInterface(Type middlewareType)
@@ -206,8 +205,8 @@ public class AIModuleRegistrationTests
         var services = CreateServiceCollection();
         var middlewareCount = services.Count(d => d.ServiceType == typeof(IAiMiddleware));
 
-        // AIModule 注册了 18 个中间件（每个都有 IAiMiddleware 转发）
-        middlewareCount.ShouldBeGreaterThanOrEqualTo(18, "Should register at least 18 IAiMiddleware forwards");
+        // AIModule 注册了 17 个中间件（每个都有 IAiMiddleware 转发）
+        middlewareCount.ShouldBeGreaterThanOrEqualTo(17, "Should register at least 17 IAiMiddleware forwards");
     }
 
     [Fact]

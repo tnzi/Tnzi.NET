@@ -11,20 +11,22 @@ public class AuditOperationConfiguration : EntityTypeConfigurationBase<AuditOper
 
         builder.ToTable("Operation");
 
-        builder.Property(e => e.FunctionName).IsRequired().HasMaxLength(200);
-        builder.Property(e => e.PermissionName).HasMaxLength(200);
-        builder.Property(e => e.UserName).HasMaxLength(200);
-        builder.Property(e => e.NickName).HasMaxLength(200);
-        builder.Property(e => e.Ip).HasMaxLength(50);
-        builder.Property(e => e.OperatingSystem).HasMaxLength(200);
-        builder.Property(e => e.Browser).HasMaxLength(200);
-        builder.Property(e => e.UserAgent).HasMaxLength(500);
-        builder.Property(e => e.Message).HasMaxLength(2000);
-        builder.Property(e => e.HttpMethod).HasMaxLength(10);
-        builder.Property(e => e.Url).HasMaxLength(2000);
+        // 列宽与 AuditMiddleware 的采集侧截断共用 AuditOperationColumns 这一份数字：
+        // 一行超列宽会让整批 INSERT 被拒、整批审计丢失，见该类型注释。
+        builder.Property(e => e.FunctionName).IsRequired().HasMaxLength(AuditOperationColumns.FunctionNameMaxLength);
+        builder.Property(e => e.PermissionName).HasMaxLength(AuditOperationColumns.PermissionNameMaxLength);
+        builder.Property(e => e.UserName).HasMaxLength(AuditOperationColumns.UserNameMaxLength);
+        builder.Property(e => e.NickName).HasMaxLength(AuditOperationColumns.NickNameMaxLength);
+        builder.Property(e => e.Ip).HasMaxLength(AuditOperationColumns.IpMaxLength);
+        builder.Property(e => e.OperatingSystem).HasMaxLength(AuditOperationColumns.OperatingSystemMaxLength);
+        builder.Property(e => e.Browser).HasMaxLength(AuditOperationColumns.BrowserMaxLength);
+        builder.Property(e => e.UserAgent).HasMaxLength(AuditOperationColumns.UserAgentMaxLength);
+        builder.Property(e => e.Message).HasMaxLength(AuditOperationColumns.MessageMaxLength);
+        builder.Property(e => e.HttpMethod).HasMaxLength(AuditOperationColumns.HttpMethodMaxLength);
+        builder.Property(e => e.Url).HasMaxLength(AuditOperationColumns.UrlMaxLength);
         builder.Property(e => e.Exception);
         builder.Property(e => e.RequestParameters);
-        builder.Property(e => e.RequestBody).HasMaxLength(8192);
+        builder.Property(e => e.RequestBody).HasMaxLength(AuditOperationColumns.RequestBodyMaxLength);
         builder.Property(e => e.ResponseResult);
 
         // 配置与 AuditEntityEntry 的关系

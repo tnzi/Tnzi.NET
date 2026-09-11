@@ -1,4 +1,4 @@
-namespace Tnzi.Payment;
+﻿namespace Tnzi.Payment;
 
 /// <summary>
 /// 支付模块：收款、退款、绑卡、渠道回调与对账。
@@ -149,11 +149,13 @@ public class PaymentModule : TnziApplicationModule
     /// <remarks>
     /// <para>
     /// 对接第三方的渠道全都住在可选子模块里（Stripe 在 <c>Tnzi.Payment.Stripe</c>，
-    /// PayPal 在 <c>Tnzi.Payment.PayPal</c>），而 <c>Payment:DefaultChannelCode</c> 的出厂值是
-    /// <c>Stripe</c>。默认值不改、子模块不加载，则每一笔没指名渠道的支付都会在
-    /// <see cref="PaymentProviderFactory"/> 那里拿到 null，最终 400 <c>PAYMENT_CHANNEL_NOT_SUPPORTED</c>。
-    /// 那是正确的行为（少能力，不是错行为），但让部署方按请求逐个去发现它太晚了 —— 症状是
-    /// 「支付全线不可用」，而配置本身一个字都没错，排查会先怀疑凭据和网络。
+    /// PayPal 在 <c>Tnzi.Payment.PayPal</c>）。<c>Payment:DefaultChannelCode</c> 的出厂值是本模块自带的
+    /// <c>Offline</c>（它曾是 <c>Stripe</c>：什么都没配错的应用一启动就收到一条 Error，见
+    /// <see cref="PaymentConstants.DefaultPaymentChannel"/>）。但把默认值指向 Stripe / PayPal 而不加载那个包，
+    /// 或指向一个没启用的渠道，则每一笔没指名渠道的支付都会在 <see cref="PaymentProviderFactory"/> 那里拿到 null，
+    /// 最终 400 <c>PAYMENT_CHANNEL_NOT_SUPPORTED</c>。那是正确的行为（少能力，不是错行为），
+    /// 但让部署方按请求逐个去发现它太晚了 —— 症状是「支付全线不可用」，而配置本身一个字都没错，
+    /// 排查会先怀疑凭据和网络。
     /// </para>
     /// <para>
     /// 因此这里在启动时把结论一次说清：默认渠道解析不出来就记 Error 并指名要么加载哪个包、
@@ -161,8 +163,14 @@ public class PaymentModule : TnziApplicationModule
     /// 没有理由因为一个用不到的默认值而起不来。
     /// </para>
     /// <para>
-    /// 复用 <see cref="IPaymentProviderFactory.GetProvider"/> 作唯一判据，不另起一套「渠道可不可用」的判断，
-    /// 免得两处规则日后分叉。区分「没注册」与「注册了但没启用」只是为了把提示说准。
+    /// 「一个渠道都没启用、默认值也没动过」是另一回事：那不是配错，是<b>还没配</b> —— 只为发票、订阅目录、
+    /// 促销这类不收款的能力而加载本模块是合法形态，每笔支付请求会被明确拒绝，没有东西在静默失效。
+    /// 这种部署只记一条 Information。
+    /// </para>
+    /// <para>
+    /// 判据与 <see cref="PaymentProviderFactory"/> 共用同一份 <see cref="PaymentProviderFactory.IsChannelEnabled"/>，
+    /// 不另起一套「渠道可不可用」的判断，免得两处规则日后分叉；不直接调 <c>GetProvider</c> 是因为它每判一次不可用
+    /// 就记一条 Warning。区分「没注册」与「注册了但没启用」只是为了把提示说准。
     /// </para>
     /// </remarks>
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
@@ -172,13 +180,87 @@ public class PaymentModule : TnziApplicationModule
         var serviceProvider = scope.ServiceProvider;
 
         var logger = serviceProvider.GetRequiredService<ILogger<PaymentModule>>();
-        var defaultChannel = serviceProvider.GetRequiredService<IOptionsMonitor<PaymentOptions>>().CurrentValue.DefaultChannelCode;
 
-        if (serviceProvider.GetRequiredService<IPaymentProviderFactory>().GetProvider(defaultChannel) != null)
-            return Task.CompletedTask;
+        ReportCallbackDeduplicationScope(serviceProvider, logger);
+        ReportDefaultChannel(serviceProvider, logger);
 
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 启动期把 webhook 去重的**作用范围**说清楚。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 去重键写在 <see cref="ICache"/> 里。框架默认注册的是<b>进程内</b>的
+    /// <see cref="MemoryCacheService"/>，于是多实例部署下每个实例各存一份：
+    /// 同一条重投事件被路由到另一个实例时，去重命中不了。
+    /// </para>
+    /// <para>
+    /// ★ 这条是 Information 不是 Warning，因为<b>去重不承载正确性</b> ——
+    /// 支付状态推进走条件更新（CAS）、终态支付一律不再被回调改写，重复处理同一条事件
+    /// 不会产生第二次状态变更。去重是一层短路，省掉重复工作并让日志干净。
+    /// 单实例部署占绝大多数，在那里报警等于训练运维忽略警告。
+    /// </para>
+    /// <para>
+    /// 但 <see cref="ICache"/> <b>完全没有注册</b>是另一回事：那说明有人主动移掉了
+    /// <c>CachingModule</c> 的注册，短路整条不存在且没有任何迹象。这条记 Warning。
+    /// </para>
+    /// </remarks>
+    private static void ReportCallbackDeduplicationScope(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var cache = serviceProvider.GetService<ICache>();
+
+        if (cache == null)
+        {
+            logger.LogWarning(
+                "No ICache is registered, so channel webhook de-duplication is off: a redelivered event is "
+                + "processed again from scratch. Payment state is still protected by the conditional update and "
+                + "the terminal-status guard, so this does not corrupt state, but the short circuit is gone. "
+                + "Register an ICache (CachingModule provides an in-process one) to get it back.");
+            return;
+        }
+
+        if (cache is MemoryCacheService)
+        {
+            logger.LogInformation(
+                "Channel webhook de-duplication uses the in-process cache, so it is scoped to this instance. "
+                + "Running more than one instance means a redelivered event routed elsewhere is processed again "
+                + "(state stays correct via the conditional update and the terminal-status guard). "
+                + "Load a distributed ICache such as Tnzi.Redis to make de-duplication cover the deployment.");
+        }
+    }
+
+    /// <summary>
+    /// 启动期核对默认渠道是否真的可用（详见本类的 OnApplicationInitializationAsync 注释）。
+    /// </summary>
+    private static void ReportDefaultChannel(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var options = serviceProvider.GetRequiredService<IOptionsMonitor<PaymentOptions>>().CurrentValue;
+        var defaultChannel = options.DefaultChannelCode;
         var registered = serviceProvider.GetServices<IPaymentProvider>().Select(x => x.ChannelCode).ToList();
         var isRegistered = registered.Contains(defaultChannel, StringComparer.OrdinalIgnoreCase);
+
+        if (isRegistered && PaymentProviderFactory.IsChannelEnabled(options, defaultChannel))
+            return;
+
+        var channels = registered.Count == 0 ? "(none)" : string.Join(", ", registered);
+
+        // 一个渠道都没启用，默认值又是出厂值：支付在这台部署上还没开通，不是配错了。
+        // 显式把默认值指向别处的部署不走这里 —— 那说明它打算收款，默认渠道解析不出来就该是 Error。
+        var nothingEnabled = !registered.Any(code => PaymentProviderFactory.IsChannelEnabled(options, code));
+        var defaultUntouched = string.Equals(defaultChannel, PaymentConstants.DefaultPaymentChannel, StringComparison.OrdinalIgnoreCase);
+
+        if (nothingEnabled && defaultUntouched)
+        {
+            logger.LogInformation(
+                "No payment channel is enabled, so every payment request will fail with {ErrorCode} until one is. "
+                + "Registered channels: {RegisteredChannels}. Enable one with Payment:Channels:<code>:Enabled=true "
+                + "(the test channel uses Payment:AllowTestProvider=true instead); Stripe and PayPal ship in the optional "
+                + "Tnzi.Payment.Stripe and Tnzi.Payment.PayPal modules.",
+                ErrorCodes.PaymentChannelNotSupported, channels);
+            return;
+        }
 
         if (isRegistered)
         {
@@ -192,33 +274,29 @@ public class PaymentModule : TnziApplicationModule
                 + "Every payment that does not name a channel will fail with {ErrorCode}. "
                 + "{HowToEnable}, or point Payment:DefaultChannelCode at another channel.",
                 defaultChannel, ErrorCodes.PaymentChannelNotSupported, howToEnable);
+            return;
+        }
+
+        var package = FindChannelPackage(defaultChannel);
+
+        if (package != null)
+        {
+            logger.LogError(
+                "Payment:DefaultChannelCode is '{DefaultChannel}', but no IPaymentProvider is registered for it. "
+                + "Every payment that does not name a channel will fail with {ErrorCode}. "
+                + "That channel ships in the optional {Package} module; load it, "
+                + "or set Payment:DefaultChannelCode to one of the registered channels: {RegisteredChannels}.",
+                defaultChannel, ErrorCodes.PaymentChannelNotSupported, package, channels);
         }
         else
         {
-            var channels = registered.Count == 0 ? "(none)" : string.Join(", ", registered);
-            var package = FindChannelPackage(defaultChannel);
-
-            if (package != null)
-            {
-                logger.LogError(
-                    "Payment:DefaultChannelCode is '{DefaultChannel}', but no IPaymentProvider is registered for it. "
-                    + "Every payment that does not name a channel will fail with {ErrorCode}. "
-                    + "That channel ships in the optional {Package} module; load it, "
-                    + "or set Payment:DefaultChannelCode to one of the registered channels: {RegisteredChannels}.",
-                    defaultChannel, ErrorCodes.PaymentChannelNotSupported, package, channels);
-            }
-            else
-            {
-                logger.LogError(
-                    "Payment:DefaultChannelCode is '{DefaultChannel}', but no IPaymentProvider is registered for it. "
-                    + "Every payment that does not name a channel will fail with {ErrorCode}. "
-                    + "Register an IPaymentProvider whose ChannelCode matches, "
-                    + "or set Payment:DefaultChannelCode to one of the registered channels: {RegisteredChannels}.",
-                    defaultChannel, ErrorCodes.PaymentChannelNotSupported, channels);
-            }
+            logger.LogError(
+                "Payment:DefaultChannelCode is '{DefaultChannel}', but no IPaymentProvider is registered for it. "
+                + "Every payment that does not name a channel will fail with {ErrorCode}. "
+                + "Register an IPaymentProvider whose ChannelCode matches, "
+                + "or set Payment:DefaultChannelCode to one of the registered channels: {RegisteredChannels}.",
+                defaultChannel, ErrorCodes.PaymentChannelNotSupported, channels);
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
